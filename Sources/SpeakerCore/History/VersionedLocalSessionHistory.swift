@@ -64,7 +64,7 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
             storedRecords.append(record)
         }
         storedRecords = Self.sort(storedRecords)
-        persistCurrentRecords()
+        _ = persistCurrentRecords()
     }
 
     public func allRecords() -> [VoiceInputHistoryRecord] {
@@ -88,10 +88,16 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
                 record.applicationName,
                 record.providerErrorCode,
                 record.providerRequestID,
+                record.transcriptionProvider,
                 record.deepSeekText,
                 record.deepSeekRequestID,
                 record.refinementModeName,
+                record.refinementPrompt,
                 record.refinementFailureCode,
+                record.dictionarySnapshotEntries
+                    .flatMap { [$0.canonicalTerm] + $0.aliases }
+                    .joined(separator: " "),
+                record.dictionaryRequestContext?.hotwords.joined(separator: " "),
             ]
             .compactMap { $0 }
             .contains { value in
@@ -106,16 +112,26 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
 
     @discardableResult
     public func delete(sessionID: VoiceInputSessionID) -> Bool {
+        let previousRecords = storedRecords
         let originalCount = storedRecords.count
         storedRecords.removeAll { $0.sessionID == sessionID }
         guard storedRecords.count != originalCount else { return false }
-        persistCurrentRecords()
+        guard persistCurrentRecords() else {
+            storedRecords = previousRecords
+            return false
+        }
         return true
     }
 
-    public func clear() {
+    @discardableResult
+    public func clear() -> Bool {
+        let previousRecords = storedRecords
         storedRecords.removeAll(keepingCapacity: false)
-        persistCurrentRecords()
+        guard persistCurrentRecords() else {
+            storedRecords = previousRecords
+            return false
+        }
+        return true
     }
 
     public func persistenceStatus() -> LocalHistoryPersistenceStatus {
@@ -125,13 +141,18 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
         )
     }
 
+    public func persistenceFailureNotice() async -> String? {
+        guard case let .writeFailed(reason) = notice else { return nil }
+        return "会话历史写入失败：\(reason)"
+    }
+
     /// Notices remain visible across later successful writes so the UI cannot
     /// silently hide a recovered corruption event. The user may dismiss it.
     public func clearPersistenceNotice() {
         notice = nil
     }
 
-    private func persistCurrentRecords() {
+    private func persistCurrentRecords() -> Bool {
         do {
             let document = HistoryDocumentV1(
                 schemaVersion: Self.currentSchemaVersion,
@@ -144,8 +165,10 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
                 withIntermediateDirectories: true
             )
             try data.write(to: fileURL, options: [.atomic])
+            return true
         } catch {
             notice = .writeFailed(reason: Self.safeReason(for: error))
+            return false
         }
     }
 }
@@ -266,14 +289,18 @@ private struct HistoryRecordV1: Codable {
     let applicationName: String?
     let transcription: String?
     let finalText: String?
+    let transcriptionProvider: String?
     let providerRequestID: String?
     let providerErrorCode: String?
     let deepSeekText: String?
     let deepSeekRequestID: String?
     let refinementModeName: String?
+    let refinementPrompt: String?
     let refinementStatus: String?
     let refinementFailureCode: String?
     let dictionarySnapshotID: UUID?
+    let dictionarySnapshotEntries: [DictionaryEntry]?
+    let dictionaryRequestContext: DictionaryRequestContext?
     let dictionaryReplacements: [DictionaryReplacement]?
     let durationMilliseconds: Int?
     let stageDurationsMilliseconds: [String: Int]?
@@ -285,14 +312,18 @@ private struct HistoryRecordV1: Codable {
         applicationName = record.applicationName
         transcription = record.transcription
         finalText = record.finalText
+        transcriptionProvider = record.transcriptionProvider
         providerRequestID = record.providerRequestID
         providerErrorCode = record.providerErrorCode
         deepSeekText = record.deepSeekText
         deepSeekRequestID = record.deepSeekRequestID
         refinementModeName = record.refinementModeName
+        refinementPrompt = record.refinementPrompt
         refinementStatus = record.refinementStatus
         refinementFailureCode = record.refinementFailureCode
         dictionarySnapshotID = record.dictionarySnapshotID
+        dictionarySnapshotEntries = record.dictionarySnapshotEntries
+        dictionaryRequestContext = record.dictionaryRequestContext
         dictionaryReplacements = record.dictionaryReplacements
         durationMilliseconds = record.durationMilliseconds
         stageDurationsMilliseconds = record.stageDurationsMilliseconds
@@ -307,14 +338,18 @@ private struct HistoryRecordV1: Codable {
                 applicationName: applicationName,
                 transcription: transcription,
                 finalText: finalText,
+                transcriptionProvider: transcriptionProvider,
                 providerRequestID: providerRequestID,
                 providerErrorCode: providerErrorCode,
                 deepSeekText: deepSeekText,
                 deepSeekRequestID: deepSeekRequestID,
                 refinementModeName: refinementModeName,
+                refinementPrompt: refinementPrompt,
                 refinementStatus: refinementStatus,
                 refinementFailureCode: refinementFailureCode,
                 dictionarySnapshotID: dictionarySnapshotID,
+                dictionarySnapshotEntries: dictionarySnapshotEntries ?? [],
+                dictionaryRequestContext: dictionaryRequestContext,
                 dictionaryReplacements: dictionaryReplacements ?? [],
                 durationMilliseconds: durationMilliseconds ?? 0,
                 stageDurationsMilliseconds: stageDurationsMilliseconds ?? [:],
@@ -468,6 +503,7 @@ private struct HistoryOutcomeV1: Codable {
         switch stage {
         case .capturingTarget: "capturingTarget"
         case .transcribing: "transcribing"
+        case .refining: "refining"
         case .delivering: "delivering"
         }
     }
@@ -476,6 +512,7 @@ private struct HistoryOutcomeV1: Codable {
         switch value {
         case "capturingTarget": .capturingTarget
         case "transcribing": .transcribing
+        case "refining": .refining
         case "delivering": .delivering
         default: throw HistoryRecordDecodingError.invalidField("processingStage")
         }

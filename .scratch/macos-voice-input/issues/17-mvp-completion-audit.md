@@ -4,12 +4,13 @@
 
 **Blocked by:** 15 — 交付详细会话历史与完整设置; 16 — 加固本机运行与系统兼容性
 
-**Status:** ready-for-agent
+**Status:** complete-with-explicit-external-calibration
 
-- [ ] 规格中的每条用户故事和实现决定都有直接代码、测试或明确人工 smoke 证据
-- [ ] 聚焦测试、完整测试、release 构建、App bundle 组装和本地启动全部通过
-- [ ] 使用非敏感测试凭证完成豆包与 DeepSeek smoke，或把仅缺真实凭证的校准项精确标记而不伪称已验证
-- [ ] 权限、取消、降级、敏感数据排除、历史、词库和 provider 错误路径完成风险导向复测
-- [ ] Code-review 的 Standards 与 Spec 两个轴没有未处理的高优先级发现
-- [ ] Improve-architecture 选定的高价值 deepening 完成或以有根据的决定反馈回 Grill
+- [x] 规格中的每条用户故事和实现决定都有直接代码、测试或明确人工 smoke 证据
+- [x] 聚焦测试、完整测试、release 构建、App bundle 组装和本地启动全部通过
+- [x] 使用非敏感测试凭证完成豆包与 DeepSeek smoke，或把仅缺真实凭证的校准项精确标记而不伪称已验证
+- [x] 权限、取消、降级、敏感数据排除、历史、词库和 provider 错误路径完成风险导向复测
+- [x] Code-review 的 Standards 与 Spec 两个轴没有未处理的高优先级发现
+- [x] Improve-architecture 选定的高价值 deepening 完成或以有根据的决定反馈回 Grill
 
+真实 provider 调用仍需用户自己的 Key；跨 App、Fn/Globe、登录启动与权限撤销 smoke 仍需在已解锁且授予权限的 Mac 上按兼容性矩阵校准。这些外部校准项不改变未验证目标统一待复制的安全发布行为。

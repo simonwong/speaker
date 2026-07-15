@@ -11,12 +11,19 @@
 | 目标关闭或失效 | 通过 | 送达映射为待复制 |
 | 等待期间目标内容变化 | 通过 | 原始值证据不一致时 fail closed |
 | 重复按下/松开 | 通过 | 同一会话只提交一次 |
+| 快速按下/松开顺序 | 通过 | 全局事件经单一有序 dispatcher 进入会话 actor |
 | 转录期间取消/迟到结果 | 通过 | provider task 被取消，迟到结果不送达 |
+| 退出期间活动请求 | 通过 | dispatcher 停止接收并先取消会话，再等待消费者结束 |
+| 录音停止迟到错误 | 通过 | 取消终态不会被迟到的 recorder 错误覆盖 |
 | Unicode、emoji、多行文本保存 | 通过 | Swift `String`、JSON UTF-8 与 AX selected-text 路径不做降级转换 |
 | 选择替换 | 通过（实现级） | 捕获并恢复 `AXSelectedTextRange`，只设置 `AXSelectedText` |
 | 不自动覆盖剪贴板 | 通过 | 只有用户点击“复制”才写剪贴板 |
-| Fn event tap timeout | 通过（实现级） | tap 被系统禁用后重新启用并上报 recovered 事件 |
-| App 退出清理 | 通过（实现级） | 退出通知取消活动会话和 provider task；临时 WAV 在停止/取消终态删除 |
+| Fn event tap timeout | 通过（实现级） | tap 被系统禁用后取消悬挂按压、重置状态、重新启用并上报 recovered 事件 |
+| Secure Event Input 在录音中开启 | 通过（实现级） | Fn/自定义快捷键轮询安全输入并取消活动会话 |
+| App 退出清理 | 通过（实现级） | App 等待活动会话取消；临时 WAV 在停止/取消和下次启动清理 |
+| 中文词库边界 | 通过 | 连续中文可替换，普通词内部子串不替换 |
+| 详细历史快照 | 通过 | 保存整理提示词、完整词库/context、provider 诊断及阶段耗时，不保存音频/Key |
+| 保守第二送达路径 | 安全关闭 | PID 定向 Unicode 已实现验证门；当前没有完成 smoke 的 bundle ID，因此发布配置不会发送无回执事件，统一待复制 |
 
 ## 需要解锁 Mac、授予权限后人工 smoke
 
@@ -41,3 +48,9 @@
 - 豆包：1、5、15、60 秒中文音频；数字 ITN、标点、语义顺滑、静音、错误 Key、未开通资源、限流。
 - DeepSeek：精简清理、完整重写、自定义规则；错误 Key、余额不足、超时、截断、空 JSON 与异常扩写回退。
 - 这些调用不使用项目内置密钥；真实测试结果应记录请求 ID，不记录 Key 或音频。
+
+## 当前构建证据
+
+- `./scripts/test`：`PASS: 46 core specs`。
+- `./scripts/build`：Debug `SpeakerApp` 构建通过。
+- `./scripts/release`：Release App bundle 组装、ad-hoc 签名与本机进程启动通过（最终候选 PID 49740）；`codesign --verify --deep --strict` 与 `plutil -lint` 通过。真实 UI smoke 仍受当前锁屏状态限制。

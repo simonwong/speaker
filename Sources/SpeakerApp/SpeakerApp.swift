@@ -13,7 +13,11 @@ struct SpeakerApp: App {
     @StateObject private var runtime: SpeakerRuntime
 
     init() {
-        _runtime = StateObject(wrappedValue: SpeakerRuntime())
+        let runtime = SpeakerRuntime()
+        _runtime = StateObject(wrappedValue: runtime)
+        Task { @MainActor in
+            runtime.start()
+        }
     }
 
     var body: some Scene {
@@ -64,9 +68,9 @@ private final class SpeakerRuntime: ObservableObject {
     private let fnMonitor: FnEventMonitor
     private let customHotKeyMonitor: CustomHotKeyMonitor
     private let sessionActor: VoiceInputSessions
+    private let triggerDispatcher: VoiceInputTriggerDispatcher
     private let settingsStore: VersionedLocalAppSettingsStore
     private let panel: VoiceInputPanelController
-    private var terminationCancellable: AnyCancellable?
     private var started = false
 
     init() {
@@ -119,23 +123,10 @@ private final class SpeakerRuntime: ObservableObject {
         )
         historyModel = HistoryModel(store: history, targets: targets)
         loginItemSettings = LoginItemSettingsModel(settingsStore: settingsStore)
+        let triggerDispatcher = VoiceInputTriggerDispatcher(sessions: sessionActor)
+        self.triggerDispatcher = triggerDispatcher
         let triggerHandler: @Sendable (GlobalVoiceTrigger) -> Void = { trigger in
-            let command: VoiceInputCommand?
-            switch trigger {
-            case .pressed:
-                command = .pressed
-            case .released:
-                command = .released
-            case .cancel:
-                command = .cancel
-            case .monitorRecovered:
-                command = nil
-            }
-            if let command {
-                Task {
-                    await sessionActor.send(command)
-                }
-            }
+            triggerDispatcher.send(trigger)
         }
         fnMonitor = FnEventMonitor(handler: triggerHandler)
         customHotKeyMonitor = CustomHotKeyMonitor(handler: triggerHandler)
@@ -147,17 +138,13 @@ private final class SpeakerRuntime: ObservableObject {
         started = true
         permissions.refresh()
         sessions.startObserving()
-        activateShortcut(.functionKey, persist: false)
         panel.start()
-        terminationCancellable = NotificationCenter.default
-            .publisher(for: NSApplication.willTerminateNotification)
-            .sink { [weak self] _ in
-                guard let sessionActor = self?.sessionActor else { return }
-                Task { await sessionActor.send(.cancel) }
-            }
+        SpeakerTerminationCoordinator.shared.handler = { [weak self] in
+            guard let self else { return }
+            await self.triggerDispatcher.shutdown()
+        }
         Task {
             let loadedSettings = await settingsStore.load()
-            activateShortcut(loadedSettings.settings.shortcut, persist: false)
             switch loadedSettings {
             case let .recovered(_, recovery):
                 shortcutNotice = "设置文件已恢复为默认值，原文件保留在 \(recovery.backupURL.lastPathComponent)。"
@@ -166,6 +153,7 @@ private final class SpeakerRuntime: ObservableObject {
             case .defaults, .loaded:
                 break
             }
+            activateShortcut(loadedSettings.settings.shortcut, persist: false)
             await dictionarySettings.load()
             await refinementSettings.load()
             await historyModel.refresh()
@@ -212,9 +200,7 @@ private final class SpeakerRuntime: ObservableObject {
     private func persistShortcut(_ choice: VoiceShortcutPreference) {
         Task {
             do {
-                var settings = await settingsStore.load().settings
-                settings.shortcut = choice
-                try await settingsStore.save(settings)
+                try await settingsStore.updateShortcut(choice)
             } catch {
                 shortcutNotice = error.localizedDescription
             }
@@ -357,11 +343,13 @@ private final class RefinementSettingsModel: ObservableObject {
     @Published var customName = "我的整理规则"
     @Published var customPrompt = ""
     @Published private(set) var hasStoredKey = false
+    @Published private(set) var isConnectionVerified = false
     @Published private(set) var notice: String?
 
     private let service: CredentialedDeepSeekTextRefiner
     private let configuration: VoiceInputConfigurationController
     private let settingsStore: VersionedLocalAppSettingsStore
+    private var connectionGeneration = 0
 
     init(
         service: CredentialedDeepSeekTextRefiner,
@@ -382,6 +370,12 @@ private final class RefinementSettingsModel: ObservableObject {
         }
     }
 
+    var savedCustomModeName: String? {
+        let name = customName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty || prompt.isEmpty ? nil : name
+    }
+
     func load() async {
         do {
             hasStoredKey = try await service.hasAPIKey()
@@ -389,40 +383,87 @@ private final class RefinementSettingsModel: ObservableObject {
             notice = error.localizedDescription
         }
 
-        let loadedMode = await settingsStore.load().settings.refinement.textRefinementMode
-        if case let .custom(name, prompt) = loadedMode {
+        let loadedSettings = await settingsStore.load().settings
+        let loadedMode = loadedSettings.refinement.textRefinementMode
+        let savedCustomMode = loadedSettings.savedCustomRefinement?.textRefinementMode
+        if case let .custom(name, prompt) = savedCustomMode ?? loadedMode {
             customName = name
             customPrompt = prompt
+        }
+        if loadedMode.requiresDeepSeek, hasStoredKey {
+            await checkConnection()
+            guard isConnectionVerified else { return }
         }
         await select(Self.choice(for: loadedMode), persist: false)
     }
 
     func saveAPIKey() async {
+        connectionGeneration &+= 1
         do {
             try await service.saveAPIKey(apiKeyDraft)
+            connectionGeneration &+= 1
             apiKeyDraft = ""
             hasStoredKey = true
-            notice = "DeepSeek Key 已保存到本机 Keychain。"
+            isConnectionVerified = false
+            await apply(.defaultSmooth, choice: .defaultSmooth, persist: true)
+            notice = "DeepSeek Key 已保存；请检查连接后再启用进一步整理。"
         } catch {
+            connectionGeneration &+= 1
             notice = error.localizedDescription
         }
     }
 
     func deleteAPIKey() async {
+        connectionGeneration &+= 1
         do {
             try await service.deleteAPIKey()
+            connectionGeneration &+= 1
             hasStoredKey = false
+            isConnectionVerified = false
             apiKeyDraft = ""
             await select(.defaultSmooth)
             notice = "DeepSeek Key 已删除，已切回默认顺滑。"
         } catch {
+            connectionGeneration &+= 1
+            notice = error.localizedDescription
+        }
+    }
+
+    func checkConnection() async {
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
+        notice = "正在检查 DeepSeek 连接…"
+        do {
+            let requestID = try await service.checkConnection()
+            guard generation == connectionGeneration else { return }
+            isConnectionVerified = true
+            notice = requestID.map { "DeepSeek 连接成功 · \($0)" } ?? "DeepSeek 连接成功。"
+        } catch let failure as DeepSeekRefinementFailure {
+            guard generation == connectionGeneration else { return }
+            isConnectionVerified = false
+            await apply(
+                .defaultSmooth,
+                choice: .defaultSmooth,
+                persist: false
+            )
+            notice = Self.connectionMessage(for: failure.kind)
+        } catch {
+            guard generation == connectionGeneration else { return }
+            isConnectionVerified = false
+            await apply(
+                .defaultSmooth,
+                choice: .defaultSmooth,
+                persist: false
+            )
             notice = error.localizedDescription
         }
     }
 
     func select(_ choice: RefinementChoice, persist: Bool = true) async {
-        if choice != .defaultSmooth, !hasStoredKey {
-            notice = "请先保存 DeepSeek API Key，再启用进一步整理。"
+        if choice != .defaultSmooth, (!hasStoredKey || !isConnectionVerified) {
+            notice = hasStoredKey
+                ? "请先点击“检查连接”，验证 DeepSeek Key 后再启用进一步整理。"
+                : "请先保存 DeepSeek API Key，再启用进一步整理。"
             await apply(.defaultSmooth, choice: .defaultSmooth, persist: persist)
             return
         }
@@ -454,6 +495,25 @@ private final class RefinementSettingsModel: ObservableObject {
     }
 
     func saveCustomMode() async {
+        do {
+            let customMode = try TextRefinementMode.custom(
+                name: customName,
+                prompt: customPrompt
+            ).validated()
+            try await settingsStore.updateSavedCustomRefinement(
+                RefinementPreference(mode: customMode)
+            )
+            if case let .custom(name, prompt) = customMode {
+                customName = name
+                customPrompt = prompt
+            }
+            await select(.custom)
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func selectSavedCustomMode() async {
         await select(.custom)
     }
 
@@ -468,9 +528,9 @@ private final class RefinementSettingsModel: ObservableObject {
     }
 
     private func persistSelection(_ selectedMode: TextRefinementMode) async throws {
-        var settings = await settingsStore.load().settings
-        settings.refinement = RefinementPreference(mode: selectedMode)
-        try await settingsStore.save(settings)
+        try await settingsStore.updateRefinement(
+            RefinementPreference(mode: selectedMode)
+        )
     }
 
     private static func choice(for mode: TextRefinementMode) -> RefinementChoice {
@@ -479,6 +539,27 @@ private final class RefinementSettingsModel: ObservableObject {
         case .conciseCleanup: .conciseCleanup
         case .fullRewrite: .fullRewrite
         case .custom: .custom
+        }
+    }
+
+    private static func connectionMessage(for kind: DeepSeekRefinementFailureKind) -> String {
+        switch kind {
+        case .invalidCredential, .authentication:
+            "DeepSeek Key 无效，请重新保存后检查连接。"
+        case .insufficientBalance:
+            "DeepSeek 余额不足，请充值后重试。"
+        case .rateLimited:
+            "DeepSeek 请求过于频繁，请稍后重试。"
+        case .network:
+            "无法连接 DeepSeek，请检查网络。"
+        case .timeout:
+            "DeepSeek 连接检查超时，请稍后重试。"
+        case .cancelled:
+            "DeepSeek 连接检查已取消。"
+        case .serverError, .serviceUnavailable, .insufficientSystemResource:
+            "DeepSeek 服务暂时不可用，请稍后重试。"
+        default:
+            "DeepSeek 返回了无法验证的响应，请稍后重试。"
         }
     }
 }
@@ -591,7 +672,11 @@ private final class HistoryModel: ObservableObject {
         let target = await targets.capture()
         switch target {
         case let .writable(snapshot):
-            let outcome = await targets.deliver(text, to: snapshot)
+            let outcome = await targets.deliver(
+                text,
+                to: snapshot,
+                commitGate: DeliveryCommitGate()
+            )
             switch outcome {
             case .delivered:
                 notice = "历史文本已重新送达 \(snapshot.applicationName)。"
@@ -641,9 +726,7 @@ private final class LoginItemSettingsModel: ObservableObject {
 
     private func persistCurrentState() async {
         do {
-            var settings = await settingsStore.load().settings
-            settings.launchAtLogin = isEnabled
-            try await settingsStore.save(settings)
+            try await settingsStore.updateLaunchAtLogin(isEnabled)
         } catch {
             notice = error.localizedDescription
         }
@@ -726,6 +809,23 @@ private final class SpeakerApplicationDelegate: NSObject, NSApplicationDelegate 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let handler = SpeakerTerminationCoordinator.shared.handler else {
+            return .terminateNow
+        }
+        Task {
+            await handler()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
+@MainActor
+private final class SpeakerTerminationCoordinator {
+    static let shared = SpeakerTerminationCoordinator()
+    var handler: (() async -> Void)?
 }
 
 private struct MenuBarContent: View {
@@ -738,7 +838,21 @@ private struct MenuBarContent: View {
 
     var body: some View {
         Group {
-            Label(refinement.mode.displayName, systemImage: "text.alignleft")
+            Menu {
+                Button("默认顺滑") { Task { await refinement.select(.defaultSmooth) } }
+                Button("精简清理") { Task { await refinement.select(.conciseCleanup) } }
+                Button("完整重写") { Task { await refinement.select(.fullRewrite) } }
+                if let customModeName = refinement.savedCustomModeName {
+                    Button(customModeName) {
+                        Task { await refinement.selectSavedCustomMode() }
+                    }
+                }
+            } label: {
+                Label(refinement.mode.displayName, systemImage: "text.alignleft")
+            }
+            if let refinementNotice = refinement.notice {
+                Label(refinementNotice, systemImage: "info.circle")
+            }
 
             Label(sessionSummary, systemImage: sessionIcon)
 
@@ -923,6 +1037,10 @@ private struct RefinementSettingsSection: View {
 
                 Button("删除 Key", role: .destructive) {
                     Task { await model.deleteAPIKey() }
+                }
+                .disabled(!model.hasStoredKey)
+                Button("检查连接") {
+                    Task { await model.checkConnection() }
                 }
                 .disabled(!model.hasStoredKey)
             }
@@ -1182,6 +1300,9 @@ private struct HistoryDetailView: View {
                 LabeledContent("时间", value: record.startedAt.formatted())
                 LabeledContent("目标 App", value: record.applicationName ?? "无")
                 LabeledContent("整理模式", value: record.refinementModeName ?? "默认顺滑")
+                if let refinementPrompt = record.refinementPrompt {
+                    HistoryTextBlock(title: "整理提示词快照", text: refinementPrompt)
+                }
                 LabeledContent("送达状态", value: record.outcome.historyLabel)
                 LabeledContent("总耗时", value: "\(record.durationMilliseconds) ms")
                 if !record.stageDurationsMilliseconds.isEmpty {
@@ -1199,6 +1320,21 @@ private struct HistoryDetailView: View {
                     LabeledContent("DeepSeek 状态", value: record.refinementStatus ?? "未知")
                 }
                 HistoryTextBlock(title: "最终文本", text: record.finalText)
+                if !record.dictionarySnapshotEntries.isEmpty {
+                    Text("词库快照")
+                        .font(.headline)
+                    ForEach(record.dictionarySnapshotEntries) { entry in
+                        Text(
+                            entry.aliases.isEmpty
+                                ? entry.canonicalTerm
+                                : "\(entry.canonicalTerm) ← \(entry.aliases.joined(separator: "、"))"
+                        )
+                    }
+                    if let context = record.dictionaryRequestContext {
+                        LabeledContent("发送词数", value: "\(context.hotwords.count)")
+                        LabeledContent("省略词数", value: "\(context.omissions.count)")
+                    }
+                }
                 if !record.dictionaryReplacements.isEmpty {
                     Text("词库替换")
                         .font(.headline)
@@ -1207,7 +1343,10 @@ private struct HistoryDetailView: View {
                     }
                 }
                 if let providerRequestID = record.providerRequestID {
-                    LabeledContent("豆包请求 ID", value: providerRequestID)
+                    LabeledContent(
+                        "\(record.transcriptionProvider ?? "转录提供商")请求 ID",
+                        value: providerRequestID
+                    )
                 }
                 if let deepSeekRequestID = record.deepSeekRequestID {
                     LabeledContent("DeepSeek 请求 ID", value: deepSeekRequestID)
@@ -1259,7 +1398,7 @@ private final class VoiceInputPanelController {
     init(model: VoiceInputSessionModel) {
         self.model = model
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 112),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 132),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -1329,6 +1468,20 @@ private struct VoiceInputOverlay: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                if let notice = model.presentation.notice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                }
+                if let telemetry = model.presentation.recordingTelemetry {
+                    HStack(spacing: 8) {
+                        Text(Self.elapsed(telemetry.elapsedMilliseconds))
+                            .font(.caption.monospacedDigit())
+                        ProgressView(value: Self.level(telemetry.peakPower))
+                            .progressViewStyle(.linear)
+                    }
+                }
             }
 
             Spacer()
@@ -1352,6 +1505,15 @@ private struct VoiceInputOverlay: View {
                 .stroke(.separator.opacity(0.45), lineWidth: 1)
         }
         .padding(8)
+    }
+
+    private static func elapsed(_ milliseconds: Int) -> String {
+        let seconds = Double(milliseconds) / 1_000
+        return String(format: "%.1f s", seconds)
+    }
+
+    private static func level(_ peakPower: Float) -> Double {
+        min(1, max(0, Double(peakPower + 60) / 60))
     }
 }
 
@@ -1392,6 +1554,8 @@ private extension VoiceInputActivity {
                 "正在捕获输入目标"
             case .transcribing:
                 "正在转录"
+            case .refining:
+                "正在进一步整理"
             case .delivering:
                 "正在送达文本"
             }
@@ -1421,12 +1585,13 @@ private extension VoiceInputActivity {
         case let .pendingCopy(_, text, _):
             text
         case .cancelled:
-            "没有发送音频或文本"
+            "已停止后续处理；不会送达或保存结果"
         case let .failed(_, failure):
             switch failure {
             case .recordingFailed: "无法完成录音"
             case .transcriptionFailed: "无法完成转录"
             case .providerNotConfigured: "请先在设置中配置豆包 API Key"
+            case .providerCredentialUnavailable: "无法读取本机 Keychain；请解锁 Mac 后重试"
             case .noSpeechDetected: "没有检测到有效语音"
             case .providerResourceUnavailable: "豆包语音资源尚未开通"
             case .providerRateLimited: "请求过于频繁，请稍后再试"

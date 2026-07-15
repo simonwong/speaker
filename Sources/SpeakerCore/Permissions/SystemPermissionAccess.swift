@@ -1,4 +1,5 @@
 import ApplicationServices
+import AppKit
 import AVFoundation
 import Foundation
 
@@ -16,10 +17,18 @@ public final class SystemPermissionAccess: PermissionAccess {
     public func request(_ permission: PermissionKind) async -> PermissionSnapshot {
         switch permission {
         case .accessibility:
+            if AXIsProcessTrusted() {
+                break
+            }
             let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
             _ = AXIsProcessTrustedWithOptions(options)
+            openPrivacySettings(anchor: "Privacy_Accessibility")
         case .microphone:
-            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            if AVCaptureDevice.authorizationStatus(for: .audio) == .denied {
+                openPrivacySettings(anchor: "Privacy_Microphone")
+            } else {
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+            }
         }
 
         return currentSnapshot()
@@ -36,5 +45,12 @@ public final class SystemPermissionAccess: PermissionAccess {
         @unknown default:
             .denied
         }
+    }
+
+    private func openPrivacySettings(anchor: String) {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 }

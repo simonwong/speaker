@@ -160,6 +160,25 @@ struct SpeakerCoreSpecs {
             try expect(!isActive)
         }
 
+        await runAsync("recorder start failure preserves preparation timing", failures: &failures) {
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: DelayedFailingStartAudioCapture(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history
+            )
+
+            await sessions.send(.pressed)
+
+            let record = await history.records.last
+            try expect(record?.outcome.isRecordingFailed == true)
+            try expect((record?.durationMilliseconds ?? 0) > 0)
+            try expect((record?.stageDurationsMilliseconds["preparing"] ?? 0) > 0)
+        }
+
         await runAsync("recording watchdog finishes and submits session", failures: &failures) {
             let audio = AudioCaptureFake()
             let watchdog = RecordingWatchdogFake()
@@ -229,13 +248,14 @@ struct SpeakerCoreSpecs {
 
         await runAsync("secure target never receives automatic text", failures: &failures) {
             let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
                 transcriber: SpeechTranscriberFake(text: "敏感文本"),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
-                history: SessionHistoryFake()
+                history: history
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
@@ -244,8 +264,13 @@ struct SpeakerCoreSpecs {
 
             let result = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
+            let record = await history.records.first
             try expect(result?.activity.pendingCopyReason == .secureTarget)
             try expect(deliveredTexts.isEmpty)
+            try expect(record?.transcription == nil)
+            try expect(record?.finalText == nil)
+            try expect(record?.deepSeekText == nil)
+            try expect(record?.outcome.pendingText == "")
         }
 
         await runAsync("delivery failure keeps transcript pending copy", failures: &failures) {
@@ -294,6 +319,168 @@ struct SpeakerCoreSpecs {
             try expect(startCount == 1)
             try expect(stopCount == 1)
             try expect(deliveredTexts == ["只提交一次。"])
+        }
+
+        await runAsync("global trigger dispatcher preserves quick press-release order", failures: &failures) {
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                transcriber: SpeechTranscriberFake(text: "顺序正确。"),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
+
+            dispatcher.send(.pressed)
+            dispatcher.send(.released)
+
+            let result = await terminal.value
+            let deliveredTexts = await delivery.deliveredTexts
+            dispatcher.finish()
+            try expect(result?.activity.isDelivered == true)
+            try expect(deliveredTexts == ["顺序正确。"])
+        }
+
+        await runAsync("trigger dispatcher shutdown cancels in-flight processing before waiting", failures: &failures) {
+            let transcriber = SpeechTranscriberFake(text: "不得送达", delaysResponse: true)
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                transcriber: transcriber,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
+            dispatcher.send(.pressed)
+            dispatcher.send(.released)
+            while await transcriber.callCount == 0 { await Task.yield() }
+
+            let shutdown = Task { await dispatcher.shutdown() }
+            while await transcriber.cancellationCount == 0 { await Task.yield() }
+            await transcriber.resume()
+            await shutdown.value
+
+            let deliveredTexts = await delivery.deliveredTexts
+            let record = await history.records.last
+            try expect(deliveredTexts.isEmpty)
+            try expect(record?.outcome.isCancelled == true)
+            try expect(record?.applicationName == "TextEdit")
+            try expect(record?.stageDurationsMilliseconds["doubao"] != nil)
+        }
+
+        await runAsync("queued trigger cancel preempts an in-flight provider request", failures: &failures) {
+            let transcriber = SpeechTranscriberFake(text: "不得送达", delaysResponse: true)
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                transcriber: transcriber,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
+            dispatcher.send(.pressed)
+            dispatcher.send(.released)
+            while await transcriber.callCount == 0 { await Task.yield() }
+
+            dispatcher.send(.cancel)
+            while await transcriber.cancellationCount == 0 { await Task.yield() }
+            while await history.records.last?.outcome.isCancelled != true { await Task.yield() }
+
+            let deliveredTexts = await delivery.deliveredTexts
+            try expect(deliveredTexts.isEmpty)
+            await transcriber.resume()
+            dispatcher.finish()
+        }
+
+        await runAsync("trigger cancellation fence cannot cancel a later session", failures: &failures) {
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                transcriber: SpeechTranscriberFake(text: "后续会话"),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+
+            await sessions.send(.pressed, triggerSequence: 2)
+            await sessions.cancel(triggeredAtSequence: 1)
+            await sessions.send(.released)
+
+            let deliveredTexts = await delivery.deliveredTexts
+            try expect(deliveredTexts == ["后续会话"])
+        }
+
+        await runAsync("cancel wins over a late recorder stop failure and discards target", failures: &failures) {
+            let audio = DelayedFailingStopAudioCapture()
+            let target = DiscardingTargetCaptureFake(
+                snapshot: .init(id: UUID(), applicationName: "TextEdit")
+            )
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: target,
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            await sessions.send(.pressed)
+            let release = Task { await sessions.send(.released) }
+            while await audio.stopCount == 0 { await Task.yield() }
+            await sessions.send(.cancel)
+            await audio.failStop()
+            await release.value
+
+            let outcome = await history.records.last?.outcome
+            let discardedCount = await target.discardedCount
+            try expect(outcome?.isCancelled == true)
+            try expect(discardedCount == 1)
+        }
+
+        await runAsync("cancel wins delivery commit gate before any text mutation", failures: &failures) {
+            let delivery = DelayedCommitDeliveryFake()
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                transcriber: SpeechTranscriberFake(text: "不得提交"),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            await sessions.send(.pressed)
+            let release = Task { await sessions.send(.released) }
+            while await delivery.entered == false { await Task.yield() }
+            await sessions.send(.cancel)
+            await delivery.allowCommitAttempt()
+            await release.value
+
+            let deliveredTexts = await delivery.deliveredTexts
+            let record = await history.records.last
+            try expect(deliveredTexts.isEmpty)
+            try expect(record?.outcome.isCancelled == true)
+            try expect(record?.applicationName == "TextEdit")
+            try expect(record?.stageDurationsMilliseconds["delivery"] != nil)
         }
 
         await runAsync("cancelled late transcription cannot deliver", failures: &failures) {
@@ -451,12 +638,19 @@ struct SpeakerCoreSpecs {
 
         await runAsync("Doubao failure becomes stable user state and diagnostic history", failures: &failures) {
             let history = SessionHistoryFake()
+            let target = DiscardingTargetCaptureFake(
+                snapshot: .init(id: UUID(), applicationName: "TextEdit")
+            )
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
-                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: DoubaoFailureTranscriber(failure: .init(
-                    kind: .invalidCredential,
-                    providerRequestID: "provider-log-id"
+                targetCapture: target,
+                textProcessor: NormalizedFailureProcessor(failure: .init(
+                    userFailure: .providerNotConfigured,
+                    providerDiagnostic: .init(
+                        provider: "doubao",
+                        requestID: "provider-log-id",
+                        code: "invalidCredential"
+                    )
                 )),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
@@ -476,6 +670,90 @@ struct SpeakerCoreSpecs {
             }
             try expect(record?.providerRequestID == "provider-log-id")
             try expect(record?.providerErrorCode == "invalidCredential")
+            try expect(record?.transcriptionProvider == "doubao")
+            try expect(record?.applicationName == "TextEdit")
+            let discardedCount = await target.discardedCount
+            try expect(discardedCount == 1)
+        }
+
+        await runAsync("history persistence failure is visible on the terminal session", failures: &failures) {
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "仍可使用"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake(failureNotice: "会话历史写入失败：磁盘不可用")
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            let presentation = await terminal.value
+            try expect(presentation?.notice?.contains("会话历史写入失败") == true)
+            try expect(presentation?.activity.pendingText == "仍可使用")
+        }
+
+        await runAsync("voice text processing owns Doubao failure normalization", failures: &failures) {
+            let cases: [(DoubaoASRFailureKind, VoiceInputFailure)] = [
+                (.invalidCredential, .providerNotConfigured),
+                (.silence, .noSpeechDetected),
+                (.emptyAudio, .noSpeechDetected),
+                (.emptyTranscript, .noSpeechDetected),
+                (.resourceNotActivated, .providerResourceUnavailable),
+                (.rateLimited, .providerRateLimited),
+                (.network, .networkUnavailable),
+                (.serverBusy, .providerUnavailable),
+                (.serviceUnavailable, .providerUnavailable),
+                (.cancelled, .transcriptionFailed),
+                (.invalidRequest, .transcriptionFailed),
+                (.invalidAudioFormat, .transcriptionFailed),
+                (.invalidResponse, .transcriptionFailed),
+            ]
+
+            for (kind, expectedFailure) in cases {
+                let processor = DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(),
+                    doubao: DoubaoFailureTranscriber(failure: .init(
+                        kind: kind,
+                        providerRequestID: "doubao-mapping-log"
+                    )),
+                    refinement: OptionalTextRefinementPipeline(
+                        refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused")))
+                    )
+                )
+                do {
+                    _ = try await processor.process(specAudio, snapshot: .empty) { _ in }
+                    throw SpecFailure(message: "\(kind.rawValue) escaped the processing seam")
+                } catch let failure as VoiceTextProcessingFailure {
+                    try expect(failure.userFailure == expectedFailure)
+                    try expect(failure.providerDiagnostic == .init(
+                        provider: "doubao",
+                        requestID: "doubao-mapping-log",
+                        code: kind.rawValue
+                    ))
+                }
+            }
+        }
+
+        await runAsync("Keychain failures remain actionable provider diagnostics", failures: &failures) {
+            let processor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(),
+                doubao: CredentialFailureTranscriber(error: .interactionUnavailable),
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused")))
+                )
+            )
+            do {
+                _ = try await processor.process(specAudio, snapshot: .empty) { _ in }
+                throw SpecFailure(message: "Keychain failure escaped the processing seam")
+            } catch let failure as VoiceTextProcessingFailure {
+                try expect(failure.userFailure == .providerCredentialUnavailable)
+                try expect(failure.providerDiagnostic == .init(
+                    provider: "doubao",
+                    requestID: nil,
+                    code: "credential.interactionUnavailable"
+                ))
+            }
         }
 
         await runAsync("default smooth refinement never calls DeepSeek", failures: &failures) {
@@ -587,6 +865,21 @@ struct SpeakerCoreSpecs {
             }
         }
 
+        await runAsync("DeepSeek enforces a wall-clock total timeout", failures: &failures) {
+            let client = DeepSeekRefinementClient(
+                configuration: .init(apiKey: "test-key", timeout: 0.05),
+                transport: HangingDeepSeekTransport()
+            )
+            let startedAt = ContinuousClock().now
+            do {
+                _ = try await client.refine("原文", using: .conciseCleanup)
+                throw SpecFailure(message: "hanging request escaped total timeout")
+            } catch let failure as DeepSeekRefinementFailure {
+                try expect(failure.kind == .timeout)
+                try expect(startedAt.duration(to: .now) < .seconds(1))
+            }
+        }
+
         await runAsync("voice session freezes dictionary and refinement mode at press", failures: &failures) {
             let initialDictionary = try PersonalDictionary(entries: [
                 .init(canonicalTerm: "Swift", aliases: ["swift-lang"]),
@@ -632,8 +925,13 @@ struct SpeakerCoreSpecs {
             try expect(record?.transcription == "Use swift-lang")
             try expect(record?.deepSeekText == "Use Swift.")
             try expect(record?.refinementModeName == "精简清理")
+            try expect(record?.refinementPrompt?.isEmpty == false)
             try expect(record?.refinementStatus == "succeeded")
+            try expect(record?.dictionarySnapshotEntries.map(\.canonicalTerm) == ["Swift"])
+            try expect(record?.dictionaryRequestContext?.hotwords == ["Swift"])
             try expect(record?.dictionaryReplacements.count == 1)
+            try expect(record?.stageDurationsMilliseconds["targetCapture"] != nil)
+            try expect(record?.stageDurationsMilliseconds["delivery"] != nil)
         }
 
         await runAsync("credential store rejects blank API keys", failures: &failures) {
@@ -674,6 +972,8 @@ struct SpeakerCoreSpecs {
             let fileURL = directory.appendingPathComponent("history.json")
             let firstID = VoiceInputSessionID()
             let secondID = VoiceInputSessionID()
+            let snapshotID = UUID()
+            let dictionaryEntry = DictionaryEntry(canonicalTerm: "豆包", aliases: ["豆宝"])
             let store = VersionedLocalSessionHistory(fileURL: fileURL)
             await store.save(.init(
                 sessionID: firstID,
@@ -681,13 +981,22 @@ struct SpeakerCoreSpecs {
                 applicationName: "TextEdit",
                 transcription: "豆包原文 alpha",
                 finalText: "最终文本",
+                transcriptionProvider: "doubao",
                 providerRequestID: "request-log-1",
                 providerErrorCode: nil,
                 deepSeekText: "DeepSeek 结果 beta",
                 deepSeekRequestID: "deepseek-log-1",
                 refinementModeName: "精简清理",
+                refinementPrompt: "只清理口语杂质",
                 refinementStatus: "succeeded",
-                dictionarySnapshotID: UUID(),
+                dictionarySnapshotID: snapshotID,
+                dictionarySnapshotEntries: [dictionaryEntry],
+                dictionaryRequestContext: .init(
+                    snapshotID: snapshotID,
+                    hotwords: ["豆包"],
+                    includedEntryIDs: [dictionaryEntry.id],
+                    omissions: []
+                ),
                 dictionaryReplacements: [
                     .init(
                         entryID: UUID(),
@@ -722,6 +1031,10 @@ struct SpeakerCoreSpecs {
             try expect(transcriptMatches.map(\.sessionID) == [firstID])
             try expect(errorMatches.map(\.sessionID) == [secondID])
             try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
+            try expect(allRecords.last?.transcriptionProvider == "doubao")
+            try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")
+            try expect(allRecords.last?.dictionarySnapshotEntries == [dictionaryEntry])
+            try expect(allRecords.last?.dictionaryRequestContext?.hotwords == ["豆包"])
             try expect(allRecords.last?.dictionaryReplacements.count == 1)
             try expect(allRecords.last?.stageDurationsMilliseconds["doubao"] == 500)
             try expect(!encoded.contains("apiKey"))
@@ -752,6 +1065,32 @@ struct SpeakerCoreSpecs {
             }
             let recoveredRecords = await store.allRecords()
             try expect(recoveredRecords.isEmpty)
+        }
+
+        await runAsync("history delete and clear roll back when disk write fails", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-history-write-failure-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try Data("blocks-directory".utf8).write(to: directory)
+            let store = VersionedLocalSessionHistory(
+                fileURL: directory.appendingPathComponent("history.json")
+            )
+            let id = VoiceInputSessionID()
+            await store.save(.init(
+                sessionID: id,
+                startedAt: Date(),
+                applicationName: nil,
+                transcription: "需要保留",
+                finalText: "需要保留",
+                outcome: .pendingCopy(id, text: "需要保留", reason: .missingTarget)
+            ))
+
+            let deleted = await store.delete(sessionID: id)
+            let cleared = await store.clear()
+            let records = await store.allRecords()
+            try expect(!deleted)
+            try expect(!cleared)
+            try expect(records.map(\.sessionID) == [id])
         }
 
         run("personal dictionary reports empty duplicate and conflicting enabled aliases", failures: &failures) {
@@ -810,14 +1149,20 @@ struct SpeakerCoreSpecs {
             let dictionary = try PersonalDictionary(entries: [
                 .init(canonicalTerm: "Swift", aliases: ["swift-lang"]),
                 .init(canonicalTerm: "SwiftUI", aliases: ["swift-ui"]),
+                .init(canonicalTerm: "豆包", aliases: ["豆宝"]),
             ])
             let result = DictionaryAliasNormalizer.normalize(
-                "Use swift-lang, not swift-language; then swift-ui.",
+                "我用豆宝写字。Use swift-lang, not swift-language; then swift-ui.",
                 using: dictionary.snapshotEnabled()
             )
 
-            try expect(result.normalizedText == "Use Swift, not swift-language; then SwiftUI.")
-            try expect(result.replacements.map(\.matchedText) == ["swift-lang", "swift-ui"])
+            try expect(result.normalizedText == "我用豆包写字。Use Swift, not swift-language; then SwiftUI.")
+            try expect(result.replacements.map(\.matchedText) == ["豆宝", "swift-lang", "swift-ui"])
+            let ordinarySubstring = DictionaryAliasNormalizer.normalize(
+                "豆宝贝",
+                using: dictionary.snapshotEnabled()
+            )
+            try expect(ordinarySubstring.normalizedText == "豆宝贝")
         }
 
         await runAsync("versioned personal dictionary store round trips locally", failures: &failures) {
@@ -853,6 +1198,24 @@ struct SpeakerCoreSpecs {
             try await store.save(settings)
             let loaded = await store.load()
             try expect(loaded.settings == settings)
+
+            async let shortcutUpdate = store.updateShortcut(.functionKey)
+            async let refinementUpdate = store.updateRefinement(.fullRewrite)
+            async let loginUpdate = store.updateLaunchAtLogin(false)
+            _ = try await (shortcutUpdate, refinementUpdate, loginUpdate)
+            let atomicallyUpdated = await store.load().settings
+            try expect(atomicallyUpdated.shortcut == .functionKey)
+            try expect(atomicallyUpdated.refinement == .fullRewrite)
+            try expect(atomicallyUpdated.launchAtLogin == false)
+
+            let savedCustom = RefinementPreference(
+                mode: .custom(name: "邮件", prompt: "整理成简洁邮件")
+            )
+            try await store.updateSavedCustomRefinement(savedCustom)
+            try await store.updateRefinement(.defaultSmooth)
+            let afterBuiltInSwitch = await store.load().settings
+            try expect(afterBuiltInSwitch.refinement == .defaultSmooth)
+            try expect(afterBuiltInSwitch.savedCustomRefinement == savedCustom)
         }
 
         await runAsync("corrupt app settings recover to defaults without overwriting evidence", failures: &failures) {
@@ -879,7 +1242,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 34 core specs")
+        print("PASS: 46 core specs")
     }
 }
 
@@ -986,6 +1349,13 @@ private actor DeepSeekTransportFake: DeepSeekTransport {
     }
 }
 
+private struct HangingDeepSeekTransport: DeepSeekTransport {
+    func send(_ request: URLRequest) async throws -> DeepSeekTransportResponse {
+        try await Task.sleep(for: .seconds(10))
+        return DeepSeekTransportResponse(statusCode: 500, body: Data())
+    }
+}
+
 private func makeDeepSeekClient(content: String) -> DeepSeekRefinementClient {
     let encodedContent = try! JSONEncoder().encode(content)
     let body = Data(
@@ -1060,6 +1430,38 @@ private actor AudioCaptureFake: AudioCapturing {
     }
 }
 
+private actor DelayedFailingStopAudioCapture: AudioCapturing {
+    private(set) var stopCount = 0
+    private var stopContinuation: CheckedContinuation<CapturedAudio, Error>?
+
+    func start() async throws {}
+
+    func stop() async throws -> CapturedAudio {
+        stopCount += 1
+        return try await withCheckedThrowingContinuation { continuation in
+            stopContinuation = continuation
+        }
+    }
+
+    func cancel() async {}
+
+    func failStop() {
+        stopContinuation?.resume(throwing: SpecFailure(message: "late recorder failure"))
+        stopContinuation = nil
+    }
+}
+
+private actor DelayedFailingStartAudioCapture: AudioCapturing {
+    func start() async throws {
+        try await Task.sleep(for: .milliseconds(20))
+        throw SpecFailure(message: "recorder start failed")
+    }
+
+    func stop() async throws -> CapturedAudio { specAudio }
+
+    func cancel() async {}
+}
+
 private actor TargetCaptureFake: InputTargetCapturing {
     let result: InputTargetCaptureResult
 
@@ -1072,10 +1474,63 @@ private actor TargetCaptureFake: InputTargetCapturing {
     }
 }
 
-private struct DoubaoFailureTranscriber: SpeechTranscribing {
+private actor DiscardingTargetCaptureFake: InputTargetCapturing, InputTargetDiscarding {
+    let snapshot: InputTargetSnapshot
+    private(set) var discardedCount = 0
+
+    init(snapshot: InputTargetSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func capture() async -> InputTargetCaptureResult { .writable(snapshot) }
+
+    func discard(_ target: InputTargetSnapshot) async {
+        if target.id == snapshot.id { discardedCount += 1 }
+    }
+}
+
+private struct DoubaoFailureTranscriber: ContextualSpeechTranscribing {
     let failure: DoubaoASRFailure
 
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
+        throw failure
+    }
+
+    func transcribe(
+        _ audio: CapturedAudio,
+        hotwords: [String],
+        context: String?
+    ) async throws -> TranscriptionResult {
+        throw failure
+    }
+}
+
+private struct CredentialFailureTranscriber: ContextualSpeechTranscribing {
+    let error: ProviderCredentialStoreError
+
+    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
+        throw error
+    }
+
+    func transcribe(
+        _ audio: CapturedAudio,
+        hotwords: [String],
+        context: String?
+    ) async throws -> TranscriptionResult {
+        throw error
+    }
+}
+
+private struct NormalizedFailureProcessor: VoiceTextProcessing {
+    let failure: VoiceTextProcessingFailure
+
+    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    func process(
+        _ audio: CapturedAudio,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
         throw failure
     }
 }
@@ -1125,9 +1580,43 @@ private actor TextDeliveryFake: TextDelivering {
         self.result = result
     }
 
-    func deliver(_ text: String, to target: InputTargetSnapshot) async -> DeliveryOutcome {
+    func deliver(
+        _ text: String,
+        to target: InputTargetSnapshot,
+        commitGate: DeliveryCommitGate
+    ) async -> DeliveryOutcome {
+        guard await commitGate.commit() else {
+            return .pendingCopy(.deliveryFailed)
+        }
         deliveredTexts.append(text)
         return result
+    }
+}
+
+private actor DelayedCommitDeliveryFake: TextDelivering {
+    private(set) var entered = false
+    private(set) var deliveredTexts: [String] = []
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func deliver(
+        _ text: String,
+        to target: InputTargetSnapshot,
+        commitGate: DeliveryCommitGate
+    ) async -> DeliveryOutcome {
+        entered = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        guard await commitGate.commit() else {
+            return .pendingCopy(.deliveryFailed)
+        }
+        deliveredTexts.append(text)
+        return .delivered
+    }
+
+    func allowCommitAttempt() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
@@ -1141,10 +1630,21 @@ private actor ClipboardFake: ClipboardWriting {
 
 private actor SessionHistoryFake: SessionHistoryRecording {
     private(set) var records: [VoiceInputHistoryRecord] = []
+    let failureNotice: String?
+
+    init(failureNotice: String? = nil) {
+        self.failureNotice = failureNotice
+    }
 
     func save(_ record: VoiceInputHistoryRecord) async {
-        records.append(record)
+        if let index = records.firstIndex(where: { $0.sessionID == record.sessionID }) {
+            records[index] = record
+        } else {
+            records.append(record)
+        }
     }
+
+    func persistenceFailureNotice() async -> String? { failureNotice }
 }
 
 private actor RecordingWatchdogFake: RecordingWatchdog {
@@ -1188,6 +1688,16 @@ private final class PermissionAccessStub: PermissionAccess {
 
 private struct SpecFailure: Error {
     let message: String
+}
+
+private extension VoiceInputActivity {
+    var isCancelled: Bool {
+        if case .cancelled = self { true } else { false }
+    }
+
+    var isRecordingFailed: Bool {
+        if case .failed(_, .recordingFailed) = self { true } else { false }
+    }
 }
 
 private func expect(

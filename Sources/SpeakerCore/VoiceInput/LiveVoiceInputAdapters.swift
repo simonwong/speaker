@@ -11,13 +11,28 @@ public enum AudioCaptureError: Error, Equatable, Sendable {
     case silent
 }
 
-public actor AVAudioCapture: AudioCapturing {
+public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var meterTask: Task<Void, Never>?
     private var peakPower: Float = -160
+    private var telemetryObservers: [
+        UUID: AsyncStream<RecordingTelemetry>.Continuation
+    ] = [:]
 
-    public init() {}
+    public init() {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+        if let urls = try? FileManager.default.contentsOfDirectory(
+            at: temporaryDirectory,
+            includingPropertiesForKeys: nil
+        ) {
+            for url in urls
+            where url.lastPathComponent.hasPrefix("speaker-")
+                && url.pathExtension.lowercased() == "wav" {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
 
     public func start() async throws {
         guard recorder == nil else {
@@ -102,10 +117,31 @@ public actor AVAudioCapture: AudioCapturing {
         peakPower = -160
     }
 
+    public func observeTelemetry() -> AsyncStream<RecordingTelemetry> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<RecordingTelemetry>.makeStream()
+        telemetryObservers[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeTelemetryObserver(id) }
+        }
+        return stream
+    }
+
     private func sampleMeters() {
         guard let recorder else { return }
         recorder.updateMeters()
         peakPower = max(peakPower, recorder.peakPower(forChannel: 0))
+        let telemetry = RecordingTelemetry(
+            elapsedMilliseconds: max(0, Int(recorder.currentTime * 1_000)),
+            peakPower: recorder.peakPower(forChannel: 0)
+        )
+        for continuation in telemetryObservers.values {
+            continuation.yield(telemetry)
+        }
+    }
+
+    private func removeTelemetryObserver(_ id: UUID) {
+        telemetryObservers[id] = nil
     }
 }
 
@@ -138,6 +174,10 @@ public actor MemorySessionHistory: SessionHistoryRecording {
     public init() {}
 
     public func save(_ record: VoiceInputHistoryRecord) async {
-        records.append(record)
+        if let index = records.firstIndex(where: { $0.sessionID == record.sessionID }) {
+            records[index] = record
+        } else {
+            records.append(record)
+        }
     }
 }

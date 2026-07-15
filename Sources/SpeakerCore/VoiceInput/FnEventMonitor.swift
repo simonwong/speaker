@@ -80,6 +80,8 @@ private final class FnEventTapBox: @unchecked Sendable {
     let handler: @Sendable (GlobalVoiceTrigger) -> Void
     var tap: CFMachPort?
     var fnIsDown = false
+    var didEmitPress = false
+    var secureInputTimer: DispatchSourceTimer?
 
     init(handler: @escaping @Sendable (GlobalVoiceTrigger) -> Void) {
         self.handler = handler
@@ -88,6 +90,13 @@ private final class FnEventTapBox: @unchecked Sendable {
     func handle(type: CGEventType, event: CGEvent) {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            let hadActivePress = didEmitPress
+            fnIsDown = false
+            didEmitPress = false
+            stopSecureInputMonitoring()
+            if hadActivePress {
+                handler(.cancel)
+            }
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 handler(.monitorRecovered)
@@ -97,18 +106,54 @@ private final class FnEventTapBox: @unchecked Sendable {
             guard isDown != fnIsDown else { return }
             fnIsDown = isDown
             if isDown {
-                guard !IsSecureEventInputEnabled() else { return }
+                guard !IsSecureEventInputEnabled() else {
+                    fnIsDown = false
+                    return
+                }
+                didEmitPress = true
                 handler(.pressed)
+                startSecureInputMonitoring()
             } else {
-                handler(.released)
+                stopSecureInputMonitoring()
+                if didEmitPress {
+                    didEmitPress = false
+                    handler(.released)
+                }
             }
         case .keyDown:
-            if fnIsDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+            if fnIsDown, didEmitPress,
+               event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+                didEmitPress = false
+                stopSecureInputMonitoring()
                 handler(.cancel)
             }
         default:
             break
         }
+    }
+
+    private func startSecureInputMonitoring() {
+        stopSecureInputMonitoring()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.fnIsDown, self.didEmitPress else { return }
+            guard IsSecureEventInputEnabled() else { return }
+            self.didEmitPress = false
+            self.stopSecureInputMonitoring()
+            self.handler(.cancel)
+        }
+        secureInputTimer = timer
+        timer.resume()
+    }
+
+    private func stopSecureInputMonitoring() {
+        secureInputTimer?.cancel()
+        secureInputTimer = nil
+    }
+
+    deinit {
+        secureInputTimer?.cancel()
     }
 }
 

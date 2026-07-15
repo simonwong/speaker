@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 public struct DictionaryReplacement: Codable, Equatable, Sendable {
     public let entryID: UUID
@@ -66,17 +67,31 @@ public enum DictionaryAliasNormalizer {
         }
 
         let unambiguousAliases = uniqueAliases(in: snapshot)
+        let tokenBoundaries = linguisticTokenBoundaries(in: text)
         var candidates: [Match] = []
         let wholeRange = NSRange(text.startIndex..<text.endIndex, in: text)
 
         for owner in unambiguousAliases {
             let escapedAlias = NSRegularExpression.escapedPattern(for: owner.alias)
-            let pattern = "(?<![\\p{L}\\p{N}_])\(escapedAlias)(?![\\p{L}\\p{N}_])"
+            let containsASCIIWordCharacter = owner.alias.unicodeScalars.contains { scalar in
+                (65...90).contains(scalar.value)
+                    || (97...122).contains(scalar.value)
+                    || (48...57).contains(scalar.value)
+                    || scalar.value == 95
+            }
+            let pattern = containsASCIIWordCharacter
+                ? "(?<![A-Za-z0-9_])\(escapedAlias)(?![A-Za-z0-9_])"
+                : escapedAlias
             guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
                 continue
             }
             for match in expression.matches(in: text, range: wholeRange) {
                 guard let range = Range(match.range, in: text) else { continue }
+                if !containsASCIIWordCharacter {
+                    guard tokenBoundaries.contains(match.range.location),
+                          tokenBoundaries.contains(NSMaxRange(match.range))
+                    else { continue }
+                }
                 let matchedText = String(text[range])
                 guard matchedText != owner.entry.canonicalTerm else { continue }
                 candidates.append(Match(range: match.range, owner: owner, matchedText: matchedText))
@@ -122,6 +137,52 @@ public enum DictionaryAliasNormalizer {
             normalizedText: normalizedText,
             replacements: replacements
         )
+    }
+
+    private static func linguisticTokenBoundaries(in text: String) -> Set<Int> {
+        var boundaries: Set<Int> = [0, text.utf16.count]
+        var runStart: String.Index?
+        var index = text.startIndex
+
+        func addRun(_ range: Range<String.Index>) {
+            let run = String(text[range])
+            let runOffset = NSRange(range, in: text).location
+            let tokenizer = NLTokenizer(unit: .word)
+            tokenizer.string = run
+            tokenizer.enumerateTokens(in: run.startIndex..<run.endIndex) { tokenRange, _ in
+                let local = NSRange(tokenRange, in: run)
+                boundaries.insert(runOffset + local.location)
+                boundaries.insert(runOffset + NSMaxRange(local))
+                return true
+            }
+        }
+
+        while index < text.endIndex {
+            let next = text.index(after: index)
+            if isHan(text[index]) {
+                if runStart == nil { runStart = index }
+            } else if let start = runStart {
+                addRun(start..<index)
+                runStart = nil
+            }
+            index = next
+        }
+        if let start = runStart {
+            addRun(start..<text.endIndex)
+        }
+        return boundaries
+    }
+
+    private static func isHan(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
+                 0x20000...0x2FA1F:
+                true
+            default:
+                false
+            }
+        }
     }
 
     private static func uniqueAliases(in snapshot: PersonalDictionarySnapshot) -> [AliasOwner] {

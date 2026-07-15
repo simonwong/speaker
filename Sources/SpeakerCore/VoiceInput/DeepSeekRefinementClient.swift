@@ -233,7 +233,24 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
         let request = try makeURLRequest(text: text, rule: rule, apiKey: apiKey)
         let response: DeepSeekTransportResponse
         do {
-            response = try await transport.send(request)
+            let transport = transport
+            let timeout = configuration.timeout
+            response = try await withThrowingTaskGroup(
+                of: DeepSeekTransportResponse.self
+            ) { group in
+                group.addTask {
+                    try await transport.send(request)
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeout))
+                    throw DeepSeekRefinementFailure(kind: .timeout)
+                }
+                guard let first = try await group.next() else {
+                    throw DeepSeekRefinementFailure(kind: .unexpected)
+                }
+                group.cancelAll()
+                return first
+            }
         } catch is CancellationError {
             throw DeepSeekRefinementFailure(kind: .cancelled)
         } catch let urlError as URLError where urlError.code == .cancelled {

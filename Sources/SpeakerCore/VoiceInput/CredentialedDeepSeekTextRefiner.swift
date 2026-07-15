@@ -42,4 +42,11 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
     public func deleteAPIKey() async throws {
         try await credentials.deleteAPIKey(for: .deepSeek)
     }
+
+    public func checkConnection() async throws -> String? {
+        try await refine(
+            "连接检查。",
+            using: .conciseCleanup
+        ).providerRequestID
+    }
 }

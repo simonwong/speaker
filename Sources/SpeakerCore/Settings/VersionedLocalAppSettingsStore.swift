@@ -151,15 +151,18 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
 public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var shortcut: VoiceShortcutPreference
     public var refinement: RefinementPreference
+    public var savedCustomRefinement: RefinementPreference?
     public var launchAtLogin: Bool
 
     public init(
         shortcut: VoiceShortcutPreference = .functionKey,
         refinement: RefinementPreference = .defaultSmooth,
+        savedCustomRefinement: RefinementPreference? = nil,
         launchAtLogin: Bool = false
     ) {
         self.shortcut = shortcut
         self.refinement = refinement
+        self.savedCustomRefinement = savedCustomRefinement
         self.launchAtLogin = launchAtLogin
     }
 
@@ -284,6 +287,44 @@ public actor VersionedLocalAppSettingsStore {
                 reason: Self.safeReason(for: error)
             )
         }
+    }
+
+    @discardableResult
+    public func updateShortcut(
+        _ shortcut: VoiceShortcutPreference
+    ) throws -> SpeakerAppSettings {
+        var settings = load().settings
+        settings.shortcut = shortcut
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateRefinement(
+        _ refinement: RefinementPreference
+    ) throws -> SpeakerAppSettings {
+        var settings = load().settings
+        settings.refinement = refinement
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateSavedCustomRefinement(
+        _ refinement: RefinementPreference
+    ) throws -> SpeakerAppSettings {
+        var settings = load().settings
+        settings.savedCustomRefinement = refinement
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateLaunchAtLogin(_ enabled: Bool) throws -> SpeakerAppSettings {
+        var settings = load().settings
+        settings.launchAtLogin = enabled
+        try save(settings)
+        return settings
     }
 
     private func recover(reason: AppSettingsRecoveryReason) -> AppSettingsLoadResult {

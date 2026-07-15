@@ -62,11 +62,65 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
     }
 }
 
+public struct VoiceProviderDiagnostic: Equatable, Sendable {
+    public let provider: String
+    public let requestID: String?
+    public let code: String?
+
+    public init(provider: String, requestID: String? = nil, code: String? = nil) {
+        self.provider = provider
+        self.requestID = requestID
+        self.code = code
+    }
+}
+
+public struct VoiceTextProcessingFailure: Error, Equatable, Sendable {
+    public let userFailure: VoiceInputFailure
+    public let providerDiagnostic: VoiceProviderDiagnostic?
+
+    public init(
+        userFailure: VoiceInputFailure,
+        providerDiagnostic: VoiceProviderDiagnostic? = nil
+    ) {
+        self.userFailure = userFailure
+        self.providerDiagnostic = providerDiagnostic
+    }
+
+    init(doubaoFailure: DoubaoASRFailure) {
+        userFailure = switch doubaoFailure.kind {
+        case .invalidCredential: .providerNotConfigured
+        case .silence, .emptyAudio, .emptyTranscript: .noSpeechDetected
+        case .resourceNotActivated: .providerResourceUnavailable
+        case .rateLimited: .providerRateLimited
+        case .network: .networkUnavailable
+        case .serverBusy, .serviceUnavailable: .providerUnavailable
+        case .cancelled, .invalidRequest, .invalidAudioFormat, .invalidResponse:
+            .transcriptionFailed
+        }
+        providerDiagnostic = VoiceProviderDiagnostic(
+            provider: "doubao",
+            requestID: doubaoFailure.providerRequestID,
+            code: doubaoFailure.kind.rawValue
+        )
+    }
+
+    init(doubaoCredentialFailure: ProviderCredentialStoreError) {
+        userFailure = doubaoCredentialFailure == .emptyAPIKey
+            ? .providerNotConfigured
+            : .providerCredentialUnavailable
+        providerDiagnostic = VoiceProviderDiagnostic(
+            provider: "doubao",
+            code: "credential.\(doubaoCredentialFailure.diagnosticCode)"
+        )
+    }
+}
+
 public protocol VoiceTextProcessing: Sendable {
     func captureSnapshot() async -> VoiceTextProcessingSnapshot
     func process(
         _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
     ) async throws -> VoiceTextProcessingResult
 }
 
@@ -133,20 +187,31 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
 
     public func process(
         _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
     ) async throws -> VoiceTextProcessingResult {
         let clock = ContinuousClock()
         let doubaoStarted = clock.now
-        let doubaoResult = try await doubao.transcribe(
-            audio,
-            hotwords: snapshot.dictionaryContext.hotwords,
-            context: nil
-        )
+        let doubaoResult: TranscriptionResult
+        do {
+            doubaoResult = try await doubao.transcribe(
+                audio,
+                hotwords: snapshot.dictionaryContext.hotwords,
+                context: nil
+            )
+        } catch let failure as DoubaoASRFailure {
+            throw VoiceTextProcessingFailure(doubaoFailure: failure)
+        } catch let failure as ProviderCredentialStoreError {
+            throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
+        }
         let doubaoDuration = doubaoStarted.duration(to: clock.now)
         let normalization = DictionaryAliasNormalizer.normalize(
             doubaoResult.text,
             using: snapshot.dictionary
         )
+        if snapshot.refinementMode.requiresDeepSeek {
+            await progress(.refining)
+        }
         let refinementStarted = clock.now
         let refinementOutcome = await refinement.refine(
             doubaoText: normalization.normalizedText,
@@ -189,9 +254,17 @@ struct BasicVoiceTextProcessor: VoiceTextProcessing {
 
     func process(
         _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
     ) async throws -> VoiceTextProcessingResult {
-        let result = try await transcriber.transcribe(audio)
+        let result: TranscriptionResult
+        do {
+            result = try await transcriber.transcribe(audio)
+        } catch let failure as DoubaoASRFailure {
+            throw VoiceTextProcessingFailure(doubaoFailure: failure)
+        } catch let failure as ProviderCredentialStoreError {
+            throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
+        }
         return VoiceTextProcessingResult(
             doubaoText: result.text,
             normalizedText: result.text,
@@ -214,5 +287,17 @@ struct BasicVoiceTextProcessor: VoiceTextProcessing {
             components.seconds * 1_000
                 + components.attoseconds / 1_000_000_000_000_000
         )
+    }
+}
+
+private extension ProviderCredentialStoreError {
+    var diagnosticCode: String {
+        switch self {
+        case .emptyAPIKey: "emptyAPIKey"
+        case .accessDenied: "accessDenied"
+        case .interactionUnavailable: "interactionUnavailable"
+        case .malformedStoredValue: "malformedStoredValue"
+        case .storageUnavailable: "storageUnavailable"
+        }
     }
 }
