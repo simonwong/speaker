@@ -314,9 +314,46 @@ struct SpeakerCoreSpecs {
             try expect(deliveredTexts.isEmpty)
             try expect(copiedBefore.isEmpty)
 
+            let hiddenAfterCopy = Task {
+                for await presentation in await sessions.observe() {
+                    if presentation.activity == .idle { return true }
+                }
+                return false
+            }
             await sessions.send(.copyPendingResult)
             let copiedAfter = await clipboard.copiedTexts
+            let didHideAfterCopy = await hiddenAfterCopy.value
             try expect(copiedAfter == ["请手动复制。"])
+            try expect(didHideAfterCopy)
+        }
+
+        await runAsync("dismiss pending copy hides without changing clipboard", failures: &failures) {
+            let clipboard = ClipboardFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "不要复制。"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: clipboard,
+                history: SessionHistoryFake()
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            _ = await terminal.value
+
+            let hiddenAfterDismiss = Task {
+                for await presentation in await sessions.observe() {
+                    if presentation.activity == .idle { return true }
+                }
+                return false
+            }
+            await sessions.send(.dismissResult)
+            let didHideAfterDismiss = await hiddenAfterDismiss.value
+            let copiedTexts = await clipboard.copiedTexts
+            try expect(didHideAfterDismiss)
+            try expect(copiedTexts.isEmpty)
         }
 
         await runAsync("secure target never receives automatic text", failures: &failures) {
@@ -1357,7 +1394,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 54 core specs")
+        print("PASS: 55 core specs")
     }
 }
 

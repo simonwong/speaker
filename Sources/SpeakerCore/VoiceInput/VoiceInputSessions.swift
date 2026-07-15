@@ -442,9 +442,13 @@ public actor VoiceInputSessions {
         case .cancel:
             await cancelSession()
         case .copyPendingResult:
-            if case let .pendingCopy(_, text, _) = presentation.activity {
-                await clipboard.copy(text)
-            }
+            guard case let .pendingCopy(id, text, _) = presentation.activity else { return }
+            await clipboard.copy(text)
+            guard phase == .idle,
+                  case let .pendingCopy(currentID, _, _) = presentation.activity,
+                  currentID == id
+            else { return }
+            publish(.idle)
         case .dismissResult:
             guard phase == .idle else { return }
             publish(.idle)

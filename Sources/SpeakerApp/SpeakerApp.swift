@@ -1481,26 +1481,42 @@ private final class VoiceInputPanelController {
         case .idle:
             panel.orderOut(nil)
         case .delivered, .cancelled:
-            showPanel()
+            showPanel(for: activity)
             hideTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(1.2))
                 guard !Task.isCancelled else { return }
                 self?.panel.orderOut(nil)
             }
         case .preparing, .recording, .processing, .pendingCopy, .failed:
-            showPanel()
+            showPanel(for: activity)
         }
     }
 
-    private func showPanel() {
+    private func showPanel(for activity: VoiceInputActivity) {
+        panel.setContentSize(Self.panelSize(for: activity))
         if let frame = NSScreen.main?.visibleFrame {
             let origin = NSPoint(
                 x: frame.midX - panel.frame.width / 2,
-                y: frame.maxY - panel.frame.height - 36
+                y: frame.minY + 28
             )
             panel.setFrameOrigin(origin)
         }
         panel.orderFrontRegardless()
+    }
+
+    private static func panelSize(for activity: VoiceInputActivity) -> NSSize {
+        switch activity {
+        case .recording:
+            NSSize(width: 224, height: 76)
+        case .pendingCopy:
+            NSSize(width: 400, height: 120)
+        case .failed:
+            NSSize(width: 380, height: 112)
+        case .preparing, .processing, .delivered, .cancelled:
+            NSSize(width: 360, height: 104)
+        case .idle:
+            NSSize(width: 360, height: 104)
+        }
     }
 }
 
@@ -1508,50 +1524,73 @@ private struct VoiceInputOverlay: View {
     @ObservedObject var model: VoiceInputSessionModel
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: model.presentation.activity.icon)
-                .font(.title2)
-                .foregroundStyle(.tint)
-                .frame(width: 30)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.presentation.activity.summary)
-                    .font(.headline)
-                Text(model.presentation.activity.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                if let notice = model.presentation.notice {
-                    Text(notice)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .lineLimit(2)
-                }
-                if let telemetry = model.presentation.recordingTelemetry {
-                    HStack(spacing: 8) {
-                        Text(Self.elapsed(telemetry.elapsedMilliseconds))
-                            .font(.caption.monospacedDigit())
-                        ProgressView(value: Self.level(telemetry.peakPower))
-                            .progressViewStyle(.linear)
-                    }
-                }
-            }
-
-            Spacer()
-
-            if model.presentation.activity.isActive {
-                Button("取消") {
-                    model.send(.cancel)
-                }
-            } else if case .pendingCopy = model.presentation.activity {
-                Button("复制") {
-                    model.send(.copyPendingResult)
-                }
+        Group {
+            if model.presentation.activity.isRecording {
+                RecordingWaveformOverlay(
+                    peakPower: model.presentation.recordingTelemetry?.peakPower
+                )
+            } else {
+                statusOverlay
             }
         }
-        .padding(16)
-        .frame(width: 360)
-        .frame(minHeight: 86)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var statusOverlay: some View {
+        ZStack(alignment: .topTrailing) {
+            HStack(spacing: 14) {
+                Image(systemName: model.presentation.activity.icon)
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .frame(width: 30)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.presentation.activity.summary)
+                        .font(.headline)
+                    Text(model.presentation.activity.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    if let notice = model.presentation.notice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                if model.presentation.activity.isActive {
+                    Button("取消") {
+                        model.send(.cancel)
+                    }
+                } else if case .pendingCopy = model.presentation.activity {
+                    Button("复制") {
+                        model.send(.copyPendingResult)
+                    }
+                    .controlSize(.large)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .padding(.trailing, model.presentation.activity.isDismissible ? 20 : 0)
+
+            if model.presentation.activity.isDismissible {
+                Button {
+                    model.send(.dismissResult)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+                .padding(8)
+            }
+        }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay {
             RoundedRectangle(cornerRadius: 16)
@@ -1559,14 +1598,70 @@ private struct VoiceInputOverlay: View {
         }
         .padding(8)
     }
+}
 
-    private static func elapsed(_ milliseconds: Int) -> String {
-        let seconds = Double(milliseconds) / 1_000
-        return String(format: "%.1f s", seconds)
+private struct RecordingWaveformOverlay: View {
+    let peakPower: Float?
+
+    private let barCount = 17
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 9, height: 9)
+                    .scaleEffect(0.88 + pulse(at: phase) * 0.18)
+                    .opacity(0.72 + pulse(at: phase) * 0.28)
+                    .shadow(color: .red.opacity(0.35), radius: 5)
+
+                HStack(spacing: 3) {
+                    ForEach(0..<barCount, id: \.self) { index in
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.accentColor.opacity(0.68),
+                                        Color.accentColor,
+                                    ],
+                                    startPoint: .bottom,
+                                    endPoint: .top
+                                )
+                            )
+                            .frame(width: 4, height: barHeight(index: index, phase: phase))
+                    }
+                }
+                .frame(height: 38)
+            }
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(.separator.opacity(0.5), lineWidth: 1)
+        }
+        .padding(8)
+        .accessibilityLabel("正在录音")
     }
 
-    private static func level(_ peakPower: Float) -> Double {
-        min(1, max(0, Double(peakPower + 60) / 60))
+    private var inputStrength: Double {
+        guard let peakPower else { return 0.5 }
+        return min(1, max(0.22, Double(peakPower + 55) / 55))
+    }
+
+    private func pulse(at phase: TimeInterval) -> Double {
+        (sin(phase * 4.2) + 1) / 2
+    }
+
+    private func barHeight(index: Int, phase: TimeInterval) -> Double {
+        let position = Double(index) / Double(max(1, barCount - 1))
+        let envelope = 0.42 + sin(position * .pi) * 0.58
+        let primary = (sin(phase * 8.4 + Double(index) * 0.82) + 1) / 2
+        let secondary = (sin(phase * 5.1 - Double(index) * 0.47) + 1) / 2
+        let motion = 0.18 + primary * 0.55 + secondary * 0.27
+        return 6 + 30 * envelope * motion * (0.45 + inputStrength * 0.55)
     }
 }
 
@@ -1589,6 +1684,15 @@ private extension VoiceInputActivity {
         case .preparing, .recording, .processing:
             true
         case .idle, .delivered, .pendingCopy, .cancelled, .failed:
+            false
+        }
+    }
+
+    var isDismissible: Bool {
+        switch self {
+        case .pendingCopy, .failed:
+            true
+        case .idle, .preparing, .recording, .processing, .delivered, .cancelled:
             false
         }
     }
