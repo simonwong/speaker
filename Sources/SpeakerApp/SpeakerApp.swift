@@ -371,6 +371,24 @@ private enum RefinementChoice: String, CaseIterable, Identifiable {
         case .custom: "自定义"
         }
     }
+
+    var subtitle: String {
+        switch self {
+        case .defaultSmooth: "只使用豆包语义顺滑"
+        case .conciseCleanup: "清理重复、停顿和口语"
+        case .fullRewrite: "重组为清晰完整的文本"
+        case .custom: "按照你自己的提示词整理"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .defaultSmooth: "waveform"
+        case .conciseCleanup: "text.badge.checkmark"
+        case .fullRewrite: "sparkles"
+        case .custom: "slider.horizontal.3"
+        }
+    }
 }
 
 @MainActor
@@ -610,6 +628,7 @@ private final class DictionarySettingsModel: ObservableObject {
 
     private let store: VersionedJSONPersonalDictionaryStore
     private let configuration: VoiceInputConfigurationController
+    private var saveTask: Task<Void, Never>?
 
     init(
         store: VersionedJSONPersonalDictionaryStore,
@@ -641,7 +660,18 @@ private final class DictionarySettingsModel: ObservableObject {
     }
 
     func saveEdits() async {
+        saveTask?.cancel()
+        saveTask = nil
         _ = await save(entries)
+    }
+
+    func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await self?.saveEdits()
+        }
     }
 
     func delete(_ id: UUID) async {
@@ -950,43 +980,251 @@ private struct MenuBarContent: View {
     }
 }
 
+private enum SettingsPage: String, CaseIterable, Identifiable {
+    case general
+    case speech
+    case refinement
+    case dictionary
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "通用"
+        case .speech: "语音识别"
+        case .refinement: "文本整理"
+        case .dictionary: "个人词库"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .general: "快捷键、录音方式与启动选项"
+        case .speech: "系统权限与豆包流式语音服务"
+        case .refinement: "选择整理强度，按需接入 DeepSeek"
+        case .dictionary: "维护专有名词和常见口语别名"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: "switch.2"
+        case .speech: "waveform"
+        case .refinement: "text.alignleft"
+        case .dictionary: "text.book.closed"
+        }
+    }
+}
+
+private struct SettingsPageHeader: View {
+    let page: SettingsPage
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: page.icon)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 42, height: 42)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(page.title)
+                    .font(.title2.weight(.semibold))
+                Text(page.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SettingsCard<Content: View>: View {
+    let title: String
+    let subtitle: String?
+    let icon: String
+    let content: Content
+
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.icon = icon
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: icon)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            content
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.025), radius: 8, y: 2)
+    }
+}
+
+private struct StatusBadge: View {
+    let text: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(color.opacity(0.11), in: Capsule())
+            .lineLimit(1)
+    }
+}
+
+private struct SettingsNotice: View {
+    let text: String
+    var color: Color = .secondary
+
+    var body: some View {
+        Label(text, systemImage: "info.circle.fill")
+            .font(.caption)
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            .textSelection(.enabled)
+    }
+}
+
 private struct SettingsView: View {
     @ObservedObject var runtime: SpeakerRuntime
     @StateObject private var shortcutRecorder = ShortcutRecorderModel()
+    @State private var selection = SettingsPage.general
 
     private var permissions: PermissionModel { runtime.permissions }
 
     var body: some View {
-        Form {
-            Section("系统权限") {
-                PermissionRow(
-                    title: "辅助功能",
-                    explanation: "用于监听全局快捷键、捕获输入目标并安全送达文本。",
-                    kind: .accessibility,
-                    state: permissions.snapshot.accessibility,
-                    permissions: permissions
-                )
-
-                PermissionRow(
-                    title: "麦克风",
-                    explanation: "支持长按说话，也支持短按开始、再次短按结束。",
-                    kind: .microphone,
-                    state: permissions.snapshot.microphone,
-                    permissions: permissions
-                )
+        NavigationSplitView {
+            List(SettingsPage.allCases, selection: $selection) { page in
+                Label(page.title, systemImage: page.icon)
+                    .tag(page)
             }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 190)
+            .safeAreaInset(edge: .bottom) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Speaker")
+                        .font(.caption.weight(.semibold))
+                    Text("语音随手输入")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+            }
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    SettingsPageHeader(page: selection)
 
-            Section("语音输入") {
-                LabeledContent(
-                    "语音输入快捷键",
-                    value: runtime.shortcutPreference.displayName
-                )
-                HStack {
+                    switch selection {
+                    case .general:
+                        GeneralSettingsPage(
+                            runtime: runtime,
+                            shortcutRecorder: shortcutRecorder,
+                            loginItemSettings: runtime.loginItemSettings
+                        )
+                    case .speech:
+                        SpeechSettingsPage(
+                            permissions: permissions,
+                            doubao: runtime.doubaoSettings
+                        )
+                    case .refinement:
+                        RefinementSettingsPage(model: runtime.refinementSettings)
+                    case .dictionary:
+                        DictionarySettingsPage(model: runtime.dictionarySettings)
+                    }
+                }
+                .padding(24)
+                .frame(maxWidth: 720, alignment: .leading)
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+        }
+        .frame(width: 860, height: 650)
+        .task {
+            permissions.refresh()
+            await runtime.doubaoSettings.refresh()
+            await runtime.loginItemSettings.refresh()
+        }
+        .onDisappear { shortcutRecorder.stop() }
+    }
+}
+
+private struct GeneralSettingsPage: View {
+    @ObservedObject var runtime: SpeakerRuntime
+    @ObservedObject var shortcutRecorder: ShortcutRecorderModel
+    @ObservedObject var loginItemSettings: LoginItemSettingsModel
+
+    var body: some View {
+        VStack(spacing: 16) {
+            SettingsCard(
+                "语音输入快捷键",
+                subtitle: "长按时松开结束；短按时再次按下结束",
+                icon: "keyboard"
+            ) {
+                HStack(spacing: 16) {
+                    Text(runtime.shortcutPreference.displayName)
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 16)
+                        .frame(minWidth: 78, minHeight: 44)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 9)
+                                .stroke(.separator.opacity(0.55), lineWidth: 1)
+                        }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("当前快捷键")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(runtime.shortcutPreference == .functionKey ? "默认 Fn" : "自定义组合键")
+                            .font(.subheadline.weight(.medium))
+                    }
+
+                    Spacer()
+
                     Button("使用 Fn") {
                         shortcutRecorder.stop()
                         runtime.useFunctionKey()
                     }
-                    Button(shortcutRecorder.isRecording ? "取消录制" : "录制组合键") {
+                    .disabled(runtime.shortcutPreference == .functionKey)
+
+                    Button(shortcutRecorder.isRecording ? "取消" : "录制新快捷键") {
                         if shortcutRecorder.isRecording {
                             shortcutRecorder.stop()
                         } else {
@@ -995,233 +1233,131 @@ private struct SettingsView: View {
                             }
                         }
                     }
+                    .buttonStyle(.borderedProminent)
                 }
 
-                if let recorderNotice = shortcutRecorder.notice,
-                   shortcutRecorder.isRecording {
-                    Text(recorderNotice)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if shortcutRecorder.isRecording, let notice = shortcutRecorder.notice {
+                    HStack(spacing: 9) {
+                        Circle()
+                            .fill(.red)
+                            .frame(width: 8, height: 8)
+                        Text(notice)
+                            .font(.caption)
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 }
 
-                if let shortcutNotice = runtime.shortcutNotice {
-                    Text(shortcutNotice)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                if let notice = runtime.shortcutNotice {
+                    SettingsNotice(text: notice, color: .orange)
                 }
 
+                Divider()
+
+                HStack(spacing: 12) {
+                    GestureHint(
+                        icon: "hand.tap",
+                        title: "短按",
+                        detail: "按一下开始，再按一下结束"
+                    )
+                    GestureHint(
+                        icon: "hand.point.up.left",
+                        title: "长按",
+                        detail: "按住录音，松开结束"
+                    )
+                    GestureHint(
+                        icon: "escape",
+                        title: "取消",
+                        detail: "录音期间按 Esc"
+                    )
+                }
             }
 
-            Section("通用") {
+            SettingsCard(
+                "启动与后台运行",
+                subtitle: "Speaker 作为菜单栏应用安静运行",
+                icon: "power"
+            ) {
                 Toggle(
-                    "登录时启动",
+                    "登录 Mac 时自动启动 Speaker",
                     isOn: Binding(
-                        get: { runtime.loginItemSettings.isEnabled },
+                        get: { loginItemSettings.isEnabled },
                         set: { enabled in
-                            Task { await runtime.loginItemSettings.setEnabled(enabled) }
+                            Task { await loginItemSettings.setEnabled(enabled) }
                         }
                     )
                 )
-                if let notice = runtime.loginItemSettings.notice {
-                    Text(notice)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                .toggleStyle(.switch)
+
+                if let notice = loginItemSettings.notice {
+                    SettingsNotice(text: notice, color: .orange)
                 }
             }
-
-            DoubaoSettingsSection(model: runtime.doubaoSettings)
-            RefinementSettingsSection(model: runtime.refinementSettings)
-            DictionarySettingsSection(model: runtime.dictionarySettings)
         }
-        .formStyle(.grouped)
-        .frame(width: 640, height: 760)
-        .task {
-            permissions.refresh()
-            await runtime.doubaoSettings.refresh()
-            await runtime.refinementSettings.load()
-            await runtime.dictionarySettings.load()
-            await runtime.loginItemSettings.refresh()
-        }
-        .onDisappear { shortcutRecorder.stop() }
     }
 }
 
-private struct RefinementSettingsSection: View {
-    @ObservedObject var model: RefinementSettingsModel
+private struct GestureHint: View {
+    let icon: String
+    let title: String
+    let detail: String
 
     var body: some View {
-        Section("文本整理") {
-            Picker(
-                "整理模式",
-                selection: Binding(
-                    get: { model.choice },
-                    set: { choice in Task { await model.select(choice) } }
-                )
-            ) {
-                ForEach(RefinementChoice.allCases) { choice in
-                    Text(choice.title).tag(choice)
-                }
-            }
-
-            SecureField("DeepSeek API Key（可选）", text: $model.apiKeyDraft)
-                .textContentType(.password)
-
-            HStack {
-                Button("保存 DeepSeek Key") {
-                    Task { await model.saveAPIKey() }
-                }
-                .disabled(model.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button("删除 Key", role: .destructive) {
-                    Task { await model.deleteAPIKey() }
-                }
-                .disabled(!model.hasStoredKey)
-                Button("检查连接") {
-                    Task { await model.checkConnection() }
-                }
-                .disabled(!model.hasStoredKey)
-            }
-
-            if model.choice == .custom {
-                TextField("规则名称", text: $model.customName)
-                TextEditor(text: $model.customPrompt)
-                    .font(.body)
-                    .frame(minHeight: 72)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(.separator, lineWidth: 1)
-                    }
-                HStack {
-                    Text("最多 4000 字符")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("保存并启用自定义规则") {
-                        Task { await model.saveCustomMode() }
-                    }
-                }
-            }
-
-            if let notice = model.notice {
-                Text(notice)
-                    .font(.caption)
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .foregroundStyle(.tint)
+                .frame(width: 24, height: 24)
+                .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                Text(detail)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct DictionarySettingsSection: View {
-    @ObservedObject var model: DictionarySettingsModel
+private struct SpeechSettingsPage: View {
+    @ObservedObject var permissions: PermissionModel
+    @ObservedObject var doubao: DoubaoSettingsModel
 
     var body: some View {
-        Section("个人词库") {
-            ForEach($model.entries) { $entry in
-                HStack(alignment: .firstTextBaseline) {
-                    Toggle("", isOn: $entry.isEnabled)
-                        .labelsHidden()
-                        .onChange(of: entry.isEnabled) {
-                            Task { await model.saveEdits() }
-                        }
-                    TextField("标准写法", text: $entry.canonicalTerm)
-                        .onSubmit { Task { await model.saveEdits() } }
-                    TextField(
-                        "别名（逗号分隔）",
-                        text: Binding(
-                            get: { entry.aliases.joined(separator: "，") },
-                            set: { value in
-                                entry.aliases = value
-                                    .split(whereSeparator: { $0 == "," || $0 == "，" || $0.isNewline })
-                                    .map(String.init)
-                            }
-                        )
-                    )
-                    .onSubmit { Task { await model.saveEdits() } }
-                    Button(role: .destructive) {
-                        Task { await model.delete(entry.id) }
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-
-            HStack {
-                TextField("新增标准写法", text: $model.draftCanonical)
-                TextField("口语别名（逗号分隔）", text: $model.draftAliases)
-                Button("添加") {
-                    Task { await model.add() }
-                }
-                .disabled(model.draftCanonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            if let notice = model.notice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private struct DoubaoSettingsSection: View {
-    @ObservedObject var model: DoubaoSettingsModel
-
-    var body: some View {
-        Section("豆包语音") {
-            SecureField("输入豆包语音 API Key", text: $model.apiKeyDraft)
-                .textContentType(.password)
-
-            Picker(
-                "流式资源",
-                selection: Binding(
-                    get: { model.resource },
-                    set: { resource in Task { await model.selectResource(resource) } }
-                )
+        VStack(spacing: 16) {
+            SettingsCard(
+                "系统权限",
+                subtitle: "只请求完成语音输入所必需的权限",
+                icon: "checkmark.shield"
             ) {
-                ForEach(DoubaoStreamingResource.allCases, id: \.rawValue) { resource in
-                    Text(resource.displayName).tag(resource)
-                }
+                PermissionSettingsRow(
+                    title: "辅助功能",
+                    explanation: "监听全局快捷键，并把文本安全送达到结束录音时的输入框。",
+                    kind: .accessibility,
+                    state: permissions.snapshot.accessibility,
+                    permissions: permissions
+                )
+
+                Divider()
+
+                PermissionSettingsRow(
+                    title: "麦克风",
+                    explanation: "音频只在内存中流式处理，不会写入磁盘或历史。",
+                    kind: .microphone,
+                    state: permissions.snapshot.microphone,
+                    permissions: permissions
+                )
             }
 
-            HStack {
-                Button("保存") {
-                    Task { await model.save() }
-                }
-                .disabled(model.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                Button("检查连接") {
-                    Task { await model.checkConnection() }
-                }
-                .disabled(!model.hasConfiguredKey)
-
-                Spacer()
-
-                Button("删除 Key", role: .destructive) {
-                    Task { await model.delete() }
-                }
-                .disabled(!model.hasConfiguredKey)
-            }
-
-            Text(model.summary)
-                .font(.caption)
-                .foregroundStyle(statusColor)
-                .textSelection(.disabled)
-
-            Text("使用 bigmodel_async WebSocket；资源必须与豆包语音控制台已开通的计费类型一致。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            DoubaoSettingsCard(model: doubao)
         }
-    }
-
-    private var statusColor: Color {
-        if case .failure = model.status { return .red }
-        if case .success = model.status { return .green }
-        return .secondary
     }
 }
 
-private struct PermissionRow: View {
+private struct PermissionSettingsRow: View {
     let title: String
     let explanation: String
     let kind: PermissionKind
@@ -1229,45 +1365,550 @@ private struct PermissionRow: View {
     @ObservedObject var permissions: PermissionModel
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
+                .font(.body.weight(.semibold))
                 .foregroundStyle(color)
-                .frame(width: 20)
+                .frame(width: 34, height: 34)
+                .background(color.opacity(0.1), in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
+                    .font(.subheadline.weight(.medium))
                 Text(explanation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
+            Spacer(minLength: 16)
 
-            Button(buttonTitle) {
-                Task {
-                    await permissions.request(kind)
+            StatusBadge(
+                text: state == .granted ? "已授权" : "待完成",
+                icon: state == .granted ? "checkmark" : "exclamationmark",
+                color: color
+            )
+
+            if state != .granted {
+                Button(buttonTitle) {
+                    Task { await permissions.request(kind) }
                 }
             }
-            .disabled(state == .granted)
         }
     }
 
     private var icon: String {
-        state == .granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+        switch kind {
+        case .accessibility: "accessibility"
+        case .microphone: "mic.fill"
+        }
     }
 
-    private var color: Color {
-        state == .granted ? .green : .orange
-    }
+    private var color: Color { state == .granted ? .green : .orange }
 
     private var buttonTitle: String {
-        switch state {
-        case .granted:
-            "已授权"
-        case .notDetermined:
-            "请求授权"
-        case .denied:
-            "打开授权"
+        state == .notDetermined ? "请求授权" : "打开设置"
+    }
+}
+
+private struct DoubaoSettingsCard: View {
+    @ObservedObject var model: DoubaoSettingsModel
+    @State private var confirmingDelete = false
+
+    var body: some View {
+        SettingsCard(
+            "豆包流式语音",
+            subtitle: "录音过程中实时转录，默认启用语义顺滑",
+            icon: "waveform.badge.mic"
+        ) {
+            HStack {
+                StatusBadge(
+                    text: statusText,
+                    icon: statusIcon,
+                    color: statusColor
+                )
+                .help(model.summary)
+                Spacer()
+                Link(
+                    "打开豆包控制台",
+                    destination: URL(
+                        string: "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default"
+                    )!
+                )
+                .font(.caption)
+            }
+
+            Divider()
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+                GridRow {
+                    Text("API Key")
+                        .font(.subheadline.weight(.medium))
+                    HStack(spacing: 8) {
+                        SecureField(
+                            model.hasConfiguredKey ? "输入新 Key 以替换当前凭据" : "输入豆包语音 API Key",
+                            text: $model.apiKeyDraft
+                        )
+                        .textContentType(.password)
+
+                        Button(model.hasConfiguredKey ? "替换 Key" : "保存 Key") {
+                            Task { await model.save() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            model.apiKeyDraft
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
+                        )
+                    }
+                }
+
+                GridRow {
+                    Text("流式资源")
+                        .font(.subheadline.weight(.medium))
+                    Picker(
+                        "流式资源",
+                        selection: Binding(
+                            get: { model.resource },
+                            set: { resource in Task { await model.selectResource(resource) } }
+                        )
+                    ) {
+                        ForEach(DoubaoStreamingResource.allCases, id: \.rawValue) { resource in
+                            Text(resource.displayName).tag(resource)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 300, alignment: .leading)
+                }
+            }
+
+            HStack(spacing: 10) {
+                if case .checking = model.status {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Button("检查连接") {
+                    Task { await model.checkConnection() }
+                }
+                .disabled(!model.hasConfiguredKey || isChecking)
+
+                Text("资源类型必须与控制台中已开通的套餐一致。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("删除 Key", role: .destructive) {
+                    confirmingDelete = true
+                }
+                .disabled(!model.hasConfiguredKey)
+            }
+        }
+        .confirmationDialog(
+            "删除豆包 API Key？",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("删除 Key", role: .destructive) {
+                Task { await model.delete() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后将无法进行新的语音转录，历史记录不会受影响。")
+        }
+    }
+
+    private var isChecking: Bool {
+        if case .checking = model.status { true } else { false }
+    }
+
+    private var statusIcon: String {
+        switch model.status {
+        case .loading: "clock"
+        case .unconfigured: "key.slash"
+        case .configured: "checkmark.shield"
+        case .checking: "arrow.triangle.2.circlepath"
+        case .success: "checkmark.circle.fill"
+        case .failure: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var statusText: String {
+        switch model.status {
+        case .loading: "正在读取 Keychain"
+        case .unconfigured: "未配置"
+        case .configured: "Key 已保存在本机"
+        case .checking: "正在检查连接"
+        case .success: "连接成功"
+        case .failure: model.summary
+        }
+    }
+
+    private var statusColor: Color {
+        switch model.status {
+        case .success: .green
+        case .failure: .red
+        case .checking: .blue
+        case .loading, .unconfigured, .configured: .secondary
+        }
+    }
+}
+
+private struct RefinementSettingsPage: View {
+    @ObservedObject var model: RefinementSettingsModel
+    @State private var confirmingDelete = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            SettingsCard(
+                "整理模式",
+                subtitle: "默认顺滑不调用 DeepSeek；其他模式需要先验证 Key",
+                icon: "text.alignleft"
+            ) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 132), spacing: 10)],
+                    spacing: 10
+                ) {
+                    ForEach(RefinementChoice.allCases) { choice in
+                        RefinementModeButton(
+                            choice: choice,
+                            selected: model.choice == choice,
+                            locked: choice != .defaultSmooth
+                                && (!model.hasStoredKey || !model.isConnectionVerified)
+                        ) {
+                            Task { await model.select(choice) }
+                        }
+                    }
+                }
+
+                if let notice = model.notice {
+                    SettingsNotice(
+                        text: notice,
+                        color: model.isConnectionVerified ? .green : .secondary
+                    )
+                }
+            }
+
+            SettingsCard(
+                "DeepSeek（可选）",
+                subtitle: "仅发送豆包转录文本和整理规则，不发送音频",
+                icon: "sparkles"
+            ) {
+                HStack {
+                    StatusBadge(
+                        text: deepSeekStatusText,
+                        icon: deepSeekStatusIcon,
+                        color: deepSeekStatusColor
+                    )
+                    Spacer()
+                    Link(
+                        "打开 DeepSeek 平台",
+                        destination: URL(string: "https://platform.deepseek.com/api_keys")!
+                    )
+                    .font(.caption)
+                }
+
+                HStack(spacing: 8) {
+                    SecureField(
+                        model.hasStoredKey ? "输入新 Key 以替换当前凭据" : "输入 DeepSeek API Key",
+                        text: $model.apiKeyDraft
+                    )
+                    .textContentType(.password)
+
+                    Button(model.hasStoredKey ? "替换 Key" : "保存 Key") {
+                        Task { await model.saveAPIKey() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        model.apiKeyDraft
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
+                    )
+                }
+
+                HStack {
+                    Button("检查连接") {
+                        Task { await model.checkConnection() }
+                    }
+                    .disabled(!model.hasStoredKey)
+
+                    Spacer()
+
+                    Button("删除 Key", role: .destructive) {
+                        confirmingDelete = true
+                    }
+                    .disabled(!model.hasStoredKey)
+                }
+            }
+            .confirmationDialog(
+                "删除 DeepSeek API Key？",
+                isPresented: $confirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("删除 Key", role: .destructive) {
+                    Task { await model.deleteAPIKey() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后会自动切回默认顺滑，豆包转录仍可正常使用。")
+            }
+
+            if model.choice == .custom {
+                SettingsCard(
+                    "自定义整理规则",
+                    subtitle: "清楚描述希望保留、删除和重组的内容",
+                    icon: "slider.horizontal.3"
+                ) {
+                    TextField("规则名称", text: $model.customName)
+
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $model.customPrompt)
+                            .font(.body)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+
+                        if model.customPrompt.isEmpty {
+                            Text("例如：整理成简洁的工作邮件，保留所有数字和专有名词……")
+                                .font(.body)
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 16)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(minHeight: 130)
+                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9)
+                            .stroke(.separator.opacity(0.7), lineWidth: 1)
+                    }
+
+                    HStack {
+                        Text("\(model.customPrompt.count) / 4000")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(
+                                model.customPrompt.count > 4_000 ? Color.red : .secondary
+                            )
+                        Spacer()
+                        Button("保存并启用") {
+                            Task { await model.saveCustomMode() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            model.customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || model.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || model.customPrompt.count > 4_000
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var deepSeekStatusText: String {
+        if model.isConnectionVerified { return "已验证" }
+        if model.hasStoredKey { return "已保存，待验证" }
+        return "未配置"
+    }
+
+    private var deepSeekStatusIcon: String {
+        if model.isConnectionVerified { return "checkmark.circle.fill" }
+        if model.hasStoredKey { return "exclamationmark.circle.fill" }
+        return "key.slash"
+    }
+
+    private var deepSeekStatusColor: Color {
+        if model.isConnectionVerified { return .green }
+        if model.hasStoredKey { return .orange }
+        return .secondary
+    }
+}
+
+private struct RefinementModeButton: View {
+    let choice: RefinementChoice
+    let selected: Bool
+    let locked: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Image(systemName: choice.icon)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    Spacer()
+                    Image(systemName: selected ? "checkmark.circle.fill" : locked ? "lock.fill" : "circle")
+                        .foregroundStyle(
+                            selected ? Color.accentColor : Color.secondary.opacity(0.55)
+                        )
+                }
+                Text(choice.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(choice.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+            .background(
+                selected ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.025),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(
+                        selected ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.08),
+                        lineWidth: selected ? 1.5 : 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct DictionarySettingsPage: View {
+    @ObservedObject var model: DictionarySettingsModel
+    @State private var pendingDeleteID: UUID?
+
+    var body: some View {
+        SettingsCard(
+            "个人词库",
+            subtitle: "识别后会把完整且无歧义的别名替换成标准写法",
+            icon: "text.book.closed"
+        ) {
+            HStack {
+                StatusBadge(
+                    text: "\(model.entries.filter(\.isEnabled).count) 个启用词条",
+                    icon: "checkmark",
+                    color: .green
+                )
+                Spacer()
+                Text("修改后自动保存")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                GridRow {
+                    Text("标准写法")
+                        .font(.caption.weight(.medium))
+                    TextField("例如：DeepSeek", text: $model.draftCanonical)
+                }
+                GridRow {
+                    Text("口语别名")
+                        .font(.caption.weight(.medium))
+                    HStack(spacing: 8) {
+                        TextField("例如：deep seek，深度求索", text: $model.draftAliases)
+                            .onSubmit { Task { await model.add() } }
+                        Button("添加词条") {
+                            Task { await model.add() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            model.draftCanonical
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
+                        )
+                    }
+                }
+            }
+
+            Divider()
+
+            if model.entries.isEmpty {
+                HStack(spacing: 12) {
+                    Image(systemName: "text.book.closed")
+                        .font(.title2)
+                        .foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("还没有词条")
+                            .font(.subheadline.weight(.medium))
+                        Text("添加产品名、人名或专业术语，提高最终文本一致性。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 14)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach($model.entries) { $entry in
+                        HStack(spacing: 10) {
+                            Toggle("", isOn: $entry.isEnabled)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .onChange(of: entry.isEnabled) {
+                                    model.scheduleSave()
+                                }
+
+                            TextField("标准写法", text: $entry.canonicalTerm)
+                                .frame(minWidth: 130)
+                                .onSubmit { Task { await model.saveEdits() } }
+                                .onChange(of: entry.canonicalTerm) {
+                                    model.scheduleSave()
+                                }
+
+                            TextField(
+                                "别名（逗号分隔）",
+                                text: Binding(
+                                    get: { entry.aliases.joined(separator: "，") },
+                                    set: { value in
+                                        entry.aliases = value
+                                            .split(whereSeparator: {
+                                                $0 == "," || $0 == "，" || $0.isNewline
+                                            })
+                                            .map(String.init)
+                                    }
+                                )
+                            )
+                            .onSubmit { Task { await model.saveEdits() } }
+                            .onChange(of: entry.aliases) {
+                                model.scheduleSave()
+                            }
+
+                            Button {
+                                pendingDeleteID = entry.id
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.red)
+                            .help("删除词条")
+                        }
+                        .padding(10)
+                        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 9))
+                    }
+                }
+            }
+
+            if let notice = model.notice {
+                SettingsNotice(text: notice)
+            }
+        }
+        .confirmationDialog(
+            "删除这个词条？",
+            isPresented: Binding(
+                get: { pendingDeleteID != nil },
+                set: { if !$0 { pendingDeleteID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除词条", role: .destructive) {
+                guard let id = pendingDeleteID else { return }
+                pendingDeleteID = nil
+                Task { await model.delete(id) }
+            }
+            Button("取消", role: .cancel) {
+                pendingDeleteID = nil
+            }
+        } message: {
+            Text("删除后仅影响新的语音输入，已有会话历史不会改变。")
         }
     }
 }
@@ -1443,10 +2084,27 @@ private struct HistoryTextBlock: View {
 
 @MainActor
 private final class VoiceInputPanelController {
+    private enum PanelLayout: Equatable {
+        case standard
+        case recording
+        case pendingCopy
+        case failed
+
+        init(activity: VoiceInputActivity) {
+            switch activity {
+            case .recording: self = .recording
+            case .pendingCopy: self = .pendingCopy
+            case .failed: self = .failed
+            case .idle, .preparing, .processing, .delivered, .cancelled: self = .standard
+            }
+        }
+    }
+
     private let panel: NSPanel
     private let model: VoiceInputSessionModel
     private var cancellable: AnyCancellable?
     private var hideTask: Task<Void, Never>?
+    private var presentedLayout: PanelLayout?
 
     init(model: VoiceInputSessionModel) {
         self.model = model
@@ -1480,6 +2138,7 @@ private final class VoiceInputPanelController {
         switch activity {
         case .idle:
             panel.orderOut(nil)
+            presentedLayout = nil
         case .delivered, .cancelled:
             showPanel(for: activity)
             hideTask = Task { [weak self] in
@@ -1493,28 +2152,30 @@ private final class VoiceInputPanelController {
     }
 
     private func showPanel(for activity: VoiceInputActivity) {
-        panel.setContentSize(Self.panelSize(for: activity))
-        if let frame = NSScreen.main?.visibleFrame {
-            let origin = NSPoint(
-                x: frame.midX - panel.frame.width / 2,
-                y: frame.minY + 28
-            )
-            panel.setFrameOrigin(origin)
+        let layout = PanelLayout(activity: activity)
+        if presentedLayout != layout || !panel.isVisible {
+            panel.setContentSize(Self.panelSize(for: layout))
+            if let frame = NSScreen.main?.visibleFrame {
+                let origin = NSPoint(
+                    x: frame.midX - panel.frame.width / 2,
+                    y: frame.minY + 28
+                )
+                panel.setFrameOrigin(origin)
+            }
+            panel.orderFrontRegardless()
+            presentedLayout = layout
         }
-        panel.orderFrontRegardless()
     }
 
-    private static func panelSize(for activity: VoiceInputActivity) -> NSSize {
-        switch activity {
+    private static func panelSize(for layout: PanelLayout) -> NSSize {
+        switch layout {
         case .recording:
             NSSize(width: 224, height: 76)
         case .pendingCopy:
             NSSize(width: 400, height: 120)
         case .failed:
             NSSize(width: 380, height: 112)
-        case .preparing, .processing, .delivered, .cancelled:
-            NSSize(width: 360, height: 104)
-        case .idle:
+        case .standard:
             NSSize(width: 360, height: 104)
         }
     }
@@ -1534,6 +2195,7 @@ private struct VoiceInputOverlay: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeOut(duration: 0.18), value: model.presentation.activity.isRecording)
     }
 
     private var statusOverlay: some View {
@@ -1622,8 +2284,8 @@ private struct RecordingWaveformOverlay: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        Color.accentColor.opacity(0.68),
-                                        Color.accentColor,
+                                        Color.white.opacity(0.5),
+                                        Color.white,
                                     ],
                                     startPoint: .bottom,
                                     endPoint: .top
@@ -1637,11 +2299,12 @@ private struct RecordingWaveformOverlay: View {
             .padding(.horizontal, 20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(.regularMaterial, in: Capsule())
+        .background(Color.black.opacity(0.9), in: Capsule())
         .overlay {
             Capsule()
-                .stroke(.separator.opacity(0.5), lineWidth: 1)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.24), radius: 14, y: 6)
         .padding(8)
         .accessibilityLabel("正在录音")
     }
