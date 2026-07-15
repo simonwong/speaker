@@ -1,6 +1,7 @@
 import AppKit
 @preconcurrency import Carbon
 import Combine
+import ServiceManagement
 import SpeakerCore
 import SwiftUI
 
@@ -55,14 +56,17 @@ private final class SpeakerRuntime: ObservableObject {
     let refinementSettings: RefinementSettingsModel
     let dictionarySettings: DictionarySettingsModel
     let historyModel: HistoryModel
+    let loginItemSettings: LoginItemSettingsModel
 
     @Published private(set) var shortcutPreference: VoiceShortcutPreference = .functionKey
     @Published private(set) var shortcutNotice: String?
 
     private let fnMonitor: FnEventMonitor
     private let customHotKeyMonitor: CustomHotKeyMonitor
+    private let sessionActor: VoiceInputSessions
     private let settingsStore: VersionedLocalAppSettingsStore
     private let panel: VoiceInputPanelController
+    private var terminationCancellable: AnyCancellable?
     private var started = false
 
     init() {
@@ -100,6 +104,7 @@ private final class SpeakerRuntime: ObservableObject {
             history: history
         )
         let sessions = VoiceInputSessionModel(sessions: sessionActor)
+        self.sessionActor = sessionActor
         self.sessions = sessions
         self.history = history
         doubaoSettings = DoubaoSettingsModel(service: doubao)
@@ -113,6 +118,7 @@ private final class SpeakerRuntime: ObservableObject {
             configuration: configuration
         )
         historyModel = HistoryModel(store: history, targets: targets)
+        loginItemSettings = LoginItemSettingsModel(settingsStore: settingsStore)
         let triggerHandler: @Sendable (GlobalVoiceTrigger) -> Void = { trigger in
             let command: VoiceInputCommand?
             switch trigger {
@@ -143,6 +149,12 @@ private final class SpeakerRuntime: ObservableObject {
         sessions.startObserving()
         activateShortcut(.functionKey, persist: false)
         panel.start()
+        terminationCancellable = NotificationCenter.default
+            .publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                guard let sessionActor = self?.sessionActor else { return }
+                Task { await sessionActor.send(.cancel) }
+            }
         Task {
             let loadedSettings = await settingsStore.load()
             activateShortcut(loadedSettings.settings.shortcut, persist: false)
@@ -157,6 +169,7 @@ private final class SpeakerRuntime: ObservableObject {
             await dictionarySettings.load()
             await refinementSettings.load()
             await historyModel.refresh()
+            await loginItemSettings.refresh()
         }
     }
 
@@ -592,6 +605,52 @@ private final class HistoryModel: ObservableObject {
 }
 
 @MainActor
+private final class LoginItemSettingsModel: ObservableObject {
+    @Published private(set) var isEnabled = false
+    @Published private(set) var notice: String?
+
+    private let settingsStore: VersionedLocalAppSettingsStore
+
+    init(settingsStore: VersionedLocalAppSettingsStore) {
+        self.settingsStore = settingsStore
+    }
+
+    func refresh() async {
+        isEnabled = SMAppService.mainApp.status == .enabled
+        if SMAppService.mainApp.status == .requiresApproval {
+            notice = "登录项需要在“系统设置 → 通用 → 登录项”中批准。"
+        }
+        await persistCurrentState()
+    }
+
+    func setEnabled(_ enabled: Bool) async {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try await SMAppService.mainApp.unregister()
+            }
+            isEnabled = SMAppService.mainApp.status == .enabled
+            notice = isEnabled ? "已启用登录时启动。" : "已关闭登录时启动。"
+            await persistCurrentState()
+        } catch {
+            isEnabled = SMAppService.mainApp.status == .enabled
+            notice = "无法更新登录项：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistCurrentState() async {
+        do {
+            var settings = await settingsStore.load().settings
+            settings.launchAtLogin = isEnabled
+            try await settingsStore.save(settings)
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+}
+
+@MainActor
 private final class ShortcutRecorderModel: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var notice: String?
@@ -802,6 +861,23 @@ private struct SettingsView: View {
 
             }
 
+            Section("通用") {
+                Toggle(
+                    "登录时启动",
+                    isOn: Binding(
+                        get: { runtime.loginItemSettings.isEnabled },
+                        set: { enabled in
+                            Task { await runtime.loginItemSettings.setEnabled(enabled) }
+                        }
+                    )
+                )
+                if let notice = runtime.loginItemSettings.notice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             DoubaoSettingsSection(model: runtime.doubaoSettings)
             RefinementSettingsSection(model: runtime.refinementSettings)
             DictionarySettingsSection(model: runtime.dictionarySettings)
@@ -813,6 +889,7 @@ private struct SettingsView: View {
             await runtime.doubaoSettings.refresh()
             await runtime.refinementSettings.load()
             await runtime.dictionarySettings.load()
+            await runtime.loginItemSettings.refresh()
         }
         .onDisappear { shortcutRecorder.stop() }
     }

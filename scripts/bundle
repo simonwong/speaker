@@ -4,9 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
+CONFIGURATION="${SPEAKER_CONFIGURATION:-debug}"
 
 "$SCRIPT_DIR/build" >&2
-BIN_PATH="$("$SCRIPT_DIR/swiftw" build --disable-sandbox --show-bin-path)"
+BIN_PATH="$("$SCRIPT_DIR/swiftw" build --disable-sandbox --configuration "$CONFIGURATION" --show-bin-path)"
 APP="$ROOT/.build/Speaker.app"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
