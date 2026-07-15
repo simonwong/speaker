@@ -1,0 +1,17 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+
+"$SCRIPT_DIR/build" >&2
+BIN_PATH="$("$SCRIPT_DIR/swiftw" build --disable-sandbox --show-bin-path)"
+APP="$ROOT/.build/Speaker.app"
+
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$BIN_PATH/SpeakerApp" "$APP/Contents/MacOS/SpeakerApp"
+cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+codesign --force --deep --sign - "$APP"
+
+print "$APP"
