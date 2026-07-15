@@ -132,6 +132,22 @@ public protocol ContextualSpeechTranscribing: SpeechTranscribing {
     ) async throws -> TranscriptionResult
 }
 
+public protocol StreamingContextualSpeechTranscribing: Sendable {
+    func transcribe(
+        _ audioChunks: AsyncStream<Data>,
+        hotwords: [String],
+        context: String?
+    ) async throws -> TranscriptionResult
+}
+
+public protocol StreamingVoiceTextProcessing: Sendable {
+    func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
+    ) async throws -> VoiceTextProcessingResult
+}
+
 public actor VoiceInputConfigurationController {
     private var dictionary: PersonalDictionary
     private var refinementMode: TextRefinementMode
@@ -205,6 +221,57 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
         }
         let doubaoDuration = doubaoStarted.duration(to: clock.now)
+        return await finishProcessing(
+            doubaoResult,
+            snapshot: snapshot,
+            recordingDuration: audio.duration,
+            doubaoDuration: doubaoDuration,
+            progress: progress
+        )
+    }
+
+    public func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        guard let streamingDoubao = doubao as? any StreamingContextualSpeechTranscribing else {
+            throw VoiceTextProcessingFailure(
+                userFailure: .transcriptionFailed,
+                providerDiagnostic: .init(provider: "doubao", code: "streamingUnavailable")
+            )
+        }
+        let clock = ContinuousClock()
+        let doubaoStarted = clock.now
+        let doubaoResult: TranscriptionResult
+        do {
+            doubaoResult = try await streamingDoubao.transcribe(
+                audioChunks,
+                hotwords: snapshot.dictionaryContext.hotwords,
+                context: nil
+            )
+        } catch let failure as DoubaoASRFailure {
+            throw VoiceTextProcessingFailure(doubaoFailure: failure)
+        } catch let failure as ProviderCredentialStoreError {
+            throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
+        }
+        let doubaoDuration = doubaoStarted.duration(to: clock.now)
+        return await finishProcessing(
+            doubaoResult,
+            snapshot: snapshot,
+            recordingDuration: nil,
+            doubaoDuration: doubaoDuration,
+            progress: progress
+        )
+    }
+
+    private func finishProcessing(
+        _ doubaoResult: TranscriptionResult,
+        snapshot: VoiceTextProcessingSnapshot,
+        recordingDuration: Duration?,
+        doubaoDuration: Duration,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
+    ) async -> VoiceTextProcessingResult {
         let normalization = DictionaryAliasNormalizer.normalize(
             doubaoResult.text,
             using: snapshot.dictionary
@@ -212,13 +279,22 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         if snapshot.refinementMode.requiresDeepSeek {
             await progress(.refining)
         }
-        let refinementStarted = clock.now
+        let refinementStarted = ContinuousClock.now
         let refinementOutcome = await refinement.refine(
             doubaoText: normalization.normalizedText,
             mode: snapshot.refinementMode
         )
-        let refinementDuration = refinementStarted.duration(to: clock.now)
+        let refinementDuration = refinementStarted.duration(to: .now)
 
+        var stageDurations = [
+            "doubao": Self.milliseconds(doubaoDuration),
+            "deepseek": snapshot.refinementMode.requiresDeepSeek
+                ? Self.milliseconds(refinementDuration)
+                : 0,
+        ]
+        if let recordingDuration {
+            stageDurations["recording"] = Self.milliseconds(recordingDuration)
+        }
         return VoiceTextProcessingResult(
             doubaoText: doubaoResult.text,
             normalizedText: normalization.normalizedText,
@@ -229,13 +305,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             refinementStatus: refinementOutcome.status,
             refinementFailure: refinementOutcome.failure,
             dictionaryReplacements: normalization.replacements,
-            stageDurationsMilliseconds: [
-                "recording": Self.milliseconds(audio.duration),
-                "doubao": Self.milliseconds(doubaoDuration),
-                "deepseek": snapshot.refinementMode.requiresDeepSeek
-                    ? Self.milliseconds(refinementDuration)
-                    : 0,
-            ]
+            stageDurationsMilliseconds: stageDurations
         )
     }
 
@@ -246,6 +316,8 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         return Int(clamping: millisecondsFromSeconds + millisecondsFromAttoseconds)
     }
 }
+
+extension DefaultVoiceTextProcessor: StreamingVoiceTextProcessing {}
 
 struct BasicVoiceTextProcessor: VoiceTextProcessing {
     let transcriber: any SpeechTranscribing

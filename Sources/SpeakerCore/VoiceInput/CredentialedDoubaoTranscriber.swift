@@ -5,16 +5,19 @@ import Foundation
 public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     private let credentials: any ProviderCredentialStoring
     private let installationID: String
-    private let transport: any DoubaoASRTransport
+    private let connector: any DoubaoWebSocketConnecting
+    private var resource: DoubaoStreamingResource
 
     public init(
         credentials: any ProviderCredentialStoring,
         installationID: String,
-        transport: any DoubaoASRTransport = URLSessionDoubaoASRTransport()
+        resource: DoubaoStreamingResource = .default,
+        connector: any DoubaoWebSocketConnecting = URLSessionDoubaoWebSocketConnector()
     ) {
         self.credentials = credentials
         self.installationID = installationID
-        self.transport = transport
+        self.resource = resource
+        self.connector = connector
     }
 
     public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
@@ -26,20 +29,40 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         hotwords: [String],
         context: String?
     ) async throws -> TranscriptionResult {
+        let pcm = try Self.pcm16LE(from: audio.data)
+        return try await transcribe(
+            Self.chunkStream(from: pcm),
+            hotwords: hotwords,
+            context: context
+        )
+    }
+
+    public func transcribe(
+        _ audioChunks: AsyncStream<Data>,
+        hotwords: [String],
+        context: String?
+    ) async throws -> TranscriptionResult {
         guard let apiKey = try await credentials.apiKey(for: .doubao) else {
             throw DoubaoASRFailure(kind: .invalidCredential)
         }
-        let client = DoubaoFlashASRClient(
+        let client = DoubaoStreamingASRClient(
             configuration: .init(
                 apiKey: apiKey,
+                resource: resource,
                 installationID: installationID,
                 hotwords: hotwords,
                 context: context
             ),
-            transport: transport
+            connector: connector
         )
-        return try await client.transcribe(audio)
+        return try await client.transcribe(audioChunks)
     }
+
+    public func setResource(_ resource: DoubaoStreamingResource) {
+        self.resource = resource
+    }
+
+    public func currentResource() -> DoubaoStreamingResource { resource }
 
     public func hasAPIKey() async throws -> Bool {
         try await credentials.apiKey(for: .doubao) != nil
@@ -53,56 +76,72 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         try await credentials.deleteAPIKey(for: .doubao)
     }
 
-    /// A valid silent WAV exercises authentication and resource activation.
+    /// A valid silent PCM stream exercises authentication and resource activation.
     /// The provider's documented silence response therefore counts as a
     /// successful connection check and avoids storing a spoken sample.
     public func checkConnection() async throws -> String? {
         do {
-            return try await transcribe(Self.silentProbeAudio).providerRequestID
+            return try await transcribe(
+                Self.chunkStream(from: Self.silentProbePCM),
+                hotwords: [],
+                context: nil
+            ).providerRequestID
         } catch let failure as DoubaoASRFailure
             where failure.kind == .silence || failure.kind == .emptyTranscript {
             return failure.providerRequestID
         }
     }
 
-    private static let silentProbeAudio = CapturedAudio(
-        data: makeSilentWAV(sampleRate: 16_000, milliseconds: 400),
-        duration: .milliseconds(400),
-        peakPower: -160
-    )
+    private static let silentProbePCM = Data(repeating: 0, count: 16_000 * 2 * 400 / 1_000)
 
-    private static func makeSilentWAV(sampleRate: Int, milliseconds: Int) -> Data {
-        let sampleCount = sampleRate * milliseconds / 1_000
-        let dataSize = sampleCount * 2
-        var data = Data()
+    private static func chunkStream(from pcm: Data) -> AsyncStream<Data> {
+        AsyncStream { continuation in
+            let chunkSize = 6_400
+            var offset = 0
+            while offset < pcm.count {
+                let end = min(offset + chunkSize, pcm.count)
+                continuation.yield(pcm.subdata(in: offset..<end))
+                offset = end
+            }
+            continuation.finish()
+        }
+    }
 
-        func appendASCII(_ value: String) {
-            data.append(contentsOf: value.utf8)
+    private static func pcm16LE(from data: Data) throws -> Data {
+        guard data.count >= 12 else {
+            guard !data.isEmpty else { throw DoubaoASRFailure(kind: .emptyAudio) }
+            return data
         }
-        func appendUInt16(_ value: UInt16) {
-            var littleEndian = value.littleEndian
-            withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
-        }
-        func appendUInt32(_ value: UInt32) {
-            var littleEndian = value.littleEndian
-            withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+        guard String(data: data.prefix(4), encoding: .ascii) == "RIFF",
+              String(data: data.dropFirst(8).prefix(4), encoding: .ascii) == "WAVE"
+        else {
+            return data
         }
 
-        appendASCII("RIFF")
-        appendUInt32(UInt32(36 + dataSize))
-        appendASCII("WAVEfmt ")
-        appendUInt32(16)
-        appendUInt16(1)
-        appendUInt16(1)
-        appendUInt32(UInt32(sampleRate))
-        appendUInt32(UInt32(sampleRate * 2))
-        appendUInt16(2)
-        appendUInt16(16)
-        appendASCII("data")
-        appendUInt32(UInt32(dataSize))
-        data.append(Data(repeating: 0, count: dataSize))
-        return data
+        var offset = 12
+        while offset + 8 <= data.count {
+            let identifier = String(
+                data: data.subdata(in: offset..<(offset + 4)),
+                encoding: .ascii
+            )
+            let sizeOffset = offset + 4
+            let size = Int(data[sizeOffset])
+                | Int(data[sizeOffset + 1]) << 8
+                | Int(data[sizeOffset + 2]) << 16
+                | Int(data[sizeOffset + 3]) << 24
+            let payloadStart = offset + 8
+            guard size >= 0, payloadStart + size <= data.count else {
+                throw DoubaoASRFailure(kind: .invalidAudioFormat)
+            }
+            if identifier == "data" {
+                guard size > 0 else { throw DoubaoASRFailure(kind: .emptyAudio) }
+                return data.subdata(in: payloadStart..<(payloadStart + size))
+            }
+            offset = payloadStart + size + (size % 2)
+        }
+        throw DoubaoASRFailure(kind: .invalidAudioFormat)
     }
 }
 
 extension CredentialedDoubaoTranscriber: ContextualSpeechTranscribing {}
+extension CredentialedDoubaoTranscriber: StreamingContextualSpeechTranscribing {}

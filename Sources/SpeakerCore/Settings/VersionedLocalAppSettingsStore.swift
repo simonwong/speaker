@@ -153,17 +153,20 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var refinement: RefinementPreference
     public var savedCustomRefinement: RefinementPreference?
     public var launchAtLogin: Bool
+    public var doubaoResourceID: String?
 
     public init(
         shortcut: VoiceShortcutPreference = .functionKey,
         refinement: RefinementPreference = .defaultSmooth,
         savedCustomRefinement: RefinementPreference? = nil,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        doubaoResourceID: String? = nil
     ) {
         self.shortcut = shortcut
         self.refinement = refinement
         self.savedCustomRefinement = savedCustomRefinement
         self.launchAtLogin = launchAtLogin
+        self.doubaoResourceID = doubaoResourceID
     }
 
     public static let `default` = SpeakerAppSettings()
@@ -323,6 +326,16 @@ public actor VersionedLocalAppSettingsStore {
     public func updateLaunchAtLogin(_ enabled: Bool) throws -> SpeakerAppSettings {
         var settings = load().settings
         settings.launchAtLogin = enabled
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateDoubaoResource(
+        _ resource: DoubaoStreamingResource
+    ) throws -> SpeakerAppSettings {
+        var settings = load().settings
+        settings.doubaoResourceID = resource.rawValue
         try save(settings)
         return settings
     }

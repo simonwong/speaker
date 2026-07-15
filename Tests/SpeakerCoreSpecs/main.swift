@@ -551,83 +551,115 @@ struct SpeakerCoreSpecs {
             try expect(cancellationCount == 1, "active provider request was not cancelled")
         }
 
-        await runAsync("Doubao request uses flash headers and semantic smoothing body", failures: &failures) {
+        await runAsync("live PCM reaches streaming processor before shortcut release", failures: &failures) {
+            let audio = StreamingAudioCaptureFake()
+            let processor = StreamingVoiceTextProcessorFake()
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                textProcessor: processor,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+
+            await sessions.send(.pressed)
+            await audio.emit(Data([1, 2, 3, 4]))
+            while await processor.receivedChunkCount == 0 {
+                await Task.yield()
+            }
+            let stopCountDuringRecording = await audio.stopCount
+            try expect(stopCountDuringRecording == 0, "audio was not streamed during recording")
+
+            await sessions.send(.released)
+
+            let receivedChunkCount = await processor.receivedChunkCount
+            let deliveredTexts = await delivery.deliveredTexts
+            try expect(receivedChunkCount == 1)
+            try expect(deliveredTexts == ["流式结果"])
+        }
+
+        await runAsync("Doubao WebSocket uses streaming headers and binary frames", failures: &failures) {
             let requestID = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
-            let transport = DoubaoTransportFake(response: .init(
-                statusCode: 200,
-                headers: ["X-Api-Status-Code": "20000000", "X-Tt-Logid": "log-12"],
-                body: Data(#"{"result":{"text":"  你好，世界。  "}}"#.utf8)
-            ))
-            let client = DoubaoFlashASRClient(
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [makeDoubaoServerResponse(text: "  你好，世界。  ", isFinal: true)],
+                metadata: .init(httpStatusCode: 101, providerRequestID: "log-12")
+            )
+            let connector = DoubaoWebSocketConnectorFake(connection: connection)
+            let client = DoubaoStreamingASRClient(
                 configuration: .init(
                     apiKey: "test-api-key",
                     installationID: "local-installation",
                     hotwords: ["Speaker"]
                 ),
-                transport: transport,
+                connector: connector,
                 requestIDGenerator: { requestID }
             )
 
-            let result = try await client.transcribe(.init(
-                data: Data([0x52, 0x49, 0x46, 0x46]),
-                duration: .seconds(1),
-                peakPower: -10
-            ))
-            let request = try await transport.onlyRequest()
-            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let result = try await client.transcribe(
+                makeAudioStream([Data([1, 2]), Data([3, 4])])
+            )
+            let request = try await connector.onlyRequest()
+            let frames = await connection.sentFrames
+            try expect(frames.count == 3)
+            let fullRequest = try DoubaoStreamingFrameCodec.decode(frames[0])
+            let firstAudio = try DoubaoStreamingFrameCodec.decode(frames[1])
+            let finalAudio = try DoubaoStreamingFrameCodec.decode(frames[2])
+            let body = try JSONSerialization.jsonObject(with: fullRequest.payload) as? [String: Any]
             let recognition = body?["request"] as? [String: Any]
             let audio = body?["audio"] as? [String: Any]
 
-            try expect(request.url == DoubaoFlashASRConfiguration.defaultEndpoint)
+            try expect(request.url == DoubaoStreamingASRConfiguration.defaultEndpoint)
             try expect(request.value(forHTTPHeaderField: "X-Api-Key") == "test-api-key")
-            try expect(request.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.bigasr.auc_turbo")
+            try expect(request.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.seedasr.sauc.duration")
             try expect(request.value(forHTTPHeaderField: "X-Api-Request-Id") == requestID.uuidString)
+            try expect(request.value(forHTTPHeaderField: "X-Api-Connect-Id") == requestID.uuidString)
             try expect(request.value(forHTTPHeaderField: "X-Api-Sequence") == "-1")
             try expect(recognition?["enable_itn"] as? Bool == true)
             try expect(recognition?["enable_punc"] as? Bool == true)
             try expect(recognition?["enable_ddc"] as? Bool == true)
-            try expect(audio?["data"] as? String == Data([0x52, 0x49, 0x46, 0x46]).base64EncodedString())
+            try expect(audio?["format"] as? String == "pcm")
+            try expect(audio?["rate"] as? Int == 16_000)
+            try expect(fullRequest.messageType == 0x01)
+            try expect(firstAudio.payload == Data([1, 2]) && !firstAudio.isFinal)
+            try expect(finalAudio.payload == Data([3, 4]) && finalAudio.isFinal)
             try expect(result == .init(text: "你好，世界。", providerRequestID: "log-12"))
         }
 
         await runAsync("Doubao maps silence without exposing a transcript", failures: &failures) {
-            let client = makeDoubaoClient(response: .init(
-                statusCode: 200,
-                headers: ["X-Api-Status-Code": "20000003", "X-Tt-Logid": "silent-log"],
-                body: Data()
-            ))
+            let client = makeDoubaoClient(
+                responses: [makeDoubaoServerResponse(text: nil, isFinal: true)],
+                metadata: .init(httpStatusCode: 101, providerRequestID: "silent-log")
+            )
             do {
-                _ = try await client.transcribe(specAudio)
+                _ = try await client.transcribe(makeAudioStream([Data([0, 0])]))
                 throw SpecFailure(message: "silence response was accepted")
             } catch let failure as DoubaoASRFailure {
-                try expect(failure.kind == .silence)
+                try expect(failure.kind == .emptyTranscript)
                 try expect(failure.providerRequestID == "silent-log")
             }
         }
 
         await runAsync("Doubao distinguishes inactive resource from bad credential", failures: &failures) {
-            let inactive = makeDoubaoClient(response: .init(
-                statusCode: 403,
-                headers: [
-                    "X-Api-Status-Code": "45000001",
-                    "X-Api-Message": "resource not activated",
-                ],
-                body: Data()
-            ))
+            let inactive = makeDoubaoClient(responses: [
+                makeDoubaoServerError(code: 45_000_001, message: "resource not activated")
+            ])
             do {
-                _ = try await inactive.transcribe(specAudio)
+                _ = try await inactive.transcribe(makeAudioStream([Data([1, 2])]))
                 throw SpecFailure(message: "inactive resource response was accepted")
             } catch let failure as DoubaoASRFailure {
                 try expect(failure.kind == .resourceNotActivated)
             }
 
-            let unauthorized = makeDoubaoClient(response: .init(
-                statusCode: 401,
-                headers: ["X-Api-Message": "unauthorized api key"],
-                body: Data()
-            ))
+            let unauthorized = makeDoubaoClient(
+                receiveError: URLError(.badServerResponse),
+                metadata: .init(httpStatusCode: 401, providerMessage: "unauthorized api key")
+            )
             do {
-                _ = try await unauthorized.transcribe(specAudio)
+                _ = try await unauthorized.transcribe(makeAudioStream([Data([1, 2])]))
                 throw SpecFailure(message: "invalid credential response was accepted")
             } catch let failure as DoubaoASRFailure {
                 try expect(failure.kind == .invalidCredential)
@@ -636,33 +668,29 @@ struct SpeakerCoreSpecs {
 
         await runAsync("credential-backed Doubao transcriber loads the current Keychain value", failures: &failures) {
             let credentials = ProviderCredentialStoreFake(values: [.doubao: "first-key"])
-            let transport = DoubaoTransportFake(response: .init(
-                statusCode: 200,
-                headers: ["X-Api-Status-Code": "20000000"],
-                body: Data(#"{"result":{"text":"第一条"}}"#.utf8)
-            ))
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [makeDoubaoServerResponse(text: "第一条", isFinal: true)]
+            )
+            let connector = DoubaoWebSocketConnectorFake(connection: connection)
             let transcriber = CredentialedDoubaoTranscriber(
                 credentials: credentials,
                 installationID: "installation-spec",
-                transport: transport
+                connector: connector
             )
 
             _ = try await transcriber.transcribe(specAudio)
-            let firstRequest = try await transport.onlyRequest()
+            let firstRequest = try await connector.onlyRequest()
             try expect(firstRequest.value(forHTTPHeaderField: "X-Api-Key") == "first-key")
         }
 
         await runAsync("credential-backed Doubao transcriber fails before network when unconfigured", failures: &failures) {
             let credentials = ProviderCredentialStoreFake()
-            let transport = DoubaoTransportFake(response: .init(
-                statusCode: 500,
-                headers: [:],
-                body: Data()
-            ))
+            let connection = DoubaoWebSocketConnectionFake(responses: [])
+            let connector = DoubaoWebSocketConnectorFake(connection: connection)
             let transcriber = CredentialedDoubaoTranscriber(
                 credentials: credentials,
                 installationID: "installation-spec",
-                transport: transport
+                connector: connector
             )
 
             do {
@@ -670,7 +698,7 @@ struct SpeakerCoreSpecs {
                 throw SpecFailure(message: "unconfigured transcriber sent a request")
             } catch let failure as DoubaoASRFailure {
                 try expect(failure.kind == .invalidCredential)
-                let requestCount = await transport.requestCount
+                let requestCount = await connector.requestCount
                 try expect(requestCount == 0)
             }
         }
@@ -1231,7 +1259,8 @@ struct SpeakerCoreSpecs {
             let settings = SpeakerAppSettings(
                 shortcut: .custom(keyCode: 49, modifiers: 2_048, displayName: "⌥ Space"),
                 refinement: .custom(name: "短句", prompt: "只清理重复"),
-                launchAtLogin: true
+                launchAtLogin: true,
+                doubaoResourceID: DoubaoStreamingResource.model1Concurrent.rawValue
             )
 
             try await store.save(settings)
@@ -1241,11 +1270,16 @@ struct SpeakerCoreSpecs {
             async let shortcutUpdate = store.updateShortcut(.functionKey)
             async let refinementUpdate = store.updateRefinement(.fullRewrite)
             async let loginUpdate = store.updateLaunchAtLogin(false)
-            _ = try await (shortcutUpdate, refinementUpdate, loginUpdate)
+            async let resourceUpdate = store.updateDoubaoResource(.model2Duration)
+            _ = try await (shortcutUpdate, refinementUpdate, loginUpdate, resourceUpdate)
             let atomicallyUpdated = await store.load().settings
             try expect(atomicallyUpdated.shortcut == .functionKey)
             try expect(atomicallyUpdated.refinement == .fullRewrite)
             try expect(atomicallyUpdated.launchAtLogin == false)
+            try expect(
+                atomicallyUpdated.doubaoResourceID
+                    == DoubaoStreamingResource.model2Duration.rawValue
+            )
 
             let savedCustom = RefinementPreference(
                 mode: .custom(name: "邮件", prompt: "整理成简洁邮件")
@@ -1281,7 +1315,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 49 core specs")
+        print("PASS: 50 core specs")
     }
 }
 
@@ -1291,37 +1325,137 @@ private let specAudio = CapturedAudio(
     peakPower: -10
 )
 
-private func makeDoubaoClient(response: DoubaoASRTransportResponse) -> DoubaoFlashASRClient {
-    DoubaoFlashASRClient(
+private func makeDoubaoClient(
+    responses: [Data] = [],
+    receiveError: URLError? = nil,
+    metadata: DoubaoWebSocketMetadata = .init()
+) -> DoubaoStreamingASRClient {
+    let connection = DoubaoWebSocketConnectionFake(
+        responses: responses,
+        receiveError: receiveError,
+        metadata: metadata
+    )
+    return DoubaoStreamingASRClient(
         configuration: .init(
             apiKey: "test-api-key",
             installationID: "local-spec-installation"
         ),
-        transport: DoubaoTransportFake(response: response)
+        connector: DoubaoWebSocketConnectorFake(connection: connection)
     )
 }
 
-private actor DoubaoTransportFake: DoubaoASRTransport {
-    let response: DoubaoASRTransportResponse
+private actor DoubaoWebSocketConnectorFake: DoubaoWebSocketConnecting {
+    let connection: DoubaoWebSocketConnectionFake
     private var requests: [URLRequest] = []
 
-    init(response: DoubaoASRTransportResponse) {
-        self.response = response
+    init(connection: DoubaoWebSocketConnectionFake) {
+        self.connection = connection
     }
 
-    func send(_ request: URLRequest) async throws -> DoubaoASRTransportResponse {
+    func connect(_ request: URLRequest) async throws -> any DoubaoWebSocketConnection {
         requests.append(request)
-        return response
+        return connection
     }
 
     func onlyRequest() throws -> URLRequest {
         guard requests.count == 1, let request = requests.first else {
-            throw SpecFailure(message: "expected exactly one Doubao request")
+            throw SpecFailure(message: "expected exactly one Doubao WebSocket request")
         }
         return request
     }
 
     var requestCount: Int { requests.count }
+}
+
+private actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
+    private let responses: [Data]
+    private let receiveError: URLError?
+    private let metadataValue: DoubaoWebSocketMetadata
+    private var responseIndex = 0
+    private(set) var sentFrames: [Data] = []
+    private(set) var closeCount = 0
+
+    init(
+        responses: [Data],
+        receiveError: URLError? = nil,
+        metadata: DoubaoWebSocketMetadata = .init()
+    ) {
+        self.responses = responses
+        self.receiveError = receiveError
+        metadataValue = metadata
+    }
+
+    func send(_ data: Data) async throws {
+        sentFrames.append(data)
+    }
+
+    func receive() async throws -> Data {
+        if let receiveError { throw receiveError }
+        guard responseIndex < responses.count else {
+            throw URLError(.cannotParseResponse)
+        }
+        defer { responseIndex += 1 }
+        return responses[responseIndex]
+    }
+
+    func metadata() -> DoubaoWebSocketMetadata { metadataValue }
+
+    func close() {
+        closeCount += 1
+    }
+}
+
+private func makeAudioStream(_ chunks: [Data]) -> AsyncStream<Data> {
+    AsyncStream { continuation in
+        for chunk in chunks {
+            continuation.yield(chunk)
+        }
+        continuation.finish()
+    }
+}
+
+private func makeDoubaoServerResponse(text: String?, isFinal: Bool) -> Data {
+    let body: Data
+    if let text {
+        body = Data(#"{"result":{"text":"\#(text)"}}"#.utf8)
+    } else {
+        body = Data(#"{"result":{"text":""}}"#.utf8)
+    }
+    return makeDoubaoServerFrame(
+        messageType: 0x09,
+        flags: isFinal ? 0x03 : 0x01,
+        prefix: UInt32(bitPattern: isFinal ? -1 : 1),
+        payload: body
+    )
+}
+
+private func makeDoubaoServerError(code: UInt32, message: String) -> Data {
+    makeDoubaoServerFrame(
+        messageType: 0x0F,
+        flags: 0,
+        prefix: code,
+        payload: Data(#"{"message":"\#(message)"}"#.utf8)
+    )
+}
+
+private func makeDoubaoServerFrame(
+    messageType: UInt8,
+    flags: UInt8,
+    prefix: UInt32,
+    payload: Data
+) -> Data {
+    var data = Data([0x11, (messageType << 4) | flags, 0x10, 0x00])
+    appendUInt32BE(prefix, to: &data)
+    appendUInt32BE(UInt32(payload.count), to: &data)
+    data.append(payload)
+    return data
+}
+
+private func appendUInt32BE(_ value: UInt32, to data: inout Data) {
+    data.append(UInt8((value >> 24) & 0xFF))
+    data.append(UInt8((value >> 16) & 0xFF))
+    data.append(UInt8((value >> 8) & 0xFF))
+    data.append(UInt8(value & 0xFF))
 }
 
 private actor DeepSeekRefinerFake: DeepSeekTextRefining {
@@ -1466,6 +1600,70 @@ private actor AudioCaptureFake: AudioCapturing {
     func cancel() async {
         cancelCount += 1
         isActive = false
+    }
+}
+
+private actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming {
+    private var continuation: AsyncStream<Data>.Continuation?
+    private(set) var stopCount = 0
+
+    func audioChunks() -> AsyncStream<Data> {
+        let (stream, continuation) = AsyncStream<Data>.makeStream()
+        self.continuation = continuation
+        return stream
+    }
+
+    func start() async throws {}
+
+    func emit(_ data: Data) {
+        continuation?.yield(data)
+    }
+
+    func stop() async throws -> CapturedAudio {
+        stopCount += 1
+        continuation?.finish()
+        continuation = nil
+        return CapturedAudio(data: Data(), duration: .seconds(1), peakPower: -12)
+    }
+
+    func cancel() async {
+        continuation?.finish()
+        continuation = nil
+    }
+}
+
+private actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextProcessing {
+    private(set) var receivedChunkCount = 0
+
+    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    func process(
+        _ audio: CapturedAudio,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        throw SpecFailure(message: "streaming processor used buffered fallback")
+    }
+
+    func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceInputProcessingStage) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        for await chunk in audioChunks where !chunk.isEmpty {
+            receivedChunkCount += 1
+        }
+        return VoiceTextProcessingResult(
+            doubaoText: "流式结果",
+            normalizedText: "流式结果",
+            deepSeekText: nil,
+            finalText: "流式结果",
+            doubaoRequestID: "streaming-spec",
+            deepSeekRequestID: nil,
+            refinementStatus: .notRequested,
+            refinementFailure: nil,
+            dictionaryReplacements: []
+        )
     }
 }
 

@@ -263,6 +263,10 @@ public protocol AudioCapturing: Sendable {
     func cancel() async
 }
 
+public protocol AudioChunkStreaming: Sendable {
+    func audioChunks() async -> AsyncStream<Data>
+}
+
 public protocol AudioCaptureTelemetryProviding: Sendable {
     func observeTelemetry() async -> AsyncStream<RecordingTelemetry>
 }
@@ -462,6 +466,17 @@ public actor VoiceInputSessions {
         guard phase == .preparing(id) else { return }
         activeSnapshot = snapshot
 
+        let liveStream: AsyncStream<Data>?
+        let streamingProcessor: (any StreamingVoiceTextProcessing)?
+        if let chunkSource = audioCapture as? any AudioChunkStreaming,
+           let processor = textProcessor as? any StreamingVoiceTextProcessing {
+            liveStream = await chunkSource.audioChunks()
+            streamingProcessor = processor
+        } else {
+            liveStream = nil
+            streamingProcessor = nil
+        }
+
         do {
             try await audioCapture.start()
             guard phase == .preparing(id) else {
@@ -472,6 +487,23 @@ public actor VoiceInputSessions {
             phase = .recording(id, startedAt: startedAt, snapshot: snapshot)
             advanceAudit(id: id, stage: "recording")
             publish(.recording(id))
+            if let liveStream, let streamingProcessor {
+                let sessions = self
+                transcriptionTask = Task {
+                    try await streamingProcessor.processStreaming(
+                        liveStream,
+                        snapshot: snapshot
+                    ) { stage in
+                        await sessions.receivedProcessingStage(
+                            stage,
+                            id: id,
+                            startedAt: startedAt,
+                            snapshot: snapshot,
+                            applicationName: nil
+                        )
+                    }
+                }
+            }
             observeRecordingTelemetry(for: id)
             scheduleWatchdog(for: id)
             saveStage(.recording(id), id: id, startedAt: startedAt, snapshot: snapshot)
@@ -535,6 +567,8 @@ public actor VoiceInputSessions {
         do {
             audio = try await audioResult
         } catch {
+            transcriptionTask?.cancel()
+            transcriptionTask = nil
             await discard(target)
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
                 return
@@ -548,6 +582,7 @@ public actor VoiceInputSessions {
             )
             return
         }
+        sessionStageDurations["recording"] = Self.milliseconds(audio.duration)
 
         guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
             await discard(target)
@@ -564,22 +599,27 @@ public actor VoiceInputSessions {
             snapshot: snapshot
         )
 
-        let activeProcessor = textProcessor
-        let task = Task {
-            try await activeProcessor.process(
-                audio,
-                snapshot: snapshot
-            ) { [weak self] stage in
-                await self?.receivedProcessingStage(
-                    stage,
-                    id: id,
-                    startedAt: startedAt,
-                    snapshot: snapshot,
-                    applicationName: applicationName
-                )
+        let task: Task<VoiceTextProcessingResult, Error>
+        if let liveTask = transcriptionTask {
+            task = liveTask
+        } else {
+            let activeProcessor = textProcessor
+            task = Task {
+                try await activeProcessor.process(
+                    audio,
+                    snapshot: snapshot
+                ) { [weak self] stage in
+                    await self?.receivedProcessingStage(
+                        stage,
+                        id: id,
+                        startedAt: startedAt,
+                        snapshot: snapshot,
+                        applicationName: applicationName
+                    )
+                }
             }
+            transcriptionTask = task
         }
-        transcriptionTask = task
         let processedText: VoiceTextProcessingResult
         do {
             processedText = try await task.value
@@ -838,6 +878,8 @@ public actor VoiceInputSessions {
         watchdogTask = nil
         telemetryTask?.cancel()
         telemetryTask = nil
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
         deliveryCommitGate = nil
         let processingNotice = processedText?.refinementStatus == .fellBack
             ? "进一步整理失败，已使用豆包结果。"

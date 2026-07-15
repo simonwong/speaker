@@ -112,7 +112,7 @@ private final class SpeakerRuntime: ObservableObject {
         self.sessionActor = sessionActor
         self.sessions = sessions
         self.history = history
-        doubaoSettings = DoubaoSettingsModel(service: doubao)
+        doubaoSettings = DoubaoSettingsModel(service: doubao, settingsStore: settingsStore)
         refinementSettings = RefinementSettingsModel(
             service: deepSeek,
             configuration: configuration,
@@ -165,6 +165,9 @@ private final class SpeakerRuntime: ObservableObject {
             case .defaults, .loaded:
                 break
             }
+            await doubaoSettings.loadResource(
+                rawValue: loadedSettings.settings.doubaoResourceID
+            )
             activateShortcut(loadedSettings.settings.shortcut, persist: false)
             await dictionarySettings.load()
             await refinementSettings.load()
@@ -244,11 +247,33 @@ private final class DoubaoSettingsModel: ObservableObject {
     @Published var apiKeyDraft = ""
     @Published private(set) var status: Status = .loading
     @Published private(set) var hasStoredKey = false
+    @Published private(set) var resource: DoubaoStreamingResource = .default
 
     private let service: CredentialedDoubaoTranscriber
+    private let settingsStore: VersionedLocalAppSettingsStore
 
-    init(service: CredentialedDoubaoTranscriber) {
+    init(
+        service: CredentialedDoubaoTranscriber,
+        settingsStore: VersionedLocalAppSettingsStore
+    ) {
         self.service = service
+        self.settingsStore = settingsStore
+    }
+
+    func loadResource(rawValue: String?) async {
+        resource = rawValue.flatMap(DoubaoStreamingResource.init(rawValue:)) ?? .default
+        await service.setResource(resource)
+    }
+
+    func selectResource(_ resource: DoubaoStreamingResource) async {
+        self.resource = resource
+        await service.setResource(resource)
+        do {
+            try await settingsStore.updateDoubaoResource(resource)
+            status = hasStoredKey ? .configured : .unconfigured
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
     }
 
     func refresh() async {
@@ -318,7 +343,7 @@ private final class DoubaoSettingsModel: ObservableObject {
     private static func message(for kind: DoubaoASRFailureKind) -> String {
         switch kind {
         case .invalidCredential: "API Key 无效或未配置"
-        case .resourceNotActivated: "尚未开通豆包极速版语音资源"
+        case .resourceNotActivated: "尚未开通所选豆包流式语音资源"
         case .rateLimited: "请求过于频繁，请稍后重试"
         case .network: "无法连接豆包服务"
         case .cancelled: "连接检查已取消"
@@ -1144,8 +1169,20 @@ private struct DoubaoSettingsSection: View {
 
     var body: some View {
         Section("豆包语音") {
-            SecureField("输入 API Key", text: $model.apiKeyDraft)
+            SecureField("输入豆包语音 API Key", text: $model.apiKeyDraft)
                 .textContentType(.password)
+
+            Picker(
+                "流式资源",
+                selection: Binding(
+                    get: { model.resource },
+                    set: { resource in Task { await model.selectResource(resource) } }
+                )
+            ) {
+                ForEach(DoubaoStreamingResource.allCases, id: \.rawValue) { resource in
+                    Text(resource.displayName).tag(resource)
+                }
+            }
 
             HStack {
                 Button("保存") {
@@ -1170,6 +1207,10 @@ private struct DoubaoSettingsSection: View {
                 .font(.caption)
                 .foregroundStyle(statusColor)
                 .textSelection(.disabled)
+
+            Text("使用 bigmodel_async WebSocket；资源必须与豆包语音控制台已开通的计费类型一致。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
