@@ -19,6 +19,7 @@ struct SpeakerApp: App {
             MenuBarContent(
                 permissions: runtime.permissions,
                 sessions: runtime.sessions,
+                refinement: runtime.refinementSettings,
                 startRuntime: runtime.start
             )
         }
@@ -29,7 +30,7 @@ struct SpeakerApp: App {
         }
 
         Window("会话历史", id: "history") {
-            HistoryEmptyView()
+            HistoryView(model: runtime.historyModel)
         }
         .defaultSize(width: 720, height: 480)
     }
@@ -48,8 +49,11 @@ struct SpeakerApp: App {
 private final class SpeakerRuntime: ObservableObject {
     let permissions: PermissionModel
     let sessions: VoiceInputSessionModel
-    let history: MemorySessionHistory
+    let history: VersionedLocalSessionHistory
     let doubaoSettings: DoubaoSettingsModel
+    let refinementSettings: RefinementSettingsModel
+    let dictionarySettings: DictionarySettingsModel
+    let historyModel: HistoryModel
 
     @Published private(set) var shortcutChoice: ShortcutChoice
     @Published private(set) var shortcutNotice: String?
@@ -63,16 +67,28 @@ private final class SpeakerRuntime: ObservableObject {
         permissions = PermissionModel(access: SystemPermissionAccess())
         let audio = AVAudioCapture()
         let targets = AccessibilityInputTargets()
-        let history = MemorySessionHistory()
+        let history = VersionedLocalSessionHistory(
+            fileURL: VersionedLocalSessionHistory.defaultFileURL()
+        )
         let credentials = KeychainProviderCredentialStore()
         let doubao = CredentialedDoubaoTranscriber(
             credentials: credentials,
             installationID: Self.installationID()
         )
+        let deepSeek = CredentialedDeepSeekTextRefiner(credentials: credentials)
+        let configuration = VoiceInputConfigurationController()
+        let processor = DefaultVoiceTextProcessor(
+            configuration: configuration,
+            doubao: doubao,
+            refinement: OptionalTextRefinementPipeline(refiner: deepSeek)
+        )
+        let dictionaryURL = (try? VersionedJSONPersonalDictionaryStore.applicationSupportFileURL())
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("speaker-personal-dictionary.json")
+        let dictionaryStore = VersionedJSONPersonalDictionaryStore(fileURL: dictionaryURL)
         let sessionActor = VoiceInputSessions(
             audioCapture: audio,
             targetCapture: targets,
-            transcriber: doubao,
+            textProcessor: processor,
             delivery: targets,
             clipboard: SystemClipboardWriter(),
             history: history
@@ -81,6 +97,15 @@ private final class SpeakerRuntime: ObservableObject {
         self.sessions = sessions
         self.history = history
         doubaoSettings = DoubaoSettingsModel(service: doubao)
+        refinementSettings = RefinementSettingsModel(
+            service: deepSeek,
+            configuration: configuration
+        )
+        dictionarySettings = DictionarySettingsModel(
+            store: dictionaryStore,
+            configuration: configuration
+        )
+        historyModel = HistoryModel(store: history)
         let triggerHandler: @Sendable (GlobalVoiceTrigger) -> Void = { trigger in
             let command: VoiceInputCommand?
             switch trigger {
@@ -114,6 +139,11 @@ private final class SpeakerRuntime: ObservableObject {
         sessions.startObserving()
         activateShortcut(shortcutChoice, persist: false)
         panel.start()
+        Task {
+            await dictionarySettings.load()
+            await refinementSettings.load()
+            await historyModel.refresh()
+        }
     }
 
     func selectShortcut(_ choice: ShortcutChoice) {
@@ -257,6 +287,243 @@ private final class DoubaoSettingsModel: ObservableObject {
     }
 }
 
+private enum RefinementChoice: String, CaseIterable, Identifiable {
+    case defaultSmooth
+    case conciseCleanup
+    case fullRewrite
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .defaultSmooth: "默认顺滑"
+        case .conciseCleanup: "精简清理"
+        case .fullRewrite: "完整重写"
+        case .custom: "自定义"
+        }
+    }
+}
+
+@MainActor
+private final class RefinementSettingsModel: ObservableObject {
+    @Published private(set) var mode: TextRefinementMode = .defaultSmooth
+    @Published var apiKeyDraft = ""
+    @Published var customName = "我的整理规则"
+    @Published var customPrompt = ""
+    @Published private(set) var hasStoredKey = false
+    @Published private(set) var notice: String?
+
+    private let service: CredentialedDeepSeekTextRefiner
+    private let configuration: VoiceInputConfigurationController
+
+    init(
+        service: CredentialedDeepSeekTextRefiner,
+        configuration: VoiceInputConfigurationController
+    ) {
+        self.service = service
+        self.configuration = configuration
+    }
+
+    var choice: RefinementChoice {
+        switch mode {
+        case .defaultSmooth: .defaultSmooth
+        case .conciseCleanup: .conciseCleanup
+        case .fullRewrite: .fullRewrite
+        case .custom: .custom
+        }
+    }
+
+    func load() async {
+        do {
+            hasStoredKey = try await service.hasAPIKey()
+        } catch {
+            notice = error.localizedDescription
+        }
+
+        let savedChoice = RefinementChoice(
+            rawValue: UserDefaults.standard.string(forKey: "refinementChoice") ?? ""
+        ) ?? .defaultSmooth
+        customName = UserDefaults.standard.string(forKey: "customRefinementName")
+            ?? "我的整理规则"
+        customPrompt = UserDefaults.standard.string(forKey: "customRefinementPrompt") ?? ""
+        await select(savedChoice, persist: false)
+    }
+
+    func saveAPIKey() async {
+        do {
+            try await service.saveAPIKey(apiKeyDraft)
+            apiKeyDraft = ""
+            hasStoredKey = true
+            notice = "DeepSeek Key 已保存到本机 Keychain。"
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func deleteAPIKey() async {
+        do {
+            try await service.deleteAPIKey()
+            hasStoredKey = false
+            apiKeyDraft = ""
+            await select(.defaultSmooth)
+            notice = "DeepSeek Key 已删除，已切回默认顺滑。"
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func select(_ choice: RefinementChoice, persist: Bool = true) async {
+        if choice != .defaultSmooth, !hasStoredKey {
+            notice = "请先保存 DeepSeek API Key，再启用进一步整理。"
+            await apply(.defaultSmooth, choice: .defaultSmooth, persist: persist)
+            return
+        }
+
+        let selectedMode: TextRefinementMode
+        switch choice {
+        case .defaultSmooth:
+            selectedMode = .defaultSmooth
+        case .conciseCleanup:
+            selectedMode = .conciseCleanup
+        case .fullRewrite:
+            selectedMode = .fullRewrite
+        case .custom:
+            selectedMode = .custom(name: customName, prompt: customPrompt)
+        }
+
+        do {
+            try await configuration.selectRefinementMode(selectedMode)
+            mode = try selectedMode.validated()
+            notice = mode.requiresDeepSeek
+                ? "此模式会把豆包文本和当前规则发送给 DeepSeek；不会发送音频。"
+                : "默认顺滑只调用豆包，不调用 DeepSeek。"
+            if persist {
+                persistSelection(choice)
+            }
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func saveCustomMode() async {
+        await select(.custom)
+    }
+
+    private func apply(
+        _ selectedMode: TextRefinementMode,
+        choice: RefinementChoice,
+        persist: Bool
+    ) async {
+        try? await configuration.selectRefinementMode(selectedMode)
+        mode = selectedMode
+        if persist { persistSelection(choice) }
+    }
+
+    private func persistSelection(_ choice: RefinementChoice) {
+        UserDefaults.standard.set(choice.rawValue, forKey: "refinementChoice")
+        UserDefaults.standard.set(customName, forKey: "customRefinementName")
+        UserDefaults.standard.set(customPrompt, forKey: "customRefinementPrompt")
+    }
+}
+
+@MainActor
+private final class DictionarySettingsModel: ObservableObject {
+    @Published var entries: [DictionaryEntry] = []
+    @Published var draftCanonical = ""
+    @Published var draftAliases = ""
+    @Published private(set) var notice: String?
+
+    private let store: VersionedJSONPersonalDictionaryStore
+    private let configuration: VoiceInputConfigurationController
+
+    init(
+        store: VersionedJSONPersonalDictionaryStore,
+        configuration: VoiceInputConfigurationController
+    ) {
+        self.store = store
+        self.configuration = configuration
+    }
+
+    func load() async {
+        do {
+            let dictionary = try await store.load()
+            entries = dictionary.entries
+            await configuration.replaceDictionary(dictionary)
+            notice = nil
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    func add() async {
+        let aliases = draftAliases
+            .split(whereSeparator: { $0 == "," || $0 == "，" || $0.isNewline })
+            .map(String.init)
+        let entry = DictionaryEntry(canonicalTerm: draftCanonical, aliases: aliases)
+        guard await save(entries + [entry]) else { return }
+        draftCanonical = ""
+        draftAliases = ""
+    }
+
+    func saveEdits() async {
+        _ = await save(entries)
+    }
+
+    func delete(_ id: UUID) async {
+        _ = await save(entries.filter { $0.id != id })
+    }
+
+    private func save(_ candidate: [DictionaryEntry]) async -> Bool {
+        do {
+            let dictionary = try PersonalDictionary(entries: candidate)
+            try await store.save(dictionary)
+            entries = dictionary.entries
+            await configuration.replaceDictionary(dictionary)
+            notice = "词库已保存在本机；新的会话会使用更新后的快照。"
+            return true
+        } catch {
+            notice = error.localizedDescription
+            return false
+        }
+    }
+}
+
+@MainActor
+private final class HistoryModel: ObservableObject {
+    @Published private(set) var records: [VoiceInputHistoryRecord] = []
+    @Published var query = ""
+    @Published private(set) var notice: String?
+
+    let store: VersionedLocalSessionHistory
+
+    init(store: VersionedLocalSessionHistory) {
+        self.store = store
+    }
+
+    func refresh() async {
+        records = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? await store.allRecords()
+            : await store.search(query)
+        let status = await store.persistenceStatus()
+        switch status.notice {
+        case let .corruptedDataPreserved(_, reason): notice = "已保留损坏的历史文件：\(reason)"
+        case let .writeFailed(reason): notice = "历史写入失败：\(reason)"
+        case nil: notice = nil
+        }
+    }
+
+    func delete(_ id: VoiceInputSessionID) async {
+        _ = await store.delete(sessionID: id)
+        await refresh()
+    }
+
+    func clear() async {
+        await store.clear()
+        await refresh()
+    }
+}
+
 private enum ShortcutChoice: String, CaseIterable, Identifiable {
     case fn
     case optionSpace
@@ -280,13 +547,14 @@ private final class SpeakerApplicationDelegate: NSObject, NSApplicationDelegate 
 private struct MenuBarContent: View {
     @ObservedObject var permissions: PermissionModel
     @ObservedObject var sessions: VoiceInputSessionModel
+    @ObservedObject var refinement: RefinementSettingsModel
     let startRuntime: () -> Void
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
-            Label("默认顺滑", systemImage: "text.alignleft")
+            Label(refinement.mode.displayName, systemImage: "text.alignleft")
 
             Label(sessionSummary, systemImage: sessionIcon)
 
@@ -391,18 +659,133 @@ private struct SettingsView: View {
                         .foregroundStyle(.orange)
                 }
 
-                LabeledContent("整理模式", value: "默认顺滑")
-                LabeledContent("DeepSeek", value: "未配置（可选）")
             }
 
-
             DoubaoSettingsSection(model: runtime.doubaoSettings)
+            RefinementSettingsSection(model: runtime.refinementSettings)
+            DictionarySettingsSection(model: runtime.dictionarySettings)
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 520)
+        .frame(width: 640, height: 760)
         .task {
             permissions.refresh()
             await runtime.doubaoSettings.refresh()
+            await runtime.refinementSettings.load()
+            await runtime.dictionarySettings.load()
+        }
+    }
+}
+
+private struct RefinementSettingsSection: View {
+    @ObservedObject var model: RefinementSettingsModel
+
+    var body: some View {
+        Section("文本整理") {
+            Picker(
+                "整理模式",
+                selection: Binding(
+                    get: { model.choice },
+                    set: { choice in Task { await model.select(choice) } }
+                )
+            ) {
+                ForEach(RefinementChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+
+            SecureField("DeepSeek API Key（可选）", text: $model.apiKeyDraft)
+                .textContentType(.password)
+
+            HStack {
+                Button("保存 DeepSeek Key") {
+                    Task { await model.saveAPIKey() }
+                }
+                .disabled(model.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("删除 Key", role: .destructive) {
+                    Task { await model.deleteAPIKey() }
+                }
+                .disabled(!model.hasStoredKey)
+            }
+
+            if model.choice == .custom {
+                TextField("规则名称", text: $model.customName)
+                TextEditor(text: $model.customPrompt)
+                    .font(.body)
+                    .frame(minHeight: 72)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(.separator, lineWidth: 1)
+                    }
+                HStack {
+                    Text("最多 4000 字符")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("保存并启用自定义规则") {
+                        Task { await model.saveCustomMode() }
+                    }
+                }
+            }
+
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct DictionarySettingsSection: View {
+    @ObservedObject var model: DictionarySettingsModel
+
+    var body: some View {
+        Section("个人词库") {
+            ForEach($model.entries) { $entry in
+                HStack(alignment: .firstTextBaseline) {
+                    Toggle("", isOn: $entry.isEnabled)
+                        .labelsHidden()
+                        .onChange(of: entry.isEnabled) {
+                            Task { await model.saveEdits() }
+                        }
+                    TextField("标准写法", text: $entry.canonicalTerm)
+                        .onSubmit { Task { await model.saveEdits() } }
+                    TextField(
+                        "别名（逗号分隔）",
+                        text: Binding(
+                            get: { entry.aliases.joined(separator: "，") },
+                            set: { value in
+                                entry.aliases = value
+                                    .split(whereSeparator: { $0 == "," || $0 == "，" || $0.isNewline })
+                                    .map(String.init)
+                            }
+                        )
+                    )
+                    .onSubmit { Task { await model.saveEdits() } }
+                    Button(role: .destructive) {
+                        Task { await model.delete(entry.id) }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            HStack {
+                TextField("新增标准写法", text: $model.draftCanonical)
+                TextField("口语别名（逗号分隔）", text: $model.draftAliases)
+                Button("添加") {
+                    Task { await model.add() }
+                }
+                .disabled(model.draftCanonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -499,13 +882,136 @@ private struct PermissionRow: View {
     }
 }
 
-private struct HistoryEmptyView: View {
+private struct HistoryView: View {
+    @ObservedObject var model: HistoryModel
+    @State private var selection: VoiceInputSessionID?
+
     var body: some View {
-        ContentUnavailableView(
-            "还没有会话记录",
-            systemImage: "clock.arrow.circlepath",
-            description: Text("完成第一次语音输入后，豆包与可选 DeepSeek 的阶段结果会显示在这里。")
-        )
+        VStack(spacing: 0) {
+            HStack {
+                TextField("搜索豆包、DeepSeek、最终文本或诊断信息", text: $model.query)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await model.refresh() } }
+                Button("搜索") { Task { await model.refresh() } }
+                Button("刷新") { Task { await model.refresh() } }
+                Button("全部清空", role: .destructive) {
+                    Task { await model.clear() }
+                }
+                .disabled(model.records.isEmpty)
+            }
+            .padding(12)
+
+            Divider()
+
+            if model.records.isEmpty {
+                ContentUnavailableView(
+                    "还没有会话记录",
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text("完成第一次语音输入后，豆包与可选 DeepSeek 的阶段结果会显示在这里。")
+                )
+            } else {
+                NavigationSplitView {
+                    List(model.records, id: \.sessionID, selection: $selection) { record in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(record.finalText ?? record.transcription ?? "无文本")
+                                .lineLimit(2)
+                            Text("\(record.startedAt.formatted()) · \(record.applicationName ?? "无目标")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .tag(record.sessionID)
+                    }
+                } detail: {
+                    if let record = selectedRecord {
+                        HistoryDetailView(record: record) {
+                            Task { await model.delete(record.sessionID) }
+                        }
+                    } else {
+                        ContentUnavailableView("选择一条会话", systemImage: "text.magnifyingglass")
+                    }
+                }
+            }
+
+            if let notice = model.notice {
+                Divider()
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .task { await model.refresh() }
+    }
+
+    private var selectedRecord: VoiceInputHistoryRecord? {
+        guard let selection else { return nil }
+        return model.records.first { $0.sessionID == selection }
+    }
+}
+
+private struct HistoryDetailView: View {
+    let record: VoiceInputHistoryRecord
+    let delete: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                LabeledContent("时间", value: record.startedAt.formatted())
+                LabeledContent("目标 App", value: record.applicationName ?? "无")
+                LabeledContent("整理模式", value: record.refinementModeName ?? "默认顺滑")
+                LabeledContent("送达状态", value: record.outcome.historyLabel)
+                HistoryTextBlock(title: "豆包转录", text: record.transcription)
+                if record.deepSeekText != nil || record.refinementStatus == "fellBack" {
+                    HistoryTextBlock(title: "DeepSeek 结果", text: record.deepSeekText)
+                    LabeledContent("DeepSeek 状态", value: record.refinementStatus ?? "未知")
+                }
+                HistoryTextBlock(title: "最终文本", text: record.finalText)
+                if !record.dictionaryReplacements.isEmpty {
+                    Text("词库替换")
+                        .font(.headline)
+                    ForEach(record.dictionaryReplacements, id: \.utf16Location) { replacement in
+                        Text("\(replacement.matchedText) → \(replacement.canonicalTerm)")
+                    }
+                }
+                if let providerRequestID = record.providerRequestID {
+                    LabeledContent("豆包请求 ID", value: providerRequestID)
+                }
+                if let deepSeekRequestID = record.deepSeekRequestID {
+                    LabeledContent("DeepSeek 请求 ID", value: deepSeekRequestID)
+                }
+
+                HStack {
+                    Button("复制最终文本") {
+                        copy(record.finalText ?? record.transcription ?? "")
+                    }
+                    .disabled(record.finalText == nil && record.transcription == nil)
+                    Button("删除记录", role: .destructive, action: delete)
+                }
+            }
+            .padding(20)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+private struct HistoryTextBlock: View {
+    let title: String
+    let text: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            Text(text ?? "无")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        }
     }
 }
 
@@ -616,6 +1122,19 @@ private struct VoiceInputOverlay: View {
 }
 
 private extension VoiceInputActivity {
+    var historyLabel: String {
+        switch self {
+        case .idle: "空闲"
+        case .preparing: "准备中"
+        case .recording: "录音中"
+        case .processing: "处理中"
+        case .delivered: "已自动送达"
+        case .pendingCopy: "等待复制"
+        case .cancelled: "已取消"
+        case .failed: "失败"
+        }
+    }
+
     var isActive: Bool {
         switch self {
         case .preparing, .recording, .processing:

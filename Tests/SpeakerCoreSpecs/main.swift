@@ -478,6 +478,164 @@ struct SpeakerCoreSpecs {
             try expect(record?.providerErrorCode == "invalidCredential")
         }
 
+        await runAsync("default smooth refinement never calls DeepSeek", failures: &failures) {
+            let refiner = DeepSeekRefinerFake(result: .success(.init(text: "不应采用")))
+            let pipeline = OptionalTextRefinementPipeline(refiner: refiner)
+
+            let outcome = await pipeline.refine(
+                doubaoText: "豆包默认顺滑",
+                mode: .defaultSmooth
+            )
+
+            try expect(outcome.status == .notRequested)
+            try expect(outcome.finalText == "豆包默认顺滑")
+            let callCount = await refiner.callCount
+            try expect(callCount == 0)
+        }
+
+        await runAsync("optional refinement succeeds or losslessly falls back to Doubao", failures: &failures) {
+            let successfulRefiner = DeepSeekRefinerFake(
+                result: .success(.init(text: "整理后的文本", providerRequestID: "ds-1"))
+            )
+            let successfulPipeline = OptionalTextRefinementPipeline(refiner: successfulRefiner)
+            let success = await successfulPipeline.refine(
+                doubaoText: "嗯 原始文本",
+                mode: .conciseCleanup
+            )
+            try expect(success.status == .succeeded)
+            try expect(success.deepSeekText == "整理后的文本")
+            try expect(success.finalText == "整理后的文本")
+
+            let failingRefiner = DeepSeekRefinerFake(
+                result: .failure(.init(kind: .rateLimited, httpStatusCode: 429))
+            )
+            let fallbackPipeline = OptionalTextRefinementPipeline(refiner: failingRefiner)
+            let fallback = await fallbackPipeline.refine(
+                doubaoText: "豆包结果仍保留",
+                mode: .fullRewrite
+            )
+            try expect(fallback.status == .fellBack)
+            try expect(fallback.deepSeekText == nil)
+            try expect(fallback.finalText == "豆包结果仍保留")
+            try expect(fallback.failure?.kind == .rateLimited)
+        }
+
+        run("custom refinement modes reject empty and oversized prompts", failures: &failures) {
+            do {
+                _ = try TextRefinementMode.custom(name: "我的模式", prompt: " ").validated()
+                throw SpecFailure(message: "empty custom prompt was accepted")
+            } catch let error as TextRefinementModeValidationError {
+                try expect(error == .emptyCustomPrompt)
+            }
+
+            do {
+                _ = try TextRefinementMode.custom(
+                    name: "我的模式",
+                    prompt: String(repeating: "x", count: 4_001)
+                ).validated()
+                throw SpecFailure(message: "oversized custom prompt was accepted")
+            } catch let error as TextRefinementModeValidationError {
+                try expect(error == .customPromptTooLong)
+            }
+        }
+
+        await runAsync("DeepSeek request disables thinking and requires strict JSON output", failures: &failures) {
+            let transport = DeepSeekTransportFake(response: .init(
+                statusCode: 200,
+                headers: ["x-request-id": "ds-request-1"],
+                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"  整理后  \"}"},"finish_reason":"stop"}]}"#.utf8)
+            ))
+            let client = DeepSeekRefinementClient(
+                configuration: .init(apiKey: "deepseek-test-key"),
+                transport: transport
+            )
+
+            let result = try await client.refine("嗯，原始文本。", using: .conciseCleanup)
+            let request = try await transport.onlyRequest()
+            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let thinking = body?["thinking"] as? [String: Any]
+            let responseFormat = body?["response_format"] as? [String: Any]
+
+            try expect(request.url == DeepSeekRefinementConfiguration.defaultEndpoint)
+            try expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer deepseek-test-key")
+            try expect(request.timeoutInterval == 20)
+            try expect(body?["model"] as? String == "deepseek-v4-flash")
+            try expect(thinking?["type"] as? String == "disabled")
+            try expect(responseFormat?["type"] as? String == "json_object")
+            try expect(body?["stream"] as? Bool == false)
+            try expect(result == .init(text: "整理后", providerRequestID: "ds-request-1"))
+        }
+
+        await runAsync("DeepSeek rejects extra JSON fields and abnormal expansion", failures: &failures) {
+            let extraFieldClient = makeDeepSeekClient(content: #"{"text":"结果","extra":true}"#)
+            do {
+                _ = try await extraFieldClient.refine("原文", using: .fullRewrite)
+                throw SpecFailure(message: "extra JSON field was accepted")
+            } catch let failure as DeepSeekRefinementFailure {
+                try expect(failure.kind == .unexpectedJSONShape)
+            }
+
+            let expanded = String(repeating: "扩", count: 4_097)
+            let expandedJSONData = try JSONEncoder().encode(["text": expanded])
+            let expandedJSON = String(decoding: expandedJSONData, as: UTF8.self)
+            let expandedClient = makeDeepSeekClient(content: expandedJSON)
+            do {
+                _ = try await expandedClient.refine("短文本", using: .fullRewrite)
+                throw SpecFailure(message: "abnormally expanded output was accepted")
+            } catch let failure as DeepSeekRefinementFailure {
+                try expect(failure.kind == .outputTooLarge)
+            }
+        }
+
+        await runAsync("voice session freezes dictionary and refinement mode at press", failures: &failures) {
+            let initialDictionary = try PersonalDictionary(entries: [
+                .init(canonicalTerm: "Swift", aliases: ["swift-lang"]),
+            ])
+            let configuration = VoiceInputConfigurationController(
+                dictionary: initialDictionary,
+                refinementMode: .conciseCleanup
+            )
+            let doubao = ContextualTranscriberFake(text: "Use swift-lang")
+            let refiner = DeepSeekRefinerFake(result: .success(.init(text: "Use Swift.")))
+            let processor = DefaultVoiceTextProcessor(
+                configuration: configuration,
+                doubao: doubao,
+                refinement: OptionalTextRefinementPipeline(refiner: refiner)
+            )
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                textProcessor: processor,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+
+            await sessions.send(.pressed)
+            await configuration.replaceDictionary(.empty)
+            try await configuration.selectRefinementMode(.fullRewrite)
+            await sessions.send(.released)
+
+            let hotwordCalls = await doubao.hotwordCalls
+            let refinementModes = await refiner.modes
+            let refinementInputs = await refiner.inputs
+            let deliveredTexts = await delivery.deliveredTexts
+            let record = await history.records.first
+            try expect(hotwordCalls == [["Swift"]])
+            try expect(refinementModes == [.conciseCleanup])
+            try expect(refinementInputs == ["Use Swift"])
+            try expect(deliveredTexts == ["Use Swift."])
+            try expect(record?.transcription == "Use swift-lang")
+            try expect(record?.deepSeekText == "Use Swift.")
+            try expect(record?.refinementModeName == "精简清理")
+            try expect(record?.refinementStatus == "succeeded")
+            try expect(record?.dictionaryReplacements.count == 1)
+        }
+
         await runAsync("credential store rejects blank API keys", failures: &failures) {
             let store = KeychainProviderCredentialStore(
                 service: "com.local.speaker.spec.\(UUID().uuidString)"
@@ -509,6 +667,156 @@ struct SpeakerCoreSpecs {
             }
         }
 
+        await runAsync("versioned local history persists searches deletes and excludes sensitive fields", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-history-spec-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("history.json")
+            let firstID = VoiceInputSessionID()
+            let secondID = VoiceInputSessionID()
+            let store = VersionedLocalSessionHistory(fileURL: fileURL)
+            await store.save(.init(
+                sessionID: firstID,
+                startedAt: Date(timeIntervalSince1970: 100),
+                applicationName: "TextEdit",
+                transcription: "豆包原文 alpha",
+                finalText: "最终文本",
+                providerRequestID: "request-log-1",
+                providerErrorCode: nil,
+                outcome: .delivered(firstID, applicationName: "TextEdit", text: "最终文本")
+            ))
+            await store.save(.init(
+                sessionID: secondID,
+                startedAt: Date(timeIntervalSince1970: 200),
+                applicationName: "Notes",
+                transcription: nil,
+                finalText: nil,
+                providerRequestID: "request-log-2",
+                providerErrorCode: "invalidCredential",
+                outcome: .failed(secondID, .providerNotConfigured)
+            ))
+
+            let reloaded = VersionedLocalSessionHistory(fileURL: fileURL)
+            let allRecords = await reloaded.allRecords()
+            let transcriptMatches = await reloaded.search("ALPHA")
+            let errorMatches = await reloaded.search("invalidcredential")
+            let encoded = try String(contentsOf: fileURL, encoding: .utf8)
+            try expect(allRecords.map(\.sessionID) == [secondID, firstID])
+            try expect(transcriptMatches.map(\.sessionID) == [firstID])
+            try expect(errorMatches.map(\.sessionID) == [secondID])
+            try expect(!encoded.contains("apiKey"))
+            try expect(!encoded.contains("audio"))
+            try expect(!encoded.contains("clipboard"))
+
+            let deleted = await reloaded.delete(sessionID: firstID)
+            try expect(deleted)
+            await reloaded.clear()
+            let recordsAfterClear = await reloaded.allRecords()
+            try expect(recordsAfterClear.isEmpty)
+        }
+
+        await runAsync("corrupt history is preserved with a recoverable notice", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-history-corrupt-spec-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileURL = directory.appendingPathComponent("history.json")
+            try Data("not-json".utf8).write(to: fileURL)
+
+            let store = VersionedLocalSessionHistory(fileURL: fileURL)
+            let status = await store.persistenceStatus()
+            if case let .corruptedDataPreserved(backupURL, _) = status.notice {
+                try expect(FileManager.default.fileExists(atPath: backupURL.path))
+            } else {
+                throw SpecFailure(message: "corrupt history did not produce a preserved recovery notice")
+            }
+            let recoveredRecords = await store.allRecords()
+            try expect(recoveredRecords.isEmpty)
+        }
+
+        run("personal dictionary reports empty duplicate and conflicting enabled aliases", failures: &failures) {
+            let emptyID = UUID()
+            let duplicateOne = UUID()
+            let duplicateTwo = UUID()
+            let aliasOne = UUID()
+            let aliasTwo = UUID()
+            let issues = PersonalDictionaryValidator.validate([
+                .init(id: emptyID, canonicalTerm: " "),
+                .init(id: duplicateOne, canonicalTerm: "Speaker"),
+                .init(id: duplicateTwo, canonicalTerm: "speaker"),
+                .init(id: aliasOne, canonicalTerm: "Swift", aliases: ["斯威夫特"]),
+                .init(id: aliasTwo, canonicalTerm: "SwiftUI", aliases: ["斯威夫特"]),
+            ])
+
+            try expect(issues.contains(.emptyCanonicalTerm(entryID: emptyID)))
+            try expect(issues.contains { issue in
+                if case .duplicateCanonicalTerm = issue { true } else { false }
+            })
+            try expect(issues.contains { issue in
+                if case .conflictingEnabledAlias = issue { true } else { false }
+            })
+        }
+
+        run("dictionary snapshot and provider truncation are deterministic", failures: &failures) {
+            let alpha = DictionaryEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                canonicalTerm: "Alpha",
+                aliases: ["A"]
+            )
+            let beta = DictionaryEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                canonicalTerm: "Beta"
+            )
+            let disabled = DictionaryEntry(canonicalTerm: "Disabled", isEnabled: false)
+            let long = DictionaryEntry(canonicalTerm: "VeryLongTerm")
+            let dictionary = try PersonalDictionary(entries: [long, disabled, beta, alpha])
+            let snapshot = dictionary.snapshotEnabled(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000099")!,
+                createdAt: Date(timeIntervalSince1970: 10)
+            )
+            let context = DictionaryRequestContextBuilder.makeContext(
+                from: snapshot,
+                capacity: .init(maximumHotwordCount: 1, maximumCharactersPerHotword: 6)
+            )
+
+            try expect(snapshot.entries.map(\.canonicalTerm) == ["Alpha", "Beta", "VeryLongTerm"])
+            try expect(context.hotwords == ["Alpha"])
+            try expect(context.includedEntryIDs == [alpha.id])
+            try expect(context.omissions.contains { $0.reason == .providerCountLimit })
+            try expect(context.omissions.contains { $0.reason == .providerTermLengthLimit })
+        }
+
+        run("dictionary alias normalization replaces only complete unambiguous tokens", failures: &failures) {
+            let dictionary = try PersonalDictionary(entries: [
+                .init(canonicalTerm: "Swift", aliases: ["swift-lang"]),
+                .init(canonicalTerm: "SwiftUI", aliases: ["swift-ui"]),
+            ])
+            let result = DictionaryAliasNormalizer.normalize(
+                "Use swift-lang, not swift-language; then swift-ui.",
+                using: dictionary.snapshotEnabled()
+            )
+
+            try expect(result.normalizedText == "Use Swift, not swift-language; then SwiftUI.")
+            try expect(result.replacements.map(\.matchedText) == ["swift-lang", "swift-ui"])
+        }
+
+        await runAsync("versioned personal dictionary store round trips locally", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-dictionary-spec-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedJSONPersonalDictionaryStore(
+                fileURL: directory.appendingPathComponent("dictionary.json")
+            )
+            let dictionary = try PersonalDictionary(entries: [
+                .init(canonicalTerm: "豆包", aliases: ["豆宝"]),
+                .init(canonicalTerm: "DeepSeek", aliases: ["deep seek"], isEnabled: false),
+            ])
+
+            try await store.save(dictionary)
+            let loaded = try await store.load()
+            try expect(loaded == dictionary)
+        }
+
         guard failures.isEmpty else {
             for failure in failures {
                 FileHandle.standardError.write(Data("FAIL: \(failure)\n".utf8))
@@ -516,7 +824,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 20 core specs")
+        print("PASS: 32 core specs")
     }
 }
 
@@ -557,6 +865,81 @@ private actor DoubaoTransportFake: DoubaoASRTransport {
     }
 
     var requestCount: Int { requests.count }
+}
+
+private actor DeepSeekRefinerFake: DeepSeekTextRefining {
+    let result: Result<DeepSeekRefinementResult, DeepSeekRefinementFailure>
+    private(set) var callCount = 0
+    private(set) var inputs: [String] = []
+    private(set) var modes: [TextRefinementMode] = []
+
+    init(result: Result<DeepSeekRefinementResult, DeepSeekRefinementFailure>) {
+        self.result = result
+    }
+
+    func refine(
+        _ text: String,
+        using mode: TextRefinementMode
+    ) async throws -> DeepSeekRefinementResult {
+        callCount += 1
+        inputs.append(text)
+        modes.append(mode)
+        return try result.get()
+    }
+}
+
+private actor ContextualTranscriberFake: ContextualSpeechTranscribing {
+    let text: String
+    private(set) var hotwordCalls: [[String]] = []
+
+    init(text: String) {
+        self.text = text
+    }
+
+    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
+        try await transcribe(audio, hotwords: [], context: nil)
+    }
+
+    func transcribe(
+        _ audio: CapturedAudio,
+        hotwords: [String],
+        context: String?
+    ) async throws -> TranscriptionResult {
+        hotwordCalls.append(hotwords)
+        return TranscriptionResult(text: text, providerRequestID: "doubao-context-spec")
+    }
+}
+
+private actor DeepSeekTransportFake: DeepSeekTransport {
+    let response: DeepSeekTransportResponse
+    private var requests: [URLRequest] = []
+
+    init(response: DeepSeekTransportResponse) {
+        self.response = response
+    }
+
+    func send(_ request: URLRequest) async throws -> DeepSeekTransportResponse {
+        requests.append(request)
+        return response
+    }
+
+    func onlyRequest() throws -> URLRequest {
+        guard requests.count == 1, let request = requests.first else {
+            throw SpecFailure(message: "expected exactly one DeepSeek request")
+        }
+        return request
+    }
+}
+
+private func makeDeepSeekClient(content: String) -> DeepSeekRefinementClient {
+    let encodedContent = try! JSONEncoder().encode(content)
+    let body = Data(
+        "{\"choices\":[{\"message\":{\"content\":\(String(decoding: encodedContent, as: UTF8.self))},\"finish_reason\":\"stop\"}]}".utf8
+    )
+    return DeepSeekRefinementClient(
+        configuration: .init(apiKey: "deepseek-test-key"),
+        transport: DeepSeekTransportFake(response: .init(statusCode: 200, body: body))
+    )
 }
 
 private actor ProviderCredentialStoreFake: ProviderCredentialStoring {

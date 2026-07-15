@@ -18,13 +18,23 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     }
 
     public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
+        try await transcribe(audio, hotwords: [], context: nil)
+    }
+
+    public func transcribe(
+        _ audio: CapturedAudio,
+        hotwords: [String],
+        context: String?
+    ) async throws -> TranscriptionResult {
         guard let apiKey = try await credentials.apiKey(for: .doubao) else {
             throw DoubaoASRFailure(kind: .invalidCredential)
         }
         let client = DoubaoFlashASRClient(
             configuration: .init(
                 apiKey: apiKey,
-                installationID: installationID
+                installationID: installationID,
+                hotwords: hotwords,
+                context: context
             ),
             transport: transport
         )
@@ -94,3 +104,5 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         return data
     }
 }
+
+extension CredentialedDoubaoTranscriber: ContextualSpeechTranscribing {}
