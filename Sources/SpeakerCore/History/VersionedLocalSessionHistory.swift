@@ -275,6 +275,8 @@ private struct HistoryRecordV1: Codable {
     let refinementFailureCode: String?
     let dictionarySnapshotID: UUID?
     let dictionaryReplacements: [DictionaryReplacement]?
+    let durationMilliseconds: Int?
+    let stageDurationsMilliseconds: [String: Int]?
     let outcome: HistoryOutcomeV1
 
     init(_ record: VoiceInputHistoryRecord) {
@@ -292,6 +294,8 @@ private struct HistoryRecordV1: Codable {
         refinementFailureCode = record.refinementFailureCode
         dictionarySnapshotID = record.dictionarySnapshotID
         dictionaryReplacements = record.dictionaryReplacements
+        durationMilliseconds = record.durationMilliseconds
+        stageDurationsMilliseconds = record.stageDurationsMilliseconds
         outcome = HistoryOutcomeV1(record.outcome)
     }
 
@@ -312,6 +316,8 @@ private struct HistoryRecordV1: Codable {
                 refinementFailureCode: refinementFailureCode,
                 dictionarySnapshotID: dictionarySnapshotID,
                 dictionaryReplacements: dictionaryReplacements ?? [],
+                durationMilliseconds: durationMilliseconds ?? 0,
+                stageDurationsMilliseconds: stageDurationsMilliseconds ?? [:],
                 outcome: try outcome.domainOutcome
             )
         }

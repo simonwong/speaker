@@ -161,6 +161,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let refinementFailureCode: String?
     public let dictionarySnapshotID: UUID?
     public let dictionaryReplacements: [DictionaryReplacement]
+    public let durationMilliseconds: Int
+    public let stageDurationsMilliseconds: [String: Int]
     public let outcome: VoiceInputActivity
 
     public init(
@@ -178,6 +180,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         refinementFailureCode: String? = nil,
         dictionarySnapshotID: UUID? = nil,
         dictionaryReplacements: [DictionaryReplacement] = [],
+        durationMilliseconds: Int = 0,
+        stageDurationsMilliseconds: [String: Int] = [:],
         outcome: VoiceInputActivity
     ) {
         self.sessionID = sessionID
@@ -194,6 +198,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.refinementFailureCode = refinementFailureCode
         self.dictionarySnapshotID = dictionarySnapshotID
         self.dictionaryReplacements = dictionaryReplacements
+        self.durationMilliseconds = durationMilliseconds
+        self.stageDurationsMilliseconds = stageDurationsMilliseconds
         self.outcome = outcome
     }
 }
@@ -574,6 +580,11 @@ public actor VoiceInputSessions {
             refinementFailureCode: processedText?.refinementFailure?.kind.rawValue,
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
             dictionaryReplacements: processedText?.dictionaryReplacements ?? [],
+            durationMilliseconds: max(
+                0,
+                Int(Date().timeIntervalSince(startedAt) * 1_000)
+            ),
+            stageDurationsMilliseconds: processedText?.stageDurationsMilliseconds ?? [:],
             outcome: activity
         ))
     }

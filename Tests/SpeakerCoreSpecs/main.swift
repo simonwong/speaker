@@ -683,6 +683,23 @@ struct SpeakerCoreSpecs {
                 finalText: "最终文本",
                 providerRequestID: "request-log-1",
                 providerErrorCode: nil,
+                deepSeekText: "DeepSeek 结果 beta",
+                deepSeekRequestID: "deepseek-log-1",
+                refinementModeName: "精简清理",
+                refinementStatus: "succeeded",
+                dictionarySnapshotID: UUID(),
+                dictionaryReplacements: [
+                    .init(
+                        entryID: UUID(),
+                        alias: "豆宝",
+                        canonicalTerm: "豆包",
+                        matchedText: "豆宝",
+                        utf16Location: 0,
+                        utf16Length: 2
+                    ),
+                ],
+                durationMilliseconds: 1_234,
+                stageDurationsMilliseconds: ["doubao": 500, "deepseek": 300],
                 outcome: .delivered(firstID, applicationName: "TextEdit", text: "最终文本")
             ))
             await store.save(.init(
@@ -704,6 +721,9 @@ struct SpeakerCoreSpecs {
             try expect(allRecords.map(\.sessionID) == [secondID, firstID])
             try expect(transcriptMatches.map(\.sessionID) == [firstID])
             try expect(errorMatches.map(\.sessionID) == [secondID])
+            try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
+            try expect(allRecords.last?.dictionaryReplacements.count == 1)
+            try expect(allRecords.last?.stageDurationsMilliseconds["doubao"] == 500)
             try expect(!encoded.contains("apiKey"))
             try expect(!encoded.contains("audio"))
             try expect(!encoded.contains("clipboard"))
@@ -817,6 +837,41 @@ struct SpeakerCoreSpecs {
             try expect(loaded == dictionary)
         }
 
+        await runAsync("versioned app settings round trip shortcut refinement and login launch", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-settings-spec-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json")
+            )
+            let settings = SpeakerAppSettings(
+                shortcut: .custom(keyCode: 49, modifiers: 2_048, displayName: "⌥ Space"),
+                refinement: .custom(name: "短句", prompt: "只清理重复"),
+                launchAtLogin: true
+            )
+
+            try await store.save(settings)
+            let loaded = await store.load()
+            try expect(loaded.settings == settings)
+        }
+
+        await runAsync("corrupt app settings recover to defaults without overwriting evidence", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-settings-corrupt-spec-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileURL = directory.appendingPathComponent("settings.json")
+            try Data("broken".utf8).write(to: fileURL)
+
+            let result = await VersionedLocalAppSettingsStore(fileURL: fileURL).load()
+            if case let .recovered(settings, recovery) = result {
+                try expect(settings == .default)
+                try expect(FileManager.default.fileExists(atPath: recovery.backupURL.path))
+            } else {
+                throw SpecFailure(message: "corrupt settings were not preserved and recovered")
+            }
+        }
+
         guard failures.isEmpty else {
             for failure in failures {
                 FileHandle.standardError.write(Data("FAIL: \(failure)\n".utf8))
@@ -824,7 +879,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 32 core specs")
+        print("PASS: 34 core specs")
     }
 }
 

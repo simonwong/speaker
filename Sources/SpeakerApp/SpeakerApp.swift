@@ -1,4 +1,5 @@
 import AppKit
+@preconcurrency import Carbon
 import Combine
 import SpeakerCore
 import SwiftUI
@@ -55,11 +56,12 @@ private final class SpeakerRuntime: ObservableObject {
     let dictionarySettings: DictionarySettingsModel
     let historyModel: HistoryModel
 
-    @Published private(set) var shortcutChoice: ShortcutChoice
+    @Published private(set) var shortcutPreference: VoiceShortcutPreference = .functionKey
     @Published private(set) var shortcutNotice: String?
 
     private let fnMonitor: FnEventMonitor
     private let customHotKeyMonitor: CustomHotKeyMonitor
+    private let settingsStore: VersionedLocalAppSettingsStore
     private let panel: VoiceInputPanelController
     private var started = false
 
@@ -85,6 +87,10 @@ private final class SpeakerRuntime: ObservableObject {
         let dictionaryURL = (try? VersionedJSONPersonalDictionaryStore.applicationSupportFileURL())
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("speaker-personal-dictionary.json")
         let dictionaryStore = VersionedJSONPersonalDictionaryStore(fileURL: dictionaryURL)
+        let settingsStore = VersionedLocalAppSettingsStore(
+            fileURL: VersionedLocalAppSettingsStore.defaultFileURL()
+        )
+        self.settingsStore = settingsStore
         let sessionActor = VoiceInputSessions(
             audioCapture: audio,
             targetCapture: targets,
@@ -99,13 +105,14 @@ private final class SpeakerRuntime: ObservableObject {
         doubaoSettings = DoubaoSettingsModel(service: doubao)
         refinementSettings = RefinementSettingsModel(
             service: deepSeek,
-            configuration: configuration
+            configuration: configuration,
+            settingsStore: settingsStore
         )
         dictionarySettings = DictionarySettingsModel(
             store: dictionaryStore,
             configuration: configuration
         )
-        historyModel = HistoryModel(store: history)
+        historyModel = HistoryModel(store: history, targets: targets)
         let triggerHandler: @Sendable (GlobalVoiceTrigger) -> Void = { trigger in
             let command: VoiceInputCommand?
             switch trigger {
@@ -127,9 +134,6 @@ private final class SpeakerRuntime: ObservableObject {
         fnMonitor = FnEventMonitor(handler: triggerHandler)
         customHotKeyMonitor = CustomHotKeyMonitor(handler: triggerHandler)
         panel = VoiceInputPanelController(model: sessions)
-        shortcutChoice = ShortcutChoice(
-            rawValue: UserDefaults.standard.string(forKey: "voiceShortcut") ?? ""
-        ) ?? .fn
     }
 
     func start() {
@@ -137,42 +141,70 @@ private final class SpeakerRuntime: ObservableObject {
         started = true
         permissions.refresh()
         sessions.startObserving()
-        activateShortcut(shortcutChoice, persist: false)
+        activateShortcut(.functionKey, persist: false)
         panel.start()
         Task {
+            let loadedSettings = await settingsStore.load()
+            activateShortcut(loadedSettings.settings.shortcut, persist: false)
+            switch loadedSettings {
+            case let .recovered(_, recovery):
+                shortcutNotice = "设置文件已恢复为默认值，原文件保留在 \(recovery.backupURL.lastPathComponent)。"
+            case let .recoveryFailed(_, reason):
+                shortcutNotice = reason
+            case .defaults, .loaded:
+                break
+            }
             await dictionarySettings.load()
             await refinementSettings.load()
             await historyModel.refresh()
         }
     }
 
-    func selectShortcut(_ choice: ShortcutChoice) {
-        guard choice != shortcutChoice else { return }
-        activateShortcut(choice, persist: true)
+    func useFunctionKey() {
+        activateShortcut(.functionKey, persist: true)
     }
 
-    private func activateShortcut(_ choice: ShortcutChoice, persist: Bool) {
+    func registerCustomShortcut(_ hotKey: CustomHotKey) {
+        activateShortcut(.init(customHotKey: hotKey), persist: true)
+    }
+
+    private func activateShortcut(_ choice: VoiceShortcutPreference, persist: Bool) {
         switch choice {
-        case .fn:
+        case .functionKey:
             customHotKeyMonitor.unregister()
             guard fnMonitor.start() else {
                 shortcutNotice = "Fn 监听未能启动，请先授予辅助功能权限后重试。"
                 return
             }
-        case .optionSpace:
+        case .custom:
             fnMonitor.stop()
-            guard customHotKeyMonitor.register(.optionSpace) else {
-                shortcutNotice = "⌥ Space 已被其他应用占用，已继续使用 Fn。"
+            guard let hotKey = choice.customHotKey,
+                  customHotKeyMonitor.register(hotKey)
+            else {
+                shortcutNotice = "该组合键已被其他应用占用，已继续使用 Fn。"
                 _ = fnMonitor.start()
-                shortcutChoice = .fn
+                shortcutPreference = .functionKey
+                if persist { persistShortcut(.functionKey) }
                 return
             }
         }
 
-        shortcutChoice = choice
+        shortcutPreference = choice
         shortcutNotice = nil
         if persist {
-            UserDefaults.standard.set(choice.rawValue, forKey: "voiceShortcut")
+            persistShortcut(choice)
+        }
+    }
+
+    private func persistShortcut(_ choice: VoiceShortcutPreference) {
+        Task {
+            do {
+                var settings = await settingsStore.load().settings
+                settings.shortcut = choice
+                try await settingsStore.save(settings)
+            } catch {
+                shortcutNotice = error.localizedDescription
+            }
         }
     }
 
@@ -316,13 +348,16 @@ private final class RefinementSettingsModel: ObservableObject {
 
     private let service: CredentialedDeepSeekTextRefiner
     private let configuration: VoiceInputConfigurationController
+    private let settingsStore: VersionedLocalAppSettingsStore
 
     init(
         service: CredentialedDeepSeekTextRefiner,
-        configuration: VoiceInputConfigurationController
+        configuration: VoiceInputConfigurationController,
+        settingsStore: VersionedLocalAppSettingsStore
     ) {
         self.service = service
         self.configuration = configuration
+        self.settingsStore = settingsStore
     }
 
     var choice: RefinementChoice {
@@ -341,13 +376,12 @@ private final class RefinementSettingsModel: ObservableObject {
             notice = error.localizedDescription
         }
 
-        let savedChoice = RefinementChoice(
-            rawValue: UserDefaults.standard.string(forKey: "refinementChoice") ?? ""
-        ) ?? .defaultSmooth
-        customName = UserDefaults.standard.string(forKey: "customRefinementName")
-            ?? "我的整理规则"
-        customPrompt = UserDefaults.standard.string(forKey: "customRefinementPrompt") ?? ""
-        await select(savedChoice, persist: false)
+        let loadedMode = await settingsStore.load().settings.refinement.textRefinementMode
+        if case let .custom(name, prompt) = loadedMode {
+            customName = name
+            customPrompt = prompt
+        }
+        await select(Self.choice(for: loadedMode), persist: false)
     }
 
     func saveAPIKey() async {
@@ -399,7 +433,7 @@ private final class RefinementSettingsModel: ObservableObject {
                 ? "此模式会把豆包文本和当前规则发送给 DeepSeek；不会发送音频。"
                 : "默认顺滑只调用豆包，不调用 DeepSeek。"
             if persist {
-                persistSelection(choice)
+                try await persistSelection(mode)
             }
         } catch {
             notice = error.localizedDescription
@@ -417,13 +451,22 @@ private final class RefinementSettingsModel: ObservableObject {
     ) async {
         try? await configuration.selectRefinementMode(selectedMode)
         mode = selectedMode
-        if persist { persistSelection(choice) }
+        if persist { try? await persistSelection(selectedMode) }
     }
 
-    private func persistSelection(_ choice: RefinementChoice) {
-        UserDefaults.standard.set(choice.rawValue, forKey: "refinementChoice")
-        UserDefaults.standard.set(customName, forKey: "customRefinementName")
-        UserDefaults.standard.set(customPrompt, forKey: "customRefinementPrompt")
+    private func persistSelection(_ selectedMode: TextRefinementMode) async throws {
+        var settings = await settingsStore.load().settings
+        settings.refinement = RefinementPreference(mode: selectedMode)
+        try await settingsStore.save(settings)
+    }
+
+    private static func choice(for mode: TextRefinementMode) -> RefinementChoice {
+        switch mode {
+        case .defaultSmooth: .defaultSmooth
+        case .conciseCleanup: .conciseCleanup
+        case .fullRewrite: .fullRewrite
+        case .custom: .custom
+        }
     }
 }
 
@@ -496,9 +539,11 @@ private final class HistoryModel: ObservableObject {
     @Published private(set) var notice: String?
 
     let store: VersionedLocalSessionHistory
+    private let targets: AccessibilityInputTargets
 
-    init(store: VersionedLocalSessionHistory) {
+    init(store: VersionedLocalSessionHistory, targets: AccessibilityInputTargets) {
         self.store = store
+        self.targets = targets
     }
 
     func refresh() async {
@@ -522,18 +567,98 @@ private final class HistoryModel: ObservableObject {
         await store.clear()
         await refresh()
     }
+
+    func redeliver(_ record: VoiceInputHistoryRecord) async {
+        guard let text = record.finalText ?? record.transcription, !text.isEmpty else {
+            notice = "这条记录没有可重新送达的文本。"
+            return
+        }
+        notice = "请在 3 秒内聚焦目标输入框；Speaker 将重新捕获目标。"
+        try? await Task.sleep(for: .seconds(3))
+        let target = await targets.capture()
+        switch target {
+        case let .writable(snapshot):
+            let outcome = await targets.deliver(text, to: snapshot)
+            switch outcome {
+            case .delivered:
+                notice = "历史文本已重新送达 \(snapshot.applicationName)。"
+            case .pendingCopy:
+                notice = "无法安全送达；请使用“复制最终文本”。"
+            }
+        case .unavailable:
+            notice = "没有捕获到可写输入框；请使用“复制最终文本”。"
+        }
+    }
 }
 
-private enum ShortcutChoice: String, CaseIterable, Identifiable {
-    case fn
-    case optionSpace
+@MainActor
+private final class ShortcutRecorderModel: ObservableObject {
+    @Published private(set) var isRecording = false
+    @Published private(set) var notice: String?
+    private var monitor: Any?
 
-    var id: String { rawValue }
+    func start(onCapture: @escaping (CustomHotKey) -> Void) {
+        stop()
+        isRecording = true
+        notice = "请按下至少包含 ⌘、⌥、⌃ 或 ⇧ 的组合键。"
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let modifiers = Self.carbonModifiers(event.modifierFlags)
+            guard modifiers != 0 else {
+                self.notice = "组合键必须包含至少一个修饰键。"
+                return nil
+            }
+            let displayName = Self.displayName(event: event)
+            self.stop()
+            onCapture(CustomHotKey(
+                keyCode: UInt32(event.keyCode),
+                modifiers: modifiers,
+                displayName: displayName
+            ))
+            return nil
+        }
+    }
 
-    var title: String {
+    func stop() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitor = nil
+        isRecording = false
+    }
+
+    private static func carbonModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
+        var result: UInt32 = 0
+        if flags.contains(.command) { result |= UInt32(cmdKey) }
+        if flags.contains(.option) { result |= UInt32(optionKey) }
+        if flags.contains(.control) { result |= UInt32(controlKey) }
+        if flags.contains(.shift) { result |= UInt32(shiftKey) }
+        return result
+    }
+
+    private static func displayName(event: NSEvent) -> String {
+        let flags = event.modifierFlags
+        var prefix = ""
+        if flags.contains(.control) { prefix += "⌃" }
+        if flags.contains(.option) { prefix += "⌥" }
+        if flags.contains(.shift) { prefix += "⇧" }
+        if flags.contains(.command) { prefix += "⌘" }
+        let key: String = switch event.keyCode {
+        case 36: "Return"
+        case 48: "Tab"
+        case 49: "Space"
+        case 53: "Esc"
+        default: event.charactersIgnoringModifiers?.uppercased() ?? "Key \(event.keyCode)"
+        }
+        return prefix + key
+    }
+}
+
+private extension VoiceShortcutPreference {
+    var displayName: String {
         switch self {
-        case .fn: "Fn"
-        case .optionSpace: "⌥ Space"
+        case .functionKey: "Fn"
+        case let .custom(_, _, displayName): displayName
         }
     }
 }
@@ -617,6 +742,7 @@ private struct MenuBarContent: View {
 
 private struct SettingsView: View {
     @ObservedObject var runtime: SpeakerRuntime
+    @StateObject private var shortcutRecorder = ShortcutRecorderModel()
 
     private var permissions: PermissionModel { runtime.permissions }
 
@@ -641,16 +767,31 @@ private struct SettingsView: View {
             }
 
             Section("语音输入") {
-                Picker(
+                LabeledContent(
                     "按住说话快捷键",
-                    selection: Binding(
-                        get: { runtime.shortcutChoice },
-                        set: { runtime.selectShortcut($0) }
-                    )
-                ) {
-                    ForEach(ShortcutChoice.allCases) { choice in
-                        Text(choice.title).tag(choice)
+                    value: runtime.shortcutPreference.displayName
+                )
+                HStack {
+                    Button("使用 Fn") {
+                        shortcutRecorder.stop()
+                        runtime.useFunctionKey()
                     }
+                    Button(shortcutRecorder.isRecording ? "取消录制" : "录制组合键") {
+                        if shortcutRecorder.isRecording {
+                            shortcutRecorder.stop()
+                        } else {
+                            shortcutRecorder.start { hotKey in
+                                runtime.registerCustomShortcut(hotKey)
+                            }
+                        }
+                    }
+                }
+
+                if let recorderNotice = shortcutRecorder.notice,
+                   shortcutRecorder.isRecording {
+                    Text(recorderNotice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let shortcutNotice = runtime.shortcutNotice {
@@ -673,6 +814,7 @@ private struct SettingsView: View {
             await runtime.refinementSettings.load()
             await runtime.dictionarySettings.load()
         }
+        .onDisappear { shortcutRecorder.stop() }
     }
 }
 
@@ -923,9 +1065,11 @@ private struct HistoryView: View {
                     }
                 } detail: {
                     if let record = selectedRecord {
-                        HistoryDetailView(record: record) {
-                            Task { await model.delete(record.sessionID) }
-                        }
+                        HistoryDetailView(
+                            record: record,
+                            redeliver: { Task { await model.redeliver(record) } },
+                            delete: { Task { await model.delete(record.sessionID) } }
+                        )
                     } else {
                         ContentUnavailableView("选择一条会话", systemImage: "text.magnifyingglass")
                     }
@@ -952,6 +1096,7 @@ private struct HistoryView: View {
 
 private struct HistoryDetailView: View {
     let record: VoiceInputHistoryRecord
+    let redeliver: () -> Void
     let delete: () -> Void
 
     var body: some View {
@@ -961,6 +1106,16 @@ private struct HistoryDetailView: View {
                 LabeledContent("目标 App", value: record.applicationName ?? "无")
                 LabeledContent("整理模式", value: record.refinementModeName ?? "默认顺滑")
                 LabeledContent("送达状态", value: record.outcome.historyLabel)
+                LabeledContent("总耗时", value: "\(record.durationMilliseconds) ms")
+                if !record.stageDurationsMilliseconds.isEmpty {
+                    LabeledContent(
+                        "阶段耗时",
+                        value: record.stageDurationsMilliseconds
+                            .sorted { $0.key < $1.key }
+                            .map { "\($0.key) \($0.value) ms" }
+                            .joined(separator: " · ")
+                    )
+                }
                 HistoryTextBlock(title: "豆包转录", text: record.transcription)
                 if record.deepSeekText != nil || record.refinementStatus == "fellBack" {
                     HistoryTextBlock(title: "DeepSeek 结果", text: record.deepSeekText)
@@ -986,6 +1141,8 @@ private struct HistoryDetailView: View {
                         copy(record.finalText ?? record.transcription ?? "")
                     }
                     .disabled(record.finalText == nil && record.transcription == nil)
+                    Button("3 秒后重新送达", action: redeliver)
+                        .disabled(record.finalText == nil && record.transcription == nil)
                     Button("删除记录", role: .destructive, action: delete)
                 }
             }
