@@ -49,6 +49,7 @@ private final class SpeakerRuntime: ObservableObject {
     let permissions: PermissionModel
     let sessions: VoiceInputSessionModel
     let history: MemorySessionHistory
+    let doubaoSettings: DoubaoSettingsModel
 
     @Published private(set) var shortcutChoice: ShortcutChoice
     @Published private(set) var shortcutNotice: String?
@@ -63,10 +64,15 @@ private final class SpeakerRuntime: ObservableObject {
         let audio = AVAudioCapture()
         let targets = AccessibilityInputTargets()
         let history = MemorySessionHistory()
+        let credentials = KeychainProviderCredentialStore()
+        let doubao = CredentialedDoubaoTranscriber(
+            credentials: credentials,
+            installationID: Self.installationID()
+        )
         let sessionActor = VoiceInputSessions(
             audioCapture: audio,
             targetCapture: targets,
-            transcriber: LocalPreviewTranscriber(),
+            transcriber: doubao,
             delivery: targets,
             clipboard: SystemClipboardWriter(),
             history: history
@@ -74,6 +80,7 @@ private final class SpeakerRuntime: ObservableObject {
         let sessions = VoiceInputSessionModel(sessions: sessionActor)
         self.sessions = sessions
         self.history = history
+        doubaoSettings = DoubaoSettingsModel(service: doubao)
         let triggerHandler: @Sendable (GlobalVoiceTrigger) -> Void = { trigger in
             let command: VoiceInputCommand?
             switch trigger {
@@ -136,6 +143,116 @@ private final class SpeakerRuntime: ObservableObject {
         shortcutNotice = nil
         if persist {
             UserDefaults.standard.set(choice.rawValue, forKey: "voiceShortcut")
+        }
+    }
+
+    private static func installationID() -> String {
+        let key = "localInstallationID"
+        if let value = UserDefaults.standard.string(forKey: key), !value.isEmpty {
+            return value
+        }
+        let value = UUID().uuidString
+        UserDefaults.standard.set(value, forKey: key)
+        return value
+    }
+}
+
+@MainActor
+private final class DoubaoSettingsModel: ObservableObject {
+    enum Status: Equatable {
+        case loading
+        case unconfigured
+        case configured
+        case checking
+        case success(String?)
+        case failure(String)
+    }
+
+    @Published var apiKeyDraft = ""
+    @Published private(set) var status: Status = .loading
+    @Published private(set) var hasStoredKey = false
+
+    private let service: CredentialedDoubaoTranscriber
+
+    init(service: CredentialedDoubaoTranscriber) {
+        self.service = service
+    }
+
+    func refresh() async {
+        do {
+            hasStoredKey = try await service.hasAPIKey()
+            status = hasStoredKey ? .configured : .unconfigured
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
+    }
+
+    func save() async {
+        do {
+            try await service.saveAPIKey(apiKeyDraft)
+            apiKeyDraft = ""
+            hasStoredKey = true
+            status = .configured
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
+    }
+
+    func checkConnection() async {
+        status = .checking
+        do {
+            let requestID = try await service.checkConnection()
+            status = .success(requestID)
+        } catch let failure as DoubaoASRFailure {
+            status = .failure(Self.message(for: failure.kind))
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
+    }
+
+    func delete() async {
+        do {
+            try await service.deleteAPIKey()
+            apiKeyDraft = ""
+            hasStoredKey = false
+            status = .unconfigured
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
+    }
+
+    var hasConfiguredKey: Bool {
+        hasStoredKey
+    }
+
+    var summary: String {
+        switch status {
+        case .loading:
+            "正在读取 Keychain…"
+        case .unconfigured:
+            "未配置"
+        case .configured:
+            "已保存到本机 Keychain"
+        case .checking:
+            "正在检查连接…"
+        case let .success(requestID):
+            requestID.map { "连接成功 · \($0)" } ?? "连接成功"
+        case let .failure(message):
+            message
+        }
+    }
+
+    private static func message(for kind: DoubaoASRFailureKind) -> String {
+        switch kind {
+        case .invalidCredential: "API Key 无效或未配置"
+        case .resourceNotActivated: "尚未开通豆包极速版语音资源"
+        case .rateLimited: "请求过于频繁，请稍后重试"
+        case .network: "无法连接豆包服务"
+        case .cancelled: "连接检查已取消"
+        case .serverBusy, .serviceUnavailable: "豆包服务暂时不可用"
+        case .silence, .emptyTranscript: "连接成功"
+        case .invalidRequest, .emptyAudio, .invalidAudioFormat, .invalidResponse:
+            "豆包返回了无法识别的响应"
         }
     }
 }
@@ -275,15 +392,59 @@ private struct SettingsView: View {
                 }
 
                 LabeledContent("整理模式", value: "默认顺滑")
-                LabeledContent("豆包", value: "未配置")
                 LabeledContent("DeepSeek", value: "未配置（可选）")
             }
+
+
+            DoubaoSettingsSection(model: runtime.doubaoSettings)
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 380)
+        .frame(width: 560, height: 520)
         .task {
             permissions.refresh()
+            await runtime.doubaoSettings.refresh()
         }
+    }
+}
+
+private struct DoubaoSettingsSection: View {
+    @ObservedObject var model: DoubaoSettingsModel
+
+    var body: some View {
+        Section("豆包语音") {
+            SecureField("输入 API Key", text: $model.apiKeyDraft)
+                .textContentType(.password)
+
+            HStack {
+                Button("保存") {
+                    Task { await model.save() }
+                }
+                .disabled(model.apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("检查连接") {
+                    Task { await model.checkConnection() }
+                }
+                .disabled(!model.hasConfiguredKey)
+
+                Spacer()
+
+                Button("删除 Key", role: .destructive) {
+                    Task { await model.delete() }
+                }
+                .disabled(!model.hasConfiguredKey)
+            }
+
+            Text(model.summary)
+                .font(.caption)
+                .foregroundStyle(statusColor)
+                .textSelection(.disabled)
+        }
+    }
+
+    private var statusColor: Color {
+        if case .failure = model.status { return .red }
+        if case .success = model.status { return .green }
+        return .secondary
     }
 }
 
@@ -509,7 +670,16 @@ private extension VoiceInputActivity {
         case .cancelled:
             "没有发送音频或文本"
         case let .failed(_, failure):
-            failure == .recordingFailed ? "无法完成录音" : "无法完成转录"
+            switch failure {
+            case .recordingFailed: "无法完成录音"
+            case .transcriptionFailed: "无法完成转录"
+            case .providerNotConfigured: "请先在设置中配置豆包 API Key"
+            case .noSpeechDetected: "没有检测到有效语音"
+            case .providerResourceUnavailable: "豆包语音资源尚未开通"
+            case .providerRateLimited: "请求过于频繁，请稍后再试"
+            case .providerUnavailable: "豆包服务暂时不可用"
+            case .networkUnavailable: "网络不可用，请检查连接"
+            }
         }
     }
 

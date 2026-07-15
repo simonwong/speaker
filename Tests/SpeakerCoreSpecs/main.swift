@@ -103,6 +103,7 @@ struct SpeakerCoreSpecs {
             try expect(deliveredTexts == ["你好，SwiftUI。"])
             try expect(records.count == 1)
             try expect(records.first?.finalText == "你好，SwiftUI。")
+            try expect(records.first?.providerRequestID == "local-spec")
         }
 
         await runAsync("release during recorder startup still completes once", failures: &failures) {
@@ -319,7 +320,193 @@ struct SpeakerCoreSpecs {
             await release.value
 
             let deliveredTexts = await delivery.deliveredTexts
+            let cancellationCount = await transcriber.cancellationCount
             try expect(deliveredTexts.isEmpty)
+            try expect(cancellationCount == 1, "active provider request was not cancelled")
+        }
+
+        await runAsync("Doubao request uses flash headers and semantic smoothing body", failures: &failures) {
+            let requestID = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
+            let transport = DoubaoTransportFake(response: .init(
+                statusCode: 200,
+                headers: ["X-Api-Status-Code": "20000000", "X-Tt-Logid": "log-12"],
+                body: Data(#"{"result":{"text":"  你好，世界。  "}}"#.utf8)
+            ))
+            let client = DoubaoFlashASRClient(
+                configuration: .init(
+                    apiKey: "test-api-key",
+                    installationID: "local-installation",
+                    hotwords: ["Speaker"]
+                ),
+                transport: transport,
+                requestIDGenerator: { requestID }
+            )
+
+            let result = try await client.transcribe(.init(
+                data: Data([0x52, 0x49, 0x46, 0x46]),
+                duration: .seconds(1),
+                peakPower: -10
+            ))
+            let request = try await transport.onlyRequest()
+            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let recognition = body?["request"] as? [String: Any]
+            let audio = body?["audio"] as? [String: Any]
+
+            try expect(request.url == DoubaoFlashASRConfiguration.defaultEndpoint)
+            try expect(request.value(forHTTPHeaderField: "X-Api-Key") == "test-api-key")
+            try expect(request.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.bigasr.auc_turbo")
+            try expect(request.value(forHTTPHeaderField: "X-Api-Request-Id") == requestID.uuidString)
+            try expect(request.value(forHTTPHeaderField: "X-Api-Sequence") == "-1")
+            try expect(recognition?["enable_itn"] as? Bool == true)
+            try expect(recognition?["enable_punc"] as? Bool == true)
+            try expect(recognition?["enable_ddc"] as? Bool == true)
+            try expect(audio?["data"] as? String == Data([0x52, 0x49, 0x46, 0x46]).base64EncodedString())
+            try expect(result == .init(text: "你好，世界。", providerRequestID: "log-12"))
+        }
+
+        await runAsync("Doubao maps silence without exposing a transcript", failures: &failures) {
+            let client = makeDoubaoClient(response: .init(
+                statusCode: 200,
+                headers: ["X-Api-Status-Code": "20000003", "X-Tt-Logid": "silent-log"],
+                body: Data()
+            ))
+            do {
+                _ = try await client.transcribe(specAudio)
+                throw SpecFailure(message: "silence response was accepted")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .silence)
+                try expect(failure.providerRequestID == "silent-log")
+            }
+        }
+
+        await runAsync("Doubao distinguishes inactive resource from bad credential", failures: &failures) {
+            let inactive = makeDoubaoClient(response: .init(
+                statusCode: 403,
+                headers: [
+                    "X-Api-Status-Code": "45000001",
+                    "X-Api-Message": "resource not activated",
+                ],
+                body: Data()
+            ))
+            do {
+                _ = try await inactive.transcribe(specAudio)
+                throw SpecFailure(message: "inactive resource response was accepted")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .resourceNotActivated)
+            }
+
+            let unauthorized = makeDoubaoClient(response: .init(
+                statusCode: 401,
+                headers: ["X-Api-Message": "unauthorized api key"],
+                body: Data()
+            ))
+            do {
+                _ = try await unauthorized.transcribe(specAudio)
+                throw SpecFailure(message: "invalid credential response was accepted")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .invalidCredential)
+            }
+        }
+
+        await runAsync("credential-backed Doubao transcriber loads the current Keychain value", failures: &failures) {
+            let credentials = ProviderCredentialStoreFake(values: [.doubao: "first-key"])
+            let transport = DoubaoTransportFake(response: .init(
+                statusCode: 200,
+                headers: ["X-Api-Status-Code": "20000000"],
+                body: Data(#"{"result":{"text":"第一条"}}"#.utf8)
+            ))
+            let transcriber = CredentialedDoubaoTranscriber(
+                credentials: credentials,
+                installationID: "installation-spec",
+                transport: transport
+            )
+
+            _ = try await transcriber.transcribe(specAudio)
+            let firstRequest = try await transport.onlyRequest()
+            try expect(firstRequest.value(forHTTPHeaderField: "X-Api-Key") == "first-key")
+        }
+
+        await runAsync("credential-backed Doubao transcriber fails before network when unconfigured", failures: &failures) {
+            let credentials = ProviderCredentialStoreFake()
+            let transport = DoubaoTransportFake(response: .init(
+                statusCode: 500,
+                headers: [:],
+                body: Data()
+            ))
+            let transcriber = CredentialedDoubaoTranscriber(
+                credentials: credentials,
+                installationID: "installation-spec",
+                transport: transport
+            )
+
+            do {
+                _ = try await transcriber.transcribe(specAudio)
+                throw SpecFailure(message: "unconfigured transcriber sent a request")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .invalidCredential)
+                let requestCount = await transport.requestCount
+                try expect(requestCount == 0)
+            }
+        }
+
+        await runAsync("Doubao failure becomes stable user state and diagnostic history", failures: &failures) {
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: DoubaoFailureTranscriber(failure: .init(
+                    kind: .invalidCredential,
+                    providerRequestID: "provider-log-id"
+                )),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+
+            let presentation = await terminal.value
+            let record = await history.records.first
+            if case let .failed(_, failure) = presentation?.activity {
+                try expect(failure == .providerNotConfigured)
+            } else {
+                throw SpecFailure(message: "provider failure did not reach terminal UI state")
+            }
+            try expect(record?.providerRequestID == "provider-log-id")
+            try expect(record?.providerErrorCode == "invalidCredential")
+        }
+
+        await runAsync("credential store rejects blank API keys", failures: &failures) {
+            let store = KeychainProviderCredentialStore(
+                service: "com.local.speaker.spec.\(UUID().uuidString)"
+            )
+            do {
+                try await store.save(apiKey: "  \n ", for: .doubao)
+                throw SpecFailure(message: "blank API key was accepted")
+            } catch let error as ProviderCredentialStoreError {
+                try expect(error == .emptyAPIKey)
+            }
+        }
+
+        await runAsync("credential store round trips and deletes isolated API key", failures: &failures) {
+            let store = KeychainProviderCredentialStore(
+                service: "com.local.speaker.spec.\(UUID().uuidString)"
+            )
+            do {
+                try await store.save(apiKey: "  local-test-key  ", for: .doubao)
+                let storedKey = try await store.apiKey(for: .doubao)
+                try expect(storedKey == "local-test-key")
+
+                try await store.deleteAPIKey(for: .doubao)
+                try await store.deleteAPIKey(for: .doubao)
+                let deletedKey = try await store.apiKey(for: .doubao)
+                try expect(deletedKey == nil)
+            } catch let error as ProviderCredentialStoreError
+                where error == .storageUnavailable || error == .interactionUnavailable {
+                print("SKIP: Keychain round trip unavailable in this command-line environment")
+            }
         }
 
         guard failures.isEmpty else {
@@ -329,7 +516,66 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 12 core specs")
+        print("PASS: 20 core specs")
+    }
+}
+
+private let specAudio = CapturedAudio(
+    data: Data([0x52, 0x49, 0x46, 0x46]),
+    duration: .seconds(1),
+    peakPower: -10
+)
+
+private func makeDoubaoClient(response: DoubaoASRTransportResponse) -> DoubaoFlashASRClient {
+    DoubaoFlashASRClient(
+        configuration: .init(
+            apiKey: "test-api-key",
+            installationID: "local-spec-installation"
+        ),
+        transport: DoubaoTransportFake(response: response)
+    )
+}
+
+private actor DoubaoTransportFake: DoubaoASRTransport {
+    let response: DoubaoASRTransportResponse
+    private var requests: [URLRequest] = []
+
+    init(response: DoubaoASRTransportResponse) {
+        self.response = response
+    }
+
+    func send(_ request: URLRequest) async throws -> DoubaoASRTransportResponse {
+        requests.append(request)
+        return response
+    }
+
+    func onlyRequest() throws -> URLRequest {
+        guard requests.count == 1, let request = requests.first else {
+            throw SpecFailure(message: "expected exactly one Doubao request")
+        }
+        return request
+    }
+
+    var requestCount: Int { requests.count }
+}
+
+private actor ProviderCredentialStoreFake: ProviderCredentialStoring {
+    private var values: [ProviderID: String]
+
+    init(values: [ProviderID: String] = [:]) {
+        self.values = values
+    }
+
+    func save(apiKey: String, for provider: ProviderID) async throws {
+        values[provider] = apiKey
+    }
+
+    func apiKey(for provider: ProviderID) async throws -> String? {
+        values[provider]
+    }
+
+    func deleteAPIKey(for provider: ProviderID) async throws {
+        values[provider] = nil
     }
 }
 
@@ -388,10 +634,19 @@ private actor TargetCaptureFake: InputTargetCapturing {
     }
 }
 
+private struct DoubaoFailureTranscriber: SpeechTranscribing {
+    let failure: DoubaoASRFailure
+
+    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
+        throw failure
+    }
+}
+
 private actor SpeechTranscriberFake: SpeechTranscribing {
     let text: String
     let delaysResponse: Bool
     private(set) var callCount = 0
+    private(set) var cancellationCount = 0
     private var continuation: CheckedContinuation<Void, Never>?
 
     init(text: String, delaysResponse: Bool = false) {
@@ -402,16 +657,25 @@ private actor SpeechTranscriberFake: SpeechTranscribing {
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
         callCount += 1
         if delaysResponse {
-            await withCheckedContinuation { continuation in
-                self.continuation = continuation
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    self.continuation = continuation
+                }
+            } onCancel: {
+                Task { await self.markCancelled() }
             }
         }
+        try Task.checkCancellation()
         return TranscriptionResult(text: text, providerRequestID: "local-spec")
     }
 
     func resume() {
         continuation?.resume()
         continuation = nil
+    }
+
+    private func markCancelled() {
+        cancellationCount += 1
     }
 }
 

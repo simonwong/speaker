@@ -34,6 +34,12 @@ public enum PendingCopyReason: String, Equatable, Sendable {
 public enum VoiceInputFailure: String, Equatable, Sendable {
     case recordingFailed
     case transcriptionFailed
+    case providerNotConfigured
+    case noSpeechDetected
+    case providerResourceUnavailable
+    case providerRateLimited
+    case providerUnavailable
+    case networkUnavailable
 }
 
 public enum VoiceInputActivity: Equatable, Sendable {
@@ -146,6 +152,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let applicationName: String?
     public let transcription: String?
     public let finalText: String?
+    public let providerRequestID: String?
+    public let providerErrorCode: String?
     public let outcome: VoiceInputActivity
 
     public init(
@@ -154,6 +162,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         applicationName: String?,
         transcription: String?,
         finalText: String?,
+        providerRequestID: String? = nil,
+        providerErrorCode: String? = nil,
         outcome: VoiceInputActivity
     ) {
         self.sessionID = sessionID
@@ -161,6 +171,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.applicationName = applicationName
         self.transcription = transcription
         self.finalText = finalText
+        self.providerRequestID = providerRequestID
+        self.providerErrorCode = providerErrorCode
         self.outcome = outcome
     }
 }
@@ -222,6 +234,7 @@ public actor VoiceInputSessions {
     private var phase: Phase = .idle
     private var releasePending = false
     private var watchdogTask: Task<Void, Never>?
+    private var transcriptionTask: Task<TranscriptionResult, Error>?
     private var presentation = VoiceInputPresentation(revision: 0, activity: .idle)
     private var observers: [UUID: AsyncStream<VoiceInputPresentation>.Continuation] = [:]
 
@@ -337,13 +350,32 @@ public actor VoiceInputSessions {
         let applicationName = target.applicationName
         publish(.processing(id, .transcribing, applicationName: applicationName))
 
+        let activeTranscriber = transcriber
+        let task = Task {
+            try await activeTranscriber.transcribe(audio)
+        }
+        transcriptionTask = task
         let transcription: TranscriptionResult
         do {
-            transcription = try await transcriber.transcribe(audio)
+            transcription = try await task.value
+        } catch let failure as DoubaoASRFailure {
+            transcriptionTask = nil
+            guard phase == .processing(id, startedAt: startedAt) else { return }
+            await finishWithFailure(
+                id: id,
+                startedAt: startedAt,
+                failure: Self.userFailure(for: failure.kind),
+                providerRequestID: failure.providerRequestID,
+                providerErrorCode: failure.kind.rawValue
+            )
+            return
         } catch {
+            transcriptionTask = nil
+            guard phase == .processing(id, startedAt: startedAt) else { return }
             await finishWithFailure(id: id, startedAt: startedAt, failure: .transcriptionFailed)
             return
         }
+        transcriptionTask = nil
 
         guard phase == .processing(id, startedAt: startedAt) else { return }
 
@@ -365,7 +397,8 @@ public actor VoiceInputSessions {
                     startedAt: startedAt,
                     applicationName: snapshot.applicationName,
                     transcription: transcription.text,
-                    finalText: transcription.text
+                    finalText: transcription.text,
+                    providerRequestID: transcription.providerRequestID
                 )
             case let .pendingCopy(reason):
                 let activity = VoiceInputActivity.pendingCopy(
@@ -379,7 +412,8 @@ public actor VoiceInputSessions {
                     startedAt: startedAt,
                     applicationName: snapshot.applicationName,
                     transcription: transcription.text,
-                    finalText: transcription.text
+                    finalText: transcription.text,
+                    providerRequestID: transcription.providerRequestID
                 )
             }
         case let .unavailable(reason):
@@ -394,7 +428,8 @@ public actor VoiceInputSessions {
                 startedAt: startedAt,
                 applicationName: nil,
                 transcription: transcription.text,
-                finalText: transcription.text
+                finalText: transcription.text,
+                providerRequestID: transcription.providerRequestID
             )
         }
     }
@@ -418,6 +453,8 @@ public actor VoiceInputSessions {
         releasePending = false
         watchdogTask?.cancel()
         watchdogTask = nil
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
         await audioCapture.cancel()
         let activity = VoiceInputActivity.cancelled(id)
         publish(activity)
@@ -434,7 +471,9 @@ public actor VoiceInputSessions {
     private func finishWithFailure(
         id: VoiceInputSessionID,
         startedAt: Date,
-        failure: VoiceInputFailure
+        failure: VoiceInputFailure,
+        providerRequestID: String? = nil,
+        providerErrorCode: String? = nil
     ) async {
         let activity = VoiceInputActivity.failed(id, failure)
         await finishTerminal(
@@ -443,7 +482,9 @@ public actor VoiceInputSessions {
             startedAt: startedAt,
             applicationName: nil,
             transcription: nil,
-            finalText: nil
+            finalText: nil,
+            providerRequestID: providerRequestID,
+            providerErrorCode: providerErrorCode
         )
     }
 
@@ -453,7 +494,9 @@ public actor VoiceInputSessions {
         startedAt: Date,
         applicationName: String?,
         transcription: String?,
-        finalText: String?
+        finalText: String?,
+        providerRequestID: String? = nil,
+        providerErrorCode: String? = nil
     ) async {
         phase = .idle
         releasePending = false
@@ -466,6 +509,8 @@ public actor VoiceInputSessions {
             applicationName: applicationName,
             transcription: transcription,
             finalText: finalText,
+            providerRequestID: providerRequestID,
+            providerErrorCode: providerErrorCode,
             outcome: activity
         ))
     }
@@ -494,11 +539,31 @@ public actor VoiceInputSessions {
         guard case let .recording(activeID, _) = phase, activeID == id else {
             return
         }
+        watchdogTask = nil
         await finishSession()
     }
 
     private func removeObserver(_ id: UUID) {
         observers[id] = nil
+    }
+
+    private static func userFailure(for kind: DoubaoASRFailureKind) -> VoiceInputFailure {
+        switch kind {
+        case .invalidCredential:
+            .providerNotConfigured
+        case .silence, .emptyAudio, .emptyTranscript:
+            .noSpeechDetected
+        case .resourceNotActivated:
+            .providerResourceUnavailable
+        case .rateLimited:
+            .providerRateLimited
+        case .network:
+            .networkUnavailable
+        case .serverBusy, .serviceUnavailable:
+            .providerUnavailable
+        case .cancelled, .invalidRequest, .invalidAudioFormat, .invalidResponse:
+            .transcriptionFailed
+        }
     }
 }
 
