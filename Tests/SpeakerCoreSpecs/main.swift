@@ -8,6 +8,40 @@ struct SpeakerCoreSpecs {
     static func main() async {
         var failures: [String] = []
 
+        await runAsync("PCM streaming emits consecutive chunks without crashing", failures: &failures) {
+            var buffer = PCMChunkBuffer(chunkSize: 6_400)
+            let chunks = buffer.append(Data(repeating: 1, count: 12_800))
+            try expect(chunks.count == 2)
+            try expect(chunks.allSatisfy { $0.count == 6_400 })
+        }
+
+        run("short press latches recording until the next press", failures: &failures) {
+            var gesture = VoiceShortcutGestureStateMachine()
+
+            try expect(gesture.handle(.pressed, at: 1_000_000_000) == [.pressed])
+            try expect(gesture.handle(.released, at: 1_100_000_000).isEmpty)
+            try expect(gesture.handle(.pressed, at: 2_000_000_000) == [.released])
+            try expect(gesture.handle(.released, at: 2_050_000_000).isEmpty)
+            try expect(gesture.handle(.pressed, at: 3_000_000_000) == [.pressed])
+        }
+
+        run("long press records only while held", failures: &failures) {
+            var gesture = VoiceShortcutGestureStateMachine()
+
+            try expect(gesture.handle(.pressed, at: 1_000_000_000) == [.pressed])
+            try expect(gesture.handle(.released, at: 1_300_000_000) == [.released])
+        }
+
+        run("cancel clears a latched shortcut gesture", failures: &failures) {
+            var gesture = VoiceShortcutGestureStateMachine()
+
+            _ = gesture.handle(.pressed, at: 1_000_000_000)
+            _ = gesture.handle(.released, at: 1_050_000_000)
+            try expect(gesture.handle(.cancel, at: 1_100_000_000) == [.cancel])
+            try expect(gesture.handle(.released, at: 1_150_000_000).isEmpty)
+            try expect(gesture.handle(.pressed, at: 1_200_000_000) == [.pressed])
+        }
+
         run("initial snapshot comes from permission access", failures: &failures) {
             let access = PermissionAccessStub(
                 snapshot: .init(accessibility: .denied, microphone: .notDetermined)
@@ -360,10 +394,11 @@ struct SpeakerCoreSpecs {
             try expect(deliveredTexts == ["只提交一次。"])
         }
 
-        await runAsync("global trigger dispatcher preserves quick press-release order", failures: &failures) {
+        await runAsync("global trigger dispatcher supports tap-to-start and tap-to-stop", failures: &failures) {
+            let audio = AudioCaptureFake()
             let delivery = TextDeliveryFake(result: .delivered)
             let sessions = VoiceInputSessions(
-                audioCapture: AudioCaptureFake(),
+                audioCapture: audio,
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
@@ -375,12 +410,19 @@ struct SpeakerCoreSpecs {
             let terminal = terminalPresentation(from: await sessions.observe())
             let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
 
-            dispatcher.send(.pressed)
-            dispatcher.send(.released)
+            dispatcher.send(.pressed, at: 1_000_000_000)
+            dispatcher.send(.released, at: 1_100_000_000)
+            while await audio.startCount == 0 {
+                await Task.yield()
+            }
+            let stopCountAfterFirstTap = await audio.stopCount
+            dispatcher.send(.pressed, at: 2_000_000_000)
+            dispatcher.send(.released, at: 2_050_000_000)
 
             let result = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
             dispatcher.finish()
+            try expect(stopCountAfterFirstTap == 0)
             try expect(result?.activity.isDelivered == true)
             try expect(deliveredTexts == ["顺序正确。"])
         }
@@ -400,8 +442,8 @@ struct SpeakerCoreSpecs {
                 history: history
             )
             let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
-            dispatcher.send(.pressed)
-            dispatcher.send(.released)
+            dispatcher.send(.pressed, at: 1_000_000_000)
+            dispatcher.send(.released, at: 1_300_000_000)
             while await transcriber.callCount == 0 { await Task.yield() }
 
             let shutdown = Task { await dispatcher.shutdown() }
@@ -432,8 +474,8 @@ struct SpeakerCoreSpecs {
                 history: history
             )
             let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
-            dispatcher.send(.pressed)
-            dispatcher.send(.released)
+            dispatcher.send(.pressed, at: 1_000_000_000)
+            dispatcher.send(.released, at: 1_300_000_000)
             while await transcriber.callCount == 0 { await Task.yield() }
 
             dispatcher.send(.cancel)
@@ -1315,7 +1357,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 50 core specs")
+        print("PASS: 54 core specs")
     }
 }
 

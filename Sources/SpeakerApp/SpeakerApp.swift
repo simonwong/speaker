@@ -969,7 +969,7 @@ private struct SettingsView: View {
 
                 PermissionRow(
                     title: "麦克风",
-                    explanation: "用于按住快捷键期间录制当前语音。",
+                    explanation: "支持长按说话，也支持短按开始、再次短按结束。",
                     kind: .microphone,
                     state: permissions.snapshot.microphone,
                     permissions: permissions
@@ -978,7 +978,7 @@ private struct SettingsView: View {
 
             Section("语音输入") {
                 LabeledContent(
-                    "按住说话快捷键",
+                    "语音输入快捷键",
                     value: runtime.shortcutPreference.displayName
                 )
                 HStack {
@@ -1626,11 +1626,11 @@ private extension VoiceInputActivity {
     var detail: String {
         switch self {
         case .idle:
-            "按住 Fn 开始讲话"
+            "长按讲话，或短按开始/再按结束"
         case .preparing:
             "请稍候"
         case .recording:
-            "松开 Fn 提交，按 Esc 取消"
+            "长按松开提交 · 短按再按一次提交 · Esc 取消"
         case let .processing(_, _, applicationName):
             applicationName.map { "输入目标：\($0)" } ?? "正在确定输入位置"
         case let .delivered(_, applicationName, _):

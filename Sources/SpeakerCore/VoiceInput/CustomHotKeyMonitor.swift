@@ -164,8 +164,7 @@ private final class CustomHotKeyBox: @unchecked Sendable {
                 handler(.monitorRecovered)
             }
         case .keyDown:
-            guard isDown, didEmitPress,
-                  event.getIntegerValueField(.keyboardEventKeycode) == 53
+            guard event.getIntegerValueField(.keyboardEventKeycode) == 53
             else { return }
             didEmitPress = false
             stopSecureInputMonitoring()

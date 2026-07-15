@@ -13,6 +13,7 @@ public final class VoiceInputTriggerDispatcher: @unchecked Sendable {
     private let consumer: Task<Void, Never>
     private let sequenceLock = NSLock()
     private var nextSequence: UInt64 = 0
+    private var gesture = VoiceShortcutGestureStateMachine()
 
     public init(sessions: VoiceInputSessions) {
         self.sessions = sessions
@@ -35,18 +36,26 @@ public final class VoiceInputTriggerDispatcher: @unchecked Sendable {
     }
 
     public func send(_ trigger: GlobalVoiceTrigger) {
-        let sequence = sequenceLock.withLock {
+        send(trigger, at: DispatchTime.now().uptimeNanoseconds)
+    }
+
+    package func send(_ trigger: GlobalVoiceTrigger, at uptimeNanoseconds: UInt64) {
+        let events = sequenceLock.withLock {
             nextSequence &+= 1
-            return nextSequence
+            let sequence = nextSequence
+            return gesture.handle(trigger, at: uptimeNanoseconds).map {
+                SequencedTrigger(trigger: $0, sequence: sequence)
+            }
         }
-        let event = SequencedTrigger(trigger: trigger, sequence: sequence)
-        if trigger == .cancel {
-            // A provider request can keep the ordered consumer inside `.released`.
-            // Preempt it immediately. The sequence fence prevents a delayed
-            // task from cancelling a session begun by a later press.
-            Task { await sessions.cancel(triggeredAtSequence: sequence) }
+        for event in events {
+            if event.trigger == .cancel {
+                // A provider request can keep the ordered consumer inside `.released`.
+                // Preempt it immediately. The sequence fence prevents a delayed
+                // task from cancelling a session begun by a later press.
+                Task { await sessions.cancel(triggeredAtSequence: event.sequence) }
+            }
+            continuation.yield(event)
         }
-        continuation.yield(event)
     }
 
     public func finish() {
@@ -63,5 +72,67 @@ public final class VoiceInputTriggerDispatcher: @unchecked Sendable {
     deinit {
         continuation.finish()
         consumer.cancel()
+    }
+}
+
+package struct VoiceShortcutGestureStateMachine: Sendable {
+    private enum State: Sendable {
+        case idle
+        case held(startedAt: UInt64)
+        case latched
+        case stoppingAwaitingRelease
+    }
+
+    package static let defaultLongPressNanoseconds: UInt64 = 300_000_000
+
+    private let longPressNanoseconds: UInt64
+    private var state: State = .idle
+
+    package init(
+        longPressNanoseconds: UInt64 = Self.defaultLongPressNanoseconds
+    ) {
+        self.longPressNanoseconds = longPressNanoseconds
+    }
+
+    package mutating func handle(
+        _ trigger: GlobalVoiceTrigger,
+        at uptimeNanoseconds: UInt64
+    ) -> [GlobalVoiceTrigger] {
+        switch trigger {
+        case .pressed:
+            switch state {
+            case .idle:
+                state = .held(startedAt: uptimeNanoseconds)
+                return [.pressed]
+            case .latched:
+                state = .stoppingAwaitingRelease
+                return [.released]
+            case .held, .stoppingAwaitingRelease:
+                return []
+            }
+        case .released:
+            switch state {
+            case let .held(startedAt):
+                let elapsed = uptimeNanoseconds >= startedAt
+                    ? uptimeNanoseconds - startedAt
+                    : 0
+                if elapsed >= longPressNanoseconds {
+                    state = .idle
+                    return [.released]
+                }
+                state = .latched
+                return []
+            case .stoppingAwaitingRelease:
+                state = .idle
+                return []
+            case .idle, .latched:
+                return []
+            }
+        case .cancel:
+            state = .idle
+            return [.cancel]
+        case .monitorRecovered:
+            return [.monitorRecovered]
+        }
     }
 }

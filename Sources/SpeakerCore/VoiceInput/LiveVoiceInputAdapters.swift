@@ -179,12 +179,11 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         let peakPower: Float
     }
 
-    private static let chunkSize = 6_400
     private let lock = NSLock()
     private let converter: AVAudioConverter
     private let outputFormat: AVAudioFormat
     private let continuation: AsyncStream<Data>.Continuation
-    private var bufferedPCM = Data()
+    private var chunkBuffer = PCMChunkBuffer(chunkSize: 6_400)
     private var currentPower: Float = -160
     private var peakPower: Float = -160
     private var isFinished = false
@@ -243,11 +242,8 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         let buffers = UnsafeMutableAudioBufferListPointer(output.mutableAudioBufferList)
         for buffer in buffers {
             guard let bytes = buffer.mData, buffer.mDataByteSize > 0 else { continue }
-            bufferedPCM.append(bytes.assumingMemoryBound(to: UInt8.self), count: Int(buffer.mDataByteSize))
-        }
-        while bufferedPCM.count >= Self.chunkSize {
-            chunks.append(bufferedPCM.subdata(in: 0..<Self.chunkSize))
-            bufferedPCM.removeFirst(Self.chunkSize)
+            let converted = Data(bytes: bytes, count: Int(buffer.mDataByteSize))
+            chunks.append(contentsOf: chunkBuffer.append(converted))
         }
         lock.unlock()
 
@@ -263,8 +259,7 @@ private final class PCMStreamingBridge: @unchecked Sendable {
             return
         }
         isFinished = true
-        let remainder = bufferedPCM
-        bufferedPCM.removeAll(keepingCapacity: false)
+        let remainder = chunkBuffer.finish()
         lock.unlock()
 
         if !remainder.isEmpty {
@@ -302,6 +297,30 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         }
         guard maximum > 0 else { return -160 }
         return max(-160, 20 * log10f(maximum))
+    }
+}
+
+package struct PCMChunkBuffer: Sendable {
+    private let chunkSize: Int
+    private var bufferedPCM = Data()
+
+    package init(chunkSize: Int) {
+        self.chunkSize = chunkSize
+    }
+
+    package mutating func append(_ data: Data) -> [Data] {
+        bufferedPCM.append(data)
+        var chunks: [Data] = []
+        while bufferedPCM.count >= chunkSize {
+            chunks.append(Data(bufferedPCM.prefix(chunkSize)))
+            bufferedPCM.removeFirst(chunkSize)
+        }
+        return chunks
+    }
+
+    package mutating func finish() -> Data {
+        defer { bufferedPCM.removeAll(keepingCapacity: false) }
+        return Data(bufferedPCM)
     }
 }
 

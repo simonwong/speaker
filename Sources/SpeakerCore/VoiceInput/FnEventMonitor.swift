@@ -121,8 +121,7 @@ private final class FnEventTapBox: @unchecked Sendable {
                 }
             }
         case .keyDown:
-            if fnIsDown, didEmitPress,
-               event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+            if event.getIntegerValueField(.keyboardEventKeycode) == 53 {
                 didEmitPress = false
                 stopSecureInputMonitoring()
                 handler(.cancel)
