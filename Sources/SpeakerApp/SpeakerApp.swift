@@ -72,6 +72,7 @@ private final class SpeakerRuntime: ObservableObject {
     private let settingsStore: VersionedLocalAppSettingsStore
     private let panel: VoiceInputPanelController
     private var started = false
+    private var permissionRefreshCancellable: AnyCancellable?
 
     init() {
         permissions = PermissionModel(access: SystemPermissionAccess())
@@ -137,7 +138,18 @@ private final class SpeakerRuntime: ObservableObject {
         guard !started else { return }
         started = true
         permissions.refresh()
+        permissionRefreshCancellable = NotificationCenter.default
+            .publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.permissions.refresh()
+                }
+            }
         sessions.startObserving()
+        Task {
+            await permissions.requestMicrophoneIfNeeded()
+            await permissions.requestAccessibilityIfNeeded()
+        }
         panel.start()
         SpeakerTerminationCoordinator.shared.handler = { [weak self] in
             guard let self else { return }

@@ -51,6 +51,7 @@
 
 ## 当前构建证据
 
-- `./scripts/test`：`PASS: 46 core specs`。
+- `./scripts/test`：`PASS: 49 core specs`。
 - `./scripts/build`：Debug `SpeakerApp` 构建通过。
-- `./scripts/release`：Release App bundle 组装、ad-hoc 签名与本机进程启动通过（最终候选 PID 49740）；`codesign --verify --deep --strict` 与 `plutil -lint` 通过。真实 UI smoke 仍受当前锁屏状态限制。
+- `./scripts/release`：Release App bundle 组装、ad-hoc 签名、安装到唯一的 `/Applications/Speaker.app` 路径与本机进程启动通过；`codesign --verify --deep --strict` 与 `plutil -lint` 通过。ad-hoc 身份按构建版本隔离，更新代码后按需重新授权。
+- 权限 smoke：麦克风已在系统列表中登记并开启；辅助功能旧 CDHash 条目已重置，当前安装版已重新出现在系统列表，等待用户开启安全开关。

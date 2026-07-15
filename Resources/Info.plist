@@ -10,6 +10,8 @@
     <string>com.local.speaker</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleName</key>
     <string>Speaker</string>
     <key>CFBundlePackageType</key>
@@ -26,4 +28,3 @@
     <string>Speaker 需要在按住快捷键时录制语音并将其转换为文字。</string>
 </dict>
 </plist>
-

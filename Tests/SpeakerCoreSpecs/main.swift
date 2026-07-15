@@ -57,6 +57,45 @@ struct SpeakerCoreSpecs {
             ))
         }
 
+        await runAsync("first launch requests an undetermined microphone once", failures: &failures) {
+            let access = PermissionAccessStub(
+                snapshot: .init(accessibility: .denied, microphone: .notDetermined)
+            )
+            access.requestResults[.microphone] = .init(
+                accessibility: .denied,
+                microphone: .granted
+            )
+            let model = PermissionModel(access: access)
+
+            await model.requestMicrophoneIfNeeded()
+            await model.requestMicrophoneIfNeeded()
+
+            try expect(access.requestedPermissions == [.microphone])
+            try expect(model.snapshot.microphone == .granted)
+        }
+
+        await runAsync("first launch does not reprompt a denied microphone", failures: &failures) {
+            let access = PermissionAccessStub(
+                snapshot: .init(accessibility: .denied, microphone: .denied)
+            )
+            let model = PermissionModel(access: access)
+
+            await model.requestMicrophoneIfNeeded()
+
+            try expect(access.requestedPermissions.isEmpty)
+        }
+
+        await runAsync("first launch requests missing accessibility for the active bundle", failures: &failures) {
+            let access = PermissionAccessStub(
+                snapshot: .init(accessibility: .denied, microphone: .granted)
+            )
+            let model = PermissionModel(access: access)
+
+            await model.requestAccessibilityIfNeeded()
+
+            try expect(access.requestedPermissions == [.accessibility])
+        }
+
         await runAsync("hold and release delivers deterministic transcript", failures: &failures) {
             let audio = AudioCaptureFake()
             let targets = TargetCaptureFake(
@@ -1242,7 +1281,7 @@ struct SpeakerCoreSpecs {
             Darwin.exit(1)
         }
 
-        print("PASS: 46 core specs")
+        print("PASS: 49 core specs")
     }
 }
 

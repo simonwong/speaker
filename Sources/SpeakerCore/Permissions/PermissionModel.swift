@@ -62,5 +62,14 @@ public final class PermissionModel: ObservableObject {
     public func request(_ permission: PermissionKind) async {
         snapshot = await access.request(permission)
     }
-}
 
+    public func requestMicrophoneIfNeeded() async {
+        guard snapshot.microphone == .notDetermined else { return }
+        await request(.microphone)
+    }
+
+    public func requestAccessibilityIfNeeded() async {
+        guard snapshot.accessibility == .denied else { return }
+        await request(.accessibility)
+    }
+}
