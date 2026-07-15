@@ -1,0 +1,18 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+ROOT="${0:A:h:h}"
+DEFAULT_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk"
+SDK="${SPEAKER_SDKROOT:-$DEFAULT_SDK}"
+CACHE_ROOT="${SPEAKER_CACHE_ROOT:-/tmp/speaker-swift-cache}"
+
+mkdir -p "$CACHE_ROOT/swiftpm" "$CACHE_ROOT/clang"
+
+export SDKROOT="$SDK"
+export SWIFTPM_MODULECACHE_OVERRIDE="$CACHE_ROOT/swiftpm"
+export CLANG_MODULE_CACHE_PATH="$CACHE_ROOT/clang"
+
+cd "$ROOT"
+exec swift "$@"
+
