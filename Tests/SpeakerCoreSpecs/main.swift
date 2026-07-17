@@ -2181,6 +2181,7 @@ struct SpeakerCoreSpecs {
             let currentStream = await sessions.observe()
             var currentIterator = currentStream.makeAsyncIterator()
             let currentPresentation = await currentIterator.next()
+            let cancellationCount = await delivery.cancellationCount
 
             try expect(
                 cancelledPresentation?.activity.isCancelled == true,
@@ -2194,6 +2195,10 @@ struct SpeakerCoreSpecs {
             try expect(
                 record?.outcome.isDelivered == true,
                 "history did not retain the truthful committed delivery outcome"
+            )
+            try expect(
+                cancellationCount == 0,
+                "Esc cancelled receipt verification after delivery committed"
             )
         }
 
@@ -6403,6 +6408,7 @@ private actor DelayedCommitDeliveryFake: TextDelivering {
 private actor BlockingDeliveryFake: TextDelivering {
     let commitsBeforeBlocking: Bool
     private(set) var isBlocking = false
+    private(set) var cancellationCount = 0
     private var continuation: CheckedContinuation<DeliveryOutcome, Never>?
 
     init(commitsBeforeBlocking: Bool) {
@@ -6420,14 +6426,23 @@ private actor BlockingDeliveryFake: TextDelivering {
             }
         }
         isBlocking = true
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
+        let outcome = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+            }
+        } onCancel: {
+            Task { await self.markCancelled() }
         }
+        return Task.isCancelled ? .pendingCopy(.deliveryFailed) : outcome
     }
 
     func finish(with outcome: DeliveryOutcome) {
         continuation?.resume(returning: outcome)
         continuation = nil
+    }
+
+    private func markCancelled() {
+        cancellationCount += 1
     }
 }
 

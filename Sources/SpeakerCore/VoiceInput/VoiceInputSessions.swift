@@ -1172,7 +1172,6 @@ public actor VoiceInputSessions {
                 suppressedTerminalPresentationSessionID = id
                 finishActiveTriggerSequence()
                 publish(.cancelled(id))
-                deliveryTask?.cancel()
                 return
             }
         }
