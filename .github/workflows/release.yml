@@ -62,8 +62,11 @@ jobs:
             -c 'Print :Version' Resources/ReleaseCandidate.plist)"
           BUILD_NUMBER="$(/usr/libexec/PlistBuddy \
             -c 'Print :BuildNumber' Resources/ReleaseCandidate.plist)"
+          BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy \
+            -c 'Print :BundleIdentifier' Resources/ReleaseIdentity.plist)"
           [[ "$VERSION" != REPLACE_WITH_* ]]
           [[ "$BUILD_NUMBER" != REPLACE_WITH_* ]]
+          [[ "$BUNDLE_IDENTIFIER" != REPLACE_WITH_* ]]
           case "$RELEASE_NOTES_INPUT" in
             ""|/*|*..*|*[^A-Za-z0-9._/-]*)
               print -u2 "Release notes path is unsafe."
@@ -82,6 +85,9 @@ jobs:
           echo "SPEAKER_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "SPEAKER_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           echo "SPEAKER_RELEASE_NOTES_FILE=$RELEASE_NOTES_INPUT" >> "$GITHUB_ENV"
+          echo "SPEAKER_RELEASE_SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SPEAKER_PACKAGE_RESOLVED_SHA256=$(shasum -a 256 Package.resolved | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "SPEAKER_KEYCHAIN_SERVICE=$BUNDLE_IDENTIFIER.provider-api-keys" >> "$GITHUB_ENV"
 
       - name: Run complete deterministic gate
         run: ./scripts/test
@@ -98,6 +104,8 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.SPEAKER_NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.SPEAKER_NOTARY_ISSUER_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPEAKER_SPARKLE_PRIVATE_KEY }}
+          DOUBAO_API_KEY: ${{ secrets.SPEAKER_DOUBAO_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.SPEAKER_DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           for required in \
@@ -106,7 +114,9 @@ jobs:
             NOTARY_API_KEY_P8_BASE64 \
             NOTARY_KEY_ID \
             NOTARY_ISSUER_ID \
-            SPARKLE_PRIVATE_KEY
+            SPARKLE_PRIVATE_KEY \
+            DOUBAO_API_KEY \
+            DEEPSEEK_API_KEY
           do
             [[ -n "${(P)required}" ]] || {
               print -u2 "Missing production secret: $required"
@@ -179,6 +189,68 @@ jobs:
             --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
             -p)"
           [[ "$ACTUAL_PUBLIC_KEY" == "$REVIEWED_PUBLIC_KEY" ]]
+
+          security add-generic-password \
+            -A \
+            -a doubao \
+            -s "$SPEAKER_KEYCHAIN_SERVICE" \
+            -w "$DOUBAO_API_KEY" \
+            "$KEYCHAIN_PATH"
+          security add-generic-password \
+            -A \
+            -a deepseek \
+            -s "$SPEAKER_KEYCHAIN_SERVICE" \
+            -w "$DEEPSEEK_API_KEY" \
+            "$KEYCHAIN_PATH"
+
+      - name: Run fresh production provider matrix
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIRECTORY="$RUNNER_TEMP/speaker-provider-evidence"
+          SAMPLE_TEXT="$RUNNER_TEMP/speaker-provider-sample.txt"
+          SAMPLE_AIFF="$RUNNER_TEMP/speaker-provider-sample.aiff"
+          SAMPLE_WAV="$RUNNER_TEMP/speaker-provider-sample.wav"
+          [[ ! -e "$EVIDENCE_DIRECTORY" ]]
+          for _ in {1..120}; do
+            print -r -- \
+              "Speaker verifies this non-sensitive release sample before distribution."
+          done > "$SAMPLE_TEXT"
+          say -f "$SAMPLE_TEXT" -o "$SAMPLE_AIFF"
+          afconvert \
+            -f WAVE \
+            -d LEI16@16000 \
+            -c 1 \
+            "$SAMPLE_AIFF" \
+            "$SAMPLE_WAV"
+          [[ "$(stat -f %z "$SAMPLE_WAV")" -ge 1920000 ]] || {
+            print -u2 "Provider sample is shorter than 60 seconds."
+            exit 1
+          }
+
+          PROVIDER_EVIDENCE_NOT_BEFORE="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ./scripts/provider-smoke matrix \
+            --confirm-paid-requests \
+            --evidence-directory "$EVIDENCE_DIRECTORY" \
+            --candidate-version "$SPEAKER_VERSION" \
+            --candidate-build "$SPEAKER_BUILD_NUMBER" \
+            --doubao-sample "$SAMPLE_WAV" \
+            --keychain-service "$SPEAKER_KEYCHAIN_SERVICE"
+          PROVIDER_EVIDENCE_FILE="$EVIDENCE_DIRECTORY/speaker-provider-matrix.json"
+          PROVIDER_EVIDENCE_NOT_AFTER="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ./scripts/verify-provider-evidence \
+            --expected-source-commit "$SPEAKER_RELEASE_SOURCE_COMMIT" \
+            --expected-package-resolved-sha256 "$SPEAKER_PACKAGE_RESOLVED_SHA256" \
+            --expected-version "$SPEAKER_VERSION" \
+            --expected-build "$SPEAKER_BUILD_NUMBER" \
+            --generated-not-before "$PROVIDER_EVIDENCE_NOT_BEFORE" \
+            --generated-not-after "$PROVIDER_EVIDENCE_NOT_AFTER" \
+            "$PROVIDER_EVIDENCE_FILE"
+          echo "SPEAKER_PROVIDER_EVIDENCE_FILE=$PROVIDER_EVIDENCE_FILE" \
+            >> "$GITHUB_ENV"
+          echo "SPEAKER_PROVIDER_EVIDENCE_NOT_BEFORE=$PROVIDER_EVIDENCE_NOT_BEFORE" \
+            >> "$GITHUB_ENV"
+          rm -f "$SAMPLE_TEXT" "$SAMPLE_AIFF" "$SAMPLE_WAV"
 
       - name: Build, sign, notarize, and verify distribution
         run: ./scripts/distribute

@@ -49,10 +49,11 @@ private func cases(status: EvidenceStatus = .pass) -> [ProviderEvidenceCase] {
 private func evidence(
     sourceTreeClean: Bool = true,
     credentialSource: EvidenceCredentialSource = .developmentOwnerOnlyFile,
-    results: [ProviderEvidenceCase] = cases()
+    results: [ProviderEvidenceCase] = cases(),
+    generatedAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
 ) -> ProviderMatrixEvidence {
     ProviderMatrixEvidence(
-        generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+        generatedAt: generatedAt,
         environment: ProviderEvidenceEnvironment(
             sourceCommit: String(repeating: "a", count: 40),
             sourceTreeClean: sourceTreeClean,
@@ -92,6 +93,39 @@ private struct SpeakerProviderEvidenceSpecs {
             requirePassingCases: true,
             requireSignedAppKeychain: true
         )
+        let releaseGeneratedAt = Date(timeIntervalSince1970: 1_700_000_100)
+        let releaseEvidence = evidence(
+            credentialSource: .signedAppKeychain,
+            generatedAt: releaseGeneratedAt
+        )
+        try releaseEvidence.validateReleaseBinding(
+            sourceCommit: String(repeating: "a", count: 40),
+            packageResolvedSHA256: String(repeating: "b", count: 64),
+            candidateVersion: "1.2.3",
+            candidateBuild: "42",
+            generatedNotBefore: releaseGeneratedAt.addingTimeInterval(-1),
+            generatedNotAfter: releaseGeneratedAt.addingTimeInterval(1)
+        )
+        try expectThrows("stale release evidence passed") {
+            try releaseEvidence.validateReleaseBinding(
+                sourceCommit: String(repeating: "a", count: 40),
+                packageResolvedSHA256: String(repeating: "b", count: 64),
+                candidateVersion: "1.2.3",
+                candidateBuild: "42",
+                generatedNotBefore: releaseGeneratedAt.addingTimeInterval(1),
+                generatedNotAfter: releaseGeneratedAt.addingTimeInterval(2)
+            )
+        }
+        try expectThrows("evidence for another commit passed") {
+            try releaseEvidence.validateReleaseBinding(
+                sourceCommit: String(repeating: "c", count: 40),
+                packageResolvedSHA256: String(repeating: "b", count: 64),
+                candidateVersion: "1.2.3",
+                candidateBuild: "42",
+                generatedNotBefore: releaseGeneratedAt.addingTimeInterval(-1),
+                generatedNotAfter: releaseGeneratedAt.addingTimeInterval(1)
+            )
+        }
         try expectThrows("dirty source tree passed") {
             try evidence(sourceTreeClean: false).validate(
                 requirePassingCases: true,

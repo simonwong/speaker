@@ -32,7 +32,7 @@ case "$command" in
         ;;
     *)
         print -u2 "Usage: ./scripts/provider-smoke [doubao|deepseek|all]"
-        print -u2 "       ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav]"
+        print -u2 "       ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav] [--keychain-service reviewed.bundle.id.provider-api-keys]"
         exit 64
         ;;
 esac

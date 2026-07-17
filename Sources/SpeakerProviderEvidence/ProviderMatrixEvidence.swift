@@ -258,6 +258,28 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
         }
     }
 
+    public func validateReleaseBinding(
+        sourceCommit: String,
+        packageResolvedSHA256: String,
+        candidateVersion: String,
+        candidateBuild: String,
+        generatedNotBefore: Date,
+        generatedNotAfter: Date
+    ) throws {
+        try validate(requirePassingCases: true, requireSignedAppKeychain: true)
+        guard generatedNotAfter >= generatedNotBefore,
+              generatedNotAfter.timeIntervalSince(generatedNotBefore) <= 4 * 60 * 60,
+              generatedAt >= generatedNotBefore,
+              generatedAt <= generatedNotAfter,
+              environment.sourceCommit == sourceCommit,
+              environment.packageResolvedSHA256 == packageResolvedSHA256,
+              environment.candidateVersion == candidateVersion,
+              environment.candidateBuild == candidateBuild
+        else {
+            throw ProviderEvidenceError.invalidSchema("releaseBinding")
+        }
+    }
+
     public func encoded() throws -> Data {
         try validate(requirePassingCases: false, requireSignedAppKeychain: false)
         let encoder = JSONEncoder()

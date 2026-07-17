@@ -28,6 +28,7 @@ private struct MatrixOptions {
     let evidenceDirectoryURL: URL
     let candidateVersion: String
     let candidateBuild: String
+    let keychainService: String?
 }
 
 private struct EvidenceContext {
@@ -158,7 +159,7 @@ private struct SpeakerProviderSmoke {
             exit(64)
         }
 
-        let credentials = LocalFileProviderCredentialStore()
+        let developmentCredentials = LocalFileProviderCredentialStore()
         let results: [SmokeResult]
         var evidenceURL: URL?
         switch command {
@@ -167,16 +168,32 @@ private struct SpeakerProviderSmoke {
             for provider in providers {
                 switch provider {
                 case .doubao:
-                    checks.append(await checkDoubaoConnection(credentials: credentials))
+                    checks.append(await checkDoubaoConnection(
+                        credentials: developmentCredentials
+                    ))
                 case .deepSeek:
-                    checks.append(await checkDeepSeekConnection(credentials: credentials))
+                    checks.append(await checkDeepSeekConnection(
+                        credentials: developmentCredentials
+                    ))
                 }
             }
             results = checks
         case let .matrix(options):
+            let credentialSource: EvidenceCredentialSource
+            let credentials: any ProviderCredentialStoring
+            if let keychainService = options.keychainService {
+                credentialSource = .signedAppKeychain
+                credentials = KeychainProviderCredentialStore(service: keychainService)
+            } else {
+                credentialSource = .developmentOwnerOnlyFile
+                credentials = developmentCredentials
+            }
             let context: EvidenceContext
             do {
-                context = try await makeEvidenceContext(options: options)
+                context = try await makeEvidenceContext(
+                    options: options,
+                    credentialSource: credentialSource
+                )
             } catch {
                 printFixedError("Unable to establish the evidence environment.")
                 exit(65)
@@ -229,6 +246,7 @@ private struct SpeakerProviderSmoke {
             var evidenceDirectoryURL: URL?
             var candidateVersion: String?
             var candidateBuild: String?
+            var keychainService: String?
             var confirmedPaidRequests = false
             while !arguments.isEmpty {
                 switch arguments[0] {
@@ -251,6 +269,10 @@ private struct SpeakerProviderSmoke {
                     guard arguments.count >= 2 else { return nil }
                     candidateBuild = arguments[1]
                     arguments.removeFirst(2)
+                case "--keychain-service" where keychainService == nil:
+                    guard arguments.count >= 2 else { return nil }
+                    keychainService = arguments[1]
+                    arguments.removeFirst(2)
                 default:
                     return nil
                 }
@@ -258,13 +280,17 @@ private struct SpeakerProviderSmoke {
             guard confirmedPaidRequests,
                   let evidenceDirectoryURL,
                   let candidateVersion,
-                  let candidateBuild
+                  let candidateBuild,
+                  keychainService == nil
+                    || (ProviderMatrixEvidence.safeToken(keychainService) == keychainService
+                        && keychainService?.hasSuffix(".provider-api-keys") == true)
             else { return nil }
             return .matrix(MatrixOptions(
                 doubaoSampleURL: sampleURL,
                 evidenceDirectoryURL: evidenceDirectoryURL,
                 candidateVersion: candidateVersion,
-                candidateBuild: candidateBuild
+                candidateBuild: candidateBuild,
+                keychainService: keychainService
             ))
         }
         guard arguments.count <= 1 else { return nil }
@@ -280,13 +306,13 @@ private struct SpeakerProviderSmoke {
         let usage = """
         Usage:
           ./scripts/provider-smoke [doubao|deepseek|all]
-          ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav]
+          ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav] [--keychain-service reviewed.bundle.id.provider-api-keys]
         """
         FileHandle.standardError.write(Data("\(usage)\n".utf8))
     }
 
     private static func runMatrix(
-        credentials: LocalFileProviderCredentialStore,
+        credentials: any ProviderCredentialStoring,
         doubaoSampleURL: URL?,
         doubaoResource: DoubaoStreamingResource
     ) async -> [SmokeResult] {
@@ -311,7 +337,7 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func checkDoubaoConnection(
-        credentials: LocalFileProviderCredentialStore,
+        credentials: any ProviderCredentialStoring,
         resource: DoubaoStreamingResource? = nil
     ) async -> SmokeResult {
         do {
@@ -337,7 +363,7 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func checkDoubaoAudioMatrix(
-        credentials: LocalFileProviderCredentialStore,
+        credentials: any ProviderCredentialStoring,
         sampleURL: URL?,
         resource: DoubaoStreamingResource
     ) async -> [SmokeResult] {
@@ -444,7 +470,7 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func checkDeepSeekConnection(
-        credentials: LocalFileProviderCredentialStore
+        credentials: any ProviderCredentialStoring
     ) async -> SmokeResult {
         do {
             guard try await credentials.apiKey(for: .deepSeek) != nil else {
@@ -462,7 +488,7 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func checkDeepSeekModes(
-        credentials: LocalFileProviderCredentialStore
+        credentials: any ProviderCredentialStoring
     ) async -> [SmokeResult] {
         guard (try? await credentials.apiKey(for: .deepSeek)) != nil else {
             return deepSeekModeCaseIDs.map { result($0, .skip, .notConfigured) }
@@ -517,7 +543,7 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func checkDeepSeekCancellation(
-        credentials: LocalFileProviderCredentialStore
+        credentials: any ProviderCredentialStoring
     ) async -> SmokeResult {
         guard (try? await credentials.apiKey(for: .deepSeek)) != nil else {
             return result(.deepSeekCancelInFlight, .skip, .notConfigured)
@@ -581,7 +607,8 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func makeEvidenceContext(
-        options: MatrixOptions
+        options: MatrixOptions,
+        credentialSource: EvidenceCredentialSource
     ) async throws -> EvidenceContext {
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let commit = try gitOutput(["rev-parse", "--verify", "HEAD^{commit}"], root: root)
@@ -622,13 +649,13 @@ private struct SpeakerProviderSmoke {
         let providers = [
             ProviderEvidenceConfiguration(
                 provider: .doubao,
-                credentialSource: .developmentOwnerOnlyFile,
+                credentialSource: credentialSource,
                 resource: resource.rawValue,
                 model: "bigmodel"
             ),
             ProviderEvidenceConfiguration(
                 provider: .deepSeek,
-                credentialSource: .developmentOwnerOnlyFile,
+                credentialSource: credentialSource,
                 resource: nil,
                 model: "deepseek-v4-flash"
             ),

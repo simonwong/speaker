@@ -11,6 +11,8 @@ connection_output="$(/bin/zsh "$SCRIPT_DIR/provider-smoke" doubao unexpected 2>&
 connection_status=$?
 missing_evidence_output="$(/bin/zsh "$SCRIPT_DIR/provider-smoke" matrix --confirm-paid-requests 2>&1)"
 missing_evidence_status=$?
+unsafe_keychain_output="$(/bin/zsh "$SCRIPT_DIR/provider-smoke" matrix --confirm-paid-requests --evidence-directory /private/tmp/new-evidence --candidate-version 1.2.3 --candidate-build 42 --keychain-service unsafe 2>&1)"
+unsafe_keychain_status=$?
 set -e
 
 [[ "$matrix_status" == "64" ]] || {
@@ -35,6 +37,14 @@ set -e
 }
 [[ "$missing_evidence_output" == *"fresh owner-only evidence directory"* ]] || {
     print -u2 "Provider matrix did not report its evidence boundary."
+    exit 1
+}
+[[ "$unsafe_keychain_status" == "64" ]] || {
+    print -u2 "Provider matrix accepted an unreviewed Keychain service shape."
+    exit 1
+}
+[[ "$unsafe_keychain_output" == *"keychain-service"* ]] || {
+    print -u2 "Provider matrix did not report its Keychain service boundary."
     exit 1
 }
 

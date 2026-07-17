@@ -229,7 +229,9 @@ DMG_HASH="$(printf 'c%.0s' {1..64})"
 APPCAST_HASH="$(printf 'd%.0s' {1..64})"
 SDK_SETTINGS_HASH="$(printf 'e%.0s' {1..64})"
 EVIDENCE_MANIFEST="$EVIDENCE_FIXTURE_DIR/ReleaseManifest.plist"
+PROVIDER_EVIDENCE_HASH="$(printf 'f%.0s' {1..64})"
 plutil -create xml1 "$EVIDENCE_MANIFEST"
+plutil -insert SchemaVersion -integer 2 "$EVIDENCE_MANIFEST"
 for pair in \
     'Version|1.2.3' \
     'BuildNumber|42' \
@@ -243,6 +245,7 @@ for pair in \
     "SourceCommit|$SOURCE_COMMIT" \
     "PackageResolvedSHA256|$PACKAGE_HASH" \
     "ReleaseNotesSHA256|$(printf 'd%.0s' {1..64})" \
+    "ProviderEvidenceSHA256|$PROVIDER_EVIDENCE_HASH" \
     'SDKCanonicalName|macosx26.0' \
     "SDKSettingsSHA256|$SDK_SETTINGS_HASH"; do
     plutil -insert "${pair%%|*}" -string "${pair#*|}" \
@@ -277,6 +280,14 @@ print -r -- 'macosx26.0' \
     > "$EVIDENCE_FIXTURE_DIR/sdk-version.txt"
 print -r -- "$SDK_SETTINGS_HASH" \
     > "$EVIDENCE_FIXTURE_DIR/sdk-settings-sha256.txt"
+print -rn -- provider-matrix-fixture \
+    > "$EVIDENCE_FIXTURE_DIR/provider-matrix.json"
+PROVIDER_EVIDENCE_HASH="$(
+    shasum -a 256 "$EVIDENCE_FIXTURE_DIR/provider-matrix.json" | awk '{print $1}'
+)"
+plutil -replace ProviderEvidenceSHA256 \
+    -string "$PROVIDER_EVIDENCE_HASH" \
+    "$EVIDENCE_MANIFEST"
 ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
@@ -289,6 +300,28 @@ validate_release_evidence_archive \
     "$DMG_SUBMISSION_HASH" \
     "$APP_SUBMISSION_ID" \
     "$DMG_SUBMISSION_ID"
+print -rn -- tampered-provider-matrix \
+    > "$EVIDENCE_FIXTURE_DIR/provider-matrix.json"
+rm -f "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+if validate_release_evidence_archive \
+    "$EVIDENCE_FIXTURE_ZIP" \
+    "1.2.3" \
+    "42" \
+    "Speaker-1.2.3-42.dmg" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" 2>/dev/null; then
+    print -u2 "Tampered provider evidence was accepted."
+    exit 1
+fi
+print -rn -- provider-matrix-fixture \
+    > "$EVIDENCE_FIXTURE_DIR/provider-matrix.json"
+rm -f "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 if validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.4" \

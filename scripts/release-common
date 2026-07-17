@@ -1646,6 +1646,7 @@ validate_release_evidence_archive() {
         sdk-path.txt
         sdk-version.txt
         sdk-settings-sha256.txt
+        provider-matrix.json
     )
 
     if [[ ! -f "$archive" || -L "$archive" ]] \
@@ -1693,7 +1694,8 @@ validate_release_evidence_archive() {
         macos-version.txt \
         sdk-path.txt \
         sdk-version.txt \
-        sdk-settings-sha256.txt; do
+        sdk-settings-sha256.txt \
+        provider-matrix.json; do
         unzip -p "$archive" "$required" > "$extracted/$required" || {
             rm -rf "$extracted"
             return 1
@@ -1740,6 +1742,7 @@ validate_release_evidence_archive() {
         fi
     fi
     local -a manifest_values=(
+        "SchemaVersion|2"
         "Version|$expected_version"
         "BuildNumber|$expected_build"
         "DMGBasename|$expected_dmg_basename"
@@ -1766,6 +1769,20 @@ validate_release_evidence_archive() {
             return 1
         fi
     done
+    actual="$(shasum -a 256 "$extracted/provider-matrix.json" | awk '{print $1}')" \
+        || {
+            rm -rf "$extracted"
+            return 1
+        }
+    if [[ "$actual" != "$(
+        /usr/libexec/PlistBuddy \
+            -c 'Print :ProviderEvidenceSHA256' \
+            "$extracted/ReleaseManifest.plist" 2>/dev/null
+    )" ]] || ! matches_release_pattern "$actual" '^[0-9a-f]{64}$'; then
+        rm -rf "$extracted"
+        release_error "Provider evidence hash does not match the release manifest."
+        return 1
+    fi
     for key in SourceCommit PackageResolvedSHA256 ReleaseNotesSHA256; do
         actual="$(
             /usr/libexec/PlistBuddy \

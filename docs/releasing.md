@@ -100,11 +100,16 @@ SPEAKER_NOTARY_API_KEY_P8_BASE64
 SPEAKER_NOTARY_KEY_ID
 SPEAKER_NOTARY_ISSUER_ID
 SPEAKER_SPARKLE_PRIVATE_KEY
+SPEAKER_DOUBAO_API_KEY
+SPEAKER_DEEPSEEK_API_KEY
 ```
 
 P12 与 App Store Connect API `.p8` 以完整文件的 base64 保存；Sparkle secret
-保存 `generate_keys -x` 导出的文件内容。Workflow 在临时 Keychain 中导入三类
-凭据，先验证 Developer ID 唯一性、公证 API Key 和 Sparkle 公私钥绑定，再执行
+保存 `generate_keys -x` 导出的文件内容。Workflow 在临时 Keychain 中导入签名、
+公证、Sparkle 和两家 provider 凭据，先验证 Developer ID 唯一性、公证 API Key
+和 Sparkle 公私钥绑定，再用固定非敏感 TTS 样本执行完整 provider matrix。Matrix
+必须在本次 run 内生成，并与当前 commit、`Package.resolved` hash、version、build
+及四小时内的执行时间窗完全一致；任何 FAIL/SKIP 或开发文件凭据都会阻止
 `scripts/distribute`。任务结束后删除临时 Keychain 和 secret files。它只把 DMG、
 checksum、appcast 与 evidence archive 留作 90 天的受保护 artifact，不会自行上传
 更新站点或创建 Git tag；完成外部发布后仍须执行下文的公开地址回读门禁。
@@ -120,13 +125,13 @@ checksum、appcast 与 evidence archive 留作 90 天的受保护 artifact，不
 
 `scripts/distribute` 会按以下顺序 fail closed：
 
-1. 读取受审查的 release identity 与 release candidate，拒绝占位值和环境覆盖；要求候选 build 严格大于仓库记录的上次公开 build，并验证 SemVer、正式 Bundle ID、Team ID 和签名 identity。Release notes 必须是当前干净 Git tree 内已提交的文件，外部临时文件和未跟踪文件会被拒绝。
+1. 读取受审查的 release identity 与 release candidate，拒绝占位值和环境覆盖；要求候选 build 严格大于仓库记录的上次公开 build，并验证 SemVer、正式 Bundle ID、Team ID 和签名 identity。Release notes 必须是当前干净 Git tree 内已提交的文件，外部临时文件和未跟踪文件会被拒绝。Provider matrix 必须来自本次 release run 的正式 Keychain，且精确绑定 commit、依赖锁 hash、version、build 与生成时间窗；旧报告、开发凭据、FAIL 或 SKIP 均 fail closed。
 2. 要求源码树和所有 SwiftPM dependency checkout 无本地修改；把固定的 `HEAD` commit 导出到 owner-only、只读的 source snapshot，后续 bundle、entitlements 和 release notes 全部从该快照读取。在本次发布专属的 pending SwiftPM scratch 中仅按快照里的 `Package.resolved` 解析公开依赖，不读取 Keychain/netrc，再分别构建 arm64/x86_64 并合成为 universal2 Release App。App 内会写入受代码签名保护的 `BuildManifest.plist`，精确记录 source commit、`Package.resolved` SHA-256 和 release-notes SHA-256。正式 App 不会覆盖开发用 `.build/Speaker.app`；随后要求 Developer ID Application、正确 Team/Identifier、Hardened Runtime、timestamp、受限 RPATH 和完全一致的 entitlements。
 3. 删除非沙箱 App 不使用的 Sparkle XPC services，按 helper → framework → App 的顺序签名，并逐一验证 Team、Developer ID、Hardened Runtime、timestamp、RPATH 和私有 framework 路径。
 4. 为最终可执行文件生成并核对 dSYM UUID；通过 pending ZIP 公证并 staple 内层 App，再生成 APFS+lzfse DMG，公证并 staple DMG。两次 `notarytool` 的 Accepted submission JSON 与 Apple log 都会按 submission ID、提交前 SHA-256 和 archive filename 交叉验证并留存，避免混入另一次已通过的公证记录。
 5. 只读挂载最终 DMG，复验其中 App 的版本、签名、公证票据、Gatekeeper 与 Sparkle 布局。
 6. 只从 SwiftPM 固定 artifact 的 canonical 路径加载 universal、code-integrity 完整且无 symlink 的 Sparkle 工具；确认 Keychain 私钥对应受审查公钥，使用 `generate_appcast` 生成 archive EdDSA、嵌入 release notes 和 signed feed，再用 `sign_update --verify` 复验 DMG 与 appcast。
-7. 生成 release evidence archive，包含受签名 BuildManifest、DMG/appcast hash、两次公证 submission/log、dSYM、Swift/macOS 版本，以及实际编译 SDK 的 canonical name、路径和 `SDKSettings.plist` hash。Evidence 采用 exact allowlist，拒绝额外/空条目，重新验证 manifest、notary JSON/log、嵌套 dSYM ZIP，并从最终 ZIP 解出 dSYM 与发布 executable 再核 UUID；随后生成独立 SHA-256。DMG、两个 checksum、evidence archive 与 `appcast.xml` 由同一 promotion journal 原子晋升。
+7. 生成 release evidence archive，包含受签名 BuildManifest、已绑定的 provider matrix 及其 hash、DMG/appcast hash、两次公证 submission/log、dSYM、Swift/macOS 版本，以及实际编译 SDK 的 canonical name、路径和 `SDKSettings.plist` hash。Evidence 采用 exact allowlist，拒绝额外/空条目，重新验证 manifest、provider report hash、notary JSON/log、嵌套 dSYM ZIP，并从最终 ZIP 解出 dSYM 与发布 executable 再核 UUID；随后生成独立 SHA-256。DMG、两个 checksum、evidence archive 与 `appcast.xml` 由同一 promotion journal 原子晋升。
 
 整个正式流程由当前 shell 的文件描述符持有 macOS `lockf` 单一发布锁，不信任可伪造的环境标记；每次正式 build 使用独立 scratch，两个发布也不能并发晋升 feed，进程崩溃后内核会自动释放锁。晋升前会把制品名、DMG/checksum/新旧 appcast 的 SHA-256 和 `prepared` 状态持久写入 promotion journal；DMG、校验和与 appcast 全部落位并同步后才持久切换为 `committed`。普通失败或可处理信号会立即按 journal 恢复；若遭遇 `SIGKILL` 或断电，下一次拿到锁时会先清理带 owner-only Speaker marker 的遗留 pending（包括尝试卸载其固定 mountpoint），再恢复 `prepared` 状态，或校验并完成 `committed` 状态的清理。恢复对象 hash 不符、旧 feed 损坏、未知 pending 或 journal 被篡改时 fail closed 并保留证据，不会删除外来同名制品或猜测成功。任一步失败都会清理可证明属于本事务的 pending 制品；不会退回 ad-hoc 签名，也不会把未验证的 DMG 或 appcast 留在正式制品目录。同一个版本号和构建号的 DMG 或 checksum 一旦存在，脚本会直接拒绝覆盖；任何重发都必须增加 build number。
 

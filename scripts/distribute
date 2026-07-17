@@ -19,6 +19,8 @@ NOTARY_PROFILE="${SPEAKER_NOTARY_PROFILE:-}"
 NOTARY_KEYCHAIN="${SPEAKER_NOTARY_KEYCHAIN:-}"
 SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
 RELEASE_NOTES_FILE="${SPEAKER_RELEASE_NOTES_FILE:-}"
+PROVIDER_EVIDENCE_FILE="${SPEAKER_PROVIDER_EVIDENCE_FILE:-}"
+PROVIDER_EVIDENCE_NOT_BEFORE="${SPEAKER_PROVIDER_EVIDENCE_NOT_BEFORE:-}"
 REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
 REQUESTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
 VERSION="${SPEAKER_VERSION:-}"
@@ -66,6 +68,22 @@ verify_release_source_tree_clean "$ROOT"
 verify_swiftpm_dependency_checkouts_clean "$ROOT"
 verify_release_candidate_history "$ROOT"
 resolve_tracked_release_notes "$ROOT" "$RELEASE_NOTES_FILE"
+if [[ -z "$PROVIDER_EVIDENCE_FILE" || -z "$PROVIDER_EVIDENCE_NOT_BEFORE" ]]; then
+    print -u2 "Fresh provider evidence from this release run is required."
+    exit 1
+fi
+PROVIDER_EVIDENCE_NOT_AFTER="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+PROVIDER_SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify 'HEAD^{commit}')"
+PROVIDER_PACKAGE_HASH="$(shasum -a 256 "$ROOT/Package.resolved" | awk '{print $1}')"
+/bin/zsh "$SCRIPT_DIR/verify-provider-evidence" \
+    --expected-source-commit "$PROVIDER_SOURCE_COMMIT" \
+    --expected-package-resolved-sha256 "$PROVIDER_PACKAGE_HASH" \
+    --expected-version "$VERSION" \
+    --expected-build "$BUILD_NUMBER" \
+    --generated-not-before "$PROVIDER_EVIDENCE_NOT_BEFORE" \
+    --generated-not-after "$PROVIDER_EVIDENCE_NOT_AFTER" \
+    "$PROVIDER_EVIDENCE_FILE"
+PROVIDER_EVIDENCE_HASH="$(shasum -a 256 "$PROVIDER_EVIDENCE_FILE" | awk '{print $1}')"
 
 export SPEAKER_CONFIGURATION=release
 export SPEAKER_BUNDLE_IDENTIFIER="$BUNDLE_IDENTIFIER"
@@ -81,6 +99,10 @@ RELEASE_SCRATCH="$PENDING_DIR/swift-build"
 RELEASE_APP="$PENDING_DIR/Speaker.app"
 RELEASE_SOURCE="$PENDING_DIR/source"
 create_release_source_snapshot "$ROOT" "$RELEASE_SOURCE"
+[[ "$REVIEWED_RELEASE_SOURCE_COMMIT" == "$PROVIDER_SOURCE_COMMIT" ]] || {
+    print -u2 "Provider evidence belongs to a different source snapshot."
+    exit 1
+}
 RELEASE_NOTES_FILE="$RELEASE_SOURCE/$REVIEWED_RELEASE_NOTES_RELATIVE_PATH"
 [[ -f "$RELEASE_NOTES_FILE" && ! -L "$RELEASE_NOTES_FILE" ]] || {
     print -u2 "Tracked release notes are missing from the source snapshot."
@@ -104,6 +126,10 @@ export SPEAKER_RELEASE_SOURCE_COMMIT="$REVIEWED_RELEASE_SOURCE_COMMIT"
 export SPEAKER_PACKAGE_RESOLVED_SHA256="$(
     shasum -a 256 "$RELEASE_SOURCE/Package.resolved" | awk '{print $1}'
 )"
+[[ "$SPEAKER_PACKAGE_RESOLVED_SHA256" == "$PROVIDER_PACKAGE_HASH" ]] || {
+    print -u2 "Provider evidence belongs to a different dependency lock."
+    exit 1
+}
 export SPEAKER_RELEASE_NOTES_SHA256="$(
     shasum -a 256 "$RELEASE_NOTES_FILE" | awk '{print $1}'
 )"
@@ -184,6 +210,12 @@ verify_production_sparkle_signatures "$APP" "$EXPECTED_TEAM_ID"
 
 mkdir "$EVIDENCE_WORK"
 chmod 700 "$EVIDENCE_WORK"
+cp "$PROVIDER_EVIDENCE_FILE" "$EVIDENCE_WORK/provider-matrix.json"
+[[ "$(shasum -a 256 "$EVIDENCE_WORK/provider-matrix.json" | awk '{print $1}')" \
+      == "$PROVIDER_EVIDENCE_HASH" ]] || {
+    print -u2 "Provider evidence changed after release verification."
+    exit 1
+}
 DSYM="$EVIDENCE_WORK/Speaker.app.dSYM"
 DSYM_ARCHIVE="$EVIDENCE_WORK/Speaker.app.dSYM.zip"
 dsymutil "$APP/Contents/MacOS/SpeakerApp" -o "$DSYM"
@@ -377,7 +409,7 @@ print -r -- "$ARCHIVE_HASH  $FINAL_BASENAME" > "$PENDING_CHECKSUM"
 APPCAST_HASH="$(shasum -a 256 "$PENDING_APPCAST" | awk '{print $1}')"
 RELEASE_MANIFEST="$EVIDENCE_WORK/ReleaseManifest.plist"
 plutil -create xml1 "$RELEASE_MANIFEST"
-plutil -insert SchemaVersion -integer 1 "$RELEASE_MANIFEST"
+plutil -insert SchemaVersion -integer 2 "$RELEASE_MANIFEST"
 for pair in \
     "Version|$VERSION" \
     "BuildNumber|$BUILD_NUMBER" \
@@ -386,6 +418,7 @@ for pair in \
     "SourceCommit|$SPEAKER_RELEASE_SOURCE_COMMIT" \
     "PackageResolvedSHA256|$SPEAKER_PACKAGE_RESOLVED_SHA256" \
     "ReleaseNotesSHA256|$SPEAKER_RELEASE_NOTES_SHA256" \
+    "ProviderEvidenceSHA256|$PROVIDER_EVIDENCE_HASH" \
     "DMGBasename|$FINAL_BASENAME" \
     "DMGSHA256|$ARCHIVE_HASH" \
     "AppcastSHA256|$APPCAST_HASH" \
