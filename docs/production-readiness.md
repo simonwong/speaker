@@ -66,7 +66,7 @@ Speaker 已可作为本机开发版持续试用，但还不能对外发布。主
 - `./scripts/build`：Debug App 构建通过。
 - `./scripts/swiftw build --disable-sandbox --configuration debug --product SpeakerApp -Xswiftc -warnings-as-errors`：严格警告构建通过。
 - `SPEAKER_CONFIGURATION=release ./scripts/bundle`：Release bundle、Info.plist、签名完整性验证通过。
-- `.github/workflows/ci.yml`：在 GitHub `macos-26` runner 上校验活动 SDK 不低于 26，并通过 `SPEAKER_SDKROOT` 固定本次 job 的 SDK；随后执行规格、Debug/Release warnings-as-errors、独立 SwiftPM scratch 的 Release bundle、Info.plist/签名、SwiftPM checkout 干净度和脚本校验。Release bundle 不复用或改写开发 `.build/Speaker.app`。正式签名与公证仍由 fail-closed 发布流程单独负责。
+- `.github/workflows/ci.yml`：在 GitHub `macos-26` runner 上校验活动 SDK 不低于 26，并通过 `SPEAKER_SDKROOT` 固定本次 job 的 SDK；随后执行规格、Debug/Release warnings-as-errors、独立 SwiftPM scratch 的 Release bundle、Info.plist/签名、SwiftPM checkout 干净度和脚本校验。Release bundle 不复用或改写开发 `.build/Speaker.app`。所有第三方 Action 必须固定到完整 commit SHA，workflow 禁止 `pull_request_target`、`write-all`，并显式使用只读 contents 权限；反例由 `./scripts/test` 覆盖。正式签名与公证仍由 fail-closed 发布流程单独负责。
 - App composition 已按 Application、Settings、Onboarding、History、VoiceInput module 拆分；`SpeakerApp.swift` 只保留 49 行 Scene wiring。`VoiceInputExperience` 已删除浅层 session model，集中 dispatcher、Esc、session capability action、notice、menu/overlay projection、VoiceOver 和 shutdown；Settings/Onboarding 也不再反向持有整个 Runtime。终态先向用户发布，历史持久化随后排队，磁盘写入不会卡住转录结果。
 - `/Applications/Speaker.app`：保留用于 TCC/权限复测的本机开发安装；它可能刻意落后于当前源码，未经显式重新安装不得作为当前构建或 UI 的证据，且 ad-hoc 身份始终不是发布签名证据。
 - 本机从旧历史升级后 SQLite `quick_check=ok`、`user_version=1`，现有记录的 payload schema 均为 v1；数据库目录为 `0700`，数据库及 WAL sidecar 为 `0600`。

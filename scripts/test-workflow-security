@@ -1,0 +1,102 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-workflow-security.XXXXXX")"
+trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
+
+verify_workflows() {
+    local directory="$1"
+    local file
+    local line
+    local uses_value
+    local revision
+    local -a workflows=("$directory"/*.yml(N) "$directory"/*.yaml(N))
+
+    (( ${#workflows} > 0 )) || {
+        print -u2 "No workflow files were found."
+        return 1
+    }
+    for file in "${workflows[@]}"; do
+        grep -Eq '^permissions:$' "$file" \
+            && grep -Eq '^  contents: read$' "$file" || {
+            print -u2 "Workflow must declare top-level contents: read: ${file:t}"
+            return 1
+        }
+        if grep -Eq '^[[:space:]]*pull_request_target:' "$file"; then
+            print -u2 "pull_request_target is not allowed: ${file:t}"
+            return 1
+        fi
+        if grep -Eq '^[[:space:]]*permissions:[[:space:]]*write-all' "$file"; then
+            print -u2 "write-all workflow permissions are not allowed: ${file:t}"
+            return 1
+        fi
+        while IFS= read -r line; do
+            uses_value="$(
+                print -r -- "$line" \
+                    | sed -E 's/^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*([^[:space:]#]+).*$/\2/'
+            )"
+            [[ "$uses_value" == ./* ]] && continue
+            [[ "$uses_value" == *@* ]] || {
+                print -u2 "Action reference has no revision: $uses_value"
+                return 1
+            }
+            revision="${uses_value##*@}"
+            print -r -- "$revision" | grep -Eq '^[0-9a-f]{40}$' || {
+                print -u2 "Action is not pinned to a full commit SHA: $uses_value"
+                return 1
+            }
+        done < <(
+            grep -E '^[[:space:]]*(-[[:space:]]*)?uses:' "$file" || true
+        )
+    done
+}
+
+mkdir "$TEST_ROOT/valid" "$TEST_ROOT/unpinned" \
+    "$TEST_ROOT/target" "$TEST_ROOT/write-all"
+print -r -- 'name: valid
+on: push
+permissions:
+  contents: read
+jobs:
+  verify:
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: ./local-action' > "$TEST_ROOT/valid/ci.yml"
+print -r -- 'name: unpinned
+on: push
+permissions:
+  contents: read
+jobs:
+  verify:
+    steps:
+      - uses: actions/checkout@v6' > "$TEST_ROOT/unpinned/ci.yml"
+print -r -- 'name: target
+on:
+  pull_request_target:
+permissions:
+  contents: read
+jobs: {}' > "$TEST_ROOT/target/ci.yml"
+print -r -- 'name: write-all
+on: push
+permissions: write-all
+jobs: {}' > "$TEST_ROOT/write-all/ci.yml"
+
+verify_workflows "$TEST_ROOT/valid"
+if verify_workflows "$TEST_ROOT/unpinned" >/dev/null 2>&1; then
+    print -u2 "Workflow gate accepted a movable Action tag."
+    exit 1
+fi
+if verify_workflows "$TEST_ROOT/target" >/dev/null 2>&1; then
+    print -u2 "Workflow gate accepted pull_request_target."
+    exit 1
+fi
+if verify_workflows "$TEST_ROOT/write-all" >/dev/null 2>&1; then
+    print -u2 "Workflow gate accepted write-all permissions."
+    exit 1
+fi
+verify_workflows "$ROOT/.github/workflows"
+
+print "PASS: workflows use least privilege and immutable Action revisions"

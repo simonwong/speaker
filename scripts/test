@@ -9,6 +9,7 @@ SCRIPT_DIR="${0:A:h}"
 /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerProviderEvidenceSpecs
 /bin/zsh "$SCRIPT_DIR/test-compatibility-smoke"
 /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
+/bin/zsh "$SCRIPT_DIR/test-workflow-security"
 /bin/zsh "$SCRIPT_DIR/test-install-identity"
 /bin/zsh "$SCRIPT_DIR/test-release-evidence"
 /bin/zsh "$SCRIPT_DIR/test-release-identity"
