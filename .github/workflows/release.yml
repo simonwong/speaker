@@ -58,15 +58,10 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
-          VERSION="$(/usr/libexec/PlistBuddy \
-            -c 'Print :Version' Resources/ReleaseCandidate.plist)"
-          BUILD_NUMBER="$(/usr/libexec/PlistBuddy \
-            -c 'Print :BuildNumber' Resources/ReleaseCandidate.plist)"
-          BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy \
-            -c 'Print :BundleIdentifier' Resources/ReleaseIdentity.plist)"
-          [[ "$VERSION" != REPLACE_WITH_* ]]
-          [[ "$BUILD_NUMBER" != REPLACE_WITH_* ]]
-          [[ "$BUNDLE_IDENTIFIER" != REPLACE_WITH_* ]]
+          source ./scripts/release-common
+          load_reviewed_release_identity "$GITHUB_WORKSPACE"
+          load_reviewed_release_candidate "$GITHUB_WORKSPACE"
+          verify_release_candidate_history "$GITHUB_WORKSPACE"
           case "$RELEASE_NOTES_INPUT" in
             ""|/*|*..*|*[^A-Za-z0-9._/-]*)
               print -u2 "Release notes path is unsafe."
@@ -80,14 +75,28 @@ jobs:
               exit 1
               ;;
           esac
-          git ls-files --error-unmatch -- "$RELEASE_NOTES_INPUT"
-          [[ -f "$RELEASE_NOTES_INPUT" && ! -L "$RELEASE_NOTES_INPUT" ]]
-          echo "SPEAKER_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "SPEAKER_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
-          echo "SPEAKER_RELEASE_NOTES_FILE=$RELEASE_NOTES_INPUT" >> "$GITHUB_ENV"
-          echo "SPEAKER_RELEASE_SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "SPEAKER_PACKAGE_RESOLVED_SHA256=$(shasum -a 256 Package.resolved | awk '{print $1}')" >> "$GITHUB_ENV"
-          echo "SPEAKER_KEYCHAIN_SERVICE=$BUNDLE_IDENTIFIER.provider-api-keys" >> "$GITHUB_ENV"
+          resolve_tracked_release_notes \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/$RELEASE_NOTES_INPUT"
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          PACKAGE_RESOLVED_SHA256="$(
+            shasum -a 256 Package.resolved | awk '{print $1}'
+          )"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_VERSION "$REVIEWED_RELEASE_VERSION"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_BUILD_NUMBER "$REVIEWED_RELEASE_BUILD_NUMBER"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_NOTES_FILE \
+            "$REVIEWED_RELEASE_NOTES_RELATIVE_PATH"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_SOURCE_COMMIT "$SOURCE_COMMIT"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_PACKAGE_RESOLVED_SHA256 \
+            "$PACKAGE_RESOLVED_SHA256"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_KEYCHAIN_SERVICE \
+            "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER.provider-api-keys"
 
       - name: Run complete deterministic gate
         run: ./scripts/test

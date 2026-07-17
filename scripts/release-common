@@ -9,6 +9,26 @@ release_error() {
     return 1
 }
 
+release_value_is_single_line() {
+    local value="$1"
+
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
+}
+
+append_github_environment_value() {
+    local output="$1"
+    local name="$2"
+    local value="$3"
+
+    if [[ -z "$output" || -z "$value" ]] \
+          || ! matches_release_pattern "$name" '^[A-Z][A-Z0-9_]*$' \
+          || ! release_value_is_single_line "$value"; then
+        release_error "Refusing an unsafe GitHub environment value: $name"
+        return 1
+    fi
+    print -r -- "$name=$value" >> "$output"
+}
+
 configure_notary_keychain() {
     local requested_path="${1:-}"
     local mode
@@ -169,6 +189,8 @@ select_local_signing_identity() {
 matches_release_pattern() {
     local value="$1"
     local pattern="$2"
+
+    release_value_is_single_line "$value" || return 1
     LC_ALL=C grep -Eq -- "$pattern" <<< "$value"
 }
 
@@ -287,6 +309,7 @@ load_reviewed_release_identity() {
     local update_public_ed_key
     local decoded_key
     local decoded_key_size
+    local reviewed_value
 
     if [[ ! -f "$identity_file" || -L "$identity_file" ]]; then
         release_error "Reviewed release identity is missing: $identity_file"
@@ -344,6 +367,19 @@ load_reviewed_release_identity() {
         release_error "ReleaseIdentity.plist is missing ProductURL."
         return 1
     }
+    for reviewed_value in \
+        "$bundle_identifier" \
+        "$team_identifier" \
+        "$update_feed_url" \
+        "$update_download_url_prefix" \
+        "$product_url" \
+        "$update_public_ed_key"
+    do
+        if ! release_value_is_single_line "$reviewed_value"; then
+            release_error "Reviewed release identity values must be single-line."
+            return 1
+        fi
+    done
     if [[ "$bundle_identifier" == REPLACE_* \
           || "$team_identifier" == REPLACE_* \
           || "$update_public_ed_key" == REPLACE_* ]]; then
@@ -407,6 +443,7 @@ load_reviewed_release_candidate() {
     local previous_build
     local version
     local build_number
+    local reviewed_value
 
     if [[ ! -f "$candidate_file" || -L "$candidate_file" ]]; then
         release_error "Reviewed release candidate is missing or unsafe: $candidate_file"
@@ -440,6 +477,12 @@ load_reviewed_release_candidate() {
         release_error "ReleaseCandidate.plist is missing BuildNumber."
         return 1
     }
+    for reviewed_value in "$previous_build" "$version" "$build_number"; do
+        if ! release_value_is_single_line "$reviewed_value"; then
+            release_error "Reviewed release candidate values must be single-line."
+            return 1
+        fi
+    done
     if [[ "$version" == REPLACE_* || "$build_number" == REPLACE_* ]]; then
         release_error "Formal release candidate has not been reviewed."
         return 1
