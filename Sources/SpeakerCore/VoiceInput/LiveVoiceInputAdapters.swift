@@ -6,40 +6,88 @@ public enum AudioCaptureError: Error, Equatable, Sendable {
     case alreadyRecording
     case couldNotPrepare
     case couldNotStart
+    case microphonePermissionDenied
     case noActiveRecording
     case tooShort
     case silent
+    case streamBufferExhausted
+    case conversionFailed
+    case deviceConfigurationChanged
 }
 
-public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
+package enum AudioCaptureQualityPolicy {
+    /// Peak amplitude below this boundary is effectively digital silence.
+    ///
+    /// This deliberately does not attempt speech recognition or noise
+    /// classification. A conservative boundary avoids rejecting quiet users;
+    /// ambiguous audio remains the provider's responsibility.
+    package static let definiteSilencePeakPower: Float = -72
+
+    package static func validate(
+        duration: Duration,
+        peakPower: Float
+    ) throws {
+        guard duration >= .milliseconds(300) else {
+            throw AudioCaptureError.tooShort
+        }
+        guard peakPower > definiteSilencePeakPower else {
+            throw AudioCaptureError.silent
+        }
+    }
+}
+
+public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
+    AudioCaptureFailureProviding {
+    /// Caps audio waiting to be consumed by the provider transport. This is a
+    /// memory/resource boundary, not a deadline: healthy consumers keep the
+    /// buffer close to empty regardless of recording duration.
+    package static let maximumBufferedAudioBytes = 1_024_000
+
     private var engine: AVAudioEngine?
     private var bridge: PCMStreamingBridge?
-    private var pendingAudioContinuation: AsyncStream<Data>.Continuation?
+    private var pendingAudioStream: BoundedAudioChunkStream?
     private var recordingStartedAt: ContinuousClock.Instant?
     private var meterTask: Task<Void, Never>?
+    private var configurationObserver: NSObjectProtocol?
+    private var activeRuntimeFailure: AudioCaptureError?
     private var telemetryObservers: [
         UUID: AsyncStream<RecordingTelemetry>.Continuation
+    ] = [:]
+    private var failureObservers: [
+        UUID: AsyncStream<AudioCaptureError>.Continuation
     ] = [:]
 
     public init() {}
 
     public func audioChunks() -> AsyncStream<Data> {
-        pendingAudioContinuation?.finish()
-        let (stream, continuation) = AsyncStream<Data>.makeStream(
-            bufferingPolicy: .unbounded
+        pendingAudioStream?.finish()
+        let audioStream = BoundedAudioChunkStream(
+            maximumBufferedBytes: Self.maximumBufferedAudioBytes,
+            nominalChunkSize: 6_400,
+            onBufferExhausted: { [weak self] in
+                Task { await self?.reportRuntimeFailure(.streamBufferExhausted) }
+            }
         )
-        pendingAudioContinuation = continuation
-        return stream
+        pendingAudioStream = audioStream
+        return audioStream.stream
     }
 
     public func start() async throws {
         guard engine == nil else {
             throw AudioCaptureError.alreadyRecording
         }
-        guard let continuation = pendingAudioContinuation else {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .denied, .restricted:
+            throw AudioCaptureError.microphonePermissionDenied
+        case .authorized, .notDetermined:
+            break
+        @unknown default:
             throw AudioCaptureError.couldNotPrepare
         }
-        pendingAudioContinuation = nil
+        guard let audioStream = pendingAudioStream else {
+            throw AudioCaptureError.couldNotPrepare
+        }
+        pendingAudioStream = nil
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -53,14 +101,17 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
               ),
               let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
         else {
-            continuation.finish()
+            audioStream.finish()
             throw AudioCaptureError.couldNotPrepare
         }
 
         let bridge = PCMStreamingBridge(
             converter: converter,
             outputFormat: outputFormat,
-            continuation: continuation
+            audioStream: audioStream,
+            onConversionFailure: { [weak self] in
+                Task { await self?.reportRuntimeFailure(.conversionFailed) }
+            }
         )
         input.installTap(
             onBus: 0,
@@ -75,13 +126,23 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            continuation.finish()
+            audioStream.finish()
             throw AudioCaptureError.couldNotStart
         }
 
         self.engine = engine
         self.bridge = bridge
+        activeRuntimeFailure = nil
         recordingStartedAt = .now
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            Task {
+                await self?.reportRuntimeFailure(.deviceConfigurationChanged)
+            }
+        }
         meterTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))
@@ -103,16 +164,24 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
         engine.inputNode.removeTap(onBus: 0)
         bridge.finish()
         let metrics = bridge.metrics()
+        removeConfigurationObserver()
+        let runtimeFailure = activeRuntimeFailure
         self.engine = nil
         self.bridge = nil
         self.recordingStartedAt = nil
+        activeRuntimeFailure = nil
 
-        guard duration >= .milliseconds(300) else {
-            throw AudioCaptureError.tooShort
+        if let runtimeFailure { throw runtimeFailure }
+        guard !metrics.didExhaustStreamBuffer else {
+            throw AudioCaptureError.streamBufferExhausted
         }
-        guard metrics.peakPower > -45 else {
-            throw AudioCaptureError.silent
+        guard !metrics.didFailConversion else {
+            throw AudioCaptureError.conversionFailed
         }
+        try AudioCaptureQualityPolicy.validate(
+            duration: duration,
+            peakPower: metrics.peakPower
+        )
 
         return CapturedAudio(
             data: Data(),
@@ -128,20 +197,39 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
             engine.stop()
             engine.inputNode.removeTap(onBus: 0)
         }
+        removeConfigurationObserver()
         bridge?.finish()
-        pendingAudioContinuation?.finish()
+        pendingAudioStream?.finish()
         engine = nil
         bridge = nil
-        pendingAudioContinuation = nil
+        pendingAudioStream = nil
         recordingStartedAt = nil
+        activeRuntimeFailure = nil
     }
 
     public func observeTelemetry() -> AsyncStream<RecordingTelemetry> {
         let id = UUID()
-        let (stream, continuation) = AsyncStream<RecordingTelemetry>.makeStream()
+        let (stream, continuation) = AsyncStream<RecordingTelemetry>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
         telemetryObservers[id] = continuation
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeTelemetryObserver(id) }
+        }
+        return stream
+    }
+
+    public func observeFailures() -> AsyncStream<AudioCaptureError> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<AudioCaptureError>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        failureObservers[id] = continuation
+        if let activeRuntimeFailure {
+            continuation.yield(activeRuntimeFailure)
+        }
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeFailureObserver(id) }
         }
         return stream
     }
@@ -162,6 +250,27 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
         telemetryObservers[id] = nil
     }
 
+    private func removeFailureObserver(_ id: UUID) {
+        failureObservers[id] = nil
+    }
+
+    private func reportRuntimeFailure(_ failure: AudioCaptureError) {
+        guard engine != nil, activeRuntimeFailure == nil else { return }
+        activeRuntimeFailure = failure
+        engine?.stop()
+        bridge?.finish()
+        for continuation in failureObservers.values {
+            continuation.yield(failure)
+        }
+    }
+
+    private func removeConfigurationObserver() {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+        }
+        configurationObserver = nil
+    }
+
     private static func milliseconds(_ duration: Duration) -> Int {
         let components = duration.components
         return Int(clamping:
@@ -173,29 +282,117 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding {
 
 extension AVAudioCapture: AudioChunkStreaming {}
 
+package enum AudioChunkYieldResult: Equatable, Sendable {
+    case accepted
+    case bufferExhausted
+    case terminated
+}
+
+/// A bounded handoff between the real-time audio tap and async provider I/O.
+/// Once exhausted it terminates rather than silently dropping part of an
+/// utterance or allowing a stalled network path to grow memory indefinitely.
+package final class BoundedAudioChunkStream: @unchecked Sendable {
+    package let stream: AsyncStream<Data>
+
+    private let lock = NSLock()
+    private let continuation: AsyncStream<Data>.Continuation
+    private let onBufferExhausted: @Sendable () -> Void
+    private var isFinished = false
+    private var exhausted = false
+
+    package init(
+        maximumBufferedBytes: Int,
+        nominalChunkSize: Int,
+        onBufferExhausted: @escaping @Sendable () -> Void = {}
+    ) {
+        precondition(maximumBufferedBytes > 0)
+        precondition(nominalChunkSize > 0)
+        let chunkCapacity = max(1, maximumBufferedBytes / nominalChunkSize)
+        let pair = AsyncStream<Data>.makeStream(
+            bufferingPolicy: .bufferingOldest(chunkCapacity)
+        )
+        stream = pair.stream
+        continuation = pair.continuation
+        self.onBufferExhausted = onBufferExhausted
+    }
+
+    @discardableResult
+    package func yield(_ chunk: Data) -> AudioChunkYieldResult {
+        lock.lock()
+        guard !isFinished else {
+            lock.unlock()
+            return .terminated
+        }
+        switch continuation.yield(chunk) {
+        case .enqueued:
+            lock.unlock()
+            return .accepted
+        case .dropped:
+            exhausted = true
+            isFinished = true
+            lock.unlock()
+            continuation.finish()
+            onBufferExhausted()
+            return .bufferExhausted
+        case .terminated:
+            isFinished = true
+            lock.unlock()
+            return .terminated
+        @unknown default:
+            isFinished = true
+            lock.unlock()
+            continuation.finish()
+            return .terminated
+        }
+    }
+
+    package func finish() {
+        lock.lock()
+        guard !isFinished else {
+            lock.unlock()
+            return
+        }
+        isFinished = true
+        lock.unlock()
+        continuation.finish()
+    }
+
+    package var didExhaustBuffer: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exhausted
+    }
+}
+
 private final class PCMStreamingBridge: @unchecked Sendable {
     struct Metrics: Sendable {
         let currentPower: Float
         let peakPower: Float
+        let didExhaustStreamBuffer: Bool
+        let didFailConversion: Bool
     }
 
     private let lock = NSLock()
     private let converter: AVAudioConverter
     private let outputFormat: AVAudioFormat
-    private let continuation: AsyncStream<Data>.Continuation
+    private let audioStream: BoundedAudioChunkStream
+    private let onConversionFailure: @Sendable () -> Void
     private var chunkBuffer = PCMChunkBuffer(chunkSize: 6_400)
     private var currentPower: Float = -160
     private var peakPower: Float = -160
+    private var didFailConversion = false
     private var isFinished = false
 
     init(
         converter: AVAudioConverter,
         outputFormat: AVAudioFormat,
-        continuation: AsyncStream<Data>.Continuation
+        audioStream: BoundedAudioChunkStream,
+        onConversionFailure: @escaping @Sendable () -> Void
     ) {
         self.converter = converter
         self.outputFormat = outputFormat
-        self.continuation = continuation
+        self.audioStream = audioStream
+        self.onConversionFailure = onConversionFailure
     }
 
     func consume(_ input: AVAudioPCMBuffer) {
@@ -216,11 +413,15 @@ private final class PCMStreamingBridge: @unchecked Sendable {
             pcmFormat: outputFormat,
             frameCapacity: capacity
         ) else {
+            didFailConversion = true
             lock.unlock()
+            onConversionFailure()
             return
         }
 
-        var suppliedInput = false
+        // AVAudioConverter 在 convert 调用内同步执行输入闭包，不跨线程；
+        // macOS 26 SDK 将该闭包标记为 @Sendable，这里显式豁免竞争检查。
+        nonisolated(unsafe) var suppliedInput = false
         var conversionError: NSError?
         let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
             guard !suppliedInput else {
@@ -235,7 +436,9 @@ private final class PCMStreamingBridge: @unchecked Sendable {
               status == .haveData || status == .inputRanDry,
               output.frameLength > 0
         else {
+            didFailConversion = true
             lock.unlock()
+            onConversionFailure()
             return
         }
 
@@ -248,7 +451,7 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         lock.unlock()
 
         for chunk in chunks {
-            continuation.yield(chunk)
+            guard audioStream.yield(chunk) == .accepted else { return }
         }
     }
 
@@ -263,15 +466,20 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         lock.unlock()
 
         if !remainder.isEmpty {
-            continuation.yield(remainder)
+            audioStream.yield(remainder)
         }
-        continuation.finish()
+        audioStream.finish()
     }
 
     func metrics() -> Metrics {
         lock.lock()
         defer { lock.unlock() }
-        return Metrics(currentPower: currentPower, peakPower: peakPower)
+        return Metrics(
+            currentPower: currentPower,
+            peakPower: peakPower,
+            didExhaustStreamBuffer: audioStream.didExhaustBuffer,
+            didFailConversion: didFailConversion
+        )
     }
 
     private static func power(of buffer: AVAudioPCMBuffer) -> Float {
@@ -336,13 +544,50 @@ public struct LocalPreviewTranscriber: SpeechTranscribing {
     }
 }
 
-public struct SystemClipboardWriter: ClipboardWriting {
-    public init() {}
+package struct ClipboardPasteboardAccess: Sendable {
+    let clearContents: @MainActor @Sendable () -> Void
+    let setString: @MainActor @Sendable (String) -> Bool
+    let readString: @MainActor @Sendable () -> String?
 
-    public func copy(_ text: String) async {
-        await MainActor.run {
+    package init(
+        clearContents: @escaping @MainActor @Sendable () -> Void,
+        setString: @escaping @MainActor @Sendable (String) -> Bool,
+        readString: @escaping @MainActor @Sendable () -> String?
+    ) {
+        self.clearContents = clearContents
+        self.setString = setString
+        self.readString = readString
+    }
+
+    static let live = ClipboardPasteboardAccess(
+        clearContents: {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+        },
+        setString: {
+            NSPasteboard.general.setString($0, forType: .string)
+        },
+        readString: {
+            NSPasteboard.general.string(forType: .string)
+        }
+    )
+}
+
+public struct SystemClipboardWriter: ClipboardWriting {
+    private let pasteboard: ClipboardPasteboardAccess
+
+    public init() {
+        pasteboard = .live
+    }
+
+    package init(pasteboard: ClipboardPasteboardAccess) {
+        self.pasteboard = pasteboard
+    }
+
+    public func copy(_ text: String) async -> Bool {
+        await MainActor.run {
+            pasteboard.clearContents()
+            guard pasteboard.setString(text) else { return false }
+            return pasteboard.readString() == text
         }
     }
 }

@@ -2,45 +2,127 @@
 @preconcurrency import CoreGraphics
 import Foundation
 
-public enum GlobalVoiceTrigger: Equatable, Sendable {
+package enum GlobalVoiceTrigger: Equatable, Sendable {
     case pressed
     case released
     case cancel
     case monitorRecovered
 }
 
+package struct VoiceTriggerTarget: Sendable {
+    package let receive: @Sendable (GlobalVoiceTrigger) -> Void
+    package let shouldConsumeEscape: @Sendable () -> Bool
+
+    package init(
+        receive: @escaping @Sendable (GlobalVoiceTrigger) -> Void,
+        shouldConsumeEscape: @escaping @Sendable () -> Bool
+    ) {
+        self.receive = receive
+        self.shouldConsumeEscape = shouldConsumeEscape
+    }
+}
+
+/// Thread-safe policy shared by the event tap and the session presentation.
+/// Escape is consumed only while Speaker owns an active voice interaction.
+package final class EscapeCancellationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+
+    package init() {}
+
+    package func setActive(_ active: Bool) {
+        lock.withLock { self.active = active }
+    }
+
+    package var shouldConsumeEscape: Bool {
+        lock.withLock { active }
+    }
+}
+
+package enum EscapeKeyEvent: Sendable {
+    case keyDown
+    case keyUp
+}
+
+package enum EscapeKeyEventDecision: Equatable, Sendable {
+    case passThrough
+    case consume
+    case consumeAndCancel
+}
+
+/// Once Speaker consumes an Escape key-down, it owns the complete physical
+/// key sequence. Repeats and the matching key-up stay consumed even after the
+/// session publishes its terminal state.
+package struct EscapeKeyEventPolicy: Sendable {
+    private var isConsumingSequence = false
+
+    package init() {}
+
+    package mutating func handle(
+        _ event: EscapeKeyEvent,
+        speakerIsActive: Bool
+    ) -> EscapeKeyEventDecision {
+        switch event {
+        case .keyDown:
+            if isConsumingSequence { return .consume }
+            guard speakerIsActive else { return .passThrough }
+            isConsumingSequence = true
+            return .consumeAndCancel
+        case .keyUp:
+            guard isConsumingSequence else { return .passThrough }
+            isConsumingSequence = false
+            return .consume
+        }
+    }
+
+    package mutating func reset() {
+        isConsumingSequence = false
+    }
+}
+
+package enum FunctionKeyMonitorStartResult: Equatable, Sendable {
+    case active
+    case eventTapUnavailable
+    case runLoopSourceUnavailable
+}
+
 @MainActor
-public final class FnEventMonitor {
-    private let handler: @Sendable (GlobalVoiceTrigger) -> Void
+package final class FnEventMonitor {
+    private let target: VoiceTriggerTarget
     private var box: FnEventTapBox?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
 
-    public init(handler: @escaping @Sendable (GlobalVoiceTrigger) -> Void) {
-        self.handler = handler
+    package init(
+        target: VoiceTriggerTarget
+    ) {
+        self.target = target
     }
 
-    @discardableResult
-    public func start() -> Bool {
-        guard tap == nil else { return true }
+    package var isRunning: Bool { tap != nil }
 
-        let box = FnEventTapBox(handler: handler)
+    @discardableResult
+    package func start() -> FunctionKeyMonitorStartResult {
+        guard tap == nil else { return .active }
+
+        let box = FnEventTapBox(target: target)
         let mask = eventMask(for: .flagsChanged)
             | eventMask(for: .keyDown)
+            | eventMask(for: .keyUp)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: mask,
             callback: fnEventTapCallback,
             userInfo: Unmanaged.passUnretained(box).toOpaque()
         ) else {
-            return false
+            return .eventTapUnavailable
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
-            return false
+            return .runLoopSourceUnavailable
         }
 
         box.tap = tap
@@ -49,11 +131,12 @@ public final class FnEventMonitor {
         self.source = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        return true
+        return .active
     }
 
-    public func stop() {
+    package func stop() {
         guard let tap else { return }
+        box?.stop()
         if let source {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
@@ -77,57 +160,69 @@ public final class FnEventMonitor {
 }
 
 private final class FnEventTapBox: @unchecked Sendable {
-    let handler: @Sendable (GlobalVoiceTrigger) -> Void
+    let target: VoiceTriggerTarget
     var tap: CFMachPort?
     var fnIsDown = false
     var didEmitPress = false
     var secureInputTimer: DispatchSourceTimer?
+    var escapePolicy = EscapeKeyEventPolicy()
 
-    init(handler: @escaping @Sendable (GlobalVoiceTrigger) -> Void) {
-        self.handler = handler
+    init(target: VoiceTriggerTarget) {
+        self.target = target
     }
 
-    func handle(type: CGEventType, event: CGEvent) {
+    func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            let hadActivePress = didEmitPress
             fnIsDown = false
             didEmitPress = false
+            escapePolicy.reset()
             stopSecureInputMonitoring()
-            if hadActivePress {
-                handler(.cancel)
-            }
+            target.receive(.cancel)
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                handler(.monitorRecovered)
+                target.receive(.monitorRecovered)
             }
+            return false
         case .flagsChanged:
             let isDown = event.flags.contains(.maskSecondaryFn)
-            guard isDown != fnIsDown else { return }
+            guard isDown != fnIsDown else { return false }
             fnIsDown = isDown
             if isDown {
                 guard !IsSecureEventInputEnabled() else {
                     fnIsDown = false
-                    return
+                    return false
                 }
                 didEmitPress = true
-                handler(.pressed)
+                target.receive(.pressed)
                 startSecureInputMonitoring()
             } else {
                 stopSecureInputMonitoring()
                 if didEmitPress {
                     didEmitPress = false
-                    handler(.released)
+                    target.receive(.released)
                 }
             }
-        case .keyDown:
-            if event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+            return false
+        case .keyDown, .keyUp:
+            guard event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
+            let keyEvent: EscapeKeyEvent = type == .keyDown ? .keyDown : .keyUp
+            switch escapePolicy.handle(
+                keyEvent,
+                speakerIsActive: target.shouldConsumeEscape()
+            ) {
+            case .passThrough:
+                return false
+            case .consume:
+                return true
+            case .consumeAndCancel:
                 didEmitPress = false
                 stopSecureInputMonitoring()
-                handler(.cancel)
+                target.receive(.cancel)
+                return true
             }
         default:
-            break
+            return false
         }
     }
 
@@ -140,7 +235,7 @@ private final class FnEventTapBox: @unchecked Sendable {
             guard IsSecureEventInputEnabled() else { return }
             self.didEmitPress = false
             self.stopSecureInputMonitoring()
-            self.handler(.cancel)
+            self.target.receive(.cancel)
         }
         secureInputTimer = timer
         timer.resume()
@@ -149,6 +244,17 @@ private final class FnEventTapBox: @unchecked Sendable {
     private func stopSecureInputMonitoring() {
         secureInputTimer?.cancel()
         secureInputTimer = nil
+    }
+
+    func stop() {
+        let hadActivePress = didEmitPress
+        fnIsDown = false
+        didEmitPress = false
+        escapePolicy.reset()
+        stopSecureInputMonitoring()
+        if hadActivePress {
+            target.receive(.cancel)
+        }
     }
 
     deinit {
@@ -161,6 +267,7 @@ private let fnEventTapCallback: CGEventTapCallBack = { _, type, event, userInfo 
         return Unmanaged.passUnretained(event)
     }
     let box = Unmanaged<FnEventTapBox>.fromOpaque(userInfo).takeUnretainedValue()
-    box.handle(type: type, event: event)
-    return Unmanaged.passUnretained(event)
+    return box.handle(type: type, event: event)
+        ? nil
+        : Unmanaged.passUnretained(event)
 }

@@ -1,0 +1,149 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
+
+APP="${SPEAKER_EVIDENCE_TEST_APP:-$ROOT/.build/Speaker.app}"
+EXECUTABLE="$APP/Contents/MacOS/SpeakerApp"
+[[ -x "$EXECUTABLE" && ! -L "$EXECUTABLE" ]] || {
+    print -u2 "A built Speaker.app is required for release evidence testing."
+    exit 1
+}
+
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-evidence.XXXXXX")"
+trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
+WORK="$TEST_ROOT/evidence"
+ARCHIVE="$TEST_ROOT/evidence.zip"
+CORRUPT_WORK="$TEST_ROOT/corrupt-evidence"
+CORRUPT_ARCHIVE="$TEST_ROOT/corrupt-evidence.zip"
+mkdir "$WORK"
+chmod 700 "$WORK"
+
+VERSION="1.2.3"
+BUILD_NUMBER="42"
+DMG_BASENAME="Speaker-$VERSION-$BUILD_NUMBER.dmg"
+SOURCE_COMMIT="$(printf 'a%.0s' {1..40})"
+PACKAGE_HASH="$(printf 'b%.0s' {1..64})"
+NOTES_HASH="$(printf 'c%.0s' {1..64})"
+DMG_HASH="$(printf 'd%.0s' {1..64})"
+APPCAST_HASH="$(printf 'e%.0s' {1..64})"
+APP_SUBMISSION_HASH="$(printf 'f%.0s' {1..64})"
+DMG_SUBMISSION_HASH="$(printf '1%.0s' {1..64})"
+APP_SUBMISSION_ID="12345678-1234-1234-1234-123456789abc"
+DMG_SUBMISSION_ID="abcdefab-cdef-cdef-cdef-abcdefabcdef"
+SDK_PATH="$(/bin/zsh "$SCRIPT_DIR/swiftw" --print-sdk-path)"
+SDK_SETTINGS="$SDK_PATH/SDKSettings.plist"
+SDK_CANONICAL_NAME="$(
+    /usr/libexec/PlistBuddy -c 'Print :CanonicalName' "$SDK_SETTINGS"
+)"
+SDK_SETTINGS_HASH="$(shasum -a 256 "$SDK_SETTINGS" | awk '{print $1}')"
+
+plutil -create xml1 "$WORK/ReleaseManifest.plist"
+plutil -insert SchemaVersion -integer 1 "$WORK/ReleaseManifest.plist"
+for pair in \
+    "Version|$VERSION" \
+    "BuildNumber|$BUILD_NUMBER" \
+    "DMGBasename|$DMG_BASENAME" \
+    "DMGSHA256|$DMG_HASH" \
+    "AppcastSHA256|$APPCAST_HASH" \
+    "AppSubmissionSHA256|$APP_SUBMISSION_HASH" \
+    "DMGSubmissionSHA256|$DMG_SUBMISSION_HASH" \
+    "AppNotarySubmissionID|$APP_SUBMISSION_ID" \
+    "DMGNotarySubmissionID|$DMG_SUBMISSION_ID" \
+    "SourceCommit|$SOURCE_COMMIT" \
+    "PackageResolvedSHA256|$PACKAGE_HASH" \
+    "ReleaseNotesSHA256|$NOTES_HASH" \
+    "SDKCanonicalName|$SDK_CANONICAL_NAME" \
+    "SDKSettingsSHA256|$SDK_SETTINGS_HASH"; do
+    plutil -insert "${pair%%|*}" -string "${pair#*|}" \
+        "$WORK/ReleaseManifest.plist"
+done
+plutil -create xml1 "$WORK/BuildManifest.plist"
+plutil -insert SchemaVersion -integer 1 "$WORK/BuildManifest.plist"
+for pair in \
+    "Version|$VERSION" \
+    "BuildNumber|$BUILD_NUMBER" \
+    "SourceCommit|$SOURCE_COMMIT" \
+    "PackageResolvedSHA256|$PACKAGE_HASH" \
+    "ReleaseNotesSHA256|$NOTES_HASH"; do
+    plutil -insert "${pair%%|*}" -string "${pair#*|}" \
+        "$WORK/BuildManifest.plist"
+done
+
+print -r -- \
+    "{\"id\":\"$APP_SUBMISSION_ID\",\"status\":\"Accepted\"}" \
+    > "$WORK/app-notary-submission.json"
+print -r -- \
+    "{\"jobId\":\"$APP_SUBMISSION_ID\",\"status\":\"Accepted\",\"archiveFilename\":\"submission.zip\",\"sha256\":\"$APP_SUBMISSION_HASH\"}" \
+    > "$WORK/app-notary-log.json"
+print -r -- \
+    "{\"id\":\"$DMG_SUBMISSION_ID\",\"status\":\"Accepted\"}" \
+    > "$WORK/dmg-notary-submission.json"
+print -r -- \
+    "{\"jobId\":\"$DMG_SUBMISSION_ID\",\"status\":\"Accepted\",\"archiveFilename\":\"final.dmg\",\"sha256\":\"$DMG_SUBMISSION_HASH\"}" \
+    > "$WORK/dmg-notary-log.json"
+swift --version > "$WORK/swift-version.txt"
+sw_vers > "$WORK/macos-version.txt"
+print -r -- "$SDK_PATH" > "$WORK/sdk-path.txt"
+print -r -- "$SDK_CANONICAL_NAME" > "$WORK/sdk-version.txt"
+print -r -- "$SDK_SETTINGS_HASH" > "$WORK/sdk-settings-sha256.txt"
+
+dsymutil "$EXECUTABLE" -o "$WORK/Speaker.app.dSYM"
+verify_dsym_matches_executable "$EXECUTABLE" "$WORK/Speaker.app.dSYM"
+ditto -c -k --keepParent \
+    "$WORK/Speaker.app.dSYM" \
+    "$WORK/Speaker.app.dSYM.zip"
+rm -rf "$WORK/Speaker.app.dSYM"
+chmod 600 "$WORK"/*
+ditto -c -k "$WORK" "$ARCHIVE"
+
+validate_release_evidence_archive \
+    "$ARCHIVE" \
+    "$VERSION" \
+    "$BUILD_NUMBER" \
+    "$DMG_BASENAME" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" \
+    "$EXECUTABLE"
+
+ditto "$WORK" "$CORRUPT_WORK"
+mkdir "$CORRUPT_WORK/unpacked-dsym"
+ditto -x -k \
+    "$CORRUPT_WORK/Speaker.app.dSYM.zip" \
+    "$CORRUPT_WORK/unpacked-dsym"
+CORRUPT_DWARF="$CORRUPT_WORK/unpacked-dsym/Speaker.app.dSYM/Contents/Resources/DWARF/SpeakerApp"
+[[ -f "$CORRUPT_DWARF" ]] || {
+    print -u2 "The generated dSYM did not contain SpeakerApp DWARF data."
+    exit 1
+}
+print -rn -- invalid > "$CORRUPT_DWARF"
+rm "$CORRUPT_WORK/Speaker.app.dSYM.zip"
+ditto -c -k --keepParent \
+    "$CORRUPT_WORK/unpacked-dsym/Speaker.app.dSYM" \
+    "$CORRUPT_WORK/Speaker.app.dSYM.zip"
+rm -rf "$CORRUPT_WORK/unpacked-dsym"
+ditto -c -k "$CORRUPT_WORK" "$CORRUPT_ARCHIVE"
+if validate_release_evidence_archive \
+    "$CORRUPT_ARCHIVE" \
+    "$VERSION" \
+    "$BUILD_NUMBER" \
+    "$DMG_BASENAME" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" \
+    "$EXECUTABLE" 2>/dev/null; then
+    print -u2 "Release evidence accepted a corrupt nested dSYM."
+    exit 1
+fi
+
+print "PASS: release evidence binds the final executable to a valid nested dSYM"

@@ -1,0 +1,8 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+
+exec /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+    SpeakerProviderEvidenceVerifier "$@"

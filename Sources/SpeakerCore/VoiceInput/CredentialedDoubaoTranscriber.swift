@@ -1,23 +1,29 @@
 import Foundation
 
-/// Loads the current BYOK credential at request time so changing the Keychain
-/// value never requires rebuilding the long-lived voice-input session actor.
+/// Loads the current BYOK credential at request time so changing its locally
+/// stored value never requires rebuilding the long-lived voice-input session actor.
 public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     private let credentials: any ProviderCredentialStoring
-    private let installationID: String
     private let connector: any DoubaoWebSocketConnecting
+    private let requestUserID: @Sendable () -> String
+    private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
     private var resource: DoubaoStreamingResource
 
     public init(
         credentials: any ProviderCredentialStoring,
-        installationID: String,
         resource: DoubaoStreamingResource = .default,
-        connector: any DoubaoWebSocketConnecting = URLSessionDoubaoWebSocketConnector()
+        connector: any DoubaoWebSocketConnecting =
+            URLSessionDoubaoWebSocketConnector(),
+        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics? = nil,
+        requestUserID: @escaping @Sendable () -> String = {
+            UUID().uuidString
+        }
     ) {
         self.credentials = credentials
-        self.installationID = installationID
         self.resource = resource
         self.connector = connector
+        self.runtimeDiagnostics = runtimeDiagnostics
+        self.requestUserID = requestUserID
     }
 
     public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
@@ -33,7 +39,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         return try await transcribe(
             Self.chunkStream(from: pcm),
             hotwords: hotwords,
-            context: context
+            context: context,
+            runtimeOperation: .voiceInput
         )
     }
 
@@ -42,18 +49,34 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         hotwords: [String],
         context: String?
     ) async throws -> TranscriptionResult {
+        try await transcribe(
+            audioChunks,
+            hotwords: hotwords,
+            context: context,
+            runtimeOperation: .voiceInput
+        )
+    }
+
+    private func transcribe(
+        _ audioChunks: AsyncStream<Data>,
+        hotwords: [String],
+        context: String?,
+        runtimeOperation: VoiceProviderRuntimeOperation
+    ) async throws -> TranscriptionResult {
         guard let apiKey = try await credentials.apiKey(for: .doubao) else {
-            throw DoubaoASRFailure(kind: .invalidCredential)
+            throw ProviderCredentialStoreError.emptyAPIKey
         }
         let client = DoubaoStreamingASRClient(
             configuration: .init(
                 apiKey: apiKey,
                 resource: resource,
-                installationID: installationID,
+                requestUserID: requestUserID(),
                 hotwords: hotwords,
                 context: context
             ),
-            connector: connector
+            connector: connector,
+            runtimeDiagnostics: runtimeDiagnostics,
+            runtimeOperation: runtimeOperation
         )
         return try await client.transcribe(audioChunks)
     }
@@ -84,7 +107,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
             return try await transcribe(
                 Self.chunkStream(from: Self.silentProbePCM),
                 hotwords: [],
-                context: nil
+                context: nil,
+                runtimeOperation: .connectionCheck
             ).providerRequestID
         } catch let failure as DoubaoASRFailure
             where failure.kind == .silence || failure.kind == .emptyTranscript {

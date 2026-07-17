@@ -3,31 +3,271 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
 INSTALL_APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
 
-case "$INSTALL_APP" in
-    /Applications/*.app|"$HOME"/Applications/*.app) ;;
-    *)
-        print -u2 "Refusing to install outside an Applications directory: $INSTALL_APP"
+path_has_symlink_component() {
+    local candidate="$1"
+    local current=""
+    local component
+
+    for component in ${(s:/:)candidate}; do
+        [[ -z "$component" ]] && continue
+        current="$current/$component"
+        [[ ! -L "$current" ]] || return 0
+    done
+    return 1
+}
+
+process_pattern_for_executable() {
+    local executable="$1"
+    local escaped
+    escaped="$(print -r -- "$executable" | sed 's/[][(){}.^$*+?|\\]/\\&/g')"
+    print -r -- "^${escaped}([[:space:]].*)?$"
+}
+
+for component in ${(s:/:)INSTALL_APP}; do
+    if [[ "$component" == ".." ]]; then
+        print -u2 "Refusing an install path containing '..': $INSTALL_APP"
         exit 1
-        ;;
-esac
+    fi
+done
 
-SOURCE_APP="$($SCRIPT_DIR/bundle)"
+REQUESTED_PARENT="${INSTALL_APP:h}"
+REQUESTED_PARENT_CANONICAL="${REQUESTED_PARENT:A}"
+APP_BASENAME="${INSTALL_APP:t}"
+TEST_PARENT=""
+if [[ "${SPEAKER_ENABLE_TEST_HOOKS:-0}" == "1" \
+      && -n "${SPEAKER_INSTALL_TEST_PARENT:-}" ]]; then
+    TEST_PARENT="${SPEAKER_INSTALL_TEST_PARENT:A}"
+fi
+if [[ "$REQUESTED_PARENT_CANONICAL" != "${${:-/Applications}:A}" \
+      && "$REQUESTED_PARENT_CANONICAL" != "${${:-$HOME/Applications}:A}" \
+      && "$REQUESTED_PARENT_CANONICAL" != "$TEST_PARENT" ]]; then
+    print -u2 "Install parent must be exactly /Applications or $HOME/Applications: $INSTALL_APP"
+    exit 1
+fi
+if [[ "$APP_BASENAME" != *.app || "$APP_BASENAME" == ".app" ]]; then
+    print -u2 "Install target must be a single .app bundle: $INSTALL_APP"
+    exit 1
+fi
+if path_has_symlink_component "$REQUESTED_PARENT" \
+    || [[ -L "$INSTALL_APP" ]]; then
+    print -u2 "Refusing a symlinked install path: $INSTALL_APP"
+    exit 1
+fi
+
+mkdir -p "$REQUESTED_PARENT"
+CANONICAL_PARENT="${REQUESTED_PARENT:A}"
+ALLOWED_SYSTEM_PARENT="${${:-/Applications}:A}"
+ALLOWED_USER_PARENT="${${:-$HOME/Applications}:A}"
+if [[ "$CANONICAL_PARENT" != "$ALLOWED_SYSTEM_PARENT" \
+      && "$CANONICAL_PARENT" != "$ALLOWED_USER_PARENT" \
+      && "$CANONICAL_PARENT" != "$TEST_PARENT" ]]; then
+    print -u2 "Canonical install parent is not an Applications directory: $CANONICAL_PARENT"
+    exit 1
+fi
+INSTALL_APP="$CANONICAL_PARENT/$APP_BASENAME"
+
+/bin/zsh "$SCRIPT_DIR/bundle"
+SOURCE_APP="${SPEAKER_BUNDLE_OUTPUT_APP:-$ROOT/.build/Speaker.app}"
 STAGING_APP="${INSTALL_APP}.installing.$$"
+BACKUP_APP="${INSTALL_APP}.previous.$$"
+EXPECTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-com.local.speaker}"
+EXPECTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
+PREVIOUS_WAS_RUNNING=0
+OPEN_AFTER_INSTALL="${SPEAKER_OPEN_AFTER_INSTALL:-preserve}"
+INSTALLED_EXECUTABLE="$INSTALL_APP/Contents/MacOS/SpeakerApp"
+INSTALLED_PROCESS_PATTERN="$(
+    process_pattern_for_executable "$INSTALLED_EXECUTABLE"
+)"
 
-pkill -f -x "$SOURCE_APP/Contents/MacOS/SpeakerApp" 2>/dev/null || true
-pkill -f -x "$INSTALL_APP/Contents/MacOS/SpeakerApp" 2>/dev/null || true
+SOURCE_BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOURCE_APP/Contents/Info.plist")"
+if [[ "$SOURCE_BUNDLE_IDENTIFIER" != "$EXPECTED_BUNDLE_IDENTIFIER" ]]; then
+    print -u2 "Refusing to install unexpected bundle identifier: $SOURCE_BUNDLE_IDENTIFIER"
+    exit 1
+fi
 
-trap 'rm -rf "$STAGING_APP"' EXIT
+if [[ -e "$INSTALL_APP" || -L "$INSTALL_APP" ]]; then
+    if [[ -L "$INSTALL_APP" ]]; then
+        print -u2 "Refusing to replace a symlinked app: $INSTALL_APP"
+        exit 1
+    fi
+    INSTALLED_BUNDLE_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INSTALL_APP/Contents/Info.plist" 2>/dev/null || true)"
+    if [[ "$INSTALLED_BUNDLE_IDENTIFIER" != "$EXPECTED_BUNDLE_IDENTIFIER" ]]; then
+        print -u2 "Refusing to replace $INSTALL_APP ($INSTALLED_BUNDLE_IDENTIFIER)"
+        exit 1
+    fi
+    if pgrep -f "$INSTALLED_PROCESS_PATTERN" >/dev/null 2>&1; then
+        PREVIOUS_WAS_RUNNING=1
+    fi
+fi
+
+ROLLBACK_NEEDED=0
+cleanup() {
+    rm -rf "$STAGING_APP"
+    if (( ROLLBACK_NEEDED )); then
+        rm -rf "$INSTALL_APP"
+        if [[ -e "$BACKUP_APP" ]]; then
+            mv "$BACKUP_APP" "$INSTALL_APP"
+        fi
+        if (( PREVIOUS_WAS_RUNNING )) && [[ -d "$INSTALL_APP" ]]; then
+            if ! /usr/bin/open -n "$INSTALL_APP"; then
+                print -u2 "The previous app was restored but macOS could not restart it."
+            fi
+        fi
+    else
+        rm -rf "$BACKUP_APP"
+    fi
+}
+trap cleanup EXIT
 rm -rf "$STAGING_APP"
+rm -rf "$BACKUP_APP"
 ditto "$SOURCE_APP" "$STAGING_APP"
 codesign --verify --deep --strict "$STAGING_APP"
+STORAGE_KIND="$(/usr/libexec/PlistBuddy -c 'Print :SpeakerCredentialStorage' "$STAGING_APP/Contents/Info.plist" 2>/dev/null || true)"
+SIGNING_MODE="$(/usr/libexec/PlistBuddy -c 'Print :SpeakerSigningMode' "$STAGING_APP/Contents/Info.plist" 2>/dev/null || true)"
+if [[ "$SIGNING_MODE" == "developer-id" && "$STORAGE_KIND" == "keychain" ]]; then
+    load_reviewed_release_identity "$ROOT"
+    verify_production_app \
+        "$STAGING_APP" \
+        "$EXPECTED_BUNDLE_IDENTIFIER" \
+        "$EXPECTED_TEAM_ID" \
+        "$ROOT/Resources/Speaker.entitlements" \
+        "$REVIEWED_UPDATE_FEED_URL" \
+        "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+elif [[ "$SIGNING_MODE" == "development-signed" && "$STORAGE_KIND" == "local-file" ]]; then
+    verify_local_signed_app "$STAGING_APP" "$EXPECTED_BUNDLE_IDENTIFIER"
+elif [[ "$SIGNING_MODE" == "development-ad-hoc" && "$STORAGE_KIND" == "local-file" ]]; then
+    verify_ad_hoc_app "$STAGING_APP" "$EXPECTED_BUNDLE_IDENTIFIER"
+else
+    print -u2 "Refusing an app with an inconsistent signing/storage policy: $SIGNING_MODE/$STORAGE_KIND"
+    exit 1
+fi
+verify_sparkle_layout "$STAGING_APP"
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    verify_production_sparkle_signatures \
+        "$STAGING_APP" \
+        "$EXPECTED_TEAM_ID"
+fi
 
-rm -rf "$INSTALL_APP"
+if [[ -e "$INSTALL_APP" ]]; then
+    case "$SIGNING_MODE" in
+        development-ad-hoc)
+            verify_ad_hoc_app \
+                "$INSTALL_APP" \
+                "$EXPECTED_BUNDLE_IDENTIFIER" || {
+                print -u2 "Refusing to replace an installed app with an invalid or incompatible signature."
+                exit 1
+            }
+            ;;
+        development-signed)
+            if signature_is_ad_hoc "$INSTALL_APP"; then
+                verify_ad_hoc_app \
+                    "$INSTALL_APP" \
+                    "$EXPECTED_BUNDLE_IDENTIFIER" || {
+                    print -u2 "Refusing an invalid ad-hoc app during local identity migration."
+                    exit 1
+                }
+            else
+                verify_local_signed_app \
+                    "$INSTALL_APP" \
+                    "$EXPECTED_BUNDLE_IDENTIFIER" || {
+                    print -u2 "Refusing to replace an installed app with an invalid local signature."
+                    exit 1
+                }
+                INSTALLED_REQUIREMENT="$(designated_requirement "$INSTALL_APP")"
+                STAGED_REQUIREMENT="$(designated_requirement "$STAGING_APP")"
+                if [[ -z "$INSTALLED_REQUIREMENT" \
+                      || "$INSTALLED_REQUIREMENT" != "$STAGED_REQUIREMENT" ]]; then
+                    print -u2 "Refusing to replace a local app signed by a different identity."
+                    exit 1
+                fi
+            fi
+            ;;
+        developer-id)
+            verify_production_app \
+                "$INSTALL_APP" \
+                "$EXPECTED_BUNDLE_IDENTIFIER" \
+                "$EXPECTED_TEAM_ID" \
+                "$ROOT/Resources/Speaker.entitlements" \
+                "$REVIEWED_UPDATE_FEED_URL" \
+                "$REVIEWED_UPDATE_PUBLIC_ED_KEY" || {
+                print -u2 "Refusing to replace an installed app with a different production identity."
+                exit 1
+            }
+            ;;
+    esac
+fi
+
+# The candidate is fully staged and validated before the running installation
+# is asked to shut down. Use the normal macOS terminate path so Speaker can
+# cancel provider work and flush settings/history before its bundle is moved.
+SOURCE_PROCESS_PATTERN="$(
+    process_pattern_for_executable "$SOURCE_APP/Contents/MacOS/SpeakerApp"
+)"
+if pgrep -f "$SOURCE_PROCESS_PATTERN" >/dev/null 2>&1 \
+    || pgrep -f "$INSTALLED_PROCESS_PATTERN" >/dev/null 2>&1; then
+    if ! /usr/bin/osascript \
+        -e "tell application id \"$EXPECTED_BUNDLE_IDENTIFIER\" to quit"; then
+        print -u2 "macOS could not ask the running Speaker app to quit; the installed app was not replaced."
+        exit 1
+    fi
+fi
+for _ in {1..100}; do
+    if ! pgrep -f "$SOURCE_PROCESS_PATTERN" >/dev/null 2>&1 \
+        && ! pgrep -f "$INSTALLED_PROCESS_PATTERN" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+done
+if pgrep -f "$SOURCE_PROCESS_PATTERN" >/dev/null 2>&1 \
+    || pgrep -f "$INSTALLED_PROCESS_PATTERN" >/dev/null 2>&1; then
+    print -u2 "Speaker did not finish its graceful shutdown; quit it manually and run the installer again."
+    exit 1
+fi
+
+if [[ -e "$INSTALL_APP" ]]; then
+    mv "$INSTALL_APP" "$BACKUP_APP"
+fi
+ROLLBACK_NEEDED=1
 mv "$STAGING_APP" "$INSTALL_APP"
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    verify_production_app \
+        "$INSTALL_APP" \
+        "$EXPECTED_BUNDLE_IDENTIFIER" \
+        "$EXPECTED_TEAM_ID" \
+        "$ROOT/Resources/Speaker.entitlements" \
+        "$REVIEWED_UPDATE_FEED_URL" \
+        "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+elif [[ "$SIGNING_MODE" == "development-signed" ]]; then
+    verify_local_signed_app "$INSTALL_APP" "$EXPECTED_BUNDLE_IDENTIFIER"
+else
+    verify_ad_hoc_app "$INSTALL_APP" "$EXPECTED_BUNDLE_IDENTIFIER"
+fi
+verify_sparkle_layout "$INSTALL_APP"
+if [[ "$SIGNING_MODE" == "developer-id" ]]; then
+    verify_production_sparkle_signatures \
+        "$INSTALL_APP" \
+        "$EXPECTED_TEAM_ID"
+fi
+if [[ "${SPEAKER_ENABLE_TEST_HOOKS:-0}" == "1" \
+      && "${SPEAKER_INSTALL_TEST_FAIL_AFTER_SWAP:-0}" == "1" ]]; then
+    print -u2 "Injected install verification failure."
+    exit 97
+fi
+ROLLBACK_NEEDED=0
 trap - EXIT
+cleanup
 rm -rf "$SOURCE_APP"
 
-open "$INSTALL_APP"
+if [[ "$OPEN_AFTER_INSTALL" == "1" \
+      || ( "$OPEN_AFTER_INSTALL" == "preserve" && "$PREVIOUS_WAS_RUNNING" == "1" ) ]]; then
+    /usr/bin/open -n "$INSTALL_APP"
+fi
+if [[ "$SIGNING_MODE" == "development-ad-hoc" ]]; then
+    print -u2 "Speaker is ad-hoc signed. Rebuilding can require re-approving macOS Accessibility and Microphone permissions."
+    print -u2 "For stable local permission identity, set SPEAKER_LOCAL_CODESIGN_IDENTITY to a trusted code-signing identity."
+fi
 print "$INSTALL_APP"

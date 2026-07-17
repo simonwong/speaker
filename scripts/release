@@ -3,5 +3,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
+source "$SCRIPT_DIR/release-common"
+if [[ -n "${SPEAKER_CODESIGN_IDENTITY:-}" \
+      && "${SPEAKER_CODESIGN_IDENTITY}" != "-" ]]; then
+    print -u2 "./scripts/release is development-only; use ./scripts/distribute for Developer ID releases."
+    exit 1
+fi
+if [[ "${SPEAKER_CODESIGN_IDENTITY:--}" == "-" \
+      && -z "${SPEAKER_LOCAL_CODESIGN_IDENTITY:-}" ]]; then
+    IDENTITY_OUTPUT="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+    if SELECTED_IDENTITY="$(select_local_signing_identity "$IDENTITY_OUTPUT")"; then
+        export SPEAKER_LOCAL_CODESIGN_IDENTITY="$SELECTED_IDENTITY"
+        print -u2 "Using stable local signing identity: $SELECTED_IDENTITY"
+    else
+        selection_status=$?
+        if (( selection_status == 2 )); then
+            exit 1
+        fi
+    fi
+fi
 export SPEAKER_CONFIGURATION=release
-exec "$SCRIPT_DIR/install"
+export SPEAKER_OPEN_AFTER_INSTALL=1
+exec /bin/zsh "$SCRIPT_DIR/install"

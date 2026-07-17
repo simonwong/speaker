@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>BundleIdentifier</key>
+    <string>REPLACE_WITH_REVIEWED_BUNDLE_ID</string>
+    <key>TeamIdentifier</key>
+    <string>REPLACE_WITH_REVIEWED_TEAM_ID</string>
+    <key>UpdateFeedURL</key>
+    <string>https://updates.example.invalid/speaker/appcast.xml</string>
+    <key>UpdateDownloadURLPrefix</key>
+    <string>https://updates.example.invalid/speaker/</string>
+    <key>ProductURL</key>
+    <string>https://speaker.example.invalid/</string>
+    <key>UpdatePublicEDKey</key>
+    <string>REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY</string>
+</dict>
+</plist>

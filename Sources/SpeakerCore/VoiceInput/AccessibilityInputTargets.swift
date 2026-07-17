@@ -1,83 +1,138 @@
-@preconcurrency import ApplicationServices
-@preconcurrency import Carbon
 import AppKit
 import Foundation
 
-public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscarding, TextDelivering {
+private final class AccessibilityReleaseCaptureCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var captures: [UUID: AccessibilityReleaseCapture] = [:]
+
+    func store(_ capture: AccessibilityReleaseCapture) -> UUID {
+        lock.withLock {
+            // There can only be one active voice session. Purging abandoned
+            // hints bounds retained AX objects if a monitor is interrupted.
+            captures.removeAll(keepingCapacity: true)
+            let token = UUID()
+            captures[token] = capture
+            return token
+        }
+    }
+
+    func take(_ token: UUID) -> AccessibilityReleaseCapture? {
+        lock.withLock { captures.removeValue(forKey: token) }
+    }
+}
+
+public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscarding,
+    TextDelivering {
     private struct StoredTarget {
-        let element: AXUIElement
-        let selectedRange: CFTypeRef
-        let selection: CFRange
-        let originalValue: String
-        let processID: pid_t
-        let bundleIdentifier: String?
-        let supportsDirectInsertion: Bool
+        let evidence: AccessibilityTargetEvidence
     }
 
     private var targets: [UUID: StoredTarget] = [:]
+    private let system: any AccessibilityTargetSystem
+    private nonisolated let releaseCapture:
+        @Sendable () -> AccessibilityReleaseCapture
+    private nonisolated let releaseCaptureCache =
+        AccessibilityReleaseCaptureCache()
     private let verifiedUnicodeDeliveryBundleIdentifiers: Set<String>
 
-    public init(verifiedUnicodeDeliveryBundleIdentifiers: Set<String> = []) {
-        self.verifiedUnicodeDeliveryBundleIdentifiers = verifiedUnicodeDeliveryBundleIdentifiers
+    public init(
+        verifiedUnicodeDeliveryBundleIdentifiers: Set<String> = []
+    ) {
+        let system = LiveAccessibilityTargetSystem()
+        self.system = system
+        releaseCapture = { system.captureReleaseTarget() }
+        self.verifiedUnicodeDeliveryBundleIdentifiers =
+            verifiedUnicodeDeliveryBundleIdentifiers
+    }
+
+    package init(
+        system: any AccessibilityTargetSystem,
+        releaseCapture:
+            @escaping @Sendable () -> AccessibilityReleaseCapture = {
+                .unavailable(processID: 0, reason: .missingTarget)
+            },
+        verifiedUnicodeDeliveryBundleIdentifiers: Set<String> = []
+    ) {
+        self.system = system
+        self.releaseCapture = releaseCapture
+        self.verifiedUnicodeDeliveryBundleIdentifiers =
+            verifiedUnicodeDeliveryBundleIdentifiers
     }
 
     public func capture() async -> InputTargetCaptureResult {
-        guard AXIsProcessTrusted() else {
-            return .unavailable(.unsupportedTarget)
-        }
-        guard !IsSecureEventInputEnabled() else {
-            return .unavailable(.secureTarget)
-        }
+        await capture(expectedProcessID: nil)
+    }
 
-        let system = AXUIElementCreateSystemWide()
-        guard let application = copyElement(
-            from: system,
-            attribute: "AXFocusedApplication"
-        ), let element = copyElement(
-            from: application,
-            attribute: "AXFocusedUIElement"
-        ) else {
-            return .unavailable(.missingTarget)
+    public func capture(
+        matching hint: InputTargetCaptureHint
+    ) async -> InputTargetCaptureResult {
+        guard let token = hint.targetToken,
+              let releaseCapture = releaseCaptureCache.take(token)
+        else {
+            return .unavailable(.invalidatedTarget)
         }
-
-        if copyString(from: element, attribute: "AXSubrole") == "AXSecureTextField" {
-            return .unavailable(.secureTarget)
+        switch releaseCapture {
+        case let .unavailable(_, reason):
+            return .unavailable(reason)
+        case let .target(target):
+            guard target.processID == hint.processID else {
+                return .unavailable(.invalidatedTarget)
+            }
+            let capture = await system.captureTarget(target)
+            return store(capture, expectedProcessID: hint.processID)
         }
+    }
 
-        guard let selectedRange = copyValue(
-            from: element,
-            attribute: "AXSelectedTextRange"
-        ), let selection = extractRange(from: selectedRange) else {
-            return .unavailable(.unsupportedTarget)
-        }
-
-        var selectedTextSettable = DarwinBoolean(false)
-        let settableError = AXUIElementIsAttributeSettable(
-            element,
-            "AXSelectedText" as CFString,
-            &selectedTextSettable
+    /// Freezes the exact focused AX element while the physical stop gesture is
+    /// still being handled. Selection/value inspection remains asynchronous,
+    /// but it can no longer follow the user to another field in the same App.
+    public nonisolated func releaseCaptureHint() -> InputTargetCaptureHint? {
+        let capture = releaseCapture()
+        let token = releaseCaptureCache.store(capture)
+        return InputTargetCaptureHint(
+            processID: capture.processID,
+            targetToken: token
         )
-        let supportsDirectInsertion = settableError == .success
-            && selectedTextSettable.boolValue
+    }
 
-        guard let originalValue = copyString(from: element, attribute: "AXValue") else {
-            return .unavailable(.unsupportedTarget)
+    /// Captures the focused target only when it belongs to the exact process
+    /// selected by the caller.
+    ///
+    /// This is used by explicit redelivery flows where a frontmost-app change
+    /// between user confirmation and AX capture must fail closed.
+    public func capture(
+        expectedProcessID: Int32
+    ) async -> InputTargetCaptureResult {
+        await capture(expectedProcessID: Optional(expectedProcessID))
+    }
+
+    private func capture(
+        expectedProcessID: Int32?
+    ) async -> InputTargetCaptureResult {
+        let capture = await system.captureFocusedTarget()
+        return store(capture, expectedProcessID: expectedProcessID)
+    }
+
+    private func store(
+        _ capture: AccessibilityTargetCapture,
+        expectedProcessID: Int32?
+    ) -> InputTargetCaptureResult {
+        switch capture {
+        case let .unavailable(reason):
+            return .unavailable(reason)
+        case let .writable(evidence):
+            guard expectedProcessID == nil
+                    || evidence.processID == expectedProcessID
+            else {
+                return .unavailable(.invalidatedTarget)
+            }
+            let id = UUID()
+            targets[id] = StoredTarget(evidence: evidence)
+            return .writable(.init(
+                id: id,
+                applicationName: evidence.applicationName
+            ))
         }
-
-        let pid = processIdentifier(of: application)
-        let runningApplication = NSRunningApplication(processIdentifier: pid)
-        let applicationName = runningApplication?.localizedName ?? "未知应用"
-        let id = UUID()
-        targets[id] = StoredTarget(
-            element: element,
-            selectedRange: selectedRange,
-            selection: selection,
-            originalValue: originalValue,
-            processID: pid,
-            bundleIdentifier: runningApplication?.bundleIdentifier,
-            supportsDirectInsertion: supportsDirectInsertion
-        )
-        return .writable(.init(id: id, applicationName: applicationName))
     }
 
     public func deliver(
@@ -88,213 +143,347 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         guard let stored = targets.removeValue(forKey: target.id) else {
             return .pendingCopy(.invalidatedTarget)
         }
+        let evidence = stored.evidence
 
-        if copyString(from: stored.element, attribute: "AXSubrole") == "AXSecureTextField" {
+        switch await system.subrole(of: evidence.reference) {
+        case let .success(subrole?) where subrole == "AXSecureTextField":
+            return .pendingCopy(.secureTarget)
+        case .failure(.attributeUnsupported), .failure(.notImplemented),
+             .success:
+            // Normal text controls are not required to expose a subrole.
+            break
+        case let .failure(failure):
+            return Self.failedOperation(
+                stage: .securityRead,
+                failure: failure
+            )
+        }
+        guard !(await system.secureInputEnabled()) else {
             return .pendingCopy(.secureTarget)
         }
-        guard !IsSecureEventInputEnabled() else {
-            return .pendingCopy(.secureTarget)
-        }
 
-        guard copyValue(from: stored.element, attribute: "AXRole") != nil else {
+        switch await system.role(of: evidence.reference) {
+        case let .success(role?) where !role.isEmpty:
+            break
+        case .success:
             return .pendingCopy(.invalidatedTarget)
+        case let .failure(failure):
+            return Self.failedOperation(
+                stage: .roleRead,
+                failure: failure
+            )
         }
 
-        if copyString(from: stored.element, attribute: "AXValue") != stored.originalValue {
-            return .pendingCopy(.changedTarget)
+        let currentValue: String
+        switch await system.value(of: evidence.reference) {
+        case let .success(value?):
+            currentValue = value
+        case .success(nil):
+            return .pendingCopy(.invalidatedTarget)
+        case let .failure(failure):
+            return Self.failedOperation(
+                stage: .valueRead,
+                failure: failure
+            )
+        }
+        guard currentValue == evidence.originalValue else {
+            return .pendingCopyDiagnosed(
+                .changedTarget,
+                .init(stage: .valueRead, cause: .changed)
+            )
         }
 
-        guard let expectedValue = replacingSelection(in: stored, with: text) else {
+        guard let expectedValue = replacingSelection(
+            in: evidence,
+            with: text
+        ) else {
             return .pendingCopy(.unsupportedTarget)
         }
 
-        var directError: AXError?
+        var directFailure: AccessibilityOperationFailure?
+        var directDiagnostic: DeliveryDiagnostic?
         var committed = false
-        if stored.supportsDirectInsertion {
+        if evidence.supportsDirectInsertion {
+            switch await system.selection(of: evidence.reference) {
+            case let .success(selection?) where selection == evidence.selection:
+                break
+            case .success:
+                return .pendingCopy(.changedTarget)
+            case let .failure(failure):
+                return Self.failedOperation(
+                    stage: .directSelection,
+                    failure: failure
+                )
+            }
+            switch await system.value(of: evidence.reference) {
+            case let .success(value?) where value == evidence.originalValue:
+                break
+            case .success:
+                return .pendingCopy(.changedTarget)
+            case let .failure(failure):
+                return Self.failedOperation(
+                    stage: .valueRead,
+                    failure: failure
+                )
+            }
+            guard !(await system.secureInputEnabled()) else {
+                return .pendingCopy(.secureTarget)
+            }
             guard await commitGate.commit() else {
                 return .pendingCopy(.deliveryFailed)
             }
             committed = true
-            let rangeResult = AXUIElementSetAttributeValue(
-                stored.element,
-                "AXSelectedTextRange" as CFString,
-                stored.selectedRange
-            )
-            directError = rangeResult
-            if rangeResult == .success {
-                guard copyString(from: stored.element, attribute: "AXValue") == stored.originalValue else {
-                    return .pendingCopy(.changedTarget)
-                }
-                guard !IsSecureEventInputEnabled() else {
-                    return .pendingCopy(.secureTarget)
-                }
-                let textResult = AXUIElementSetAttributeValue(
-                    stored.element,
-                    "AXSelectedText" as CFString,
-                    text as CFString
+            guard !Task.isCancelled else {
+                return .pendingCopy(.deliveryFailed)
+            }
+            // The current selection was just verified. Writing the historical
+            // range back here would overwrite a cursor move that races after
+            // the check; AXSelectedText already targets the current selection.
+            switch await system.setSelectedText(
+                text,
+                of: evidence.reference
+            ) {
+            case .success, .failure(.cannotComplete):
+                return await verifyMutationReceipt(
+                    expectedValue,
+                    originalValue: evidence.originalValue,
+                    target: evidence.reference,
+                    diagnosticStage: .directReceipt
                 )
-                directError = textResult
-                if textResult == .success {
-                    return copyString(from: stored.element, attribute: "AXValue") == expectedValue
-                        ? .delivered
-                        : .pendingCopy(.deliveryFailed)
+            case let .failure(error):
+                directFailure = error
+                directDiagnostic = Self.diagnostic(
+                    stage: .directWrite,
+                    failure: error
+                )
+                switch await system.value(of: evidence.reference) {
+                case let .success(value?) where value == expectedValue:
+                    return .delivered
+                case let .success(value?) where value == evidence.originalValue:
+                    break
+                case .success:
+                    return .pendingCopy(.changedTarget)
+                case let .failure(failure):
+                    return Self.failedOperation(
+                        stage: .valueRead,
+                        failure: failure
+                    )
                 }
             }
         }
 
-        // A PID-targeted event has no delivery receipt. Keep this adapter off
-        // unless the current process was explicitly verified by local smoke.
-        guard let bundleIdentifier = stored.bundleIdentifier,
-              verifiedUnicodeDeliveryBundleIdentifiers.contains(bundleIdentifier)
-        else {
-            return .pendingCopy(directError.map(map) ?? .unsupportedTarget)
+        let isVerifiedApplication = Self.allowsUnicodeDelivery(
+            to: evidence.applicationBundleIdentifier,
+            verifiedBundleIdentifiers: verifiedUnicodeDeliveryBundleIdentifiers
+        )
+        let isFrontmostExactTarget = await system.isFrontmost(
+            processID: evidence.processID
+        )
+        guard isVerifiedApplication || isFrontmostExactTarget else {
+            if let directFailure, let directDiagnostic {
+                return .pendingCopyDiagnosed(
+                    directFailure.pendingCopyReason,
+                    directDiagnostic
+                )
+            }
+            return .pendingCopyDiagnosed(
+                .unsupportedTarget,
+                .init(
+                    stage: .fallbackEligibility,
+                    cause: .notFrontmost
+                )
+            )
         }
-        guard isStillFocused(stored.element) else {
+        switch await system.focusedState(
+            evidence.reference,
+            in: evidence.processID
+        ) {
+        case .success(true):
+            break
+        case .success(false):
             return .pendingCopy(.invalidatedTarget)
+        case let .failure(failure):
+            return Self.failedOperation(
+                stage: .focusRead,
+                failure: failure
+            )
         }
-        guard copyString(from: stored.element, attribute: "AXValue") == stored.originalValue else {
+        switch await system.value(of: evidence.reference) {
+        case let .success(value?) where value == evidence.originalValue:
+            break
+        case .success:
             return .pendingCopy(.changedTarget)
+        case let .failure(failure):
+            return Self.failedOperation(
+                stage: .valueRead,
+                failure: failure
+            )
         }
-        guard let currentSelection = copyValue(
-            from: stored.element,
-            attribute: "AXSelectedTextRange"
-        ), CFEqual(currentSelection, stored.selectedRange) else {
+        switch await system.selection(of: evidence.reference) {
+        case let .success(selection?) where selection == evidence.selection:
+            break
+        case .success:
             return .pendingCopy(.changedTarget)
+        case let .failure(failure):
+            return Self.failedOperation(
+                stage: .fallbackSelection,
+                failure: failure
+            )
+        }
+        guard !(await system.secureInputEnabled()) else {
+            return .pendingCopy(.secureTarget)
         }
         if !committed {
             guard await commitGate.commit() else {
                 return .pendingCopy(.deliveryFailed)
             }
         }
-        guard !IsSecureEventInputEnabled() else {
-            return .pendingCopy(.secureTarget)
+        guard !Task.isCancelled else {
+            return .pendingCopy(.deliveryFailed)
         }
-        guard postUnicode(text, to: stored.processID) else {
-            return .pendingCopy(directError.map(map) ?? .deliveryFailed)
+        guard await system.postUnicode(text, to: evidence.processID) else {
+            if let directFailure, let directDiagnostic {
+                return .pendingCopyDiagnosed(
+                    directFailure.pendingCopyReason,
+                    directDiagnostic
+                )
+            }
+            return .pendingCopyDiagnosed(
+                .deliveryFailed,
+                .init(
+                    stage: .unicodePost,
+                    cause: .rejected
+                )
+            )
         }
-        try? await Task.sleep(for: .milliseconds(80))
-        return copyString(from: stored.element, attribute: "AXValue") == expectedValue
-            ? .delivered
-            : .pendingCopy(.deliveryFailed)
+        return await verifyPostedUnicode(
+            expectedValue,
+            originalValue: evidence.originalValue,
+            target: evidence.reference
+        )
     }
 
     public func discard(_ target: InputTargetSnapshot) async {
         targets[target.id] = nil
     }
 
-    private func copyElement(
-        from element: AXUIElement,
-        attribute: String
-    ) -> AXUIElement? {
-        guard let value = copyValue(from: element, attribute: attribute) else {
-            return nil
-        }
-        guard CFGetTypeID(value) == AXUIElementGetTypeID() else {
-            return nil
-        }
-        return unsafeDowncast(value, to: AXUIElement.self)
+    package static func allowsUnicodeDelivery(
+        to bundleIdentifier: String?,
+        verifiedBundleIdentifiers: Set<String>
+    ) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return verifiedBundleIdentifiers.contains(bundleIdentifier)
     }
 
-    private func copyString(
-        from element: AXUIElement,
-        attribute: String
+    private func verifyMutationReceipt(
+        _ expectedValue: String,
+        originalValue: String,
+        target: AccessibilityTargetReference,
+        diagnosticStage: DeliveryDiagnostic.Stage
+    ) async -> DeliveryOutcome {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(1))
+        while true {
+            switch await system.value(of: target) {
+            case let .success(value?) where value == expectedValue:
+                return .delivered
+            case let .success(value?) where value == originalValue:
+                break
+            case .success(nil), .failure(.cannotComplete):
+                break
+            case .failure(.invalidUIElement):
+                return .pendingCopyDiagnosed(
+                    .invalidatedTarget,
+                    .init(
+                        stage: diagnosticStage,
+                        cause: .invalidated
+                    )
+                )
+            case .failure(.attributeUnsupported), .failure(.notImplemented):
+                return .pendingCopyDiagnosed(
+                    .unsupportedTarget,
+                    .init(
+                        stage: diagnosticStage,
+                        cause: .unsupported
+                    )
+                )
+            case .failure(.other), .success(.some):
+                return .pendingCopyDiagnosed(
+                    .deliveryUnconfirmed,
+                    .init(
+                        stage: diagnosticStage,
+                        cause: .unconfirmed
+                    )
+                )
+            }
+            guard clock.now < deadline else {
+                return .pendingCopyDiagnosed(
+                    .deliveryUnconfirmed,
+                    .init(
+                        stage: diagnosticStage,
+                        cause: .unconfirmed
+                    )
+                )
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else {
+                return .pendingCopyDiagnosed(
+                    .deliveryFailed,
+                    .init(
+                        stage: diagnosticStage,
+                        cause: .cancelled
+                    )
+                )
+            }
+        }
+    }
+
+    private func verifyPostedUnicode(
+        _ expectedValue: String,
+        originalValue: String,
+        target: AccessibilityTargetReference
+    ) async -> DeliveryOutcome {
+        await verifyMutationReceipt(
+            expectedValue,
+            originalValue: originalValue,
+            target: target,
+            diagnosticStage: .unicodeReceipt
+        )
+    }
+
+    private func replacingSelection(
+        in evidence: AccessibilityTargetEvidence,
+        with text: String
     ) -> String? {
-        copyValue(from: element, attribute: attribute) as? String
-    }
-
-    private func copyValue(
-        from element: AXUIElement,
-        attribute: String
-    ) -> CFTypeRef? {
-        var value: CFTypeRef?
-        let error = AXUIElementCopyAttributeValue(
-            element,
-            attribute as CFString,
-            &value
-        )
-        return error == .success ? value : nil
-    }
-
-    private func extractRange(from value: CFTypeRef) -> CFRange? {
-        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        let axValue = unsafeDowncast(value, to: AXValue.self)
-        guard AXValueGetType(axValue) == .cfRange else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(axValue, .cfRange, &range) else { return nil }
-        return range
-    }
-
-    private func replacingSelection(in stored: StoredTarget, with text: String) -> String? {
-        let original = stored.originalValue as NSString
-        let range = NSRange(
-            location: stored.selection.location,
-            length: stored.selection.length
-        )
+        let original = evidence.originalValue as NSString
+        let range = evidence.selection
         guard range.location >= 0, range.length >= 0,
               NSMaxRange(range) <= original.length
         else { return nil }
         return original.replacingCharacters(in: range, with: text)
     }
 
-    private func isStillFocused(_ expected: AXUIElement) -> Bool {
-        let system = AXUIElementCreateSystemWide()
-        guard let application = copyElement(
-            from: system,
-            attribute: "AXFocusedApplication"
-        ), let focused = copyElement(
-            from: application,
-            attribute: "AXFocusedUIElement"
-        ) else { return false }
-        return CFEqual(focused, expected)
-    }
-
-    private func postUnicode(_ text: String, to processID: pid_t) -> Bool {
-        guard !text.isEmpty,
-              let source = CGEventSource(stateID: .hidSystemState),
-              let keyDown = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: 0,
-                keyDown: true
-              ),
-              let keyUp = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: 0,
-                keyDown: false
-              )
-        else { return false }
-        let units = Array(text.utf16)
-        units.withUnsafeBufferPointer { buffer in
-            guard let baseAddress = buffer.baseAddress else { return }
-            keyDown.keyboardSetUnicodeString(
-                stringLength: buffer.count,
-                unicodeString: baseAddress
-            )
-            keyUp.keyboardSetUnicodeString(
-                stringLength: buffer.count,
-                unicodeString: baseAddress
-            )
+    private static func diagnostic(
+        stage: DeliveryDiagnostic.Stage,
+        failure: AccessibilityOperationFailure
+    ) -> DeliveryDiagnostic {
+        let cause: DeliveryDiagnostic.Cause = switch failure {
+        case .invalidUIElement: .invalidUIElement
+        case .attributeUnsupported: .attributeUnsupported
+        case .notImplemented: .notImplemented
+        case .cannotComplete: .cannotComplete
+        case .other: .other
         }
-        keyDown.postToPid(processID)
-        keyUp.postToPid(processID)
-        return true
+        return DeliveryDiagnostic(stage: stage, cause: cause)
     }
 
-    private func processIdentifier(of element: AXUIElement) -> pid_t {
-        var pid: pid_t = 0
-        AXUIElementGetPid(element, &pid)
-        return pid
-    }
-
-    private func map(_ error: AXError) -> PendingCopyReason {
-        switch error {
-        case .invalidUIElement:
-            .invalidatedTarget
-        case .attributeUnsupported, .notImplemented:
-            .unsupportedTarget
-        case .cannotComplete:
-            .deliveryFailed
-        default:
-            .deliveryFailed
-        }
+    private static func failedOperation(
+        stage: DeliveryDiagnostic.Stage,
+        failure: AccessibilityOperationFailure
+    ) -> DeliveryOutcome {
+        .pendingCopyDiagnosed(
+            failure.pendingCopyReason,
+            diagnostic(stage: stage, failure: failure)
+        )
     }
 }

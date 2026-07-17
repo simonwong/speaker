@@ -4,17 +4,327 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
 CONFIGURATION="${SPEAKER_CONFIGURATION:-debug}"
+VERSION="${SPEAKER_VERSION:-0.1.0}"
+BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-1}"
+REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
+REQUESTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
+BUNDLE_IDENTIFIER="${REQUESTED_BUNDLE_IDENTIFIER:-com.local.speaker}"
+SIGNING_IDENTITY="${SPEAKER_CODESIGN_IDENTITY:--}"
+LOCAL_SIGNING_IDENTITY="${SPEAKER_LOCAL_CODESIGN_IDENTITY:-}"
+EXPECTED_TEAM_ID="$REQUESTED_TEAM_ID"
+UNIVERSAL_EXECUTABLE=""
+BUILD_ROOT="${SPEAKER_SWIFT_SCRATCH_PATH:-$ROOT/.build}"
+APP="${SPEAKER_BUNDLE_OUTPUT_APP:-$ROOT/.build/Speaker.app}"
+PENDING_ROOT="${SPEAKER_BUNDLE_PENDING_ROOT:-}"
+RELEASE_SOURCE_COMMIT="${SPEAKER_RELEASE_SOURCE_COMMIT:-}"
+PACKAGE_RESOLVED_SHA256="${SPEAKER_PACKAGE_RESOLVED_SHA256:-}"
+RELEASE_NOTES_SHA256="${SPEAKER_RELEASE_NOTES_SHA256:-}"
+CUSTOM_BUNDLE_PATHS=0
+TEST_ISOLATED_OUTPUT=0
 
-"$SCRIPT_DIR/build" >&2
-BIN_PATH="$("$SCRIPT_DIR/swiftw" build --disable-sandbox --configuration "$CONFIGURATION" --show-bin-path)"
-APP="$ROOT/.build/Speaker.app"
+if [[ -n "${SPEAKER_SWIFT_SCRATCH_PATH:-}" \
+      || -n "${SPEAKER_BUNDLE_OUTPUT_APP:-}" \
+      || -n "$PENDING_ROOT" ]]; then
+    CUSTOM_BUNDLE_PATHS=1
+fi
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN_PATH/SpeakerApp" "$APP/Contents/MacOS/SpeakerApp"
+if [[ "$BUILD_ROOT" != /* || "$APP" != /* || "$APP" != *.app ]]; then
+    print -u2 "Bundle build and output paths must be absolute; output must end in .app."
+    exit 1
+fi
+for guarded_path in "$BUILD_ROOT" "$APP"; do
+    if [[ "$guarded_path" == */./* \
+          || "$guarded_path" == */../* \
+          || "$guarded_path" == */. \
+          || "$guarded_path" == */.. ]]; then
+        print -u2 "Refusing a non-normalized bundle path: $guarded_path"
+        exit 1
+    fi
+    current_component=""
+    for component in ${(s:/:)guarded_path}; do
+        [[ -n "$component" ]] || continue
+        current_component="$current_component/$component"
+        if [[ -L "$current_component" ]]; then
+            print -u2 "Refusing a bundle path containing a symbolic link: $current_component"
+            exit 1
+        fi
+    done
+done
+if (( CUSTOM_BUNDLE_PATHS )); then
+    if [[ "${SPEAKER_ENABLE_TEST_HOOKS:-0}" == "1" \
+          && "$CONFIGURATION" == "debug" \
+          && "$SIGNING_IDENTITY" == "-" \
+          && "$BUILD_ROOT" == "$ROOT/.build" \
+          && "$APP" == "$PENDING_ROOT/"* ]]; then
+        TEST_ISOLATED_OUTPUT=1
+    fi
+    if [[ -z "$PENDING_ROOT" || "$PENDING_ROOT" != /* \
+          || ! -d "$PENDING_ROOT" || -L "$PENDING_ROOT" \
+          || "$(stat -f %u "$PENDING_ROOT")" != "$UID" \
+          || "$(stat -f %Lp "$PENDING_ROOT")" != "700" \
+          || ( "$BUILD_ROOT" != "$PENDING_ROOT/"* \
+              && "$TEST_ISOLATED_OUTPUT" != "1" ) \
+          || "$APP" != "$PENDING_ROOT/"* ]]; then
+        print -u2 "Custom bundle paths require one owner-only pending root."
+        exit 1
+    fi
+    if [[ -e "$APP" || -L "$APP" ]]; then
+        print -u2 "Refusing to overwrite a custom bundle output: $APP"
+        exit 1
+    fi
+fi
+
+cleanup_bundle() {
+    [[ -z "$UNIVERSAL_EXECUTABLE" ]] || rm -f "$UNIVERSAL_EXECUTABLE"
+}
+trap cleanup_bundle EXIT
+
+sign_embedded_sparkle() {
+    local framework="$1"
+    local identity="$2"
+    local timestamp_mode="$3"
+    local -a signing_arguments
+
+    signing_arguments=(
+        --force
+        --options runtime
+        --sign "$identity"
+    )
+    if [[ "$timestamp_mode" == "timestamp" ]]; then
+        signing_arguments+=(--timestamp)
+    fi
+
+    codesign "${signing_arguments[@]}" \
+        "$framework/Versions/Current/Updater.app"
+    codesign "${signing_arguments[@]}" \
+        "$framework/Versions/Current/Autoupdate"
+    codesign "${signing_arguments[@]}" "$framework"
+}
+
+remove_build_machine_rpaths() {
+    local executable="$1"
+    local path
+    local -a paths
+
+    paths=("${(@f)$(
+        otool -l "$executable" \
+            | awk '/cmd LC_RPATH/{getline; getline; print $2}'
+    )}")
+    typeset -U paths
+    for path in "${paths[@]}"; do
+        case "$path" in
+            /Library/Developer/*|/Applications/Xcode*.app/*|*.xctoolchain/*)
+                install_name_tool -delete_rpath "$path" "$executable"
+                ;;
+        esac
+    done
+}
+
+print -u2 "Validating Speaker bundle metadata..."
+validate_bundle_metadata "$VERSION" "$BUILD_NUMBER" "$BUNDLE_IDENTIFIER"
+print -u2 "Bundling Speaker $VERSION ($BUILD_NUMBER) [$CONFIGURATION]..."
+if [[ "$SIGNING_IDENTITY" != "-" && -n "$LOCAL_SIGNING_IDENTITY" ]]; then
+    print -u2 "Use either SPEAKER_CODESIGN_IDENTITY or SPEAKER_LOCAL_CODESIGN_IDENTITY, not both."
+    exit 1
+fi
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+    load_reviewed_release_identity "$ROOT"
+    reject_release_identity_override \
+        "$REQUESTED_BUNDLE_IDENTIFIER" \
+        "$REQUESTED_TEAM_ID"
+    BUNDLE_IDENTIFIER="$REVIEWED_RELEASE_BUNDLE_IDENTIFIER"
+    EXPECTED_TEAM_ID="$REVIEWED_RELEASE_TEAM_IDENTIFIER"
+    [[ -n "$SIGNING_IDENTITY" ]] || {
+        print -u2 "SPEAKER_CODESIGN_IDENTITY must not be empty."
+        exit 1
+    }
+    [[ "$CONFIGURATION" == "release" ]] || {
+        print -u2 "A production-signed bundle must use the release configuration."
+        exit 1
+    }
+    if [[ "${SPEAKER_SWIFT_RELEASE_ISOLATION:-0}" != "1" ]] \
+          || (( ! CUSTOM_BUNDLE_PATHS )); then
+        print -u2 "Production bundles require an isolated pending build root."
+        exit 1
+    fi
+    if ! matches_release_pattern "$RELEASE_SOURCE_COMMIT" '^[0-9a-f]{40}$' \
+          || ! matches_release_pattern "$PACKAGE_RESOLVED_SHA256" '^[0-9a-f]{64}$' \
+          || ! matches_release_pattern "$RELEASE_NOTES_SHA256" '^[0-9a-f]{64}$'; then
+        print -u2 "Production bundles require complete reviewed build provenance."
+        exit 1
+    fi
+    validate_production_metadata \
+        "$VERSION" \
+        "$BUILD_NUMBER" \
+        "$BUNDLE_IDENTIFIER" \
+        "$EXPECTED_TEAM_ID"
+fi
+
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+    # Formal artifacts are deterministic universal2 binaries regardless of
+    # the release runner's host architecture. Separate builds work with both
+    # full Xcode and Command Line Tools, unlike SwiftPM's XCBuild multi-arch
+    # driver which is unavailable on CLT-only machines.
+    for architecture in arm64 x86_64; do
+        /bin/zsh "$SCRIPT_DIR/swiftw" build \
+            --disable-sandbox \
+            --configuration release \
+            --product SpeakerApp \
+            --arch "$architecture" \
+            -Xswiftc -warnings-as-errors >&2
+    done
+    ARM_BIN_PATH="$(
+        /bin/zsh "$SCRIPT_DIR/swiftw" build \
+            --disable-sandbox \
+            --configuration release \
+            --product SpeakerApp \
+            --arch arm64 \
+            --show-bin-path
+    )"
+    X86_BIN_PATH="$(
+        /bin/zsh "$SCRIPT_DIR/swiftw" build \
+            --disable-sandbox \
+            --configuration release \
+            --product SpeakerApp \
+            --arch x86_64 \
+            --show-bin-path
+    )"
+    BIN_PATH="$ARM_BIN_PATH"
+    mkdir -p "$BUILD_ROOT"
+    UNIVERSAL_EXECUTABLE="$(mktemp "$BUILD_ROOT/SpeakerApp.universal.XXXXXX")"
+    lipo -create \
+        "$ARM_BIN_PATH/SpeakerApp" \
+        "$X86_BIN_PATH/SpeakerApp" \
+        -output "$UNIVERSAL_EXECUTABLE"
+else
+    /bin/zsh "$SCRIPT_DIR/build" >&2
+    BIN_PATH="$(/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox --configuration "$CONFIGURATION" --show-bin-path)"
+fi
+
+if (( ! CUSTOM_BUNDLE_PATHS )); then
+    rm -rf "$APP"
+fi
+mkdir -p \
+    "$APP/Contents/MacOS" \
+    "$APP/Contents/Resources" \
+    "$APP/Contents/Frameworks"
+if [[ -n "$UNIVERSAL_EXECUTABLE" ]]; then
+    cp "$UNIVERSAL_EXECUTABLE" "$APP/Contents/MacOS/SpeakerApp"
+else
+    cp "$BIN_PATH/SpeakerApp" "$APP/Contents/MacOS/SpeakerApp"
+fi
+[[ -d "$BIN_PATH/Sparkle.framework" ]] || {
+    print -u2 "The built Sparkle.framework is missing: $BIN_PATH/Sparkle.framework"
+    exit 1
+}
+ditto \
+    "$BIN_PATH/Sparkle.framework" \
+    "$APP/Contents/Frameworks/Sparkle.framework"
+# Speaker is not sandboxed and does not enable Sparkle's sandbox-only XPC
+# services. Removing them also avoids shipping privileged code that the app
+# neither configures nor needs.
+rm -rf \
+    "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" \
+    "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices"
+if ! otool -l "$APP/Contents/MacOS/SpeakerApp" \
+    | grep -Fq '@executable_path/../Frameworks'; then
+    install_name_tool \
+        -add_rpath '@executable_path/../Frameworks' \
+        "$APP/Contents/MacOS/SpeakerApp"
+fi
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+    remove_build_machine_rpaths "$APP/Contents/MacOS/SpeakerApp"
+fi
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-codesign --force --deep --sign - "$APP"
+cp "$ROOT/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md"
+[[ -s "$APP/Contents/Resources/PRIVACY.md" ]] || {
+    print -u2 "Bundled privacy policy is missing or empty."
+    exit 1
+}
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_IDENTIFIER" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
+
+if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+    BUILD_MANIFEST="$APP/Contents/Resources/BuildManifest.plist"
+    plutil -create xml1 "$BUILD_MANIFEST"
+    plutil -insert SchemaVersion -integer 1 "$BUILD_MANIFEST"
+    for pair in \
+        "SourceCommit|$RELEASE_SOURCE_COMMIT" \
+        "PackageResolvedSHA256|$PACKAGE_RESOLVED_SHA256" \
+        "ReleaseNotesSHA256|$RELEASE_NOTES_SHA256" \
+        "Version|$VERSION" \
+        "BuildNumber|$BUILD_NUMBER"; do
+        plutil -insert "${pair%%|*}" -string "${pair#*|}" \
+            "$BUILD_MANIFEST"
+    done
+    chmod 644 "$BUILD_MANIFEST"
+    plutil -lint "$BUILD_MANIFEST" >/dev/null
+    /usr/libexec/PlistBuddy -c "Add :SpeakerSigningMode string developer-id" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SpeakerCredentialStorage string keychain" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SpeakerKeychainService string $BUNDLE_IDENTIFIER.provider-api-keys" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUFeedURL string $REVIEWED_UPDATE_FEED_URL" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $REVIEWED_UPDATE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUVerifyUpdateBeforeExtraction bool true" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SURequireSignedFeed bool true" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUSignedFeedFailureExpirationInterval integer 0" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUEnableAutomaticChecks bool false" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUAutomaticallyUpdate bool false" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUEnableSystemProfiling bool false" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SUEnableJavaScript bool false" "$APP/Contents/Info.plist"
+    sign_embedded_sparkle \
+        "$APP/Contents/Frameworks/Sparkle.framework" \
+        "$SIGNING_IDENTITY" \
+        timestamp
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp \
+        --entitlements "$ROOT/Resources/Speaker.entitlements" \
+        --sign "$SIGNING_IDENTITY" \
+        "$APP"
+    verify_production_app \
+        "$APP" \
+        "$BUNDLE_IDENTIFIER" \
+        "$EXPECTED_TEAM_ID" \
+        "$ROOT/Resources/Speaker.entitlements" \
+        "$REVIEWED_UPDATE_FEED_URL" \
+        "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+    verify_production_build_provenance \
+        "$APP" \
+        "$RELEASE_SOURCE_COMMIT" \
+        "$PACKAGE_RESOLVED_SHA256" \
+        "$RELEASE_NOTES_SHA256" \
+        "$VERSION" \
+        "$BUILD_NUMBER"
+    verify_production_sparkle_signatures "$APP" "$EXPECTED_TEAM_ID"
+elif [[ -n "$LOCAL_SIGNING_IDENTITY" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :SpeakerSigningMode string development-signed" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SpeakerCredentialStorage string local-file" "$APP/Contents/Info.plist"
+    sign_embedded_sparkle \
+        "$APP/Contents/Frameworks/Sparkle.framework" \
+        "$LOCAL_SIGNING_IDENTITY" \
+        no-timestamp
+    codesign \
+        --force \
+        --sign "$LOCAL_SIGNING_IDENTITY" \
+        "$APP"
+    verify_local_signed_app "$APP" "$BUNDLE_IDENTIFIER"
+else
+    /usr/libexec/PlistBuddy -c "Add :SpeakerSigningMode string development-ad-hoc" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SpeakerCredentialStorage string local-file" "$APP/Contents/Info.plist"
+    sign_embedded_sparkle \
+        "$APP/Contents/Frameworks/Sparkle.framework" \
+        - \
+        no-timestamp
+    codesign --force --sign - "$APP"
+    verify_ad_hoc_app "$APP" "$BUNDLE_IDENTIFIER"
+fi
+verify_sparkle_layout "$APP"
 codesign --verify --deep --strict "$APP"
+plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
 print "$APP"

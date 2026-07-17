@@ -29,6 +29,13 @@ public enum VoiceShortcutPreference: Equatable, Sendable, Codable {
         }
     }
 
+    public var displayName: String {
+        switch self {
+        case .functionKey: "Fn"
+        case let .custom(_, _, displayName): displayName
+        }
+    }
+
     private enum Kind: String, Codable {
         case functionKey
         case custom
@@ -148,28 +155,83 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
     }
 }
 
+public enum HistoryRetentionPolicy: String, CaseIterable, Equatable, Sendable, Codable {
+    case thirtyDays
+    case ninetyDays
+    case oneYear
+    case forever
+
+    public var maximumAgeDays: Int? {
+        switch self {
+        case .thirtyDays: 30
+        case .ninetyDays: 90
+        case .oneYear: 365
+        case .forever: nil
+        }
+    }
+}
+
 public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var shortcut: VoiceShortcutPreference
     public var refinement: RefinementPreference
     public var savedCustomRefinement: RefinementPreference?
     public var launchAtLogin: Bool
     public var doubaoResourceID: String?
+    public var historyRetention: HistoryRetentionPolicy
 
     public init(
         shortcut: VoiceShortcutPreference = .functionKey,
         refinement: RefinementPreference = .defaultSmooth,
         savedCustomRefinement: RefinementPreference? = nil,
         launchAtLogin: Bool = false,
-        doubaoResourceID: String? = nil
+        doubaoResourceID: String? = nil,
+        historyRetention: HistoryRetentionPolicy = .forever
     ) {
         self.shortcut = shortcut
         self.refinement = refinement
         self.savedCustomRefinement = savedCustomRefinement
         self.launchAtLogin = launchAtLogin
         self.doubaoResourceID = doubaoResourceID
+        self.historyRetention = historyRetention
     }
 
     public static let `default` = SpeakerAppSettings()
+
+    private enum CodingKeys: String, CodingKey {
+        case shortcut
+        case refinement
+        case savedCustomRefinement
+        case launchAtLogin
+        case doubaoResourceID
+        case historyRetention
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        shortcut = try container.decode(
+            VoiceShortcutPreference.self,
+            forKey: .shortcut
+        )
+        refinement = try container.decode(
+            RefinementPreference.self,
+            forKey: .refinement
+        )
+        savedCustomRefinement = try container.decodeIfPresent(
+            RefinementPreference.self,
+            forKey: .savedCustomRefinement
+        )
+        launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
+        doubaoResourceID = try container.decodeIfPresent(
+            String.self,
+            forKey: .doubaoResourceID
+        )
+        // Preserve history until the user makes an explicit retention choice.
+        // The hard record cap remains an independent resource-safety boundary.
+        historyRetention = try container.decodeIfPresent(
+            HistoryRetentionPolicy.self,
+            forKey: .historyRetention
+        ) ?? .forever
+    }
 }
 
 public enum AppSettingsRecoveryReason: Equatable, Sendable {
@@ -208,13 +270,33 @@ public enum AppSettingsStoreError: Error, Equatable, Sendable {
     case writeFailed(reason: String)
 }
 
+extension AppSettingsStoreError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .writeFailed(reason):
+            "无法保存 Speaker 设置：\(reason)"
+        }
+    }
+}
+
 public actor VersionedLocalAppSettingsStore {
     public static let currentSchemaVersion = 1
+    private static let maximumDocumentByteCount = 1 * 1_024 * 1_024
 
     private let fileURL: URL
+    private let fileProtection: LocalFileProtection
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
+        fileProtection = .ownerOnly
+    }
+
+    package init(
+        fileURL: URL,
+        fileProtection: LocalFileProtection
+    ) {
+        self.fileURL = fileURL
+        self.fileProtection = fileProtection
     }
 
     public static func defaultFileURL(
@@ -232,16 +314,28 @@ public actor VersionedLocalAppSettingsStore {
     }
 
     public func load() -> AppSettingsLoadResult {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .defaults(.default)
+        Self.pruneRecoveryArtifacts(for: fileURL)
+        do {
+            try fileProtection.protect(fileURL)
+        } catch {
+            return .recoveryFailed(
+                .default,
+                reason: "无法保护设置文件权限，已停止加载本机设置。"
+            )
         }
-
         let data: Data
         do {
-            data = try Data(contentsOf: fileURL)
+            guard let storedData = try OwnerOnlyFilePersistence.read(
+                from: fileURL,
+                maximumByteCount: Self.maximumDocumentByteCount
+            ) else {
+                return .defaults(.default)
+            }
+            data = storedData
         } catch {
-            return recover(
-                reason: .corrupted(reason: Self.safeReason(for: error))
+            return .recoveryFailed(
+                .default,
+                reason: "无法安全读取设置文件，已停止加载：\(Self.safeReason(for: error))"
             )
         }
 
@@ -280,11 +374,12 @@ public actor VersionedLocalAppSettingsStore {
                 settings: settings
             )
             let data = try Self.encoder.encode(document)
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try data.write(to: fileURL, options: [.atomic])
+            guard data.count <= Self.maximumDocumentByteCount else {
+                throw OwnerOnlyFilePersistenceError.fileTooLarge(
+                    maximumByteCount: Self.maximumDocumentByteCount
+                )
+            }
+            try OwnerOnlyFilePersistence.write(data, to: fileURL)
         } catch {
             throw AppSettingsStoreError.writeFailed(
                 reason: Self.safeReason(for: error)
@@ -296,7 +391,7 @@ public actor VersionedLocalAppSettingsStore {
     public func updateShortcut(
         _ shortcut: VoiceShortcutPreference
     ) throws -> SpeakerAppSettings {
-        var settings = load().settings
+        var settings = try settingsForUpdate()
         settings.shortcut = shortcut
         try save(settings)
         return settings
@@ -306,7 +401,7 @@ public actor VersionedLocalAppSettingsStore {
     public func updateRefinement(
         _ refinement: RefinementPreference
     ) throws -> SpeakerAppSettings {
-        var settings = load().settings
+        var settings = try settingsForUpdate()
         settings.refinement = refinement
         try save(settings)
         return settings
@@ -316,7 +411,7 @@ public actor VersionedLocalAppSettingsStore {
     public func updateSavedCustomRefinement(
         _ refinement: RefinementPreference
     ) throws -> SpeakerAppSettings {
-        var settings = load().settings
+        var settings = try settingsForUpdate()
         settings.savedCustomRefinement = refinement
         try save(settings)
         return settings
@@ -324,7 +419,7 @@ public actor VersionedLocalAppSettingsStore {
 
     @discardableResult
     public func updateLaunchAtLogin(_ enabled: Bool) throws -> SpeakerAppSettings {
-        var settings = load().settings
+        var settings = try settingsForUpdate()
         settings.launchAtLogin = enabled
         try save(settings)
         return settings
@@ -334,10 +429,30 @@ public actor VersionedLocalAppSettingsStore {
     public func updateDoubaoResource(
         _ resource: DoubaoStreamingResource
     ) throws -> SpeakerAppSettings {
-        var settings = load().settings
+        var settings = try settingsForUpdate()
         settings.doubaoResourceID = resource.rawValue
         try save(settings)
         return settings
+    }
+
+    @discardableResult
+    public func updateHistoryRetention(
+        _ policy: HistoryRetentionPolicy
+    ) throws -> SpeakerAppSettings {
+        var settings = try settingsForUpdate()
+        settings.historyRetention = policy
+        try save(settings)
+        return settings
+    }
+
+    private func settingsForUpdate() throws -> SpeakerAppSettings {
+        let result = load()
+        guard case let .recoveryFailed(_, reason) = result else {
+            return result.settings
+        }
+        throw AppSettingsStoreError.writeFailed(
+            reason: "原设置文件无法安全读取，已保留原文件且拒绝覆盖：\(reason)"
+        )
     }
 
     private func recover(reason: AppSettingsRecoveryReason) -> AppSettingsLoadResult {
@@ -348,6 +463,10 @@ public actor VersionedLocalAppSettingsStore {
 
         do {
             try FileManager.default.moveItem(at: fileURL, to: backupURL)
+            Self.pruneRecoveryArtifacts(
+                for: fileURL,
+                preserving: backupURL
+            )
             return .recovered(
                 .default,
                 recovery: AppSettingsRecovery(backupURL: backupURL, reason: reason)
@@ -358,6 +477,19 @@ public actor VersionedLocalAppSettingsStore {
                 reason: "Settings could not be recovered: \(Self.safeReason(for: error))"
             )
         }
+    }
+
+    private static func pruneRecoveryArtifacts(
+        for fileURL: URL,
+        preserving preservedURL: URL? = nil
+    ) {
+        let baseName = fileURL.deletingPathExtension().lastPathComponent
+        RecoveryArchivePruner.pruneRegularFiles(
+            in: fileURL.deletingLastPathComponent(),
+            prefix: "\(baseName).recovery-",
+            suffix: ".json",
+            preserving: preservedURL
+        )
     }
 }
 

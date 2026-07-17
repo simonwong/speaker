@@ -1,0 +1,327 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
+OUTPUT_DIR="$ROOT/.build/compatibility-smoke"
+SELECTED_CASE=""
+LIST_ONLY=0
+
+typeset -a CASE_IDS=(
+    shortcut
+    shortcut-conflict
+    textedit-insert
+    textedit-selection-undo
+    safari-input
+    safari-secure
+    chrome-input
+    electron-editor
+    rich-text
+    terminal
+    release-focus
+    target-changed
+    target-closed
+    cancel-recording
+    cancel-processing
+    login-item
+    permissions-recovery
+    voiceover-hud
+    visual-accessibility
+)
+
+usage() {
+    print "Usage: ./scripts/compatibility-smoke [--list] [--case ID] [--output DIR] [--app PATH]"
+    print "Exit: 0=full matrix PASS, 1=FAIL, 2=SKIP, 3=partial case PASS"
+}
+
+case_title() {
+    case "$1" in
+        shortcut) print "Fn 与自定义快捷键" ;;
+        shortcut-conflict) print "快捷键冲突与 Fn 回退" ;;
+        textedit-insert) print "TextEdit 光标插入、中文与多行" ;;
+        textedit-selection-undo) print "TextEdit 选择替换与撤销" ;;
+        safari-input) print "Safari 普通输入框与 textarea" ;;
+        safari-secure) print "Safari 安全输入框降级" ;;
+        chrome-input) print "Chrome 普通输入框与 contenteditable" ;;
+        electron-editor) print "Electron 编辑器" ;;
+        rich-text) print "富文本编辑器" ;;
+        terminal) print "Terminal 光标输入" ;;
+        release-focus) print "松开快捷键时确定最终目标" ;;
+        target-changed) print "等待期间目标内容变化" ;;
+        target-closed) print "等待期间目标关闭" ;;
+        cancel-recording) print "录音中 Esc 取消" ;;
+        cancel-processing) print "处理中 Esc 取消" ;;
+        login-item) print "登录时启动" ;;
+        permissions-recovery) print "权限撤销与恢复" ;;
+        voiceover-hud) print "VoiceOver HUD 操作" ;;
+        visual-accessibility) print "动态效果与增强对比度" ;;
+        *) return 1 ;;
+    esac
+}
+
+case_instructions() {
+    case "$1" in
+        shortcut)
+            print "分别用内建键盘 Fn、外接键盘 Fn（如有）和自定义快捷键完成一次短按、一次长按。"
+            print "通过：短按为再次按下结束；长按为松开结束；空闲时不吞掉前台 App 的 Esc。"
+            ;;
+        shortcut-conflict)
+            print "先保存一个未占用的自定义组合键并验证，再尝试录制一个被系统或其他 App 占用的组合键。"
+            print "通过：未占用组合键生效；Command 菜单类组合键或 Carbon 明确拒绝的组合键不会被静默接受，并安全回退 Fn。其他 App 的被动监听冲突只记录实际观察结果。"
+            ;;
+        textedit-insert)
+            print "在 TextEdit 纯文本窗口中，把光标放在已有文字中间，输入一段中文并明确说出“换行、第二行”。"
+            print "通过：文字出现在松开快捷键时的光标处；周边文字不变；没有重复内容。"
+            ;;
+        textedit-selection-undo)
+            print "在 TextEdit 选择一段已有文字后完成语音输入，再执行一次 Command-Z。"
+            print "通过：只替换选区；一次撤销可恢复原内容。"
+            ;;
+        safari-input)
+            print "分别在 Safari 普通 input 与 textarea 中完成输入；textarea 覆盖多行。"
+            print "通过：可确认送达；不支持的控件稳定进入待复制，HUD 不会一直等待。"
+            ;;
+        safari-secure)
+            print "在 Safari 密码输入框结束一次录音。不要说真实密码或敏感信息。"
+            print "通过：绝不自动写入；结果明确进入安全输入框的待复制降级。"
+            ;;
+        chrome-input)
+            print "分别在 Chrome 普通 input 与 contenteditable 中完成输入。"
+            print "通过：已验证控件正确送达；其余控件稳定待复制；不覆盖整段文档。"
+            ;;
+        electron-editor)
+            print "在 VS Code 或其他 Electron 编辑器的普通文本位置完成输入和选区替换。"
+            print "通过：正确送达或稳定待复制；没有卡住、重复输入或错误窗口写入。"
+            ;;
+        rich-text)
+            print "在 Notes 或 TextEdit 富文本中插入并替换一段文本；如历史中有 emoji 记录，再执行重新输入。"
+            print "通过：周边格式不被整体重写；不确定时进入待复制。"
+            ;;
+        terminal)
+            print "在 Terminal 的空白命令行位置完成一段不执行的文本输入，随后用 Control-U 清空。"
+            print "通过：正确出现在光标处或稳定待复制；Speaker 不模拟 Command-V。"
+            ;;
+        release-focus)
+            print "按住快捷键讲话时在两个 App 间切换，只在最后一个 App 的输入框聚焦后松开。"
+            print "通过：只使用松开时的目标；开始录音时的 App 不被写入。"
+            ;;
+        target-changed)
+            print "松开后、模型仍在处理时，修改目标输入框原有内容或选区。"
+            print "通过：Speaker 不覆盖并发修改；最终文字保留为待复制。"
+            ;;
+        target-closed)
+            print "松开后、模型仍在处理时关闭目标窗口或目标 App。"
+            print "通过：最终文字保留为待复制；HUD 进入明确终态。"
+            ;;
+        cancel-recording)
+            print "开始录音后按 Esc。"
+            print "通过：录音 HUD 立即消失；没有转录、送达或迟到提示。"
+            ;;
+        cancel-processing)
+            print "松开进入转写后按 Esc。"
+            print "通过：loading 立即消失；迟到的豆包或 DeepSeek 结果不会送达。"
+            ;;
+        login-item)
+            print "在设置中开启登录时启动，退出登录并重新登录确认启动；随后关闭并再次登录确认不启动。"
+            print "通过：系统登录项状态与设置页一致；默认关闭；切换失败会明确提示。"
+            ;;
+        permissions-recovery)
+            print "运行中分别撤销麦克风与辅助功能权限，触发一次录音；随后重新授权并再次输入。"
+            print "通过：撤销后错误可解释且不卡住；重新授权后无需重装即可恢复。"
+            ;;
+        voiceover-hud)
+            print "开启 VoiceOver，依次进入录音、处理中、待复制和错误 HUD；用 VoiceOver 导航并执行取消、复制与关闭。"
+            print "通过：状态只播报一次；按钮名称和动作明确；操作不激活 Speaker、不误送达、不重复输入。"
+            ;;
+        visual-accessibility)
+            print "分别开启“减弱动态效果”和“增强对比度”，检查录音、处理中、待复制与错误 HUD。"
+            print "通过：减弱动态效果后无持续旋转/脉冲；增强对比度下边界、文字和按钮清晰，布局不跳动或截断。"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+while (( $# > 0 )); do
+    case "$1" in
+        --list)
+            LIST_ONLY=1
+            shift
+            ;;
+        --case)
+            [[ $# -ge 2 ]] || { usage; exit 64; }
+            SELECTED_CASE="$2"
+            shift 2
+            ;;
+        --output)
+            [[ $# -ge 2 ]] || { usage; exit 64; }
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --app)
+            [[ $# -ge 2 ]] || { usage; exit 64; }
+            APP="$2"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            print -u2 "Unknown option: $1"
+            usage
+            exit 64
+            ;;
+    esac
+done
+
+if [[ -n "$SELECTED_CASE" ]] && (( ! ${CASE_IDS[(Ie)$SELECTED_CASE]} )); then
+    print -u2 "Unknown compatibility case: $SELECTED_CASE"
+    exit 64
+fi
+
+if (( LIST_ONLY )); then
+    for case_id in "${CASE_IDS[@]}"; do
+        print "$case_id\t$(case_title "$case_id")"
+    done
+    exit 0
+fi
+
+[[ -d "$APP" ]] || {
+    print -u2 "Speaker is not installed at: $APP"
+    exit 66
+}
+[[ ! -L "$APP" ]] || {
+    print -u2 "Refusing a symlinked Speaker app: $APP"
+    exit 66
+}
+/usr/bin/codesign --verify --deep --strict "$APP" || {
+    print -u2 "Speaker failed strict code-signing verification: $APP"
+    exit 65
+}
+[[ ! -L "$OUTPUT_DIR" ]] || {
+    print -u2 "Refusing a symlinked report directory: $OUTPUT_DIR"
+    exit 73
+}
+mkdir -p "$OUTPUT_DIR"
+chmod 700 "$OUTPUT_DIR"
+
+typeset -a RUN_CASES
+if [[ -n "$SELECTED_CASE" ]]; then
+    RUN_CASES=("$SELECTED_CASE")
+else
+    RUN_CASES=("${CASE_IDS[@]}")
+fi
+
+timestamp="$(date -u '+%Y-%m-%dT%H-%M-%SZ')"
+report="$OUTPUT_DIR/$timestamp.md"
+temporary="$OUTPUT_DIR/.$timestamp.tmp"
+trap 'rm -f "$temporary"' EXIT
+umask 077
+
+bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+signing_mode="$(/usr/libexec/PlistBuddy -c 'Print :SpeakerSigningMode' "$APP/Contents/Info.plist")"
+executable="$APP/Contents/MacOS/SpeakerApp"
+[[ -x "$executable" ]] || {
+    print -u2 "Speaker executable is missing: $executable"
+    exit 65
+}
+executable_sha256="$(/usr/bin/shasum -a 256 "$executable" | /usr/bin/awk '{print $1}')"
+scope="FULL"
+if [[ -n "$SELECTED_CASE" ]]; then
+    scope="PARTIAL"
+fi
+
+{
+    print "# Speaker compatibility smoke"
+    print
+    print -r -- "- UTC: $(date -u '+%Y-%m-%d %H:%M:%S')"
+    print -r -- "- macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+    print -r -- "- App: $bundle_identifier $version ($build)"
+    print -r -- "- Signing: $signing_mode"
+    print -r -- "- Executable SHA-256: $executable_sha256"
+    print -r -- "- Scope: $scope (${#RUN_CASES} / ${#CASE_IDS})"
+    print
+    print "报告只记录通过/失败及脱敏备注。不要填写转录文字、API Key、请求正文或其他敏感信息。"
+    print
+    print "| Case | Result | Notes |"
+    print "| --- | --- | --- |"
+} > "$temporary"
+
+failures=0
+skipped=0
+
+for case_id in "${RUN_CASES[@]}"; do
+    title="$(case_title "$case_id")"
+    print
+    print "[$case_id] $title"
+    case_instructions "$case_id"
+    while true; do
+        print -n "结果 [p=通过 / f=失败 / s=跳过 / q=终止]: "
+        IFS= read -r result
+        case "${result:l}" in
+            p|f|s|q) break ;;
+            *) print "请输入 p、f、s 或 q。" ;;
+        esac
+    done
+    if [[ "${result:l}" == "q" ]]; then
+        print -u2 "Smoke terminated before completion."
+        exit 130
+    fi
+    print -n "脱敏备注（可留空）: "
+    IFS= read -r notes
+    notes="${notes//$'\r'/ }"
+    notes="${notes//$'\t'/ }"
+    notes="${notes//|/\\|}"
+    notes="${notes[1,240]}"
+    [[ -n "$notes" ]] || notes="-"
+
+    case "${result:l}" in
+        p) label="PASS" ;;
+        f)
+            label="FAIL"
+            (( failures += 1 ))
+            ;;
+        s)
+            label="SKIP"
+            (( skipped += 1 ))
+            ;;
+    esac
+    print "| $case_id — $title | $label | $notes |" >> "$temporary"
+done
+
+{
+    print
+    print "## Verdict"
+    print
+    print -r -- "- Failed: $failures"
+    print -r -- "- Skipped: $skipped"
+    if (( failures == 0 && skipped == 0 )); then
+        if [[ "$scope" == "FULL" ]]; then
+            print -r -- "- Result: FULL PASS"
+        else
+            print -r -- "- Result: PARTIAL PASS — 不能作为完整兼容矩阵证据"
+        fi
+    else
+        print -r -- "- Result: INCOMPLETE"
+    fi
+} >> "$temporary"
+
+mv "$temporary" "$report"
+chmod 600 "$report"
+trap - EXIT
+print
+print "Report: $report"
+
+if (( failures > 0 )); then
+    exit 1
+fi
+if (( skipped > 0 )); then
+    exit 2
+fi
+if [[ "$scope" == "PARTIAL" ]]; then
+    exit 3
+fi

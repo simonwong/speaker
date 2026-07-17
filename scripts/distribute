@@ -1,0 +1,484 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
+OUTPUT_DIR="$ROOT/.build/distribution"
+mkdir -p "$OUTPUT_DIR"
+exec 9> "$OUTPUT_DIR/.release.lock"
+chmod 600 "$OUTPUT_DIR/.release.lock"
+if ! /usr/bin/lockf -s -t 0 9; then
+    exit 75
+fi
+recover_stale_release_pending_directories "$OUTPUT_DIR"
+recover_interrupted_release_promotion "$OUTPUT_DIR"
+IDENTITY="${SPEAKER_CODESIGN_IDENTITY:-}"
+NOTARY_PROFILE="${SPEAKER_NOTARY_PROFILE:-}"
+SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
+RELEASE_NOTES_FILE="${SPEAKER_RELEASE_NOTES_FILE:-}"
+REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
+REQUESTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
+VERSION="${SPEAKER_VERSION:-}"
+BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-}"
+load_reviewed_release_identity "$ROOT"
+load_reviewed_release_candidate "$ROOT"
+reject_release_identity_override \
+    "$REQUESTED_BUNDLE_IDENTIFIER" \
+    "$REQUESTED_TEAM_ID"
+BUNDLE_IDENTIFIER="$REVIEWED_RELEASE_BUNDLE_IDENTIFIER"
+EXPECTED_TEAM_ID="$REVIEWED_RELEASE_TEAM_IDENTIFIER"
+
+if [[ -z "$IDENTITY" || "$IDENTITY" == "-" ]]; then
+    print -u2 "SPEAKER_CODESIGN_IDENTITY must be a Developer ID Application identity."
+    exit 1
+fi
+if [[ -z "$NOTARY_PROFILE" ]]; then
+    print -u2 "SPEAKER_NOTARY_PROFILE must name a notarytool Keychain profile."
+    exit 1
+fi
+if [[ -z "$SPARKLE_KEY_ACCOUNT" ]]; then
+    print -u2 "SPEAKER_SPARKLE_KEY_ACCOUNT must name the reviewed Sparkle EdDSA keychain account."
+    exit 1
+fi
+case "${RELEASE_NOTES_FILE:e:l}" in
+    md|txt|html)
+        ;;
+    *)
+        print -u2 "Release notes must use .md, .txt, or .html."
+        exit 1
+        ;;
+esac
+if [[ -z "$VERSION" || -z "$BUILD_NUMBER" ]]; then
+    print -u2 "SPEAKER_VERSION and SPEAKER_BUILD_NUMBER are required."
+    exit 1
+fi
+reject_release_candidate_override "$VERSION" "$BUILD_NUMBER"
+validate_production_metadata \
+    "$VERSION" \
+    "$BUILD_NUMBER" \
+    "$BUNDLE_IDENTIFIER" \
+    "$EXPECTED_TEAM_ID"
+verify_release_source_tree_clean "$ROOT"
+verify_swiftpm_dependency_checkouts_clean "$ROOT"
+verify_release_candidate_history "$ROOT"
+resolve_tracked_release_notes "$ROOT" "$RELEASE_NOTES_FILE"
+
+export SPEAKER_CONFIGURATION=release
+export SPEAKER_BUNDLE_IDENTIFIER="$BUNDLE_IDENTIFIER"
+export SPEAKER_EXPECTED_TEAM_ID="$EXPECTED_TEAM_ID"
+mkdir -p "$OUTPUT_DIR"
+PENDING_DIR="$(mktemp -d "$OUTPUT_DIR/.pending.XXXXXX")" || {
+    exit 1
+}
+print -r -- speaker-release-pending-v1 \
+    > "$PENDING_DIR/.speaker-release-pending"
+chmod 600 "$PENDING_DIR/.speaker-release-pending"
+RELEASE_SCRATCH="$PENDING_DIR/swift-build"
+RELEASE_APP="$PENDING_DIR/Speaker.app"
+RELEASE_SOURCE="$PENDING_DIR/source"
+create_release_source_snapshot "$ROOT" "$RELEASE_SOURCE"
+RELEASE_NOTES_FILE="$RELEASE_SOURCE/$REVIEWED_RELEASE_NOTES_RELATIVE_PATH"
+[[ -f "$RELEASE_NOTES_FILE" && ! -L "$RELEASE_NOTES_FILE" ]] || {
+    print -u2 "Tracked release notes are missing from the source snapshot."
+    exit 1
+}
+RELEASE_SDK_PATH="$(/bin/zsh "$RELEASE_SOURCE/scripts/swiftw" --print-sdk-path)"
+RELEASE_SDK_SETTINGS="$RELEASE_SDK_PATH/SDKSettings.plist"
+[[ -f "$RELEASE_SDK_SETTINGS" && ! -L "$RELEASE_SDK_SETTINGS" ]] || {
+    print -u2 "The selected release SDK has no safe SDKSettings.plist."
+    exit 1
+}
+RELEASE_SDK_CANONICAL_NAME="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CanonicalName' \
+        "$RELEASE_SDK_SETTINGS"
+)"
+RELEASE_SDK_SETTINGS_HASH="$(
+    shasum -a 256 "$RELEASE_SDK_SETTINGS" | awk '{print $1}'
+)"
+export SPEAKER_RELEASE_SOURCE_COMMIT="$REVIEWED_RELEASE_SOURCE_COMMIT"
+export SPEAKER_PACKAGE_RESOLVED_SHA256="$(
+    shasum -a 256 "$RELEASE_SOURCE/Package.resolved" | awk '{print $1}'
+)"
+export SPEAKER_RELEASE_NOTES_SHA256="$(
+    shasum -a 256 "$RELEASE_NOTES_FILE" | awk '{print $1}'
+)"
+export SPEAKER_SWIFT_SCRATCH_PATH="$RELEASE_SCRATCH"
+export SPEAKER_BUNDLE_OUTPUT_APP="$RELEASE_APP"
+export SPEAKER_BUNDLE_PENDING_ROOT="$PENDING_DIR"
+export SPEAKER_SWIFT_RELEASE_ISOLATION=1
+PENDING_ARCHIVE="$PENDING_DIR/submission.zip"
+DMG_SOURCE="$PENDING_DIR/dmg-source"
+PENDING_DMG="$PENDING_DIR/final.dmg"
+PENDING_CHECKSUM="$PENDING_DIR/final.dmg.sha256"
+EVIDENCE_WORK="$PENDING_DIR/evidence"
+PENDING_EVIDENCE="$PENDING_DIR/release-evidence.zip"
+PENDING_EVIDENCE_CHECKSUM="$PENDING_DIR/release-evidence.zip.sha256"
+APPCAST_WORK="$PENDING_DIR/appcast"
+PENDING_APPCAST="$APPCAST_WORK/appcast.xml"
+MOUNT_POINT="$PENDING_DIR/mount"
+FINAL_BASENAME="Speaker-$VERSION-$BUILD_NUMBER.dmg"
+CHECKSUM_BASENAME="$FINAL_BASENAME.sha256"
+EVIDENCE_BASENAME="Speaker-$VERSION-$BUILD_NUMBER-evidence.zip"
+EVIDENCE_CHECKSUM_BASENAME="$EVIDENCE_BASENAME.sha256"
+ARCHIVE="$OUTPUT_DIR/$FINAL_BASENAME"
+CHECKSUM="$OUTPUT_DIR/$CHECKSUM_BASENAME"
+EVIDENCE="$OUTPUT_DIR/$EVIDENCE_BASENAME"
+EVIDENCE_CHECKSUM="$OUTPUT_DIR/$EVIDENCE_CHECKSUM_BASENAME"
+APPCAST="$OUTPUT_DIR/appcast.xml"
+APPCAST_PROMOTION="$OUTPUT_DIR/.appcast.xml.pending"
+PREVIOUS_APPCAST="$PENDING_DIR/previous-appcast.xml"
+HAD_PREVIOUS_APPCAST=0
+PROMOTION_STARTED=0
+PROMOTION_COMPLETE=0
+DMG_MOUNTED=0
+
+if [[ -e "$ARCHIVE" || -e "$CHECKSUM" \
+      || -e "$EVIDENCE" || -e "$EVIDENCE_CHECKSUM" ]]; then
+    print -u2 "Refusing to overwrite an existing release artifact: $FINAL_BASENAME"
+    rm -rf "$PENDING_DIR"
+    exit 1
+fi
+if [[ -L "$APPCAST" ]]; then
+    print -u2 "Refusing a symlinked release appcast: $APPCAST"
+    rm -rf "$PENDING_DIR"
+    exit 1
+fi
+if [[ -f "$APPCAST" ]]; then
+    validate_appcast_build_order "$BUILD_NUMBER" "$APPCAST" strictly-newer
+fi
+cleanup() {
+    if (( DMG_MOUNTED )); then
+        hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true
+    fi
+    if (( PROMOTION_STARTED && ! PROMOTION_COMPLETE )); then
+        recover_interrupted_release_promotion "$OUTPUT_DIR" || true
+    fi
+    chmod -R -P u+w "$PENDING_DIR" 2>/dev/null || true
+    rm -rf "$PENDING_DIR"
+}
+trap cleanup EXIT
+
+/bin/zsh "$RELEASE_SOURCE/scripts/bundle"
+APP="$RELEASE_APP"
+verify_production_app \
+    "$APP" \
+    "$BUNDLE_IDENTIFIER" \
+    "$EXPECTED_TEAM_ID" \
+    "$RELEASE_SOURCE/Resources/Speaker.entitlements" \
+    "$REVIEWED_UPDATE_FEED_URL" \
+    "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+verify_production_build_provenance \
+    "$APP" \
+    "$SPEAKER_RELEASE_SOURCE_COMMIT" \
+    "$SPEAKER_PACKAGE_RESOLVED_SHA256" \
+    "$SPEAKER_RELEASE_NOTES_SHA256" \
+    "$VERSION" \
+    "$BUILD_NUMBER"
+verify_sparkle_layout "$APP"
+verify_production_sparkle_signatures "$APP" "$EXPECTED_TEAM_ID"
+
+mkdir "$EVIDENCE_WORK"
+chmod 700 "$EVIDENCE_WORK"
+DSYM="$EVIDENCE_WORK/Speaker.app.dSYM"
+DSYM_ARCHIVE="$EVIDENCE_WORK/Speaker.app.dSYM.zip"
+dsymutil "$APP/Contents/MacOS/SpeakerApp" -o "$DSYM"
+verify_dsym_matches_executable "$APP/Contents/MacOS/SpeakerApp" "$DSYM"
+ditto -c -k --keepParent "$DSYM" "$DSYM_ARCHIVE"
+rm -rf "$DSYM"
+
+# Notarize and staple the app itself before placing it in the user-facing
+# image. This preserves a ticket on the copied app in addition to the ticket
+# stapled to the outer DMG.
+ditto -c -k --keepParent "$APP" "$PENDING_ARCHIVE"
+APP_SUBMISSION_HASH="$(shasum -a 256 "$PENDING_ARCHIVE" | awk '{print $1}')"
+APP_NOTARY_RESULT="$EVIDENCE_WORK/app-notary-submission.json"
+APP_NOTARY_LOG="$EVIDENCE_WORK/app-notary-log.json"
+xcrun notarytool submit \
+    "$PENDING_ARCHIVE" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait \
+    --output-format json \
+    > "$APP_NOTARY_RESULT"
+validate_notary_submission_result "$APP_NOTARY_RESULT"
+APP_NOTARY_SUBMISSION_ID="$REVIEWED_NOTARY_SUBMISSION_ID"
+xcrun notarytool log \
+    --keychain-profile "$NOTARY_PROFILE" \
+    "$APP_NOTARY_SUBMISSION_ID" \
+    "$APP_NOTARY_LOG"
+validate_notary_log \
+    "$APP_NOTARY_LOG" \
+    "$APP_NOTARY_SUBMISSION_ID" \
+    "$APP_SUBMISSION_HASH" \
+    "${PENDING_ARCHIVE:t}"
+xcrun stapler staple "$APP"
+verify_notarized_app "$APP"
+
+# Sparkle recommends APFS images with lzfse compression. `ditto` preserves
+# Sparkle.framework's symlinks while the image is staged.
+mkdir -p "$DMG_SOURCE"
+ditto "$APP" "$DMG_SOURCE/Speaker.app"
+ln -s /Applications "$DMG_SOURCE/Applications"
+hdiutil create \
+    -quiet \
+    -fs APFS \
+    -format ULFO \
+    -srcfolder "$DMG_SOURCE" \
+    -volname Speaker \
+    "$PENDING_DMG"
+DMG_SUBMISSION_HASH="$(shasum -a 256 "$PENDING_DMG" | awk '{print $1}')"
+DMG_NOTARY_RESULT="$EVIDENCE_WORK/dmg-notary-submission.json"
+DMG_NOTARY_LOG="$EVIDENCE_WORK/dmg-notary-log.json"
+xcrun notarytool submit \
+    "$PENDING_DMG" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait \
+    --output-format json \
+    > "$DMG_NOTARY_RESULT"
+validate_notary_submission_result "$DMG_NOTARY_RESULT"
+DMG_NOTARY_SUBMISSION_ID="$REVIEWED_NOTARY_SUBMISSION_ID"
+xcrun notarytool log \
+    --keychain-profile "$NOTARY_PROFILE" \
+    "$DMG_NOTARY_SUBMISSION_ID" \
+    "$DMG_NOTARY_LOG"
+validate_notary_log \
+    "$DMG_NOTARY_LOG" \
+    "$DMG_NOTARY_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_HASH" \
+    "${PENDING_DMG:t}"
+xcrun stapler staple "$PENDING_DMG"
+verify_notarized_dmg "$PENDING_DMG"
+
+# Verify the exact app a user or Sparkle will read from the final image.
+mkdir -p "$MOUNT_POINT"
+hdiutil attach \
+    "$PENDING_DMG" \
+    -readonly \
+    -nobrowse \
+    -mountpoint "$MOUNT_POINT" >/dev/null
+DMG_MOUNTED=1
+VERIFIED_APP="$MOUNT_POINT/Speaker.app"
+[[ -d "$VERIFIED_APP" ]] || {
+    print -u2 "Final DMG does not contain Speaker.app."
+    exit 1
+}
+verify_production_app \
+    "$VERIFIED_APP" \
+    "$BUNDLE_IDENTIFIER" \
+    "$EXPECTED_TEAM_ID" \
+    "$RELEASE_SOURCE/Resources/Speaker.entitlements" \
+    "$REVIEWED_UPDATE_FEED_URL" \
+    "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+verify_production_build_provenance \
+    "$VERIFIED_APP" \
+    "$SPEAKER_RELEASE_SOURCE_COMMIT" \
+    "$SPEAKER_PACKAGE_RESOLVED_SHA256" \
+    "$SPEAKER_RELEASE_NOTES_SHA256" \
+    "$VERSION" \
+    "$BUILD_NUMBER"
+verify_sparkle_layout "$VERIFIED_APP"
+verify_production_sparkle_signatures \
+    "$VERIFIED_APP" \
+    "$EXPECTED_TEAM_ID"
+verify_notarized_app "$VERIFIED_APP"
+hdiutil detach "$MOUNT_POINT" >/dev/null
+DMG_MOUNTED=0
+
+resolve_sparkle_release_tools "$RELEASE_SOURCE"
+GENERATE_APPCAST="$REVIEWED_SPARKLE_GENERATE_APPCAST"
+GENERATE_KEYS="$REVIEWED_SPARKLE_GENERATE_KEYS"
+SIGN_UPDATE="$REVIEWED_SPARKLE_SIGN_UPDATE"
+
+ACTUAL_UPDATE_PUBLIC_KEY="$(
+    "$GENERATE_KEYS" \
+        --account "$SPARKLE_KEY_ACCOUNT" \
+        -p
+)"
+if [[ "$ACTUAL_UPDATE_PUBLIC_KEY" != "$REVIEWED_UPDATE_PUBLIC_ED_KEY" ]]; then
+    print -u2 "The Sparkle private key account does not match the reviewed public key."
+    exit 1
+fi
+
+mkdir -p "$APPCAST_WORK"
+setopt local_options null_glob
+for previous_archive in "$OUTPUT_DIR"/Speaker-*.dmg; do
+    ditto "$previous_archive" "$APPCAST_WORK/${previous_archive:t}"
+done
+if [[ -f "$APPCAST" ]]; then
+    ditto "$APPCAST" "$PENDING_APPCAST"
+fi
+ditto "$PENDING_DMG" "$APPCAST_WORK/$FINAL_BASENAME"
+NOTES_BASENAME="${FINAL_BASENAME:r}.${RELEASE_NOTES_FILE:e:l}"
+ditto "$RELEASE_NOTES_FILE" "$APPCAST_WORK/$NOTES_BASENAME"
+
+"$GENERATE_APPCAST" \
+    --account "$SPARKLE_KEY_ACCOUNT" \
+    --download-url-prefix "$REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX" \
+    --link "$REVIEWED_PRODUCT_URL" \
+    --versions "$BUILD_NUMBER" \
+    --maximum-deltas 0 \
+    --maximum-versions 10 \
+    --embed-release-notes \
+    -o "$PENDING_APPCAST" \
+    "$APPCAST_WORK"
+
+xmllint --noout "$PENDING_APPCAST"
+validate_appcast_build_order "$BUILD_NUMBER" "$PENDING_APPCAST" latest
+if grep -Fq -- '.invalid' "$PENDING_APPCAST"; then
+    print -u2 "Generated appcast contains a placeholder URL."
+    exit 1
+fi
+if ! grep -Fq -- "<sparkle:version>$BUILD_NUMBER</sparkle:version>" \
+    "$PENDING_APPCAST" \
+    || ! grep -Fq -- \
+        "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" \
+        "$PENDING_APPCAST" \
+    || ! grep -Fq -- \
+        "url=\"${REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX}${FINAL_BASENAME}\"" \
+        "$PENDING_APPCAST"; then
+    print -u2 "Generated appcast does not advertise the current reviewed release."
+    exit 1
+fi
+if ! grep -Fq -- 'sparkle:edSignature="' "$PENDING_APPCAST" \
+    || ! grep -Fq -- '<!-- sparkle-signatures:' "$PENDING_APPCAST"; then
+    print -u2 "Generated appcast is missing archive or signed-feed EdDSA metadata."
+    exit 1
+fi
+"$SIGN_UPDATE" \
+    --account "$SPARKLE_KEY_ACCOUNT" \
+    --verify \
+    "$PENDING_APPCAST"
+ARCHIVE_SIGNATURE="$(
+    xmllint \
+        --xpath \
+        "string((//*[local-name()='item'][*[local-name()='version' and text()='$BUILD_NUMBER']]/enclosure/@*[local-name()='edSignature'])[1])" \
+        "$PENDING_APPCAST"
+)"
+[[ -n "$ARCHIVE_SIGNATURE" ]] || {
+    print -u2 "Unable to read the current archive signature from appcast.xml."
+    exit 1
+}
+"$SIGN_UPDATE" \
+    --account "$SPARKLE_KEY_ACCOUNT" \
+    --verify \
+    "$PENDING_DMG" \
+    "$ARCHIVE_SIGNATURE"
+
+ARCHIVE_HASH="$(shasum -a 256 "$PENDING_DMG" | awk '{print $1}')"
+print -r -- "$ARCHIVE_HASH  $FINAL_BASENAME" > "$PENDING_CHECKSUM"
+APPCAST_HASH="$(shasum -a 256 "$PENDING_APPCAST" | awk '{print $1}')"
+RELEASE_MANIFEST="$EVIDENCE_WORK/ReleaseManifest.plist"
+plutil -create xml1 "$RELEASE_MANIFEST"
+plutil -insert SchemaVersion -integer 1 "$RELEASE_MANIFEST"
+for pair in \
+    "Version|$VERSION" \
+    "BuildNumber|$BUILD_NUMBER" \
+    "BundleIdentifier|$BUNDLE_IDENTIFIER" \
+    "TeamIdentifier|$EXPECTED_TEAM_ID" \
+    "SourceCommit|$SPEAKER_RELEASE_SOURCE_COMMIT" \
+    "PackageResolvedSHA256|$SPEAKER_PACKAGE_RESOLVED_SHA256" \
+    "ReleaseNotesSHA256|$SPEAKER_RELEASE_NOTES_SHA256" \
+    "DMGBasename|$FINAL_BASENAME" \
+    "DMGSHA256|$ARCHIVE_HASH" \
+    "AppcastSHA256|$APPCAST_HASH" \
+    "AppNotarySubmissionID|$APP_NOTARY_SUBMISSION_ID" \
+    "AppSubmissionSHA256|$APP_SUBMISSION_HASH" \
+    "DMGNotarySubmissionID|$DMG_NOTARY_SUBMISSION_ID" \
+    "DMGSubmissionSHA256|$DMG_SUBMISSION_HASH" \
+    "SDKCanonicalName|$RELEASE_SDK_CANONICAL_NAME" \
+    "SDKSettingsSHA256|$RELEASE_SDK_SETTINGS_HASH"; do
+    plutil -insert "${pair%%|*}" -string "${pair#*|}" \
+        "$RELEASE_MANIFEST"
+done
+cp "$APP/Contents/Resources/BuildManifest.plist" \
+    "$EVIDENCE_WORK/BuildManifest.plist"
+swift --version > "$EVIDENCE_WORK/swift-version.txt"
+sw_vers > "$EVIDENCE_WORK/macos-version.txt"
+print -r -- "$RELEASE_SDK_PATH" > "$EVIDENCE_WORK/sdk-path.txt"
+print -r -- "$RELEASE_SDK_CANONICAL_NAME" \
+    > "$EVIDENCE_WORK/sdk-version.txt"
+print -r -- "$RELEASE_SDK_SETTINGS_HASH" \
+    > "$EVIDENCE_WORK/sdk-settings-sha256.txt"
+chmod 600 "$EVIDENCE_WORK"/*
+plutil -lint "$RELEASE_MANIFEST" >/dev/null
+ditto -c -k "$EVIDENCE_WORK" "$PENDING_EVIDENCE"
+validate_release_evidence_archive \
+    "$PENDING_EVIDENCE" \
+    "$VERSION" \
+    "$BUILD_NUMBER" \
+    "$FINAL_BASENAME" \
+    "$ARCHIVE_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_NOTARY_SUBMISSION_ID" \
+    "$DMG_NOTARY_SUBMISSION_ID" \
+    "$APP/Contents/MacOS/SpeakerApp"
+chmod 600 "$PENDING_EVIDENCE"
+EVIDENCE_HASH="$(shasum -a 256 "$PENDING_EVIDENCE" | awk '{print $1}')"
+print -r -- "$EVIDENCE_HASH  $EVIDENCE_BASENAME" \
+    > "$PENDING_EVIDENCE_CHECKSUM"
+chmod 600 "$PENDING_EVIDENCE_CHECKSUM"
+
+if [[ -f "$APPCAST" ]]; then
+    cp "$APPCAST" "$PREVIOUS_APPCAST"
+    HAD_PREVIOUS_APPCAST=1
+fi
+prepare_release_promotion_journal \
+    "$OUTPUT_DIR" \
+    "$FINAL_BASENAME" \
+    "$CHECKSUM_BASENAME" \
+    "$PREVIOUS_APPCAST" \
+    "$HAD_PREVIOUS_APPCAST" \
+    "$PENDING_DMG" \
+    "$PENDING_CHECKSUM" \
+    "$PENDING_APPCAST" \
+    "$EVIDENCE_BASENAME" \
+    "$EVIDENCE_CHECKSUM_BASENAME" \
+    "$PENDING_EVIDENCE" \
+    "$PENDING_EVIDENCE_CHECKSUM"
+PROMOTION_STARTED=1
+if [[ -e "$ARCHIVE" || -e "$CHECKSUM" \
+      || -e "$EVIDENCE" || -e "$EVIDENCE_CHECKSUM" ]]; then
+    print -u2 "Release artifact appeared during publication; refusing to overwrite it."
+    exit 1
+fi
+mv -n "$PENDING_DMG" "$ARCHIVE"
+[[ ! -e "$PENDING_DMG" ]] || {
+    print -u2 "Release archive appeared during no-clobber promotion."
+    exit 1
+}
+mv -n "$PENDING_CHECKSUM" "$CHECKSUM"
+[[ ! -e "$PENDING_CHECKSUM" ]] || {
+    print -u2 "Release checksum appeared during no-clobber promotion."
+    exit 1
+}
+mv -n "$PENDING_EVIDENCE" "$EVIDENCE"
+[[ ! -e "$PENDING_EVIDENCE" ]] || {
+    print -u2 "Release evidence appeared during no-clobber promotion."
+    exit 1
+}
+mv -n "$PENDING_EVIDENCE_CHECKSUM" "$EVIDENCE_CHECKSUM"
+[[ ! -e "$PENDING_EVIDENCE_CHECKSUM" ]] || {
+    print -u2 "Release evidence checksum appeared during no-clobber promotion."
+    exit 1
+}
+mv -n "$PENDING_APPCAST" "$APPCAST_PROMOTION"
+[[ ! -e "$PENDING_APPCAST" ]] || {
+    print -u2 "Pending appcast appeared during no-clobber promotion."
+    exit 1
+}
+mv -f "$APPCAST_PROMOTION" "$APPCAST"
+mark_release_promotion_committed "$OUTPUT_DIR"
+PROMOTION_COMPLETE=1
+recover_interrupted_release_promotion "$OUTPUT_DIR"
+trap - EXIT
+cleanup
+
+print "$ARCHIVE"
+print "$CHECKSUM"
+print "$EVIDENCE"
+print "$EVIDENCE_CHECKSUM"
+print "$APPCAST"

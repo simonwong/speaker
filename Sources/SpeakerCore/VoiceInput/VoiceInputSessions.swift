@@ -8,12 +8,32 @@ public struct VoiceInputSessionID: Hashable, Sendable {
     }
 }
 
-public enum VoiceInputCommand: Sendable {
+package enum VoiceInputCommand: Sendable {
     case pressed
     case released
     case cancel
     case copyPendingResult
     case dismissResult
+}
+
+/// Content-free identity frozen inside the physical stop-gesture callback.
+///
+/// Full Accessibility inspection remains asynchronous, but it must resolve to
+/// this exact process. Switching to another App after ending the recording
+/// therefore fails closed instead of capturing the newer App.
+public struct InputTargetCaptureHint: Equatable, Sendable {
+    public let processID: Int32
+    package let targetToken: UUID?
+
+    public init(processID: Int32) {
+        self.processID = processID
+        targetToken = nil
+    }
+
+    package init(processID: Int32, targetToken: UUID) {
+        self.processID = processID
+        self.targetToken = targetToken
+    }
 }
 
 public enum VoiceInputProcessingStage: Equatable, Sendable {
@@ -25,23 +45,17 @@ public enum VoiceInputProcessingStage: Equatable, Sendable {
 
 public enum PendingCopyReason: String, Equatable, Sendable {
     case missingTarget
+    case accessibilityPermissionMissing
     case secureTarget
     case unsupportedTarget
     case invalidatedTarget
     case changedTarget
     case deliveryFailed
-}
-
-public enum VoiceInputFailure: String, Equatable, Sendable {
-    case recordingFailed
-    case transcriptionFailed
-    case providerNotConfigured
-    case providerCredentialUnavailable
-    case noSpeechDetected
-    case providerResourceUnavailable
-    case providerRateLimited
-    case providerUnavailable
-    case networkUnavailable
+    case targetApplicationUnresponsive
+    /// Kept only so history written by older builds remains decodable.
+    case deliveryTimedOut
+    case deliveryUnconfirmed
+    case clipboardFailed
 }
 
 public enum VoiceInputActivity: Equatable, Sendable {
@@ -94,19 +108,40 @@ public enum VoiceInputActivity: Equatable, Sendable {
     public var pendingText: String? {
         if case let .pendingCopy(_, text, _) = self { text } else { nil }
     }
+
+    package var sessionID: VoiceInputSessionID? {
+        switch self {
+        case .idle:
+            nil
+        case let .preparing(id),
+             let .recording(id),
+             let .processing(id, _, _),
+             let .delivered(id, _, _),
+             let .pendingCopy(id, _, _),
+             let .cancelled(id),
+             let .failed(id, _):
+            id
+        }
+    }
+}
+
+public enum VoiceInputNotice: Equatable, Sendable {
+    case copied
+    case refinementFellBack(DeepSeekRefinementFailureKind?)
+    case persistenceFailure(String)
 }
 
 public struct VoiceInputPresentation: Equatable, Sendable {
     public let revision: UInt64
     public let activity: VoiceInputActivity
     public let recordingTelemetry: RecordingTelemetry?
-    public let notice: String?
+    public let notice: VoiceInputNotice?
 
     public init(
         revision: UInt64,
         activity: VoiceInputActivity,
         recordingTelemetry: RecordingTelemetry? = nil,
-        notice: String? = nil
+        notice: VoiceInputNotice? = nil
     ) {
         self.revision = revision
         self.activity = activity
@@ -162,9 +197,73 @@ public struct TranscriptionResult: Equatable, Sendable {
     }
 }
 
+public struct DeliveryDiagnostic: Equatable, Sendable {
+    public enum Stage: String, Equatable, Sendable {
+        case securityRead
+        case roleRead
+        case directSelection
+        case directWrite
+        case directReceipt
+        case fallbackEligibility
+        case focusRead
+        case fallbackSelection
+        case valueRead
+        case unicodePost
+        case unicodeReceipt
+    }
+
+    public enum Cause: String, Equatable, Sendable {
+        case invalidated
+        case unsupported
+        case unconfirmed
+        case cancelled
+        case invalidUIElement
+        case attributeUnsupported
+        case notImplemented
+        case cannotComplete
+        case other
+        case notFrontmost
+        case rejected
+        case changed
+    }
+
+    public let stage: Stage
+    public let cause: Cause
+
+    public init(stage: Stage, cause: Cause) {
+        self.stage = stage
+        self.cause = cause
+    }
+
+    public var code: String {
+        "\(stage.rawValue).\(cause.rawValue)"
+    }
+}
+
 public enum DeliveryOutcome: Equatable, Sendable {
     case delivered
     case pendingCopy(PendingCopyReason)
+    case pendingCopyDiagnosed(
+        PendingCopyReason,
+        DeliveryDiagnostic
+    )
+
+    public var pendingCopyReason: PendingCopyReason? {
+        switch self {
+        case .delivered: nil
+        case let .pendingCopy(reason),
+             let .pendingCopyDiagnosed(reason, _):
+            reason
+        }
+    }
+
+    public var deliveryDiagnostic: DeliveryDiagnostic? {
+        if case let .pendingCopyDiagnosed(_, diagnostic) = self {
+            diagnostic
+        } else {
+            nil
+        }
+    }
 }
 
 public actor DeliveryCommitGate {
@@ -187,6 +286,25 @@ public actor DeliveryCommitGate {
     }
 }
 
+private actor DeliveryResolution {
+    private var outcome: DeliveryOutcome?
+    private var continuation: CheckedContinuation<DeliveryOutcome, Never>?
+
+    func wait() async -> DeliveryOutcome {
+        if let outcome { return outcome }
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resolve(_ outcome: DeliveryOutcome) {
+        guard self.outcome == nil else { return }
+        self.outcome = outcome
+        continuation?.resume(returning: outcome)
+        continuation = nil
+    }
+}
+
 public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let sessionID: VoiceInputSessionID
     public let startedAt: Date
@@ -196,12 +314,19 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let transcriptionProvider: String?
     public let providerRequestID: String?
     public let providerErrorCode: String?
+    public let providerOperation: String?
+    public let providerStatusCode: String?
+    public let providerMessage: String?
+    public let deliveryDiagnosticCode: String?
     public let deepSeekText: String?
     public let deepSeekRequestID: String?
     public let refinementModeName: String?
     public let refinementPrompt: String?
     public let refinementStatus: String?
     public let refinementFailureCode: String?
+    public let refinementFailureStatusCode: String?
+    public let refinementFailureMessage: String?
+    public let cancelledAtStage: String?
     public let dictionarySnapshotID: UUID?
     public let dictionarySnapshotEntries: [DictionaryEntry]
     public let dictionaryRequestContext: DictionaryRequestContext?
@@ -219,12 +344,19 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         transcriptionProvider: String? = nil,
         providerRequestID: String? = nil,
         providerErrorCode: String? = nil,
+        providerOperation: String? = nil,
+        providerStatusCode: String? = nil,
+        providerMessage: String? = nil,
+        deliveryDiagnosticCode: String? = nil,
         deepSeekText: String? = nil,
         deepSeekRequestID: String? = nil,
         refinementModeName: String? = nil,
         refinementPrompt: String? = nil,
         refinementStatus: String? = nil,
         refinementFailureCode: String? = nil,
+        refinementFailureStatusCode: String? = nil,
+        refinementFailureMessage: String? = nil,
+        cancelledAtStage: String? = nil,
         dictionarySnapshotID: UUID? = nil,
         dictionarySnapshotEntries: [DictionaryEntry] = [],
         dictionaryRequestContext: DictionaryRequestContext? = nil,
@@ -241,12 +373,19 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.transcriptionProvider = transcriptionProvider
         self.providerRequestID = providerRequestID
         self.providerErrorCode = providerErrorCode
+        self.providerOperation = providerOperation
+        self.providerStatusCode = providerStatusCode
+        self.providerMessage = providerMessage
+        self.deliveryDiagnosticCode = deliveryDiagnosticCode
         self.deepSeekText = deepSeekText
         self.deepSeekRequestID = deepSeekRequestID
         self.refinementModeName = refinementModeName
         self.refinementPrompt = refinementPrompt
         self.refinementStatus = refinementStatus
         self.refinementFailureCode = refinementFailureCode
+        self.refinementFailureStatusCode = refinementFailureStatusCode
+        self.refinementFailureMessage = refinementFailureMessage
+        self.cancelledAtStage = cancelledAtStage
         self.dictionarySnapshotID = dictionarySnapshotID
         self.dictionarySnapshotEntries = dictionarySnapshotEntries
         self.dictionaryRequestContext = dictionaryRequestContext
@@ -271,8 +410,23 @@ public protocol AudioCaptureTelemetryProviding: Sendable {
     func observeTelemetry() async -> AsyncStream<RecordingTelemetry>
 }
 
+public protocol AudioCaptureFailureProviding: Sendable {
+    func observeFailures() async -> AsyncStream<AudioCaptureError>
+}
+
 public protocol InputTargetCapturing: Sendable {
     func capture() async -> InputTargetCaptureResult
+    func capture(
+        matching hint: InputTargetCaptureHint
+    ) async -> InputTargetCaptureResult
+}
+
+public extension InputTargetCapturing {
+    func capture(
+        matching hint: InputTargetCaptureHint
+    ) async -> InputTargetCaptureResult {
+        await capture()
+    }
 }
 
 public protocol InputTargetDiscarding: Sendable {
@@ -292,7 +446,8 @@ public protocol TextDelivering: Sendable {
 }
 
 public protocol ClipboardWriting: Sendable {
-    func copy(_ text: String) async
+    @discardableResult
+    func copy(_ text: String) async -> Bool
 }
 
 public protocol SessionHistoryRecording: Sendable {
@@ -304,19 +459,12 @@ public extension SessionHistoryRecording {
     func persistenceFailureNotice() async -> String? { nil }
 }
 
-public protocol RecordingWatchdog: Sendable {
-    func wait() async
-}
-
-public struct SixtySecondRecordingWatchdog: RecordingWatchdog {
-    public init() {}
-
-    public func wait() async {
-        try? await Task.sleep(for: .seconds(60))
-    }
-}
-
 public actor VoiceInputSessions {
+    private struct TerminalHistoryPresentation: Sendable {
+        let activity: VoiceInputActivity
+        let notice: VoiceInputNotice?
+    }
+
     private enum Phase: Equatable {
         case idle
         case preparing(VoiceInputSessionID)
@@ -333,23 +481,41 @@ public actor VoiceInputSessions {
         case finalizing(VoiceInputSessionID)
     }
 
+    /// History text is fail-closed until the release-time Accessibility target
+    /// has been classified. A secure target must never let provider text enter
+    /// an in-flight, cancelled, failed, or terminal history record.
+    private enum HistoryTextPolicy {
+        case unclassified
+        case allowed
+        case redacted
+    }
+
     private let audioCapture: any AudioCapturing
     private let targetCapture: any InputTargetCapturing
     private let textProcessor: any VoiceTextProcessing
     private let delivery: any TextDelivering
     private let clipboard: any ClipboardWriting
     private let history: any SessionHistoryRecording
-    private let watchdog: any RecordingWatchdog
 
     private var phase: Phase = .idle
     private var releasePending = false
-    private var watchdogTask: Task<Void, Never>?
+    private var pendingReleaseCaptureHint: InputTargetCaptureHint?
     private var transcriptionTask: Task<VoiceTextProcessingResult, Error>?
+    private var streamingCompletionTask: Task<Void, Never>?
     private var telemetryTask: Task<Void, Never>?
+    private var captureFailureTask: Task<Void, Never>?
     private var deliveryCommitGate: DeliveryCommitGate?
+    private var deliveryTask: Task<DeliveryOutcome, Never>?
+    private var deliveryResolution: DeliveryResolution?
+    private var suppressedTerminalPresentationSessionID: VoiceInputSessionID?
+    private var finishingTask: Task<Void, Never>?
     private var historyWriteTasks: [VoiceInputSessionID: Task<Void, Never>] = [:]
+    private var historyWriteTokens: [VoiceInputSessionID: UUID] = [:]
+    private var isShutDown = false
     private var preparingStartedAt: Date?
     private var activeSnapshot: VoiceTextProcessingSnapshot?
+    private var confirmedDoubaoResult: TranscriptionResult?
+    private var historyTextPolicy = HistoryTextPolicy.unclassified
     private var activeTriggerSequence: UInt64?
     private var auditSessionID: VoiceInputSessionID?
     private var auditStageName: String?
@@ -358,6 +524,9 @@ public actor VoiceInputSessions {
     private var auditApplicationName: String?
     private var presentation = VoiceInputPresentation(revision: 0, activity: .idle)
     private var observers: [UUID: AsyncStream<VoiceInputPresentation>.Continuation] = [:]
+    private var triggerTerminationObservers: [
+        UUID: AsyncStream<UInt64>.Continuation
+    ] = [:]
 
     public init(
         audioCapture: any AudioCapturing,
@@ -365,8 +534,7 @@ public actor VoiceInputSessions {
         transcriber: any SpeechTranscribing,
         delivery: any TextDelivering,
         clipboard: any ClipboardWriting,
-        history: any SessionHistoryRecording,
-        watchdog: any RecordingWatchdog = SixtySecondRecordingWatchdog()
+        history: any SessionHistoryRecording
     ) {
         self.audioCapture = audioCapture
         self.targetCapture = targetCapture
@@ -374,7 +542,6 @@ public actor VoiceInputSessions {
         self.delivery = delivery
         self.clipboard = clipboard
         self.history = history
-        self.watchdog = watchdog
     }
 
     public init(
@@ -383,8 +550,7 @@ public actor VoiceInputSessions {
         textProcessor: any VoiceTextProcessing,
         delivery: any TextDelivering,
         clipboard: any ClipboardWriting,
-        history: any SessionHistoryRecording,
-        watchdog: any RecordingWatchdog = SixtySecondRecordingWatchdog()
+        history: any SessionHistoryRecording
     ) {
         self.audioCapture = audioCapture
         self.targetCapture = targetCapture
@@ -392,12 +558,13 @@ public actor VoiceInputSessions {
         self.delivery = delivery
         self.clipboard = clipboard
         self.history = history
-        self.watchdog = watchdog
     }
 
     public func observe() -> AsyncStream<VoiceInputPresentation> {
         let id = UUID()
-        let (stream, continuation) = AsyncStream<VoiceInputPresentation>.makeStream()
+        let (stream, continuation) = AsyncStream<VoiceInputPresentation>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
         observers[id] = continuation
         continuation.yield(presentation)
         continuation.onTermination = { [weak self] _ in
@@ -408,15 +575,46 @@ public actor VoiceInputSessions {
         return stream
     }
 
-    public func send(_ command: VoiceInputCommand) async {
+    /// Emits the dispatcher sequence owned by a session when that session
+    /// reaches a terminal state without requiring another physical key edge.
+    /// Consumers must compare the sequence before resetting gesture state so a
+    /// delayed terminal event cannot affect a newer session.
+    package func observeTriggerTerminations() -> AsyncStream<UInt64> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<UInt64>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        triggerTerminationObservers[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeTriggerTerminationObserver(id) }
+        }
+        return stream
+    }
+
+    package func isActive(triggerSequence: UInt64) -> Bool {
+        activeTriggerSequence == triggerSequence
+    }
+
+    package func send(_ command: VoiceInputCommand) async {
         await send(command, triggerSequence: nil)
     }
 
-    public func send(
+    package func send(
         _ command: VoiceInputCommand,
         triggerSequence: UInt64
     ) async {
         await send(command, triggerSequence: Optional(triggerSequence))
+    }
+
+    package func releaseFromDispatcher(
+        captureHint: InputTargetCaptureHint?
+    ) {
+        if case .preparing = phase {
+            releasePending = true
+            pendingReleaseCaptureHint = captureHint
+        } else {
+            beginFinishingSession(captureHint: captureHint)
+        }
     }
 
     public func cancel(triggeredAtSequence sequence: UInt64) async {
@@ -424,6 +622,57 @@ public actor VoiceInputSessions {
               activeTriggerSequence <= sequence
         else { return }
         await cancelSession()
+    }
+
+    package func cancel(expectedSessionID: VoiceInputSessionID) async {
+        guard currentActiveSessionID == expectedSessionID else { return }
+        await cancelSession()
+    }
+
+    package func copyPendingResult(expectedSessionID: VoiceInputSessionID) async {
+        guard case let .pendingCopy(id, text, _) = presentation.activity,
+              id == expectedSessionID
+        else { return }
+        let copied = await clipboard.copy(text)
+        guard phase == .idle,
+              case let .pendingCopy(currentID, _, _) = presentation.activity,
+              currentID == expectedSessionID
+        else { return }
+        if copied {
+            publish(.idle, notice: .copied)
+        } else {
+            publish(
+                .pendingCopy(
+                    expectedSessionID,
+                    text: text,
+                    reason: .clipboardFailed
+                )
+            )
+        }
+    }
+
+    package func dismissResult(expectedSessionID: VoiceInputSessionID) {
+        guard phase == .idle,
+              presentation.activity.sessionID == expectedSessionID
+        else { return }
+        publish(.idle)
+    }
+
+    /// Stops active work and waits until every queued history mutation has
+    /// reached durable storage. App termination must use this instead of only
+    /// sending `.cancel`, otherwise the final cancellation record can be lost.
+    public func shutdown() async {
+        isShutDown = true
+        await cancelSession()
+        await finishingTask?.value
+        let pending = Array(historyWriteTasks.values)
+        for task in pending {
+            await task.value
+        }
+        // Completed tasks are safe to discard. No new session can begin
+        // through a dispatcher after its consumer has been stopped.
+        historyWriteTasks.removeAll()
+        historyWriteTokens.removeAll()
     }
 
     private func send(
@@ -436,33 +685,72 @@ public actor VoiceInputSessions {
         case .released:
             if case .preparing = phase {
                 releasePending = true
+                pendingReleaseCaptureHint = nil
             } else {
-                await finishSession()
+                beginFinishingSession(captureHint: nil)
+                await finishingTask?.value
             }
         case .cancel:
             await cancelSession()
         case .copyPendingResult:
             guard case let .pendingCopy(id, text, _) = presentation.activity else { return }
-            await clipboard.copy(text)
+            let copied = await clipboard.copy(text)
             guard phase == .idle,
                   case let .pendingCopy(currentID, _, _) = presentation.activity,
                   currentID == id
             else { return }
-            publish(.idle)
+            if copied {
+                publish(.idle, notice: .copied)
+            } else {
+                publish(
+                    .pendingCopy(
+                        id,
+                        text: text,
+                        reason: .clipboardFailed
+                    )
+                )
+            }
         case .dismissResult:
             guard phase == .idle else { return }
             publish(.idle)
         }
     }
 
+    private var currentActiveSessionID: VoiceInputSessionID? {
+        switch phase {
+        case .idle:
+            nil
+        case let .preparing(id),
+             let .recording(id, _, _),
+             let .processing(id, _, _),
+             let .finalizing(id):
+            id
+        }
+    }
+
     private func beginSession(triggerSequence: UInt64?) async {
-        guard phase == .idle else { return }
+        guard !isShutDown, phase == .idle else {
+            if let triggerSequence {
+                finishRejectedTriggerSequence(triggerSequence)
+            }
+            return
+        }
+        if case .pendingCopy = presentation.activity {
+            if let triggerSequence {
+                finishRejectedTriggerSequence(triggerSequence)
+            }
+            return
+        }
         let id = VoiceInputSessionID()
         let requestedAt = Date()
         releasePending = false
+        pendingReleaseCaptureHint = nil
         phase = .preparing(id)
         activeTriggerSequence = triggerSequence
         preparingStartedAt = requestedAt
+        confirmedDoubaoResult = nil
+        historyTextPolicy = .unclassified
+        suppressedTerminalPresentationSessionID = nil
         beginAudit(id: id, stage: "preparing")
         publish(.preparing(id))
         saveStage(.preparing(id), id: id, startedAt: requestedAt)
@@ -497,9 +785,9 @@ public actor VoiceInputSessions {
                     try await streamingProcessor.processStreaming(
                         liveStream,
                         snapshot: snapshot
-                    ) { stage in
-                        await sessions.receivedProcessingStage(
-                            stage,
+                    ) { progress in
+                        await sessions.receivedProcessingProgress(
+                            progress,
                             id: id,
                             startedAt: startedAt,
                             snapshot: snapshot,
@@ -507,13 +795,28 @@ public actor VoiceInputSessions {
                         )
                     }
                 }
+                if let transcriptionTask {
+                    observeStreamingCompletion(
+                        transcriptionTask,
+                        id: id,
+                        startedAt: startedAt,
+                        snapshot: snapshot
+                    )
+                }
             }
             observeRecordingTelemetry(for: id)
-            scheduleWatchdog(for: id)
+            observeCaptureFailures(
+                for: id,
+                startedAt: startedAt,
+                snapshot: snapshot
+            )
             saveStage(.recording(id), id: id, startedAt: startedAt, snapshot: snapshot)
             if releasePending {
                 releasePending = false
-                await finishSession()
+                let captureHint = pendingReleaseCaptureHint
+                pendingReleaseCaptureHint = nil
+                beginFinishingSession(captureHint: captureHint)
+                await finishingTask?.value
             }
         } catch {
             guard phase == .preparing(id) else {
@@ -521,13 +824,18 @@ public actor VoiceInputSessions {
                 return
             }
             phase = .finalizing(id)
-            activeTriggerSequence = nil
+            finishActiveTriggerSequence()
             preparingStartedAt = nil
             activeSnapshot = nil
-            let activity = VoiceInputActivity.failed(id, .recordingFailed)
+            confirmedDoubaoResult = nil
+            historyTextPolicy = .unclassified
+            let problem = (error as? AudioCaptureError)
+                .map(VoiceInputProblem.init(audioCaptureError:))
+                ?? VoiceInputProblem(failure: .recordingFailed)
+            let activity = VoiceInputActivity.failed(id, problem.failure)
             let audit = finishAudit(id: id)
             let elapsed = max(0, Int(Date().timeIntervalSince(requestedAt) * 1_000))
-            let historyNotice = await saveHistoryAndWait(.init(
+            let record = VoiceInputHistoryRecord(
                 sessionID: id,
                 startedAt: requestedAt,
                 applicationName: nil,
@@ -541,38 +849,77 @@ public actor VoiceInputSessions {
                 durationMilliseconds: elapsed,
                 stageDurationsMilliseconds: audit.stageDurations,
                 outcome: activity
-            ))
+            )
             phase = .idle
-            publish(activity, notice: historyNotice)
+            publish(activity)
+            _ = queueHistory(
+                record,
+                terminalPresentation: .init(activity: activity, notice: nil)
+            )
         }
     }
 
-    private func finishSession() async {
+    private func beginFinishingSession(
+        captureHint: InputTargetCaptureHint?
+    ) {
         guard case let .recording(id, startedAt, snapshot) = phase else { return }
-        watchdogTask?.cancel()
-        watchdogTask = nil
         telemetryTask?.cancel()
         telemetryTask = nil
+        captureFailureTask?.cancel()
+        captureFailureTask = nil
         phase = .processing(id, startedAt: startedAt, snapshot: snapshot)
         advanceAudit(id: id, stage: "targetCapture")
         publish(.processing(id, .capturingTarget, applicationName: nil))
-        async let timedTarget = Self.captureWithTiming(targetCapture)
-        async let audioResult = audioCapture.stop()
         saveStage(
             .processing(id, .capturingTarget, applicationName: nil),
             id: id,
             startedAt: startedAt,
             snapshot: snapshot
         )
+        let targetCapture = targetCapture
+        let audioCapture = audioCapture
+        let targetTask = Task {
+            await Self.captureWithTiming(
+                targetCapture,
+                matching: captureHint
+            )
+        }
+        let audioTask = Task<CapturedAudio, Error> {
+            try await audioCapture.stop()
+        }
+        finishingTask = Task { [weak self] in
+            await self?.finishSession(
+                id: id,
+                startedAt: startedAt,
+                snapshot: snapshot,
+                targetTask: targetTask,
+                audioTask: audioTask
+            )
+        }
+    }
 
-        let (target, targetCaptureMilliseconds) = await timedTarget
+    private func finishSession(
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot,
+        targetTask: Task<(InputTargetCaptureResult, Int), Never>,
+        audioTask: Task<CapturedAudio, Error>
+    ) async {
+        let (target, targetCaptureMilliseconds) = await targetTask.value
+        historyTextPolicy = switch target {
+        case .unavailable(.secureTarget): .redacted
+        case .writable: .allowed
+        case .unavailable: .unclassified
+        }
         var sessionStageDurations = ["targetCapture": targetCaptureMilliseconds]
         let audio: CapturedAudio
         do {
-            audio = try await audioResult
+            audio = try await audioTask.value
         } catch {
             transcriptionTask?.cancel()
             transcriptionTask = nil
+            streamingCompletionTask?.cancel()
+            streamingCompletionTask = nil
             await discard(target)
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
                 return
@@ -580,7 +927,9 @@ public actor VoiceInputSessions {
             await finishWithFailure(
                 id: id,
                 startedAt: startedAt,
-                failure: .recordingFailed,
+                problem: (error as? AudioCaptureError)
+                    .map(VoiceInputProblem.init(audioCaptureError:))
+                    ?? VoiceInputProblem(failure: .recordingFailed),
                 processingSnapshot: snapshot,
                 additionalStageDurations: sessionStageDurations
             )
@@ -612,9 +961,9 @@ public actor VoiceInputSessions {
                 try await activeProcessor.process(
                     audio,
                     snapshot: snapshot
-                ) { [weak self] stage in
-                    await self?.receivedProcessingStage(
-                        stage,
+                ) { [weak self] progress in
+                    await self?.receivedProcessingProgress(
+                        progress,
                         id: id,
                         startedAt: startedAt,
                         snapshot: snapshot,
@@ -634,14 +983,10 @@ public actor VoiceInputSessions {
                 return
             }
             await discard(target)
-            let diagnostic = failure.providerDiagnostic
             await finishWithFailure(
                 id: id,
                 startedAt: startedAt,
-                failure: failure.userFailure,
-                transcriptionProvider: diagnostic?.provider,
-                providerRequestID: diagnostic?.requestID,
-                providerErrorCode: diagnostic?.code,
+                problem: failure.problem,
                 processingSnapshot: snapshot,
                 additionalStageDurations: sessionStageDurations
             )
@@ -656,13 +1001,15 @@ public actor VoiceInputSessions {
             await finishWithFailure(
                 id: id,
                 startedAt: startedAt,
-                failure: .transcriptionFailed,
+                problem: VoiceInputProblem(failure: .transcriptionFailed),
                 processingSnapshot: snapshot,
                 additionalStageDurations: sessionStageDurations
             )
             return
         }
         transcriptionTask = nil
+        streamingCompletionTask?.cancel()
+        streamingCompletionTask = nil
 
         guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
             await discard(target)
@@ -687,11 +1034,23 @@ public actor VoiceInputSessions {
             let commitGate = DeliveryCommitGate()
             deliveryCommitGate = commitGate
             let deliveryStarted = ContinuousClock.now
-            let outcome = await delivery.deliver(
-                processedText.finalText,
-                to: targetSnapshot,
-                commitGate: commitGate
-            )
+            let resolution = DeliveryResolution()
+            deliveryResolution = resolution
+            let delivery = delivery
+            let finalText = processedText.finalText
+            let deliveryTask = Task {
+                let outcome = await delivery.deliver(
+                    finalText,
+                    to: targetSnapshot,
+                    commitGate: commitGate
+                )
+                await resolution.resolve(outcome)
+                return outcome
+            }
+            self.deliveryTask = deliveryTask
+            let outcome = await resolution.wait()
+            self.deliveryTask = nil
+            deliveryResolution = nil
             deliveryCommitGate = nil
             sessionStageDurations["delivery"] = Self.milliseconds(
                 deliveryStarted.duration(to: .now)
@@ -716,12 +1075,36 @@ public actor VoiceInputSessions {
                     processingSnapshot: snapshot,
                     additionalStageDurations: sessionStageDurations
                 )
-            case let .pendingCopy(reason):
+            case let .pendingCopy(reason),
+                 let .pendingCopyDiagnosed(reason, _):
                 let activity = VoiceInputActivity.pendingCopy(
                     id,
                     text: processedText.finalText,
                     reason: reason
                 )
+                if reason == .secureTarget {
+                    historyTextPolicy = .redacted
+                    await finishTerminal(
+                        activity,
+                        id: id,
+                        startedAt: startedAt,
+                        applicationName: targetSnapshot.applicationName,
+                        transcription: nil,
+                        finalText: nil,
+                        transcriptionProvider: "doubao",
+                        providerRequestID: processedText.doubaoRequestID,
+                        deliveryDiagnosticCode: outcome
+                            .deliveryDiagnostic?.code,
+                        processingSnapshot: snapshot,
+                        additionalStageDurations: sessionStageDurations,
+                        historyOutcome: .pendingCopy(
+                            id,
+                            text: "",
+                            reason: .secureTarget
+                        )
+                    )
+                    return
+                }
                 await finishTerminal(
                     activity,
                     id: id,
@@ -730,6 +1113,8 @@ public actor VoiceInputSessions {
                     transcription: processedText.doubaoText,
                     finalText: processedText.finalText,
                     providerRequestID: processedText.doubaoRequestID,
+                    deliveryDiagnosticCode: outcome
+                        .deliveryDiagnostic?.code,
                     processedText: processedText,
                     processingSnapshot: snapshot,
                     additionalStageDurations: sessionStageDurations
@@ -742,6 +1127,7 @@ public actor VoiceInputSessions {
                 reason: reason
             )
             if reason == .secureTarget {
+                historyTextPolicy = .redacted
                 await finishTerminal(
                     activity,
                     id: id,
@@ -774,12 +1160,28 @@ public actor VoiceInputSessions {
 
     private func cancelSession() async {
         if let deliveryCommitGate {
-            guard await deliveryCommitGate.cancel() else { return }
-            self.deliveryCommitGate = nil
+            // Once the delivery adapter has crossed its mutation boundary,
+            // the target App may already contain the text. Hide the active UI
+            // immediately, stop consuming Esc, and let the bounded receipt
+            // task finish history in the background without resurfacing a
+            // late result card or falsely rewriting the mutation as cancelled.
+            guard await deliveryCommitGate.cancel() else {
+                guard let id = currentActiveSessionID,
+                      suppressedTerminalPresentationSessionID != id
+                else { return }
+                suppressedTerminalPresentationSessionID = id
+                finishActiveTriggerSequence()
+                publish(.cancelled(id))
+                deliveryTask?.cancel()
+                return
+            }
         }
         let id: VoiceInputSessionID
         let startedAt: Date
         let processingSnapshot: VoiceTextProcessingSnapshot?
+        let confirmedDoubaoResult = historyTextPolicy == .allowed
+            ? confirmedDoubaoResult
+            : nil
         switch phase {
         case let .preparing(sessionID):
             id = sessionID
@@ -794,30 +1196,49 @@ public actor VoiceInputSessions {
             return
         }
 
+        let cancelledAtStage = auditStageName
         let audit = finishAudit(id: id)
         phase = .finalizing(id)
-        activeTriggerSequence = nil
+        finishActiveTriggerSequence()
         preparingStartedAt = nil
         activeSnapshot = nil
+        self.confirmedDoubaoResult = nil
+        historyTextPolicy = .unclassified
         releasePending = false
-        watchdogTask?.cancel()
-        watchdogTask = nil
+        pendingReleaseCaptureHint = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        streamingCompletionTask?.cancel()
+        streamingCompletionTask = nil
+        deliveryTask?.cancel()
+        deliveryTask = nil
+        if let deliveryResolution {
+            await deliveryResolution.resolve(.pendingCopy(.deliveryFailed))
+        }
+        deliveryResolution = nil
         deliveryCommitGate = nil
+        suppressedTerminalPresentationSessionID = nil
         telemetryTask?.cancel()
         telemetryTask = nil
-        await audioCapture.cancel()
+        captureFailureTask?.cancel()
+        captureFailureTask = nil
         let activity = VoiceInputActivity.cancelled(id)
+        // Cancellation is committed before cleanup or history I/O. The overlay
+        // disappears immediately and late results are fenced by `.finalizing`.
+        publish(activity)
+        await audioCapture.cancel()
         let elapsed = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
-        let historyNotice = await saveHistoryAndWait(.init(
+        _ = queueHistory(.init(
             sessionID: id,
             startedAt: startedAt,
             applicationName: audit.applicationName,
-            transcription: nil,
+            transcription: confirmedDoubaoResult?.text,
             finalText: nil,
+            transcriptionProvider: confirmedDoubaoResult == nil ? nil : "doubao",
+            providerRequestID: confirmedDoubaoResult?.providerRequestID,
             refinementModeName: processingSnapshot?.refinementMode.displayName,
             refinementPrompt: processingSnapshot?.refinementMode.deepSeekRule,
+            cancelledAtStage: cancelledAtStage,
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
             dictionarySnapshotEntries: processingSnapshot?.dictionary.entries ?? [],
             dictionaryRequestContext: processingSnapshot?.dictionaryContext,
@@ -828,20 +1249,16 @@ public actor VoiceInputSessions {
             outcome: activity
         ))
         phase = .idle
-        publish(activity, notice: historyNotice)
     }
 
     private func finishWithFailure(
         id: VoiceInputSessionID,
         startedAt: Date,
-        failure: VoiceInputFailure,
-        transcriptionProvider: String? = nil,
-        providerRequestID: String? = nil,
-        providerErrorCode: String? = nil,
+        problem: VoiceInputProblem,
         processingSnapshot: VoiceTextProcessingSnapshot? = nil,
         additionalStageDurations: [String: Int] = [:]
     ) async {
-        let activity = VoiceInputActivity.failed(id, failure)
+        let activity = VoiceInputActivity.failed(id, problem.failure)
         await finishTerminal(
             activity,
             id: id,
@@ -849,9 +1266,7 @@ public actor VoiceInputSessions {
             applicationName: nil,
             transcription: nil,
             finalText: nil,
-            transcriptionProvider: transcriptionProvider,
-            providerRequestID: providerRequestID,
-            providerErrorCode: providerErrorCode,
+            problem: problem,
             processingSnapshot: processingSnapshot,
             additionalStageDurations: additionalStageDurations
         )
@@ -867,68 +1282,128 @@ public actor VoiceInputSessions {
         transcriptionProvider: String? = nil,
         providerRequestID: String? = nil,
         providerErrorCode: String? = nil,
+        deliveryDiagnosticCode: String? = nil,
+        problem: VoiceInputProblem? = nil,
         processedText: VoiceTextProcessingResult? = nil,
         processingSnapshot: VoiceTextProcessingSnapshot? = nil,
         additionalStageDurations: [String: Int] = [:],
         historyOutcome: VoiceInputActivity? = nil
     ) async {
         let audit = finishAudit(id: id)
+        let terminalHistoryTextPolicy = historyTextPolicy
+        let suppressTerminalPresentation =
+            suppressedTerminalPresentationSessionID == id
         phase = .finalizing(id)
-        activeTriggerSequence = nil
+        finishActiveTriggerSequence()
         preparingStartedAt = nil
         activeSnapshot = nil
+        confirmedDoubaoResult = nil
+        historyTextPolicy = .unclassified
         releasePending = false
-        watchdogTask?.cancel()
-        watchdogTask = nil
+        pendingReleaseCaptureHint = nil
         telemetryTask?.cancel()
         telemetryTask = nil
+        captureFailureTask?.cancel()
+        captureFailureTask = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        streamingCompletionTask?.cancel()
+        streamingCompletionTask = nil
+        deliveryTask?.cancel()
+        deliveryTask = nil
+        deliveryResolution = nil
         deliveryCommitGate = nil
-        let processingNotice = processedText?.refinementStatus == .fellBack
-            ? "进一步整理失败，已使用豆包结果。"
-            : nil
+        suppressedTerminalPresentationSessionID = nil
+        let processingNotice: VoiceInputNotice? = if processedText?.refinementStatus
+            == .fellBack
+        {
+            .refinementFellBack(processedText?.refinementFailure?.kind)
+        } else {
+            nil
+        }
         let measuredStageDurations = (processedText?.stageDurationsMilliseconds ?? [:])
             .merging(additionalStageDurations) { _, latest in latest }
         let stageDurations = audit.stageDurations
             .merging(measuredStageDurations) { _, measured in measured }
-        let historyNotice = await saveHistoryAndWait(.init(
+        let providerDiagnostic = problem?.diagnostic
+        let refinementDiagnostic = processedText?.refinementFailure?.providerDiagnostic
+        let mayPersistBody = terminalHistoryTextPolicy == .allowed
+        let mayPersistProviderRequestID = terminalHistoryTextPolicy != .redacted
+        let persistedOutcome = Self.historyOutcome(
+            historyOutcome ?? activity,
+            mayPersistBody: mayPersistBody
+        )
+        let record = VoiceInputHistoryRecord(
             sessionID: id,
             startedAt: startedAt,
             applicationName: applicationName ?? audit.applicationName,
-            transcription: transcription,
-            finalText: finalText,
-            transcriptionProvider: transcriptionProvider ?? (processedText == nil ? nil : "doubao"),
-            providerRequestID: providerRequestID,
-            providerErrorCode: providerErrorCode,
-            deepSeekText: processedText?.deepSeekText,
-            deepSeekRequestID: processedText?.deepSeekRequestID,
+            transcription: mayPersistBody ? transcription : nil,
+            finalText: mayPersistBody ? finalText : nil,
+            transcriptionProvider: providerDiagnostic?.provider
+                ?? transcriptionProvider
+                ?? (processedText == nil ? nil : "doubao"),
+            providerRequestID: mayPersistProviderRequestID
+                ? (providerDiagnostic?.requestID ?? providerRequestID)
+                : nil,
+            providerErrorCode: providerDiagnostic?.code ?? providerErrorCode,
+            providerOperation: providerDiagnostic?.operation.rawValue,
+            providerStatusCode: providerDiagnostic?.statusCode,
+            // Provider messages are untrusted response text and can echo
+            // credentials or user context. Keep structured codes only.
+            providerMessage: nil,
+            deliveryDiagnosticCode: deliveryDiagnosticCode,
+            deepSeekText: mayPersistBody ? processedText?.deepSeekText : nil,
+            deepSeekRequestID: mayPersistProviderRequestID
+                ? processedText?.deepSeekRequestID
+                : nil,
             refinementModeName: processingSnapshot?.refinementMode.displayName,
             refinementPrompt: processingSnapshot?.refinementMode.deepSeekRule,
             refinementStatus: processedText?.refinementStatus.rawValue,
             refinementFailureCode: processedText?.refinementFailure?.kind.rawValue,
+            refinementFailureStatusCode: refinementDiagnostic?.statusCode,
+            refinementFailureMessage: nil,
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
             dictionarySnapshotEntries: processingSnapshot?.dictionary.entries ?? [],
             dictionaryRequestContext: processingSnapshot?.dictionaryContext,
-            dictionaryReplacements: processedText?.dictionaryReplacements ?? [],
+            dictionaryReplacements: mayPersistBody
+                ? (processedText?.dictionaryReplacements ?? [])
+                : [],
             durationMilliseconds: max(
                 0,
                 Int(Date().timeIntervalSince(startedAt) * 1_000)
             ),
             stageDurationsMilliseconds: stageDurations,
-            outcome: historyOutcome ?? activity
-        ))
-        let notice = [processingNotice, historyNotice]
-            .compactMap { $0 }
-            .joined(separator: " ")
+            outcome: persistedOutcome
+        )
         phase = .idle
-        publish(activity, notice: notice.isEmpty ? nil : notice)
+        if !suppressTerminalPresentation {
+            publish(activity, notice: processingNotice)
+        }
+        _ = queueHistory(
+            record,
+            terminalPresentation: suppressTerminalPresentation
+                ? nil
+                : .init(
+                    activity: activity,
+                    notice: processingNotice
+                )
+        )
+    }
+
+    private static func historyOutcome(
+        _ activity: VoiceInputActivity,
+        mayPersistBody: Bool
+    ) -> VoiceInputActivity {
+        guard !mayPersistBody,
+              case let .pendingCopy(id, _, reason) = activity
+        else { return activity }
+        return .pendingCopy(id, text: "", reason: reason)
     }
 
     private func publish(
         _ activity: VoiceInputActivity,
         telemetry: RecordingTelemetry? = nil,
-        notice: String? = nil
+        notice: VoiceInputNotice? = nil
     ) {
         presentation = VoiceInputPresentation(
             revision: presentation.revision &+ 1,
@@ -938,16 +1413,6 @@ public actor VoiceInputSessions {
         )
         for continuation in observers.values {
             continuation.yield(presentation)
-        }
-    }
-
-    private func scheduleWatchdog(for id: VoiceInputSessionID) {
-        watchdogTask?.cancel()
-        let watchdog = watchdog
-        watchdogTask = Task { [weak self] in
-            await watchdog.wait()
-            guard !Task.isCancelled else { return }
-            await self?.watchdogFired(for: id)
         }
     }
 
@@ -963,6 +1428,137 @@ public actor VoiceInputSessions {
         }
     }
 
+    private func observeStreamingCompletion(
+        _ task: Task<VoiceTextProcessingResult, Error>,
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot
+    ) {
+        streamingCompletionTask?.cancel()
+        streamingCompletionTask = Task { [weak self] in
+            let result = await task.result
+            guard case let .failure(error) = result else { return }
+            await self?.receivedStreamingFailureWhileRecording(
+                error,
+                id: id,
+                startedAt: startedAt,
+                snapshot: snapshot
+            )
+        }
+    }
+
+    private func observeCaptureFailures(
+        for id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot
+    ) {
+        captureFailureTask?.cancel()
+        guard let source = audioCapture as? any AudioCaptureFailureProviding else { return }
+        captureFailureTask = Task { [weak self] in
+            let stream = await source.observeFailures()
+            for await failure in stream {
+                guard !Task.isCancelled else { return }
+                await self?.receivedCaptureFailureWhileRecording(
+                    failure,
+                    id: id,
+                    startedAt: startedAt,
+                    snapshot: snapshot
+                )
+                return
+            }
+        }
+    }
+
+    private func receivedCaptureFailureWhileRecording(
+        _ failure: AudioCaptureError,
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot
+    ) async {
+        await failActiveRecording(
+            id: id,
+            startedAt: startedAt,
+            snapshot: snapshot,
+            problem: VoiceInputProblem(audioCaptureError: failure)
+        )
+    }
+
+    private func receivedStreamingFailureWhileRecording(
+        _ error: Error,
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot
+    ) async {
+        let problem = (error as? VoiceTextProcessingFailure)?.problem
+            ?? VoiceInputProblem(failure: .transcriptionFailed)
+        await failActiveRecording(
+            id: id,
+            startedAt: startedAt,
+            snapshot: snapshot,
+            problem: problem
+        )
+    }
+
+    private func failActiveRecording(
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot,
+        problem: VoiceInputProblem
+    ) async {
+        guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
+            return
+        }
+        let audit = finishAudit(id: id)
+        phase = .finalizing(id)
+        finishActiveTriggerSequence()
+        preparingStartedAt = nil
+        activeSnapshot = nil
+        confirmedDoubaoResult = nil
+        historyTextPolicy = .unclassified
+        releasePending = false
+        pendingReleaseCaptureHint = nil
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        streamingCompletionTask = nil
+        telemetryTask?.cancel()
+        telemetryTask = nil
+        captureFailureTask?.cancel()
+        captureFailureTask = nil
+
+        let activity = VoiceInputActivity.failed(id, problem.failure)
+        // The provider has already returned a definite failure. Surface that
+        // fact before recorder cleanup or history I/O, then fence late events.
+        publish(activity)
+        await audioCapture.cancel()
+
+        let diagnostic = problem.diagnostic
+        _ = queueHistory(.init(
+            sessionID: id,
+            startedAt: startedAt,
+            applicationName: audit.applicationName,
+            transcription: nil,
+            finalText: nil,
+            transcriptionProvider: diagnostic?.provider ?? "doubao",
+            providerRequestID: diagnostic?.requestID,
+            providerErrorCode: diagnostic?.code,
+            providerOperation: diagnostic?.operation.rawValue,
+            providerStatusCode: diagnostic?.statusCode,
+            providerMessage: nil,
+            refinementModeName: snapshot.refinementMode.displayName,
+            refinementPrompt: snapshot.refinementMode.deepSeekRule,
+            dictionarySnapshotID: snapshot.dictionary.id,
+            dictionarySnapshotEntries: snapshot.dictionary.entries,
+            dictionaryRequestContext: snapshot.dictionaryContext,
+            durationMilliseconds: max(
+                0,
+                Int(Date().timeIntervalSince(startedAt) * 1_000)
+            ),
+            stageDurationsMilliseconds: audit.stageDurations,
+            outcome: activity
+        ))
+        phase = .idle
+    }
+
     private func receivedTelemetry(
         _ telemetry: RecordingTelemetry,
         for id: VoiceInputSessionID
@@ -971,14 +1567,18 @@ public actor VoiceInputSessions {
         publish(.recording(id), telemetry: telemetry)
     }
 
-    private func receivedProcessingStage(
-        _ stage: VoiceInputProcessingStage,
+    private func receivedProcessingProgress(
+        _ progress: VoiceTextProcessingProgress,
         id: VoiceInputSessionID,
         startedAt: Date,
         snapshot: VoiceTextProcessingSnapshot,
         applicationName: String?
     ) async {
         guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
+        let stage = progress.stage
+        if let confirmed = progress.confirmedDoubaoResult {
+            confirmedDoubaoResult = confirmed
+        }
         let auditStage = switch stage {
         case .capturingTarget: "targetCapture"
         case .transcribing: "doubao"
@@ -1016,8 +1616,13 @@ public actor VoiceInputSessions {
             sessionID: id,
             startedAt: startedAt,
             applicationName: applicationName,
+            // Provider text is terminal data. Persisting it during processing
+            // creates a crash window where a secure target can leave sensitive
+            // text in SQLite/WAL before the target classification is applied.
             transcription: nil,
             finalText: nil,
+            transcriptionProvider: nil,
+            providerRequestID: nil,
             refinementModeName: snapshot?.refinementMode.displayName,
             refinementPrompt: snapshot?.refinementMode.deepSeekRule,
             dictionarySnapshotID: snapshot?.dictionary.id,
@@ -1029,25 +1634,47 @@ public actor VoiceInputSessions {
 
     @discardableResult
     private func queueHistory(
-        _ record: VoiceInputHistoryRecord
+        _ record: VoiceInputHistoryRecord,
+        terminalPresentation: TerminalHistoryPresentation? = nil
     ) -> Task<Void, Never> {
         let previous = historyWriteTasks[record.sessionID]
         let history = history
-        let task = Task {
+        let token = UUID()
+        historyWriteTokens[record.sessionID] = token
+        let task = Task { [weak self] in
             await previous?.value
             await history.save(record)
+            let persistenceNotice = terminalPresentation == nil
+                ? nil
+                : await history.persistenceFailureNotice()
+            await self?.historyWriteDidComplete(
+                sessionID: record.sessionID,
+                token: token,
+                terminalPresentation: terminalPresentation,
+                persistenceNotice: persistenceNotice
+            )
         }
         historyWriteTasks[record.sessionID] = task
         return task
     }
 
-    private func saveHistoryAndWait(
-        _ record: VoiceInputHistoryRecord
-    ) async -> String? {
-        let task = queueHistory(record)
-        await task.value
-        historyWriteTasks[record.sessionID] = nil
-        return await history.persistenceFailureNotice()
+    private func historyWriteDidComplete(
+        sessionID: VoiceInputSessionID,
+        token: UUID,
+        terminalPresentation: TerminalHistoryPresentation?,
+        persistenceNotice: String?
+    ) {
+        guard historyWriteTokens[sessionID] == token else { return }
+        historyWriteTasks[sessionID] = nil
+        historyWriteTokens[sessionID] = nil
+        guard let terminalPresentation,
+              let persistenceNotice,
+              presentation.activity == terminalPresentation.activity
+        else { return }
+        publish(
+            terminalPresentation.activity,
+            notice: .persistenceFailure(persistenceNotice)
+        )
     }
 
     private func discard(_ captureResult: InputTargetCaptureResult) async {
@@ -1058,10 +1685,15 @@ public actor VoiceInputSessions {
     }
 
     private static func captureWithTiming(
-        _ capture: any InputTargetCapturing
+        _ capture: any InputTargetCapturing,
+        matching hint: InputTargetCaptureHint?
     ) async -> (InputTargetCaptureResult, Int) {
         let started = ContinuousClock.now
-        let result = await capture.capture()
+        let result = if let hint {
+            await capture.capture(matching: hint)
+        } else {
+            await capture.capture()
+        }
         return (result, milliseconds(started.duration(to: .now)))
     }
 
@@ -1118,16 +1750,26 @@ public actor VoiceInputSessions {
         )
     }
 
-    private func watchdogFired(for id: VoiceInputSessionID) async {
-        guard case let .recording(activeID, _, _) = phase, activeID == id else {
-            return
-        }
-        watchdogTask = nil
-        await finishSession()
-    }
-
     private func removeObserver(_ id: UUID) {
         observers[id] = nil
+    }
+
+    private func removeTriggerTerminationObserver(_ id: UUID) {
+        triggerTerminationObservers[id] = nil
+    }
+
+    private func finishActiveTriggerSequence() {
+        guard let sequence = activeTriggerSequence else { return }
+        activeTriggerSequence = nil
+        for continuation in triggerTerminationObservers.values {
+            continuation.yield(sequence)
+        }
+    }
+
+    private func finishRejectedTriggerSequence(_ sequence: UInt64) {
+        for continuation in triggerTerminationObservers.values {
+            continuation.yield(sequence)
+        }
     }
 
 }

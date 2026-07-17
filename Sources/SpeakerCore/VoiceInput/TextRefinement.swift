@@ -26,6 +26,15 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         }
     }
 
+    public var diagnosticKind: String {
+        switch self {
+        case .defaultSmooth: "defaultSmooth"
+        case .conciseCleanup: "conciseCleanup"
+        case .fullRewrite: "fullRewrite"
+        case .custom: "custom"
+        }
+    }
+
     public func validated() throws -> TextRefinementMode {
         switch self {
         case .defaultSmooth, .conciseCleanup, .fullRewrite:
@@ -68,6 +77,21 @@ public enum TextRefinementModeValidationError: String, Error, Equatable, Sendabl
     case customNameTooLong
     case emptyCustomPrompt
     case customPromptTooLong
+}
+
+extension TextRefinementModeValidationError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .emptyCustomName:
+            "规则名称不能为空。"
+        case .customNameTooLong:
+            "规则名称不能超过 \(TextRefinementMode.maximumCustomNameLength) 个字符。"
+        case .emptyCustomPrompt:
+            "整理规则不能为空。"
+        case .customPromptTooLong:
+            "整理规则不能超过 \(TextRefinementMode.maximumCustomPromptLength) 个字符。"
+        }
+    }
 }
 
 public struct DeepSeekRefinementResult: Equatable, Sendable {
@@ -130,7 +154,7 @@ public actor OptionalTextRefinementPipeline {
     public func refine(
         doubaoText: String,
         mode: TextRefinementMode
-    ) async -> TextRefinementOutcome {
+    ) async throws -> TextRefinementOutcome {
         guard mode.requiresDeepSeek else {
             return TextRefinementOutcome(
                 doubaoText: doubaoText,
@@ -144,8 +168,10 @@ public actor OptionalTextRefinementPipeline {
         }
 
         do {
+            try Task.checkCancellation()
             let validatedMode = try mode.validated()
             let result = try await refiner.refine(doubaoText, using: validatedMode)
+            try Task.checkCancellation()
             return TextRefinementOutcome(
                 doubaoText: doubaoText,
                 deepSeekText: result.text,
@@ -156,6 +182,9 @@ public actor OptionalTextRefinementPipeline {
                 providerRequestID: result.providerRequestID
             )
         } catch let failure as DeepSeekRefinementFailure {
+            if failure.kind == .cancelled {
+                throw CancellationError()
+            }
             return fallback(doubaoText: doubaoText, mode: mode, failure: failure)
         } catch let validation as TextRefinementModeValidationError {
             return fallback(
@@ -167,11 +196,7 @@ public actor OptionalTextRefinementPipeline {
                 )
             )
         } catch is CancellationError {
-            return fallback(
-                doubaoText: doubaoText,
-                mode: mode,
-                failure: DeepSeekRefinementFailure(kind: .cancelled)
-            )
+            throw CancellationError()
         } catch {
             return fallback(
                 doubaoText: doubaoText,

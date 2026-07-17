@@ -3,5 +3,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
-exec "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerCoreSpecs
-
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerCoreSpecs
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppScenarioSpecs
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerProviderEvidenceSpecs
+/bin/zsh "$SCRIPT_DIR/test-compatibility-smoke"
+/bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
+/bin/zsh "$SCRIPT_DIR/test-install-identity"
+/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerProviderSmoke \
+    -Xswiftc -warnings-as-errors
+/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerProviderEvidenceVerifier \
+    -Xswiftc -warnings-as-errors

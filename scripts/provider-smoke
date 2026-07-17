@@ -1,0 +1,41 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+command="${1:-all}"
+
+case "$command" in
+    all|doubao|deepseek)
+        (( $# <= 1 )) || {
+            print -u2 "Connection probes do not accept additional arguments."
+            exit 64
+        }
+        ;;
+    matrix)
+        (( ${@[(I)--confirm-paid-requests]} > 0 )) || {
+            print -u2 "Matrix sends paid BYOK requests. Re-run with --confirm-paid-requests."
+            exit 64
+        }
+        (( ${@[(I)--evidence-directory]} > 0 )) || {
+            print -u2 "Matrix requires a fresh owner-only evidence directory."
+            exit 64
+        }
+        (( ${@[(I)--candidate-version]} > 0 )) || {
+            print -u2 "Matrix requires the candidate version."
+            exit 64
+        }
+        (( ${@[(I)--candidate-build]} > 0 )) || {
+            print -u2 "Matrix requires the candidate build number."
+            exit 64
+        }
+        ;;
+    *)
+        print -u2 "Usage: ./scripts/provider-smoke [doubao|deepseek|all]"
+        print -u2 "       ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav]"
+        exit 64
+        ;;
+esac
+
+exec /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+    SpeakerProviderSmoke "$@"

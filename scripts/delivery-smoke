@@ -1,0 +1,140 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
+TARGET="${1:-TextEdit}"
+REPORT=""
+FIXTURE=""
+
+case "$TARGET" in
+    TextEdit)
+        TARGET_APP="/System/Applications/TextEdit.app"
+        TARGET_PROCESS="TextEdit"
+        ;;
+    Terminal)
+        TARGET_APP="/System/Applications/Utilities/Terminal.app"
+        TARGET_PROCESS="Terminal"
+        ;;
+    *)
+        print -u2 "Usage: ./scripts/delivery-smoke [TextEdit|Terminal]"
+        exit 64
+        ;;
+esac
+
+[[ -d "$APP" ]] || {
+    print -u2 "Speaker is not installed at $APP"
+    exit 1
+}
+
+INSTALLED_EXECUTABLE="$APP/Contents/MacOS/SpeakerApp"
+SIGNING_MODE="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :SpeakerSigningMode' \
+        "$APP/Contents/Info.plist" 2>/dev/null || true
+)"
+if [[ "$SIGNING_MODE" != "development-ad-hoc" \
+      && "$SIGNING_MODE" != "development-signed" ]]; then
+    print -u2 "Delivery smoke is available only in local development builds"
+    exit 1
+fi
+BUNDLE_IDENTIFIER="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CFBundleIdentifier' \
+        "$APP/Contents/Info.plist"
+)"
+ESCAPED_EXECUTABLE="$(
+    print -r -- "$INSTALLED_EXECUTABLE" \
+        | sed 's/[][(){}.^$*+?|\\]/\\&/g'
+)"
+SPEAKER_PROCESS_PATTERN="^${ESCAPED_EXECUTABLE}([[:space:]].*)?$"
+SPEAKER_WAS_RUNNING=0
+SPEAKER_STOPPED_FOR_SMOKE=0
+TARGET_PID=""
+cleanup() {
+    [[ -z "$REPORT" ]] || rm -f "$REPORT"
+    [[ -z "$FIXTURE" ]] || rm -f "$FIXTURE"
+    if [[ -n "$TARGET_PID" ]] && kill -0 "$TARGET_PID" 2>/dev/null; then
+        kill -TERM "$TARGET_PID" 2>/dev/null || true
+    fi
+    if (( SPEAKER_WAS_RUNNING && SPEAKER_STOPPED_FOR_SMOKE )); then
+        /usr/bin/open -n "$APP" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+
+REPORT="$(mktemp "/private/tmp/speaker-delivery-smoke-${TARGET:l}.XXXXXX.txt")"
+chmod 600 "$REPORT"
+if [[ "$TARGET" == "TextEdit" ]]; then
+    FIXTURE="$(mktemp "/private/tmp/speaker-delivery-fixture-textedit.XXXXXX.txt")"
+    chmod 600 "$FIXTURE"
+fi
+
+if pgrep -f "$SPEAKER_PROCESS_PATTERN" >/dev/null 2>&1; then
+    SPEAKER_WAS_RUNNING=1
+    if ! /usr/bin/osascript \
+        -e "tell application id \"$BUNDLE_IDENTIFIER\" to quit"; then
+        print -u2 "Could not ask the running Speaker to quit safely"
+        exit 1
+    fi
+    for _ in {1..100}; do
+        if ! pgrep -f "$SPEAKER_PROCESS_PATTERN" \
+            >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.1
+    done
+    if pgrep -f "$SPEAKER_PROCESS_PATTERN" \
+        >/dev/null 2>&1; then
+        print -u2 "Speaker did not finish its normal shutdown"
+        exit 1
+    fi
+    SPEAKER_STOPPED_FOR_SMOKE=1
+fi
+
+typeset -a before after candidates
+before=(${(f)"$(pgrep -x "$TARGET_PROCESS" 2>/dev/null || true)"})
+if (( ${#before} > 0 )); then
+    print "result=SKIP"
+    print "reason=targetAlreadyRunning"
+    print "targetApplication=$TARGET"
+    exit 2
+fi
+if [[ "$TARGET" == "TextEdit" ]]; then
+    /usr/bin/open -n -a "$TARGET_APP" "$FIXTURE"
+else
+    /usr/bin/open -n -a "$TARGET_APP"
+fi
+
+for _ in {1..50}; do
+    after=(${(f)"$(pgrep -x "$TARGET_PROCESS" 2>/dev/null || true)"})
+    candidates=(${after:|before})
+    if (( ${#candidates} > 0 )); then
+        TARGET_PID="${candidates[-1]}"
+        break
+    fi
+    sleep 0.1
+done
+[[ -n "$TARGET_PID" ]] || {
+    print -u2 "Could not identify the new $TARGET process"
+    exit 1
+}
+
+# The script refuses pre-existing instances above, so LaunchServices can only
+# activate the exact temporary process identified by TARGET_PID.
+/usr/bin/open -a "$TARGET_APP"
+/usr/bin/open -n "$APP" --args \
+    --speaker-delivery-smoke-pid "$TARGET_PID" \
+    --speaker-delivery-smoke-report "$REPORT"
+
+for _ in {1..100}; do
+    [[ -s "$REPORT" ]] && break
+    sleep 0.1
+done
+[[ -s "$REPORT" ]] || {
+    print -u2 "FAIL: Speaker did not produce a delivery report"
+    exit 1
+}
+
+cat "$REPORT"
+grep -qx 'result=PASS' "$REPORT"

@@ -25,6 +25,6 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Speaker 需要在按住快捷键时录制语音并将其转换为文字。</string>
+    <string>Speaker 需要在你使用语音快捷键时录制语音并将其转换为文字。</string>
 </dict>
 </plist>

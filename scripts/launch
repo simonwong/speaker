@@ -3,5 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
-APP="$($SCRIPT_DIR/bundle)"
+ROOT="${SCRIPT_DIR:h}"
+/bin/zsh "$SCRIPT_DIR/bundle"
+APP="$ROOT/.build/Speaker.app"
 exec open "$APP"

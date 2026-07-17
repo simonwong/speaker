@@ -1,0 +1,50 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+OUTPUT_DIR="$(/usr/bin/mktemp -d /private/tmp/speaker-compatibility-spec.XXXXXX)"
+trap 'rm -rf "$OUTPUT_DIR"' EXIT
+APP="${SPEAKER_COMPATIBILITY_TEST_APP:-$ROOT/.build/Speaker.app}"
+
+if [[ ! -d "$APP" ]]; then
+    SPEAKER_CONFIGURATION=debug /bin/zsh "$SCRIPT_DIR/bundle" >/dev/null
+fi
+
+set +e
+/bin/echo $'p\ncontrol-type-only' \
+    | /bin/zsh "$SCRIPT_DIR/compatibility-smoke" \
+        --case textedit-insert \
+        --output "$OUTPUT_DIR" \
+        --app "$APP" \
+        >/dev/null
+exit_code=$?
+set -e
+
+[[ "$exit_code" == "3" ]] || {
+    print -u2 "Expected partial PASS to exit 3, got $exit_code."
+    exit 1
+}
+
+reports=("$OUTPUT_DIR"/*.md(N))
+[[ "${#reports}" == "1" ]] || {
+    print -u2 "Expected exactly one compatibility report."
+    exit 1
+}
+report="${reports[1]}"
+case_count="$(/bin/zsh "$SCRIPT_DIR/compatibility-smoke" --list | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
+permissions="$(/usr/bin/stat -f '%Lp' "$report")"
+[[ "$permissions" == "600" ]] || {
+    print -u2 "Compatibility report is not owner-only: $permissions"
+    exit 1
+}
+/usr/bin/grep -q -- "- Scope: PARTIAL (1 / $case_count)" "$report"
+/usr/bin/grep -q -- '- Result: PARTIAL PASS' "$report"
+/usr/bin/grep -Eq -- '- Executable SHA-256: [0-9a-f]{64}' "$report"
+if /usr/bin/grep -q -- '- Bundle:' "$report"; then
+    print -u2 "Compatibility report leaked an absolute bundle path."
+    exit 1
+fi
+
+print "PASS: compatibility smoke report contract"

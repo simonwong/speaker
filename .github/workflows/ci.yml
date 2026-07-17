@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: speaker-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Test, build, and bundle
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Record toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          SDK_CANONICAL_NAME="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CanonicalName' \
+              "$SDK_PATH/SDKSettings.plist"
+          )"
+          SDK_MAJOR="${SDK_CANONICAL_NAME#macosx}"
+          SDK_MAJOR="${SDK_MAJOR%%.*}"
+          test "$SDK_MAJOR" -ge 26
+          echo "SPEAKER_SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
+          echo "Selected SDK: $SDK_CANONICAL_NAME ($SDK_PATH)"
+
+      - name: Run deterministic specifications
+        run: ./scripts/test
+
+      - name: Verify resolved dependencies are pristine
+        shell: zsh {0}
+        run: |
+          source scripts/release-common
+          verify_swiftpm_dependency_checkouts_clean "$PWD"
+
+      - name: Treat compiler warnings as errors
+        run: >-
+          ./scripts/swiftw build
+          --disable-sandbox
+          --configuration debug
+          --product SpeakerApp
+          -Xswiftc -warnings-as-errors
+
+      - name: Treat release compiler warnings as errors
+        run: >-
+          ./scripts/swiftw build
+          --disable-sandbox
+          --configuration release
+          --product SpeakerApp
+          -Xswiftc -warnings-as-errors
+
+      - name: Build and validate isolated release bundle
+        env:
+          SPEAKER_CONFIGURATION: release
+          SPEAKER_BUNDLE_PENDING_ROOT: ${{ runner.temp }}/speaker-release-pending
+          SPEAKER_SWIFT_SCRATCH_PATH: ${{ runner.temp }}/speaker-release-pending/swift-build
+          SPEAKER_BUNDLE_OUTPUT_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
+          SPEAKER_SWIFT_RELEASE_ISOLATION: "1"
+        run: |
+          mkdir -p "$SPEAKER_BUNDLE_PENDING_ROOT"
+          chmod 700 "$SPEAKER_BUNDLE_PENDING_ROOT"
+          ./scripts/bundle
+
+      - name: Verify release identity and integrity
+        env:
+          SPEAKER_BUNDLE_OUTPUT_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
+        run: |
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "com.local.speaker"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SpeakerCredentialStorage' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "local-file"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SpeakerSigningMode' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "development-ad-hoc"
+          cmp PRIVACY.md "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Resources/PRIVACY.md"
+          codesign --verify --deep --strict --verbose=2 "$SPEAKER_BUNDLE_OUTPUT_APP"
+
+      - name: Verify release evidence dSYM binding
+        env:
+          SPEAKER_EVIDENCE_TEST_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
+        run: ./scripts/test-release-evidence
+
+      - name: Archive validated release candidate
+        run: |
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+            "${{ runner.temp }}/speaker-release-pending/Speaker.app" \
+            "${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip"
+          /usr/bin/shasum -a 256 \
+            "${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip" \
+            > "${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip.sha256"
+
+      - name: Retain validated release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: Speaker-ci-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip
+            ${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify install rollback
+        run: ./scripts/test-install-rollback
+
+      - name: Verify reviewed release identity guard
+        run: ./scripts/test-release-identity
+
+      - name: Check scripts and patch hygiene
+        run: |
+          zsh -n scripts/*
+          git diff --check

@@ -5,6 +5,7 @@ public enum PersonalDictionaryStoreError: Error, Equatable, Sendable {
     case corruptedData
     case readFailed
     case writeFailed
+    case privacyProtectionFailed
 }
 
 extension PersonalDictionaryStoreError: LocalizedError {
@@ -18,6 +19,8 @@ extension PersonalDictionaryStoreError: LocalizedError {
             "无法读取本机个人词库。"
         case .writeFailed:
             "无法保存本机个人词库。"
+        case .privacyProtectionFailed:
+            "无法把个人词库限制为仅当前用户可读，已停止加载。"
         }
     }
 }
@@ -27,8 +30,17 @@ public protocol PersonalDictionaryStoring: Sendable {
     func save(_ dictionary: PersonalDictionary) async throws
 }
 
+public enum PersonalDictionaryMigrationOutcome: Equatable, Sendable {
+    case notNeeded
+    case primaryAlreadyExists
+    case migrated
+    case migratedLegacyCleanupFailed
+    case failed
+}
+
 public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
     public static let currentVersion = 1
+    private static let maximumDocumentByteCount = 8 * 1_024 * 1_024
 
     private struct VersionHeader: Decodable {
         let version: Int
@@ -40,11 +52,39 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
     }
 
     public let fileURL: URL
+    private let fileProtection: LocalFileProtection
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
+        fileProtection = .ownerOnly
     }
 
+    package init(
+        fileURL: URL,
+        fileProtection: LocalFileProtection
+    ) {
+        self.fileURL = fileURL
+        self.fileProtection = fileProtection
+    }
+
+    public static func defaultFileURL(
+        fileManager: FileManager = .default,
+        applicationDirectoryName: String = "Speaker"
+    ) -> URL {
+        let root = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.homeDirectoryForCurrentUser
+        return root
+            .appendingPathComponent(applicationDirectoryName, isDirectory: true)
+            .appendingPathComponent(
+                "personal-dictionary.json",
+                isDirectory: false
+            )
+    }
+
+    /// Legacy development builds used the bundle identifier as their storage
+    /// directory. Keep this locator only for one-way migration.
     public static func applicationSupportFileURL(
         bundleIdentifier: String = "com.local.speaker",
         fileManager: FileManager = .default
@@ -60,14 +100,59 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
             .appendingPathComponent("personal-dictionary.json", isDirectory: false)
     }
 
-    public func load() async throws -> PersonalDictionary {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .empty
+    public static func migrateLegacyFileIfNeeded(
+        from legacyURL: URL,
+        to primaryURL: URL
+    ) async -> PersonalDictionaryMigrationOutcome {
+        let legacyPath = legacyURL.standardizedFileURL.path
+        let primaryPath = primaryURL.standardizedFileURL.path
+        guard legacyPath != primaryPath,
+              FileManager.default.fileExists(atPath: legacyPath)
+        else {
+            return .notNeeded
+        }
+        guard !FileManager.default.fileExists(atPath: primaryPath) else {
+            return .primaryAlreadyExists
         }
 
+        do {
+            let legacyStore = VersionedJSONPersonalDictionaryStore(
+                fileURL: legacyURL
+            )
+            let primaryStore = VersionedJSONPersonalDictionaryStore(
+                fileURL: primaryURL
+            )
+            let dictionary = try await legacyStore.load()
+            try await primaryStore.save(dictionary)
+            guard try await primaryStore.load() == dictionary else {
+                return .failed
+            }
+            do {
+                try FileManager.default.removeItem(at: legacyURL)
+                return .migrated
+            } catch {
+                return .migratedLegacyCleanupFailed
+            }
+        } catch {
+            return .failed
+        }
+    }
+
+    public func load() async throws -> PersonalDictionary {
+        do {
+            try fileProtection.protect(fileURL)
+        } catch {
+            throw PersonalDictionaryStoreError.privacyProtectionFailed
+        }
         let data: Data
         do {
-            data = try Data(contentsOf: fileURL)
+            guard let storedData = try OwnerOnlyFilePersistence.read(
+                from: fileURL,
+                maximumByteCount: Self.maximumDocumentByteCount
+            ) else {
+                return .empty
+            }
+            data = storedData
         } catch {
             throw PersonalDictionaryStoreError.readFailed
         }
@@ -103,16 +188,15 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             data = try encoder.encode(envelope)
+            guard data.count <= Self.maximumDocumentByteCount else {
+                throw PersonalDictionaryStoreError.writeFailed
+            }
         } catch {
             throw PersonalDictionaryStoreError.writeFailed
         }
 
         do {
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try data.write(to: fileURL, options: [.atomic])
+            try OwnerOnlyFilePersistence.write(data, to: fileURL)
         } catch {
             throw PersonalDictionaryStoreError.writeFailed
         }

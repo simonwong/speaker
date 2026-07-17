@@ -1,0 +1,41 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+
+set +e
+matrix_output="$(/bin/zsh "$SCRIPT_DIR/provider-smoke" matrix 2>&1)"
+matrix_status=$?
+connection_output="$(/bin/zsh "$SCRIPT_DIR/provider-smoke" doubao unexpected 2>&1)"
+connection_status=$?
+missing_evidence_output="$(/bin/zsh "$SCRIPT_DIR/provider-smoke" matrix --confirm-paid-requests 2>&1)"
+missing_evidence_status=$?
+set -e
+
+[[ "$matrix_status" == "64" ]] || {
+    print -u2 "Provider matrix ran without explicit paid-request confirmation."
+    exit 1
+}
+[[ "$matrix_output" == *"paid BYOK requests"* ]] || {
+    print -u2 "Provider matrix did not explain its paid-request boundary."
+    exit 1
+}
+[[ "$connection_status" == "64" ]] || {
+    print -u2 "Connection probe accepted unexpected arguments."
+    exit 1
+}
+[[ "$connection_output" == *"do not accept additional arguments"* ]] || {
+    print -u2 "Connection probe did not report its argument boundary."
+    exit 1
+}
+[[ "$missing_evidence_status" == "64" ]] || {
+    print -u2 "Provider matrix ran without an evidence destination."
+    exit 1
+}
+[[ "$missing_evidence_output" == *"fresh owner-only evidence directory"* ]] || {
+    print -u2 "Provider matrix did not report its evidence boundary."
+    exit 1
+}
+
+print "PASS: provider smoke requires paid confirmation and evidence binding"

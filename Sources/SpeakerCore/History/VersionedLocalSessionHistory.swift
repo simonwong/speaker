@@ -1,5 +1,32 @@
 import Foundation
 
+public extension Notification.Name {
+    static let speakerHistoryDidChange = Notification.Name(
+        "com.local.speaker.history-did-change"
+    )
+}
+
+public protocol LocalSessionHistoryStoring: SessionHistoryRecording {
+    func allRecords() async -> [VoiceInputHistoryRecord]
+    func record(sessionID: VoiceInputSessionID) async -> VoiceInputHistoryRecord?
+    func search(_ query: String) async -> [VoiceInputHistoryRecord]
+    @discardableResult func delete(sessionID: VoiceInputSessionID) async -> Bool
+    @discardableResult func clear() async -> Bool
+    func persistenceStatus() async -> LocalHistoryPersistenceStatus
+    func clearPersistenceNotice() async
+    func currentRetentionPolicy() async -> HistoryRetentionPolicy
+    @discardableResult func applyRetentionPolicy(
+        _ policy: HistoryRetentionPolicy,
+        now: Date
+    ) async -> Bool
+}
+
+public extension LocalSessionHistoryStoring {
+    func latestRecord() async -> VoiceInputHistoryRecord? {
+        await allRecords().first
+    }
+}
+
 public struct LocalHistoryPersistenceStatus: Equatable, Sendable {
     public let recordCount: Int
     public let notice: LocalHistoryPersistenceNotice?
@@ -12,6 +39,8 @@ public struct LocalHistoryPersistenceStatus: Equatable, Sendable {
 
 public enum LocalHistoryPersistenceNotice: Equatable, Sendable {
     case corruptedDataPreserved(backupURL: URL, reason: String)
+    case corruptedRecordsSkipped(count: Int)
+    case privacyMigrationFailed(reason: String)
     case writeFailed(reason: String)
 }
 
@@ -21,19 +50,59 @@ public enum LocalHistoryPersistenceNotice: Equatable, Sendable {
 /// Audio, credentials, accessibility objects, the target's original value, and
 /// clipboard contents are not accepted by this API and cannot be encoded by its
 /// persistence DTOs.
-public actor VersionedLocalSessionHistory: SessionHistoryRecording {
+public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
     public static let currentSchemaVersion = 1
+    public static let defaultMaximumRecordCount = 10_000
+    private static let maximumLegacyDocumentByteCount = 64 * 1_024 * 1_024
 
     private let fileURL: URL
+    private let maximumRecordCount: Int
     private var storedRecords: [VoiceInputHistoryRecord]
+    private var retentionPolicy: HistoryRetentionPolicy
     private var notice: LocalHistoryPersistenceNotice?
 
-    public init(fileURL: URL) {
+    public init(
+        fileURL: URL,
+        retentionPolicy: HistoryRetentionPolicy = .forever,
+        maximumRecordCount: Int = VersionedLocalSessionHistory.defaultMaximumRecordCount
+    ) {
+        self.init(
+            fileURL: fileURL,
+            retentionPolicy: retentionPolicy,
+            maximumRecordCount: maximumRecordCount,
+            fileProtection: .ownerOnly
+        )
+    }
+
+    package init(
+        fileURL: URL,
+        retentionPolicy: HistoryRetentionPolicy = .forever,
+        maximumRecordCount: Int = VersionedLocalSessionHistory.defaultMaximumRecordCount,
+        fileProtection: LocalFileProtection
+    ) {
+        let resolvedMaximumRecordCount = max(1, maximumRecordCount)
         self.fileURL = fileURL
+        self.retentionPolicy = retentionPolicy
+        self.maximumRecordCount = resolvedMaximumRecordCount
+        Self.pruneRecoveryArtifacts(for: fileURL)
+        do {
+            try fileProtection.protect(fileURL)
+        } catch {
+            storedRecords = []
+            notice = .privacyMigrationFailed(
+                reason: Self.safeReason(for: error)
+            )
+            return
+        }
 
         switch Self.loadDocument(at: fileURL) {
         case let .success(records):
-            storedRecords = Self.sort(records)
+            storedRecords = SessionHistoryRecordPolicy.retained(
+                records,
+                policy: retentionPolicy,
+                maximumCount: resolvedMaximumRecordCount,
+                now: Date()
+            )
             notice = nil
         case let .failure(failure):
             storedRecords = []
@@ -63,44 +132,64 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
         } else {
             storedRecords.append(record)
         }
-        storedRecords = Self.sort(storedRecords)
-        _ = persistCurrentRecords()
+        storedRecords = SessionHistoryRecordPolicy.retained(
+            storedRecords,
+            policy: retentionPolicy,
+            maximumCount: maximumRecordCount,
+            now: Date()
+        )
+        if persistCurrentRecords() {
+            NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
+        }
     }
 
-    public func allRecords() -> [VoiceInputHistoryRecord] {
+    public func allRecords() async -> [VoiceInputHistoryRecord] {
         storedRecords
     }
 
-    public func record(sessionID: VoiceInputSessionID) -> VoiceInputHistoryRecord? {
+    public func currentRetentionPolicy() async -> HistoryRetentionPolicy {
+        retentionPolicy
+    }
+
+    @discardableResult
+    public func applyRetentionPolicy(
+        _ policy: HistoryRetentionPolicy,
+        now: Date = Date()
+    ) async -> Bool {
+        let previousPolicy = retentionPolicy
+        let previousRecords = storedRecords
+        let retainedRecords = SessionHistoryRecordPolicy.retained(
+            storedRecords,
+            policy: policy,
+            maximumCount: maximumRecordCount,
+            now: now
+        )
+        guard policy != retentionPolicy || retainedRecords != storedRecords else {
+            return true
+        }
+        retentionPolicy = policy
+        storedRecords = retainedRecords
+        guard persistCurrentRecords() else {
+            retentionPolicy = previousPolicy
+            storedRecords = previousRecords
+            return false
+        }
+        NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
+        return true
+    }
+
+    public func record(sessionID: VoiceInputSessionID) async -> VoiceInputHistoryRecord? {
         storedRecords.first { $0.sessionID == sessionID }
     }
 
     /// Searches all user-visible and diagnostic text retained by the history
     /// model. Matching is localized, case-insensitive, and diacritic-insensitive.
-    public func search(_ query: String) -> [VoiceInputHistoryRecord] {
+    public func search(_ query: String) async -> [VoiceInputHistoryRecord] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuery.isEmpty else { return storedRecords }
 
         return storedRecords.filter { record in
-            [
-                record.transcription,
-                record.finalText,
-                record.applicationName,
-                record.providerErrorCode,
-                record.providerRequestID,
-                record.transcriptionProvider,
-                record.deepSeekText,
-                record.deepSeekRequestID,
-                record.refinementModeName,
-                record.refinementPrompt,
-                record.refinementFailureCode,
-                record.dictionarySnapshotEntries
-                    .flatMap { [$0.canonicalTerm] + $0.aliases }
-                    .joined(separator: " "),
-                record.dictionaryRequestContext?.hotwords.joined(separator: " "),
-            ]
-            .compactMap { $0 }
-            .contains { value in
+            SessionHistoryRecordPolicy.searchableValues(record).contains { value in
                 value.range(
                     of: normalizedQuery,
                     options: [.caseInsensitive, .diacriticInsensitive],
@@ -111,7 +200,7 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
     }
 
     @discardableResult
-    public func delete(sessionID: VoiceInputSessionID) -> Bool {
+    public func delete(sessionID: VoiceInputSessionID) async -> Bool {
         let previousRecords = storedRecords
         let originalCount = storedRecords.count
         storedRecords.removeAll { $0.sessionID == sessionID }
@@ -120,21 +209,30 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
             storedRecords = previousRecords
             return false
         }
+        NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
         return true
     }
 
     @discardableResult
-    public func clear() -> Bool {
+    public func clear() async -> Bool {
         let previousRecords = storedRecords
         storedRecords.removeAll(keepingCapacity: false)
         guard persistCurrentRecords() else {
             storedRecords = previousRecords
             return false
         }
-        return true
+        do {
+            try removeRecoveryArtifacts()
+            notice = nil
+            NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
+            return true
+        } catch {
+            notice = .writeFailed(reason: Self.safeReason(for: error))
+            return false
+        }
     }
 
-    public func persistenceStatus() -> LocalHistoryPersistenceStatus {
+    public func persistenceStatus() async -> LocalHistoryPersistenceStatus {
         LocalHistoryPersistenceStatus(
             recordCount: storedRecords.count,
             notice: notice
@@ -148,7 +246,7 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
 
     /// Notices remain visible across later successful writes so the UI cannot
     /// silently hide a recovered corruption event. The user may dismiss it.
-    public func clearPersistenceNotice() {
+    public func clearPersistenceNotice() async {
         notice = nil
     }
 
@@ -159,16 +257,28 @@ public actor VersionedLocalSessionHistory: SessionHistoryRecording {
                 records: storedRecords.map(HistoryRecordV1.init)
             )
             let data = try Self.encoder.encode(document)
-            let directoryURL = fileURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(
-                at: directoryURL,
-                withIntermediateDirectories: true
-            )
-            try data.write(to: fileURL, options: [.atomic])
+            try OwnerOnlyFilePersistence.write(data, to: fileURL)
             return true
         } catch {
             notice = .writeFailed(reason: Self.safeReason(for: error))
             return false
+        }
+    }
+
+    private func removeRecoveryArtifacts() throws {
+        let directory = fileURL.deletingLastPathComponent()
+        let baseName = fileURL.deletingPathExtension().lastPathComponent
+        let prefix = "\(baseName).corrupt-"
+        let candidates = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        for candidate in candidates where
+            candidate.lastPathComponent.hasPrefix(prefix)
+                && candidate.pathExtension == "json"
+        {
+            try FileManager.default.removeItem(at: candidate)
         }
     }
 }
@@ -203,13 +313,15 @@ private extension VersionedLocalSessionHistory {
     }
 
     static func loadDocument(at fileURL: URL) -> LoadResult {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .success([])
-        }
-
         let data: Data
         do {
-            data = try Data(contentsOf: fileURL)
+            guard let storedData = try OwnerOnlyFilePersistence.read(
+                from: fileURL,
+                maximumByteCount: maximumLegacyDocumentByteCount
+            ) else {
+                return .success([])
+            }
+            data = storedData
         } catch {
             return .failure(.unreadable(error))
         }
@@ -255,6 +367,7 @@ private extension VersionedLocalSessionHistory {
 
         do {
             try FileManager.default.moveItem(at: fileURL, to: backupURL)
+            pruneRecoveryArtifacts(for: fileURL, preserving: backupURL)
             return .corruptedDataPreserved(backupURL: backupURL, reason: reason)
         } catch {
             return .writeFailed(
@@ -268,14 +381,19 @@ private extension VersionedLocalSessionHistory {
         return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
     }
 
-    static func sort(_ records: [VoiceInputHistoryRecord]) -> [VoiceInputHistoryRecord] {
-        records.sorted {
-            if $0.startedAt == $1.startedAt {
-                return $0.sessionID.rawValue.uuidString > $1.sessionID.rawValue.uuidString
-            }
-            return $0.startedAt > $1.startedAt
-        }
+    static func pruneRecoveryArtifacts(
+        for fileURL: URL,
+        preserving preservedURL: URL? = nil
+    ) {
+        let baseName = fileURL.deletingPathExtension().lastPathComponent
+        RecoveryArchivePruner.pruneRegularFiles(
+            in: fileURL.deletingLastPathComponent(),
+            prefix: "\(baseName).corrupt-",
+            suffix: ".json",
+            preserving: preservedURL
+        )
     }
+
 }
 
 private struct HistoryDocumentV1: Codable {
@@ -283,7 +401,7 @@ private struct HistoryDocumentV1: Codable {
     let records: [HistoryRecordV1]
 }
 
-private struct HistoryRecordV1: Codable {
+package struct HistoryRecordV1: Codable {
     let sessionID: UUID
     let startedAt: Date
     let applicationName: String?
@@ -292,12 +410,19 @@ private struct HistoryRecordV1: Codable {
     let transcriptionProvider: String?
     let providerRequestID: String?
     let providerErrorCode: String?
+    let providerOperation: String?
+    let providerStatusCode: String?
+    let providerMessage: String?
+    let deliveryDiagnosticCode: String?
     let deepSeekText: String?
     let deepSeekRequestID: String?
     let refinementModeName: String?
     let refinementPrompt: String?
     let refinementStatus: String?
     let refinementFailureCode: String?
+    let refinementFailureStatusCode: String?
+    let refinementFailureMessage: String?
+    let cancelledAtStage: String?
     let dictionarySnapshotID: UUID?
     let dictionarySnapshotEntries: [DictionaryEntry]?
     let dictionaryRequestContext: DictionaryRequestContext?
@@ -315,12 +440,19 @@ private struct HistoryRecordV1: Codable {
         transcriptionProvider = record.transcriptionProvider
         providerRequestID = record.providerRequestID
         providerErrorCode = record.providerErrorCode
+        providerOperation = record.providerOperation
+        providerStatusCode = record.providerStatusCode
+        providerMessage = nil
+        deliveryDiagnosticCode = record.deliveryDiagnosticCode
         deepSeekText = record.deepSeekText
         deepSeekRequestID = record.deepSeekRequestID
         refinementModeName = record.refinementModeName
         refinementPrompt = record.refinementPrompt
         refinementStatus = record.refinementStatus
         refinementFailureCode = record.refinementFailureCode
+        refinementFailureStatusCode = record.refinementFailureStatusCode
+        refinementFailureMessage = nil
+        cancelledAtStage = record.cancelledAtStage
         dictionarySnapshotID = record.dictionarySnapshotID
         dictionarySnapshotEntries = record.dictionarySnapshotEntries
         dictionaryRequestContext = record.dictionaryRequestContext
@@ -341,12 +473,19 @@ private struct HistoryRecordV1: Codable {
                 transcriptionProvider: transcriptionProvider,
                 providerRequestID: providerRequestID,
                 providerErrorCode: providerErrorCode,
+                providerOperation: providerOperation,
+                providerStatusCode: providerStatusCode,
+                providerMessage: nil,
+                deliveryDiagnosticCode: deliveryDiagnosticCode,
                 deepSeekText: deepSeekText,
                 deepSeekRequestID: deepSeekRequestID,
                 refinementModeName: refinementModeName,
                 refinementPrompt: refinementPrompt,
                 refinementStatus: refinementStatus,
                 refinementFailureCode: refinementFailureCode,
+                refinementFailureStatusCode: refinementFailureStatusCode,
+                refinementFailureMessage: nil,
+                cancelledAtStage: cancelledAtStage,
                 dictionarySnapshotID: dictionarySnapshotID,
                 dictionarySnapshotEntries: dictionarySnapshotEntries ?? [],
                 dictionaryRequestContext: dictionaryRequestContext,
@@ -359,7 +498,7 @@ private struct HistoryRecordV1: Codable {
     }
 }
 
-private struct HistoryOutcomeV1: Codable {
+package struct HistoryOutcomeV1: Codable {
     enum Kind: String, Codable {
         case idle
         case preparing
@@ -526,7 +665,7 @@ private struct HistoryOutcomeV1: Codable {
     }
 }
 
-private enum HistoryRecordDecodingError: Error {
+package enum HistoryRecordDecodingError: Error {
     case missingField(String)
     case invalidField(String)
 }

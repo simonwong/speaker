@@ -1,0 +1,819 @@
+#!/bin/zsh
+
+set -euo pipefail
+unsetopt BG_NICE
+
+SCRIPT_DIR="${0:A:h}"
+source "$SCRIPT_DIR/release-common"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-identity.XXXXXX")"
+trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
+mkdir -p "$TEST_ROOT/Resources"
+
+write_identity() {
+    local bundle_identifier="$1"
+    local team_identifier="$2"
+    local update_feed_url="$3"
+    local update_download_url_prefix="$4"
+    local product_url="$5"
+    local update_public_ed_key="$6"
+    /usr/libexec/PlistBuddy \
+        -c 'Clear dict' \
+        -c "Add :BundleIdentifier string $bundle_identifier" \
+        -c "Add :TeamIdentifier string $team_identifier" \
+        -c "Add :UpdateFeedURL string $update_feed_url" \
+        -c "Add :UpdateDownloadURLPrefix string $update_download_url_prefix" \
+        -c "Add :ProductURL string $product_url" \
+        -c "Add :UpdatePublicEDKey string $update_public_ed_key" \
+        "$TEST_ROOT/Resources/ReleaseIdentity.plist" >/dev/null
+}
+
+write_candidate() {
+    local previous_build="$1"
+    local version="$2"
+    local build_number="$3"
+    /usr/libexec/PlistBuddy \
+        -c 'Clear dict' \
+        -c "Add :PreviousPublishedBuildNumber string $previous_build" \
+        -c "Add :Version string $version" \
+        -c "Add :BuildNumber string $build_number" \
+        "$TEST_ROOT/Resources/ReleaseCandidate.plist" >/dev/null
+}
+
+write_identity \
+    "REPLACE_WITH_REVIEWED_BUNDLE_ID" \
+    "REPLACE_WITH_REVIEWED_TEAM_ID" \
+    "https://updates.example.invalid/speaker/appcast.xml" \
+    "https://updates.example.invalid/speaker/" \
+    "https://speaker.example.invalid/" \
+    "REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY"
+if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "Placeholder release identity was accepted."
+    exit 1
+fi
+
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "https://updates.example.com/speaker/" \
+    "https://speaker.example.com/" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+load_reviewed_release_identity "$TEST_ROOT"
+[[ "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" == "com.example.speaker" ]]
+[[ "$REVIEWED_RELEASE_TEAM_IDENTIFIER" == "A1B2C3D4E5" ]]
+[[ "$REVIEWED_UPDATE_FEED_URL" \
+    == "https://updates.example.com/speaker/appcast.xml" ]]
+[[ "$REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX" \
+    == "https://updates.example.com/speaker/" ]]
+[[ "$REVIEWED_PRODUCT_URL" == "https://speaker.example.com/" ]]
+[[ "$REVIEWED_UPDATE_PUBLIC_ED_KEY" \
+    == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" ]]
+
+write_candidate \
+    "0" \
+    "REPLACE_WITH_REVIEWED_VERSION" \
+    "REPLACE_WITH_REVIEWED_BUILD_NUMBER"
+if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "Placeholder release candidate was accepted."
+    exit 1
+fi
+write_candidate "41" "1.2.3" "42"
+load_reviewed_release_candidate "$TEST_ROOT"
+[[ "$REVIEWED_PREVIOUS_PUBLISHED_BUILD_NUMBER" == "41" ]]
+[[ "$REVIEWED_RELEASE_VERSION" == "1.2.3" ]]
+[[ "$REVIEWED_RELEASE_BUILD_NUMBER" == "42" ]]
+reject_release_candidate_override "1.2.3" "42"
+if reject_release_candidate_override "1.2.3" "41" 2>/dev/null; then
+    print -u2 "A CI build override bypassed the reviewed candidate."
+    exit 1
+fi
+write_candidate "42" "1.2.4" "42"
+if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "A reused published build number was accepted."
+    exit 1
+fi
+write_candidate "42" "1.2.4" "43"
+load_reviewed_release_candidate "$TEST_ROOT"
+
+TEST_APP="$TEST_ROOT/Speaker.app"
+TEST_INFO="$TEST_APP/Contents/Info.plist"
+TEST_BUILD_MANIFEST="$TEST_APP/Contents/Resources/BuildManifest.plist"
+mkdir -p "$TEST_APP/Contents/Resources"
+/usr/libexec/PlistBuddy \
+    -c 'Clear dict' \
+    -c 'Add :SpeakerSigningMode string developer-id' \
+    -c 'Add :SpeakerCredentialStorage string keychain' \
+    -c 'Add :SpeakerKeychainService string com.example.speaker.provider-api-keys' \
+    -c 'Add :SUFeedURL string https://updates.example.com/speaker/appcast.xml' \
+    -c 'Add :SUPublicEDKey string AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' \
+    -c 'Add :SUVerifyUpdateBeforeExtraction bool true' \
+    -c 'Add :SURequireSignedFeed bool true' \
+    -c 'Add :SUSignedFeedFailureExpirationInterval integer 0' \
+    -c 'Add :SUEnableAutomaticChecks bool false' \
+    -c 'Add :SUAutomaticallyUpdate bool false' \
+    -c 'Add :SUEnableSystemProfiling bool false' \
+    -c 'Add :SUEnableJavaScript bool false' \
+    "$TEST_INFO" >/dev/null
+verify_production_update_configuration \
+    "$TEST_APP" \
+    "com.example.speaker" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+/usr/libexec/PlistBuddy \
+    -c 'Set :SUPublicEDKey BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=' \
+    "$TEST_INFO"
+if verify_production_update_configuration \
+    "$TEST_APP" \
+    "com.example.speaker" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" 2>/dev/null; then
+    print -u2 "A production app with an unreviewed update key was accepted."
+    exit 1
+fi
+
+SOURCE_COMMIT="$(printf 'a%.0s' {1..40})"
+PACKAGE_HASH="$(printf 'b%.0s' {1..64})"
+NOTES_HASH="$(printf 'c%.0s' {1..64})"
+/usr/libexec/PlistBuddy \
+    -c 'Clear dict' \
+    -c 'Add :SchemaVersion integer 1' \
+    -c "Add :SourceCommit string $SOURCE_COMMIT" \
+    -c "Add :PackageResolvedSHA256 string $PACKAGE_HASH" \
+    -c "Add :ReleaseNotesSHA256 string $NOTES_HASH" \
+    -c 'Add :Version string 1.2.3' \
+    -c 'Add :BuildNumber string 42' \
+    "$TEST_BUILD_MANIFEST" >/dev/null
+verify_production_build_provenance \
+    "$TEST_APP" \
+    "$SOURCE_COMMIT" \
+    "$PACKAGE_HASH" \
+    "$NOTES_HASH" \
+    "1.2.3" \
+    "42"
+verify_production_build_provenance_shape "$TEST_APP" "1.2.3" "42"
+/usr/libexec/PlistBuddy \
+    -c "Set :ReleaseNotesSHA256 $(printf 'd%.0s' {1..64})" \
+    "$TEST_BUILD_MANIFEST"
+if verify_production_build_provenance \
+    "$TEST_APP" \
+    "$SOURCE_COMMIT" \
+    "$PACKAGE_HASH" \
+    "$NOTES_HASH" \
+    "1.2.3" \
+    "42" 2>/dev/null; then
+    print -u2 "A build manifest with different release notes was accepted."
+    exit 1
+fi
+
+NOTARY_RESULT="$TEST_ROOT/notary-result.json"
+NOTARY_LOG="$TEST_ROOT/notary-log.json"
+print -r -- \
+    '{"id":"12345678-1234-1234-1234-123456789abc","status":"Accepted"}' \
+    > "$NOTARY_RESULT"
+print -r -- \
+    '{"jobId":"12345678-1234-1234-1234-123456789abc","status":"Accepted","archiveFilename":"submission.zip","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issues":[]}' \
+    > "$NOTARY_LOG"
+validate_notary_submission_result "$NOTARY_RESULT"
+[[ "$REVIEWED_NOTARY_SUBMISSION_ID" \
+    == "12345678-1234-1234-1234-123456789abc" ]]
+validate_notary_log \
+    "$NOTARY_LOG" \
+    "$REVIEWED_NOTARY_SUBMISSION_ID" \
+    "$(printf 'a%.0s' {1..64})" \
+    "submission.zip"
+if validate_notary_log \
+    "$NOTARY_LOG" \
+    "$REVIEWED_NOTARY_SUBMISSION_ID" \
+    "$(printf 'b%.0s' {1..64})" \
+    "submission.zip" 2>/dev/null; then
+    print -u2 "A notarization log for different submitted bytes was accepted."
+    exit 1
+fi
+print -r -- \
+    '{"id":"12345678-1234-1234-1234-123456789abc","status":"Invalid"}' \
+    > "$NOTARY_RESULT"
+if validate_notary_submission_result "$NOTARY_RESULT" 2>/dev/null; then
+    print -u2 "An invalid notarization result was accepted."
+    exit 1
+fi
+
+EVIDENCE_FIXTURE_DIR="$TEST_ROOT/evidence-fixture"
+EVIDENCE_FIXTURE_ZIP="$TEST_ROOT/evidence-fixture.zip"
+mkdir "$EVIDENCE_FIXTURE_DIR"
+APP_SUBMISSION_ID="12345678-1234-1234-1234-123456789abc"
+DMG_SUBMISSION_ID="abcdefab-cdef-cdef-cdef-abcdefabcdef"
+APP_SUBMISSION_HASH="$(printf 'a%.0s' {1..64})"
+DMG_SUBMISSION_HASH="$(printf 'b%.0s' {1..64})"
+DMG_HASH="$(printf 'c%.0s' {1..64})"
+APPCAST_HASH="$(printf 'd%.0s' {1..64})"
+SDK_SETTINGS_HASH="$(printf 'e%.0s' {1..64})"
+EVIDENCE_MANIFEST="$EVIDENCE_FIXTURE_DIR/ReleaseManifest.plist"
+plutil -create xml1 "$EVIDENCE_MANIFEST"
+for pair in \
+    'Version|1.2.3' \
+    'BuildNumber|42' \
+    'DMGBasename|Speaker-1.2.3-42.dmg' \
+    "DMGSHA256|$DMG_HASH" \
+    "AppcastSHA256|$APPCAST_HASH" \
+    "AppSubmissionSHA256|$APP_SUBMISSION_HASH" \
+    "DMGSubmissionSHA256|$DMG_SUBMISSION_HASH" \
+    "AppNotarySubmissionID|$APP_SUBMISSION_ID" \
+    "DMGNotarySubmissionID|$DMG_SUBMISSION_ID" \
+    "SourceCommit|$SOURCE_COMMIT" \
+    "PackageResolvedSHA256|$PACKAGE_HASH" \
+    "ReleaseNotesSHA256|$(printf 'd%.0s' {1..64})" \
+    'SDKCanonicalName|macosx26.0' \
+    "SDKSettingsSHA256|$SDK_SETTINGS_HASH"; do
+    plutil -insert "${pair%%|*}" -string "${pair#*|}" \
+        "$EVIDENCE_MANIFEST"
+done
+cp "$TEST_BUILD_MANIFEST" "$EVIDENCE_FIXTURE_DIR/BuildManifest.plist"
+mkdir "$EVIDENCE_FIXTURE_DIR/dsym-content"
+print -r -- dwarf > "$EVIDENCE_FIXTURE_DIR/dsym-content/debug-info"
+ditto -c -k \
+    "$EVIDENCE_FIXTURE_DIR/dsym-content" \
+    "$EVIDENCE_FIXTURE_DIR/Speaker.app.dSYM.zip"
+rm -rf "$EVIDENCE_FIXTURE_DIR/dsym-content"
+print -r -- \
+    "{\"id\":\"$APP_SUBMISSION_ID\",\"status\":\"Accepted\"}" \
+    > "$EVIDENCE_FIXTURE_DIR/app-notary-submission.json"
+print -r -- \
+    "{\"jobId\":\"$APP_SUBMISSION_ID\",\"status\":\"Accepted\",\"archiveFilename\":\"submission.zip\",\"sha256\":\"$APP_SUBMISSION_HASH\"}" \
+    > "$EVIDENCE_FIXTURE_DIR/app-notary-log.json"
+print -r -- \
+    "{\"id\":\"$DMG_SUBMISSION_ID\",\"status\":\"Accepted\"}" \
+    > "$EVIDENCE_FIXTURE_DIR/dmg-notary-submission.json"
+print -r -- \
+    "{\"jobId\":\"$DMG_SUBMISSION_ID\",\"status\":\"Accepted\",\"archiveFilename\":\"final.dmg\",\"sha256\":\"$DMG_SUBMISSION_HASH\"}" \
+    > "$EVIDENCE_FIXTURE_DIR/dmg-notary-log.json"
+print -r -- 'Swift version fixture' \
+    > "$EVIDENCE_FIXTURE_DIR/swift-version.txt"
+print -r -- 'ProductName: macOS' \
+    > "$EVIDENCE_FIXTURE_DIR/macos-version.txt"
+print -r -- '/Applications/Xcode.app/SDKs/MacOSX.sdk' \
+    > "$EVIDENCE_FIXTURE_DIR/sdk-path.txt"
+print -r -- 'macosx26.0' \
+    > "$EVIDENCE_FIXTURE_DIR/sdk-version.txt"
+print -r -- "$SDK_SETTINGS_HASH" \
+    > "$EVIDENCE_FIXTURE_DIR/sdk-settings-sha256.txt"
+ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+validate_release_evidence_archive \
+    "$EVIDENCE_FIXTURE_ZIP" \
+    "1.2.3" \
+    "42" \
+    "Speaker-1.2.3-42.dmg" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID"
+if validate_release_evidence_archive \
+    "$EVIDENCE_FIXTURE_ZIP" \
+    "1.2.4" \
+    "42" \
+    "Speaker-1.2.3-42.dmg" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" 2>/dev/null; then
+    print -u2 "Evidence for a different release version was accepted."
+    exit 1
+fi
+print -r -- 'must-not-be-published' \
+    > "$EVIDENCE_FIXTURE_DIR/unexpected-secret.txt"
+rm -f "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+if validate_release_evidence_archive \
+    "$EVIDENCE_FIXTURE_ZIP" \
+    "1.2.3" \
+    "42" \
+    "Speaker-1.2.3-42.dmg" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" 2>/dev/null; then
+    print -u2 "Evidence with an unexpected private entry was accepted."
+    exit 1
+fi
+rm -f "$EVIDENCE_FIXTURE_DIR/unexpected-secret.txt"
+print -r -- "$(printf 'f%.0s' {1..64})" \
+    > "$EVIDENCE_FIXTURE_DIR/sdk-settings-sha256.txt"
+rm -f "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+if validate_release_evidence_archive \
+    "$EVIDENCE_FIXTURE_ZIP" \
+    "1.2.3" \
+    "42" \
+    "Speaker-1.2.3-42.dmg" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" 2>/dev/null; then
+    print -u2 "Evidence whose SDK record disagrees with its manifest was accepted."
+    exit 1
+fi
+print -r -- "$SDK_SETTINGS_HASH" \
+    > "$EVIDENCE_FIXTURE_DIR/sdk-settings-sha256.txt"
+rm -f "$EVIDENCE_FIXTURE_DIR/sdk-version.txt" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+if validate_release_evidence_archive \
+    "$EVIDENCE_FIXTURE_ZIP" \
+    "1.2.3" \
+    "42" \
+    "Speaker-1.2.3-42.dmg" \
+    "$DMG_HASH" \
+    "$APPCAST_HASH" \
+    "$APP_SUBMISSION_HASH" \
+    "$DMG_SUBMISSION_HASH" \
+    "$APP_SUBMISSION_ID" \
+    "$DMG_SUBMISSION_ID" 2>/dev/null; then
+    print -u2 "An incomplete release evidence archive was accepted."
+    exit 1
+fi
+
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "http://updates.example.com/speaker/appcast.xml" \
+    "https://updates.example.com/speaker/" \
+    "https://speaker.example.com/" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "An insecure update feed URL was accepted."
+    exit 1
+fi
+
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "https://downloads.example.com/speaker/" \
+    "https://speaker.example.com/" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "A mismatched update download prefix was accepted."
+    exit 1
+fi
+
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "https://updates.example.com/speaker/" \
+    "http://speaker.example.com/" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "An insecure product URL was accepted."
+    exit 1
+fi
+
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "https://updates.example.com/speaker/" \
+    "https://speaker.example.com/" \
+    "dG9vLXNob3J0"
+if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "An invalid Sparkle public key was accepted."
+    exit 1
+fi
+
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://updates.example.com/speaker/appcast.xml" \
+    "https://updates.example.com/speaker/" \
+    "https://speaker.example.com/" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+if reject_release_identity_override \
+    "com.attacker.speaker" \
+    "A1B2C3D4E5" 2>/dev/null; then
+    print -u2 "Bundle identity override was accepted."
+    exit 1
+fi
+if reject_release_identity_override \
+    "com.example.speaker" \
+    "ZZZZZZZZZZ" 2>/dev/null; then
+    print -u2 "Team identity override was accepted."
+    exit 1
+fi
+reject_release_identity_override \
+    "com.example.speaker" \
+    "A1B2C3D4E5"
+
+SINGLE_LOCAL='
+  1) ABCDEF1234 "Speaker Local Development"
+     1 valid identities found
+'
+[[ "$(select_local_signing_identity "$SINGLE_LOCAL")" \
+    == "Speaker Local Development" ]]
+
+SINGLE_APPLE='
+  1) ABCDEF1234 "Apple Development: Speaker Developer (A1B2C3D4E5)"
+     1 valid identities found
+'
+[[ "$(select_local_signing_identity "$SINGLE_APPLE")" \
+    == "Apple Development: Speaker Developer (A1B2C3D4E5)" ]]
+
+PREFERRED_OVER_APPLE='
+  1) ABCDEF1234 "Apple Development: Speaker Developer (A1B2C3D4E5)"
+  2) FEDCBA4321 "Speaker Local Development"
+     2 valid identities found
+'
+[[ "$(select_local_signing_identity "$PREFERRED_OVER_APPLE")" \
+    == "Speaker Local Development" ]]
+
+AMBIGUOUS_APPLE='
+  1) ABCDEF1234 "Apple Development: First (A1B2C3D4E5)"
+  2) FEDCBA4321 "Apple Development: Second (Z9Y8X7W6V5)"
+     2 valid identities found
+'
+if select_local_signing_identity "$AMBIGUOUS_APPLE" 2>/dev/null; then
+    print -u2 "Ambiguous Apple Development identities were auto-selected."
+    exit 1
+else
+    [[ "$?" == 2 ]]
+fi
+
+for version in \
+    "1.2.3" \
+    "1.2.3-beta.1" \
+    "1.2.3+reviewed.1" \
+    "1.2.3-beta.1+reviewed.1"; do
+    validate_bundle_metadata "$version" "42" "com.example.speaker"
+    basename="Speaker-$version-42.dmg"
+    checksum="$(printf 'a%.0s' {1..64})  $basename"
+validate_portable_checksum_line "$checksum" "$basename"
+done
+if validate_production_metadata \
+    "1.2.3-beta.1" \
+    "43" \
+    "com.example.speaker" \
+    "A1B2C3D4E5" 2>/dev/null; then
+    print -u2 "A prerelease without a reviewed update channel was accepted."
+    exit 1
+fi
+validate_production_metadata \
+    "1.2.3+reviewed-build.1" \
+    "44" \
+    "com.example.speaker" \
+    "A1B2C3D4E5"
+if validate_portable_checksum_line \
+    "$(printf 'a%.0s' {1..64})  Speaker-1X2X3-42.dmg" \
+    "Speaker-1.2.3-42.dmg" 2>/dev/null; then
+    print -u2 "A checksum for a different artifact basename was accepted."
+    exit 1
+fi
+
+APPCAST_FIXTURE="$TEST_ROOT/appcast.xml"
+print -r -- '<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <item><sparkle:version>9</sparkle:version></item>
+    <item><sparkle:version>10</sparkle:version></item>
+  </channel>
+</rss>' > "$APPCAST_FIXTURE"
+validate_appcast_build_order "11" "$APPCAST_FIXTURE" strictly-newer
+validate_appcast_build_order "10" "$APPCAST_FIXTURE" latest
+if validate_appcast_build_order \
+    "10" \
+    "$APPCAST_FIXTURE" \
+    strictly-newer 2>/dev/null; then
+    print -u2 "A reused appcast build number was accepted."
+    exit 1
+fi
+if validate_appcast_build_order \
+    "9" \
+    "$APPCAST_FIXTURE" \
+    latest 2>/dev/null; then
+    print -u2 "A non-latest published build was accepted."
+    exit 1
+fi
+release_build_is_greater \
+    "100000000000000000000000000000000000000" \
+    "99999999999999999999999999999999999999"
+
+resolve_sparkle_release_tools "$SCRIPT_DIR:h"
+[[ "$REVIEWED_SPARKLE_TOOLS_ROOT" \
+    == "$SCRIPT_DIR:h/.build/artifacts/sparkle/Sparkle/bin" ]]
+REAL_SCRATCH="$TEST_ROOT/real-scratch"
+LINKED_SCRATCH="$TEST_ROOT/linked-scratch"
+mkdir -p "$REAL_SCRATCH"
+ln -s "$REAL_SCRATCH" "$LINKED_SCRATCH"
+if SPEAKER_SWIFT_SCRATCH_PATH="$LINKED_SCRATCH" \
+    resolve_sparkle_release_tools "$SCRIPT_DIR:h" 2>/dev/null; then
+    print -u2 "A symlinked Sparkle artifact root was accepted."
+    exit 1
+fi
+
+LEDGER_ROOT="$TEST_ROOT/ledger-repository"
+mkdir -p "$LEDGER_ROOT/Resources"
+git -C "$LEDGER_ROOT" init -q
+cp "$TEST_ROOT/Resources/ReleaseCandidate.plist" \
+    "$LEDGER_ROOT/Resources/ReleaseCandidate.plist"
+git -C "$LEDGER_ROOT" add Resources/ReleaseCandidate.plist
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'candidate 43'
+/usr/libexec/PlistBuddy \
+    -c 'Set :PreviousPublishedBuildNumber 43' \
+    -c 'Set :BuildNumber 44' \
+    "$LEDGER_ROOT/Resources/ReleaseCandidate.plist"
+git -C "$LEDGER_ROOT" add Resources/ReleaseCandidate.plist
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'candidate 44'
+load_reviewed_release_candidate "$LEDGER_ROOT"
+verify_release_candidate_history "$LEDGER_ROOT"
+/usr/libexec/PlistBuddy \
+    -c 'Set :PreviousPublishedBuildNumber 42' \
+    -c 'Set :BuildNumber 45' \
+    "$LEDGER_ROOT/Resources/ReleaseCandidate.plist"
+git -C "$LEDGER_ROOT" add Resources/ReleaseCandidate.plist
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'invalid ledger rollback'
+load_reviewed_release_candidate "$LEDGER_ROOT"
+if verify_release_candidate_history "$LEDGER_ROOT" 2>/dev/null; then
+    print -u2 "A published build ledger rollback was accepted."
+    exit 1
+fi
+
+mkdir -p "$LEDGER_ROOT/docs"
+print -r -- 'reviewed release notes' > "$LEDGER_ROOT/docs/release-1.2.4.md"
+git -C "$LEDGER_ROOT" add docs/release-1.2.4.md
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'review release notes'
+resolve_tracked_release_notes \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/release-1.2.4.md"
+[[ "$REVIEWED_RELEASE_NOTES_RELATIVE_PATH" == docs/release-1.2.4.md ]]
+print -r -- 'external notes' > "$TEST_ROOT/external-notes.md"
+if resolve_tracked_release_notes \
+    "$LEDGER_ROOT" \
+    "$TEST_ROOT/external-notes.md" 2>/dev/null; then
+    print -u2 "External unreviewed release notes were accepted."
+    exit 1
+fi
+SNAPSHOT_PENDING="$TEST_ROOT/source-snapshot-pending"
+mkdir "$SNAPSHOT_PENDING"
+chmod 700 "$SNAPSHOT_PENDING"
+create_release_source_snapshot \
+    "$LEDGER_ROOT" \
+    "$SNAPSHOT_PENDING/source"
+[[ "$REVIEWED_RELEASE_SOURCE_COMMIT" \
+    == "$(git -C "$LEDGER_ROOT" rev-parse HEAD)" ]]
+[[ "$(<"$SNAPSHOT_PENDING/source/docs/release-1.2.4.md")" \
+    == 'reviewed release notes' ]]
+[[ ! -w "$SNAPSHOT_PENDING/source/docs/release-1.2.4.md" ]]
+print -r -- 'mutated working tree' > "$LEDGER_ROOT/docs/release-1.2.4.md"
+[[ "$(<"$SNAPSHOT_PENDING/source/docs/release-1.2.4.md")" \
+    == 'reviewed release notes' ]]
+
+mkdir -p "$SCRIPT_DIR:h/.build/distribution"
+/usr/bin/lockf \
+    -t 0 \
+    "$SCRIPT_DIR:h/.build/distribution/.release.lock" \
+    /bin/sleep 1 &
+LOCK_HOLDER_PID=$!
+/bin/sleep 0.1
+if SPEAKER_DISTRIBUTION_LOCK_HELD=1 \
+    /bin/zsh "$SCRIPT_DIR/distribute" >/dev/null 2>&1; then
+    wait "$LOCK_HOLDER_PID"
+    print -u2 "A concurrent formal release acquired the global lock."
+    exit 1
+else
+    DISTRIBUTE_STATUS=$?
+fi
+wait "$LOCK_HOLDER_PID"
+[[ "$DISTRIBUTE_STATUS" == "75" ]] || {
+    print -u2 "Concurrent release returned unexpected status: $DISTRIBUTE_STATUS"
+    exit 1
+}
+
+BUNDLE_PATH_FIXTURE="$TEST_ROOT/bundle-path"
+mkdir -p "$BUNDLE_PATH_FIXTURE/Important.app"
+chmod 700 "$BUNDLE_PATH_FIXTURE"
+print -r -- sentinel > "$BUNDLE_PATH_FIXTURE/Important.app/sentinel"
+if SPEAKER_BUNDLE_PENDING_ROOT="$BUNDLE_PATH_FIXTURE" \
+    SPEAKER_SWIFT_SCRATCH_PATH="$BUNDLE_PATH_FIXTURE/swift-build" \
+    SPEAKER_BUNDLE_OUTPUT_APP="$BUNDLE_PATH_FIXTURE/Important.app" \
+    /bin/zsh "$SCRIPT_DIR/bundle" >/dev/null 2>&1; then
+    print -u2 "Bundle overwrote a pre-existing custom app output."
+    exit 1
+fi
+[[ "$(<"$BUNDLE_PATH_FIXTURE/Important.app/sentinel")" == sentinel ]]
+
+PROMOTION_FIXTURE="$TEST_ROOT/promotion"
+mkdir -p "$PROMOTION_FIXTURE"
+print -r -- 'old-feed' > "$PROMOTION_FIXTURE/previous.xml"
+print -r -- 'new-feed' > "$PROMOTION_FIXTURE/appcast.xml"
+print -r -- 'archive' > "$PROMOTION_FIXTURE/release.dmg"
+print -r -- 'checksum' > "$PROMOTION_FIXTURE/release.dmg.sha256"
+rollback_release_promotion \
+    "$PROMOTION_FIXTURE/release.dmg" \
+    "$PROMOTION_FIXTURE/release.dmg.sha256" \
+    "$PROMOTION_FIXTURE/appcast.xml" \
+    "$PROMOTION_FIXTURE/pending.xml" \
+    "$PROMOTION_FIXTURE/previous.xml" \
+    "1"
+[[ "$(cat "$PROMOTION_FIXTURE/appcast.xml")" == "old-feed" ]]
+[[ ! -e "$PROMOTION_FIXTURE/release.dmg" ]]
+[[ ! -e "$PROMOTION_FIXTURE/release.dmg.sha256" ]]
+
+JOURNAL_FIXTURE="$TEST_ROOT/promotion-journal"
+mkdir -p "$JOURNAL_FIXTURE"
+print -r -- '<?xml version="1.0"?><rss><channel><title>old</title></channel></rss>' \
+    > "$JOURNAL_FIXTURE/previous.xml"
+print -r -- '<?xml version="1.0"?><rss><channel><title>new</title></channel></rss>' \
+    > "$JOURNAL_FIXTURE/appcast.xml"
+print -r -- 'archive' > "$JOURNAL_FIXTURE/pending.dmg"
+print -r -- 'checksum' > "$JOURNAL_FIXTURE/pending.dmg.sha256"
+cp "$JOURNAL_FIXTURE/appcast.xml" "$JOURNAL_FIXTURE/pending-appcast.xml"
+print -r -- evidence > "$JOURNAL_FIXTURE/pending-evidence.zip"
+print -r -- evidence-checksum \
+    > "$JOURNAL_FIXTURE/pending-evidence.zip.sha256"
+prepare_release_promotion_journal \
+    "$JOURNAL_FIXTURE" \
+    "Speaker-1.2.3-42.dmg" \
+    "Speaker-1.2.3-42.dmg.sha256" \
+    "$JOURNAL_FIXTURE/previous.xml" \
+    "1" \
+    "$JOURNAL_FIXTURE/pending.dmg" \
+    "$JOURNAL_FIXTURE/pending.dmg.sha256" \
+    "$JOURNAL_FIXTURE/pending-appcast.xml" \
+    "Speaker-1.2.3-42-evidence.zip" \
+    "Speaker-1.2.3-42-evidence.zip.sha256" \
+    "$JOURNAL_FIXTURE/pending-evidence.zip" \
+    "$JOURNAL_FIXTURE/pending-evidence.zip.sha256"
+mv "$JOURNAL_FIXTURE/pending.dmg" \
+    "$JOURNAL_FIXTURE/Speaker-1.2.3-42.dmg"
+mv "$JOURNAL_FIXTURE/pending.dmg.sha256" \
+    "$JOURNAL_FIXTURE/Speaker-1.2.3-42.dmg.sha256"
+mv "$JOURNAL_FIXTURE/pending-evidence.zip" \
+    "$JOURNAL_FIXTURE/Speaker-1.2.3-42-evidence.zip"
+mv "$JOURNAL_FIXTURE/pending-evidence.zip.sha256" \
+    "$JOURNAL_FIXTURE/Speaker-1.2.3-42-evidence.zip.sha256"
+recover_interrupted_release_promotion "$JOURNAL_FIXTURE"
+cmp "$JOURNAL_FIXTURE/appcast.xml" "$JOURNAL_FIXTURE/previous.xml"
+[[ ! -e "$JOURNAL_FIXTURE/Speaker-1.2.3-42.dmg" ]]
+[[ ! -e "$JOURNAL_FIXTURE/Speaker-1.2.3-42.dmg.sha256" ]]
+[[ ! -e "$JOURNAL_FIXTURE/Speaker-1.2.3-42-evidence.zip" ]]
+[[ ! -e "$JOURNAL_FIXTURE/.promotion-journal" ]]
+
+NO_PREVIOUS_FIXTURE="$TEST_ROOT/promotion-journal-no-previous"
+mkdir -p "$NO_PREVIOUS_FIXTURE"
+print -r -- '<?xml version="1.0"?><rss><channel><title>new</title></channel></rss>' \
+    > "$NO_PREVIOUS_FIXTURE/appcast.xml"
+print -r -- 'archive' > "$NO_PREVIOUS_FIXTURE/pending.dmg"
+print -r -- 'checksum' > "$NO_PREVIOUS_FIXTURE/pending.dmg.sha256"
+cp "$NO_PREVIOUS_FIXTURE/appcast.xml" \
+    "$NO_PREVIOUS_FIXTURE/pending-appcast.xml"
+print -r -- evidence > "$NO_PREVIOUS_FIXTURE/pending-evidence.zip"
+print -r -- evidence-checksum \
+    > "$NO_PREVIOUS_FIXTURE/pending-evidence.zip.sha256"
+prepare_release_promotion_journal \
+    "$NO_PREVIOUS_FIXTURE" \
+    "Speaker-1.2.4-43.dmg" \
+    "Speaker-1.2.4-43.dmg.sha256" \
+    "$NO_PREVIOUS_FIXTURE/unused.xml" \
+    "0" \
+    "$NO_PREVIOUS_FIXTURE/pending.dmg" \
+    "$NO_PREVIOUS_FIXTURE/pending.dmg.sha256" \
+    "$NO_PREVIOUS_FIXTURE/pending-appcast.xml" \
+    "Speaker-1.2.4-43-evidence.zip" \
+    "Speaker-1.2.4-43-evidence.zip.sha256" \
+    "$NO_PREVIOUS_FIXTURE/pending-evidence.zip" \
+    "$NO_PREVIOUS_FIXTURE/pending-evidence.zip.sha256"
+mv "$NO_PREVIOUS_FIXTURE/pending.dmg" \
+    "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43.dmg"
+mv "$NO_PREVIOUS_FIXTURE/pending.dmg.sha256" \
+    "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43.dmg.sha256"
+mv "$NO_PREVIOUS_FIXTURE/pending-evidence.zip" \
+    "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43-evidence.zip"
+mv "$NO_PREVIOUS_FIXTURE/pending-evidence.zip.sha256" \
+    "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43-evidence.zip.sha256"
+recover_interrupted_release_promotion "$NO_PREVIOUS_FIXTURE"
+[[ ! -e "$NO_PREVIOUS_FIXTURE/appcast.xml" ]]
+[[ ! -e "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43.dmg" ]]
+[[ ! -e "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43.dmg.sha256" ]]
+[[ ! -e "$NO_PREVIOUS_FIXTURE/Speaker-1.2.4-43-evidence.zip" ]]
+
+COMMITTED_FIXTURE="$TEST_ROOT/promotion-journal-committed"
+mkdir -p "$COMMITTED_FIXTURE"
+print -r -- 'archive' > "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg"
+COMMITTED_HASH="$(
+    shasum -a 256 "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg" \
+        | awk '{print $1}'
+)"
+print -r -- \
+    "$COMMITTED_HASH  Speaker-1.2.5-44.dmg" \
+    > "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg.sha256"
+print -r -- '<?xml version="1.0"?><rss><channel/></rss>' \
+    > "$COMMITTED_FIXTURE/appcast.xml"
+cp "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg" \
+    "$COMMITTED_FIXTURE/pending.dmg"
+cp "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg.sha256" \
+    "$COMMITTED_FIXTURE/pending.dmg.sha256"
+cp "$COMMITTED_FIXTURE/appcast.xml" \
+    "$COMMITTED_FIXTURE/pending-appcast.xml"
+print -r -- evidence \
+    > "$COMMITTED_FIXTURE/Speaker-1.2.5-44-evidence.zip"
+COMMITTED_EVIDENCE_HASH="$(
+    shasum -a 256 "$COMMITTED_FIXTURE/Speaker-1.2.5-44-evidence.zip" \
+        | awk '{print $1}'
+)"
+print -r -- \
+    "$COMMITTED_EVIDENCE_HASH  Speaker-1.2.5-44-evidence.zip" \
+    > "$COMMITTED_FIXTURE/Speaker-1.2.5-44-evidence.zip.sha256"
+cp "$COMMITTED_FIXTURE/Speaker-1.2.5-44-evidence.zip" \
+    "$COMMITTED_FIXTURE/pending-evidence.zip"
+cp "$COMMITTED_FIXTURE/Speaker-1.2.5-44-evidence.zip.sha256" \
+    "$COMMITTED_FIXTURE/pending-evidence.zip.sha256"
+prepare_release_promotion_journal \
+    "$COMMITTED_FIXTURE" \
+    "Speaker-1.2.5-44.dmg" \
+    "Speaker-1.2.5-44.dmg.sha256" \
+    "$COMMITTED_FIXTURE/unused.xml" \
+    "0" \
+    "$COMMITTED_FIXTURE/pending.dmg" \
+    "$COMMITTED_FIXTURE/pending.dmg.sha256" \
+    "$COMMITTED_FIXTURE/pending-appcast.xml" \
+    "Speaker-1.2.5-44-evidence.zip" \
+    "Speaker-1.2.5-44-evidence.zip.sha256" \
+    "$COMMITTED_FIXTURE/pending-evidence.zip" \
+    "$COMMITTED_FIXTURE/pending-evidence.zip.sha256"
+mark_release_promotion_committed "$COMMITTED_FIXTURE"
+recover_interrupted_release_promotion "$COMMITTED_FIXTURE"
+[[ -f "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg" ]]
+[[ -f "$COMMITTED_FIXTURE/Speaker-1.2.5-44.dmg.sha256" ]]
+[[ -f "$COMMITTED_FIXTURE/appcast.xml" ]]
+[[ -f "$COMMITTED_FIXTURE/Speaker-1.2.5-44-evidence.zip" ]]
+[[ ! -e "$COMMITTED_FIXTURE/.promotion-journal" ]]
+
+FOREIGN_FIXTURE="$TEST_ROOT/promotion-journal-foreign"
+mkdir -p "$FOREIGN_FIXTURE"
+print -r -- 'owned-archive' > "$FOREIGN_FIXTURE/pending.dmg"
+print -r -- 'owned-checksum' > "$FOREIGN_FIXTURE/pending.dmg.sha256"
+print -r -- '<?xml version="1.0"?><rss><channel/></rss>' \
+    > "$FOREIGN_FIXTURE/pending-appcast.xml"
+print -r -- evidence > "$FOREIGN_FIXTURE/pending-evidence.zip"
+print -r -- evidence-checksum \
+    > "$FOREIGN_FIXTURE/pending-evidence.zip.sha256"
+prepare_release_promotion_journal \
+    "$FOREIGN_FIXTURE" \
+    "Speaker-1.2.6-45.dmg" \
+    "Speaker-1.2.6-45.dmg.sha256" \
+    "$FOREIGN_FIXTURE/unused.xml" \
+    "0" \
+    "$FOREIGN_FIXTURE/pending.dmg" \
+    "$FOREIGN_FIXTURE/pending.dmg.sha256" \
+    "$FOREIGN_FIXTURE/pending-appcast.xml" \
+    "Speaker-1.2.6-45-evidence.zip" \
+    "Speaker-1.2.6-45-evidence.zip.sha256" \
+    "$FOREIGN_FIXTURE/pending-evidence.zip" \
+    "$FOREIGN_FIXTURE/pending-evidence.zip.sha256"
+print -r -- 'foreign-archive' \
+    > "$FOREIGN_FIXTURE/Speaker-1.2.6-45.dmg"
+if recover_interrupted_release_promotion "$FOREIGN_FIXTURE" 2>/dev/null; then
+    print -u2 "A foreign release artifact was deleted by journal recovery."
+    exit 1
+fi
+[[ "$(<"$FOREIGN_FIXTURE/Speaker-1.2.6-45.dmg")" == "foreign-archive" ]]
+[[ -d "$FOREIGN_FIXTURE/.promotion-journal" ]]
+
+STALE_PENDING_ROOT="$TEST_ROOT/stale-pending"
+mkdir -p "$STALE_PENDING_ROOT/.pending.owned"
+chmod 700 "$STALE_PENDING_ROOT/.pending.owned"
+print -r -- speaker-release-pending-v1 \
+    > "$STALE_PENDING_ROOT/.pending.owned/.speaker-release-pending"
+print -r -- partial-artifact \
+    > "$STALE_PENDING_ROOT/.pending.owned/submission.zip"
+recover_stale_release_pending_directories "$STALE_PENDING_ROOT"
+[[ ! -e "$STALE_PENDING_ROOT/.pending.owned" ]]
+
+mkdir -p "$STALE_PENDING_ROOT/.pending.foreign"
+chmod 700 "$STALE_PENDING_ROOT/.pending.foreign"
+print -r -- keep-me > "$STALE_PENDING_ROOT/.pending.foreign/unknown"
+if recover_stale_release_pending_directories \
+    "$STALE_PENDING_ROOT" 2>/dev/null; then
+    print -u2 "An unrecognized stale pending directory was deleted."
+    exit 1
+fi
+[[ "$(<"$STALE_PENDING_ROOT/.pending.foreign/unknown")" == keep-me ]]
+
+print "PASS: reviewed release identity is fixed and override-resistant"

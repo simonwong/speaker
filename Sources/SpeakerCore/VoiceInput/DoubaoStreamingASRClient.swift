@@ -41,7 +41,7 @@ public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
 
     public var apiKey: String
     public var resource: DoubaoStreamingResource
-    public var installationID: String
+    public var requestUserID: String
     public var hotwords: [String]
     public var context: String?
     public var options: DoubaoTranscriptionOptions
@@ -50,7 +50,7 @@ public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
     public init(
         apiKey: String,
         resource: DoubaoStreamingResource = .default,
-        installationID: String,
+        requestUserID: String,
         hotwords: [String] = [],
         context: String? = nil,
         options: DoubaoTranscriptionOptions = .init(),
@@ -58,7 +58,7 @@ public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
     ) {
         self.apiKey = apiKey
         self.resource = resource
-        self.installationID = installationID
+        self.requestUserID = requestUserID
         self.hotwords = hotwords
         self.context = context
         self.options = options
@@ -105,15 +105,18 @@ public struct DoubaoWebSocketMetadata: Equatable, Sendable {
     public let httpStatusCode: Int?
     public let providerRequestID: String?
     public let providerMessage: String?
+    public let webSocketCloseCode: Int?
 
     public init(
         httpStatusCode: Int? = nil,
         providerRequestID: String? = nil,
-        providerMessage: String? = nil
+        providerMessage: String? = nil,
+        webSocketCloseCode: Int? = nil
     ) {
         self.httpStatusCode = httpStatusCode
         self.providerRequestID = providerRequestID
         self.providerMessage = providerMessage
+        self.webSocketCloseCode = webSocketCloseCode
     }
 }
 
@@ -131,8 +134,12 @@ public protocol DoubaoWebSocketConnecting: Sendable {
 public struct URLSessionDoubaoWebSocketConnector: DoubaoWebSocketConnecting {
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession) {
         self.session = session
+    }
+
+    public init() {
+        session = ProviderURLSessionFactory.makeSession()
     }
 
     public func connect(_ request: URLRequest) async throws -> any DoubaoWebSocketConnection {
@@ -166,13 +173,19 @@ private actor URLSessionDoubaoWebSocketConnection: DoubaoWebSocketConnection {
     }
 
     func metadata() -> DoubaoWebSocketMetadata {
-        guard let response = task.response as? HTTPURLResponse else {
-            return .init()
-        }
+        let response = task.response as? HTTPURLResponse
+        let closeCode = task.closeCode
         return DoubaoWebSocketMetadata(
-            httpStatusCode: response.statusCode,
-            providerRequestID: Self.header("X-Tt-Logid", in: response),
-            providerMessage: Self.header("X-Api-Message", in: response)
+            httpStatusCode: response?.statusCode,
+            providerRequestID: response.flatMap {
+                Self.header("X-Tt-Logid", in: $0)
+            },
+            providerMessage: response.flatMap {
+                Self.header("X-Api-Message", in: $0)
+            },
+            webSocketCloseCode: closeCode == .invalid
+                ? nil
+                : closeCode.rawValue
         )
     }
 
@@ -184,6 +197,34 @@ private actor URLSessionDoubaoWebSocketConnection: DoubaoWebSocketConnection {
         response.allHeaderFields.first {
             String(describing: $0.key).caseInsensitiveCompare(name) == .orderedSame
         }.map { String(describing: $0.value) }
+    }
+}
+
+private actor DoubaoWebSocketCloseGate {
+    private let connection: any DoubaoWebSocketConnection
+    private var isClosed = false
+
+    init(connection: any DoubaoWebSocketConnection) {
+        self.connection = connection
+    }
+
+    func close() async {
+        guard !isClosed else { return }
+        isClosed = true
+        await connection.close()
+    }
+}
+
+private actor DoubaoExchangeFailurePriority {
+    private var receiverFailure: DoubaoASRFailure?
+
+    func recordReceiverFailure(_ failure: DoubaoASRFailure) {
+        guard receiverFailure == nil else { return }
+        receiverFailure = failure
+    }
+
+    func preferredFailure() -> DoubaoASRFailure? {
+        receiverFailure
     }
 }
 
@@ -355,18 +396,29 @@ private struct DoubaoStreamingResponseBody: Decodable, Sendable {
 }
 
 public actor DoubaoStreamingASRClient {
+    private enum ExchangeEvent: Sendable {
+        case audioSent
+        case finalResult(TranscriptionResult)
+    }
+
     private let configuration: DoubaoStreamingASRConfiguration
     private let connector: any DoubaoWebSocketConnecting
     private let requestIDGenerator: @Sendable () -> UUID
+    private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
+    private let runtimeOperation: VoiceProviderRuntimeOperation
 
     public init(
         configuration: DoubaoStreamingASRConfiguration,
         connector: any DoubaoWebSocketConnecting = URLSessionDoubaoWebSocketConnector(),
-        requestIDGenerator: @escaping @Sendable () -> UUID = UUID.init
+        requestIDGenerator: @escaping @Sendable () -> UUID = UUID.init,
+        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics? = nil,
+        runtimeOperation: VoiceProviderRuntimeOperation = .voiceInput
     ) {
         self.configuration = configuration
         self.connector = connector
         self.requestIDGenerator = requestIDGenerator
+        self.runtimeDiagnostics = runtimeDiagnostics
+        self.runtimeOperation = runtimeOperation
     }
 
     public func transcribe(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
@@ -375,18 +427,32 @@ public actor DoubaoStreamingASRClient {
         }
 
         let requestID = requestIDGenerator().uuidString
+        await runtimeDiagnostics?.beginDoubao(
+            requestID: requestID,
+            operation: runtimeOperation
+        )
         let connection: any DoubaoWebSocketConnection
         do {
-            connection = try await connector.connect(makeURLRequest(requestID: requestID))
+            let connector = connector
+            let request = makeURLRequest(requestID: requestID)
+            connection = try await connector.connect(request)
         } catch is CancellationError {
+            await runtimeDiagnostics?.finishDoubao(requestID: requestID)
             throw DoubaoASRFailure(kind: .cancelled, providerRequestID: requestID)
+        } catch let failure as DoubaoASRFailure {
+            await runtimeDiagnostics?.finishDoubao(requestID: requestID)
+            throw failure
         } catch {
-            throw DoubaoASRFailure(
-                kind: .network,
-                providerRequestID: requestID,
-                message: Self.safeNetworkMessage(error)
+            await runtimeDiagnostics?.finishDoubao(requestID: requestID)
+            throw Self.mapTransportFailure(
+                error,
+                metadata: .init(),
+                fallbackRequestID: requestID
             )
         }
+        let closeGate = DoubaoWebSocketCloseGate(connection: connection)
+        let failurePriority = DoubaoExchangeFailurePriority()
+        let runtimeDiagnostics = runtimeDiagnostics
 
         return try await withTaskCancellationHandler {
             do {
@@ -394,23 +460,136 @@ public actor DoubaoStreamingASRClient {
                 try await connection.send(
                     DoubaoStreamingFrameCodec.fullClientRequest(payload: requestPayload)
                 )
-                async let response = receiveFinalResult(
-                    from: connection,
-                    fallbackRequestID: requestID
+                await runtimeDiagnostics?.updateDoubao(
+                    requestID: requestID,
+                    phase: .connected,
+                    metadata: await connection.metadata()
                 )
-                try await sendAudio(chunks, through: connection, requestID: requestID)
-                let result = try await response
-                await connection.close()
+                await runtimeDiagnostics?.updateDoubao(
+                    requestID: requestID,
+                    phase: .requestSent
+                )
+                let result = try await withThrowingTaskGroup(
+                    of: ExchangeEvent.self,
+                    returning: TranscriptionResult.self
+                    ) { group in
+                        group.addTask {
+                            do {
+                                try await Self.sendAudio(
+                                    chunks,
+                                    through: connection,
+                                    requestID: requestID,
+                                    runtimeDiagnostics: runtimeDiagnostics
+                                )
+                                await runtimeDiagnostics?.updateDoubao(
+                                    requestID: requestID,
+                                    phase: .awaitingFinal
+                                )
+                                return .audioSent
+                            } catch {
+                                // Task cancellation alone is not a transport
+                                // contract. Close the socket so a concurrent
+                                // receive that ignores cancellation is released.
+                                await closeGate.close()
+                                throw error
+                            }
+                        }
+                        group.addTask {
+                            do {
+                                return .finalResult(try await Self.receiveFinalResult(
+                                    from: connection,
+                                    fallbackRequestID: requestID,
+                                    runtimeDiagnostics: runtimeDiagnostics
+                                ))
+                            } catch let failure as DoubaoASRFailure {
+                                // Record the receiver's structured provider
+                                // result before closing the socket. The close
+                                // can make the concurrent sender fail with a
+                                // generic transport error, which must not hide
+                                // an error frame already observed from Doubao.
+                                await failurePriority.recordReceiverFailure(
+                                    failure
+                                )
+                                await closeGate.close()
+                                throw failure
+                            } catch {
+                                let metadata = await connection.metadata()
+                                let failure = Self.mapTransportFailure(
+                                    error,
+                                    metadata: metadata,
+                                    fallbackRequestID: requestID
+                                )
+                                await failurePriority.recordReceiverFailure(
+                                    failure
+                                )
+                                await closeGate.close()
+                                throw failure
+                            }
+                        }
+
+                    var finalResult: TranscriptionResult?
+                    var didFinishSending = false
+                    while let event = try await group.next() {
+                        switch event {
+                        case .audioSent:
+                            didFinishSending = true
+                        case let .finalResult(result):
+                            finalResult = result
+                        }
+                        if didFinishSending, let finalResult {
+                            return finalResult
+                        }
+                    }
+                    throw DoubaoASRFailure(
+                        kind: .invalidResponse,
+                        providerRequestID: requestID
+                    )
+                }
+                await closeGate.close()
+                await runtimeDiagnostics?.finishDoubao(
+                    requestID: requestID
+                )
                 return result
             } catch let failure as DoubaoASRFailure {
-                await connection.close()
+                await closeGate.close()
+                await runtimeDiagnostics?.finishDoubao(
+                    requestID: requestID
+                )
+                if Task.isCancelled {
+                    throw DoubaoASRFailure(
+                        kind: .cancelled,
+                        providerRequestID: requestID
+                    )
+                }
+                if let preferred = await failurePriority.preferredFailure() {
+                    throw preferred
+                }
                 throw failure
             } catch is CancellationError {
-                await connection.close()
+                await closeGate.close()
+                await runtimeDiagnostics?.finishDoubao(
+                    requestID: requestID
+                )
+                if !Task.isCancelled,
+                   let failure = await failurePriority.preferredFailure() {
+                    throw failure
+                }
                 throw DoubaoASRFailure(kind: .cancelled, providerRequestID: requestID)
             } catch {
                 let metadata = await connection.metadata()
-                await connection.close()
+                await closeGate.close()
+                await runtimeDiagnostics?.finishDoubao(
+                    requestID: requestID
+                )
+                if Task.isCancelled {
+                    throw DoubaoASRFailure(
+                        kind: .cancelled,
+                        providerRequestID: requestID
+                    )
+                }
+                if let failure = await failurePriority.preferredFailure() {
+                    throw failure
+                }
                 throw Self.mapTransportFailure(
                     error,
                     metadata: metadata,
@@ -418,37 +597,64 @@ public actor DoubaoStreamingASRClient {
                 )
             }
         } onCancel: {
-            Task { await connection.close() }
+            Task { await closeGate.close() }
         }
     }
 
-    private func sendAudio(
+    private static func sendAudio(
         _ chunks: AsyncStream<Data>,
         through connection: any DoubaoWebSocketConnection,
-        requestID: String
+        requestID: String,
+        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
     ) async throws {
         var pending: Data?
         for await chunk in chunks {
             try Task.checkCancellation()
             guard !chunk.isEmpty else { continue }
             if let pending {
-                try await connection.send(
-                    DoubaoStreamingFrameCodec.audioRequest(payload: pending, isFinal: false)
+                try await sendAudioFrame(
+                    pending,
+                    isFinal: false,
+                    through: connection
+                )
+                await runtimeDiagnostics?.updateDoubao(
+                    requestID: requestID,
+                    phase: .streamingAudio
                 )
             }
             pending = chunk
         }
+        // AsyncStream ends its iteration when the consuming task is cancelled.
+        // Re-check here before treating the buffered chunk as a legitimate
+        // end-of-audio frame; otherwise Esc can still send `isFinal=true`.
+        try Task.checkCancellation()
         guard let pending else {
             throw DoubaoASRFailure(kind: .emptyAudio, providerRequestID: requestID)
         }
-        try await connection.send(
-            DoubaoStreamingFrameCodec.audioRequest(payload: pending, isFinal: true)
+        try await sendAudioFrame(
+            pending,
+            isFinal: true,
+            through: connection
+        )
+        await runtimeDiagnostics?.updateDoubao(
+            requestID: requestID,
+            phase: .audioFinalized
         )
     }
 
-    private func receiveFinalResult(
+    private static func sendAudioFrame(
+        _ payload: Data,
+        isFinal: Bool,
+        through connection: any DoubaoWebSocketConnection
+    ) async throws {
+        let frame = DoubaoStreamingFrameCodec.audioRequest(payload: payload, isFinal: isFinal)
+        try await connection.send(frame)
+    }
+
+    private static func receiveFinalResult(
         from connection: any DoubaoWebSocketConnection,
-        fallbackRequestID: String
+        fallbackRequestID: String,
+        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
     ) async throws -> TranscriptionResult {
         var latestText: String?
         while true {
@@ -457,6 +663,10 @@ public actor DoubaoStreamingASRClient {
             let frame = try DoubaoStreamingFrameCodec.decode(rawFrame)
             let metadata = await connection.metadata()
             let providerRequestID = metadata.providerRequestID ?? fallbackRequestID
+            await runtimeDiagnostics?.updateDoubaoMetadata(
+                requestID: fallbackRequestID,
+                metadata: metadata
+            )
 
             switch frame.messageType {
             case 0x09:
@@ -523,7 +733,7 @@ public actor DoubaoStreamingASRClient {
 
     private func makeRequestBody() throws -> DoubaoStreamingRequestBody {
         DoubaoStreamingRequestBody(
-            user: .init(uid: configuration.installationID),
+            user: .init(uid: configuration.requestUserID),
             audio: .init(),
             request: .init(
                 enableITN: configuration.options.enableITN,
@@ -587,6 +797,7 @@ public actor DoubaoStreamingASRClient {
         let kind: DoubaoASRFailureKind
 
         switch codeString {
+        case "20000003": kind = .silence
         case "45000001":
             if messageLooksLikeResourceFailure(normalizedMessage) {
                 kind = .resourceNotActivated
@@ -642,9 +853,49 @@ public actor DoubaoStreamingASRClient {
         }
         return DoubaoASRFailure(
             kind: kind,
+            providerStatusCode: transportStatusCode(
+                error,
+                metadata: metadata
+            ),
             providerRequestID: metadata.providerRequestID ?? fallbackRequestID,
             message: metadata.providerMessage ?? safeNetworkMessage(error)
         )
+    }
+
+    private static func transportStatusCode(
+        _ error: Error,
+        metadata: DoubaoWebSocketMetadata
+    ) -> String? {
+        if let status = metadata.httpStatusCode {
+            return String(status)
+        }
+        if let closeCode = metadata.webSocketCloseCode {
+            return "websocket.close.\(closeCode)"
+        }
+        guard let urlError = error as? URLError else { return nil }
+        return switch urlError.code {
+        case .cancelled: "url.cancelled"
+        case .timedOut: "url.timedOut"
+        case .cannotFindHost: "url.cannotFindHost"
+        case .cannotConnectToHost: "url.cannotConnectToHost"
+        case .dnsLookupFailed: "url.dnsLookupFailed"
+        case .networkConnectionLost: "url.networkConnectionLost"
+        case .notConnectedToInternet: "url.notConnectedToInternet"
+        case .secureConnectionFailed: "url.secureConnectionFailed"
+        case .serverCertificateHasBadDate:
+            "url.serverCertificateHasBadDate"
+        case .serverCertificateUntrusted:
+            "url.serverCertificateUntrusted"
+        case .serverCertificateHasUnknownRoot:
+            "url.serverCertificateHasUnknownRoot"
+        case .serverCertificateNotYetValid:
+            "url.serverCertificateNotYetValid"
+        case .clientCertificateRejected:
+            "url.clientCertificateRejected"
+        case .clientCertificateRequired:
+            "url.clientCertificateRequired"
+        default: "url.\(urlError.code.rawValue)"
+        }
     }
 
     private static func messageLooksLikeCredentialFailure(_ message: String) -> Bool {

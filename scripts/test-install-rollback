@@ -1,0 +1,79 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-install-rollback.XXXXXX")"
+TEST_ROOT="${TEST_ROOT:A}"
+TEST_PARENT="$TEST_ROOT/Applications"
+INSTALL_APP="$TEST_PARENT/Speaker.app"
+EXECUTABLE="$INSTALL_APP/Contents/MacOS/SpeakerApp"
+BUILD_PENDING="$TEST_ROOT/build-pending"
+TEST_BUNDLE_IDENTIFIER="com.local.speaker.installtest$RANDOM"
+OLD_PID=""
+
+cleanup() {
+    if [[ -n "$OLD_PID" ]]; then
+        kill "$OLD_PID" 2>/dev/null || true
+    fi
+    pkill -f "$EXECUTABLE" 2>/dev/null || true
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
+
+mkdir -p "$TEST_PARENT"
+mkdir "$BUILD_PENDING"
+chmod 700 "$BUILD_PENDING"
+SPEAKER_INSTALL_APP="$INSTALL_APP" \
+SPEAKER_BUNDLE_PENDING_ROOT="$BUILD_PENDING" \
+SPEAKER_SWIFT_SCRATCH_PATH="$SCRIPT_DIR:h/.build" \
+SPEAKER_BUNDLE_OUTPUT_APP="$BUILD_PENDING/Speaker.app" \
+SPEAKER_OPEN_AFTER_INSTALL=0 \
+SPEAKER_VERSION=0.1.0 \
+SPEAKER_BUILD_NUMBER=41 \
+SPEAKER_BUNDLE_IDENTIFIER="$TEST_BUNDLE_IDENTIFIER" \
+SPEAKER_ENABLE_TEST_HOOKS=1 \
+SPEAKER_INSTALL_TEST_PARENT="$TEST_PARENT" \
+    /bin/zsh "$SCRIPT_DIR/install"
+
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INSTALL_APP/Contents/Info.plist")" == "41" ]]
+
+/usr/bin/open -n "$INSTALL_APP" --args --speaker-visual-scenario processing
+for _ in {1..30}; do
+    OLD_PID="$(pgrep -f "$EXECUTABLE" | head -1 || true)"
+    [[ -n "$OLD_PID" ]] && break
+    sleep 0.1
+done
+[[ -n "$OLD_PID" ]]
+
+if SPEAKER_INSTALL_APP="$INSTALL_APP" \
+    SPEAKER_BUNDLE_PENDING_ROOT="$BUILD_PENDING" \
+    SPEAKER_SWIFT_SCRATCH_PATH="$SCRIPT_DIR:h/.build" \
+    SPEAKER_BUNDLE_OUTPUT_APP="$BUILD_PENDING/Speaker.app" \
+    SPEAKER_VERSION=0.1.0 \
+    SPEAKER_BUILD_NUMBER=42 \
+    SPEAKER_BUNDLE_IDENTIFIER="$TEST_BUNDLE_IDENTIFIER" \
+    SPEAKER_ENABLE_TEST_HOOKS=1 \
+    SPEAKER_INSTALL_TEST_PARENT="$TEST_PARENT" \
+    SPEAKER_INSTALL_TEST_FAIL_AFTER_SWAP=1 \
+        /bin/zsh "$SCRIPT_DIR/install"
+then
+    print -u2 "Injected install failure unexpectedly succeeded."
+    exit 1
+fi
+OLD_PID=""
+
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INSTALL_APP/Contents/Info.plist")" == "41" ]]
+codesign --verify --deep --strict "$INSTALL_APP"
+
+for _ in {1..50}; do
+    if pgrep -f "$EXECUTABLE" >/dev/null 2>&1; then
+        print "PASS: install rollback restores the previous bundle and running state"
+        exit 0
+    fi
+    sleep 0.1
+done
+
+print -u2 "The previous Speaker bundle was restored but not restarted."
+ps -axo pid=,command= | grep '[S]peakerApp' >&2 || true
+exit 1

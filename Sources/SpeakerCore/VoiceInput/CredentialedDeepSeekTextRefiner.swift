@@ -21,8 +21,16 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
         _ text: String,
         using mode: TextRefinementMode
     ) async throws -> DeepSeekRefinementResult {
-        guard let apiKey = try await credentials.apiKey(for: .deepSeek) else {
-            throw DeepSeekRefinementFailure(kind: .invalidCredential)
+        let apiKey: String
+        do {
+            guard let storedKey = try await credentials.apiKey(for: .deepSeek) else {
+                throw DeepSeekRefinementFailure(kind: .invalidCredential)
+            }
+            apiKey = storedKey
+        } catch let failure as ProviderCredentialStoreError {
+            throw DeepSeekRefinementFailure(
+                kind: Self.refinementFailureKind(for: failure)
+            )
         }
         let client = DeepSeekRefinementClient(
             configuration: .init(apiKey: apiKey, endpoint: endpoint),
@@ -48,5 +56,22 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
             "连接检查。",
             using: .conciseCleanup
         ).providerRequestID
+    }
+
+    private static func refinementFailureKind(
+        for failure: ProviderCredentialStoreError
+    ) -> DeepSeekRefinementFailureKind {
+        switch failure {
+        case .emptyAPIKey, .apiKeyTooLarge:
+            .invalidCredential
+        case .accessDenied:
+            .credentialAccessDenied
+        case .interactionUnavailable:
+            .credentialInteractionUnavailable
+        case .malformedStoredValue:
+            .credentialMalformed
+        case .conflictingStoredValues, .storageUnavailable:
+            .credentialStorageUnavailable
+        }
     }
 }

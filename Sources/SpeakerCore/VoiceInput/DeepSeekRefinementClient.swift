@@ -6,20 +6,17 @@ public struct DeepSeekRefinementConfiguration: Equatable, Sendable {
     public var apiKey: String
     public var endpoint: URL
     public var model: String
-    public var timeout: TimeInterval
     public var maximumOutputTokens: Int
 
     public init(
         apiKey: String,
         endpoint: URL = Self.defaultEndpoint,
         model: String = "deepseek-v4-flash",
-        timeout: TimeInterval = 20,
         maximumOutputTokens: Int = 2_048
     ) {
         self.apiKey = apiKey
         self.endpoint = endpoint
         self.model = model
-        self.timeout = timeout
         self.maximumOutputTokens = maximumOutputTokens
     }
 }
@@ -47,8 +44,12 @@ public protocol DeepSeekTransport: Sendable {
 public struct URLSessionDeepSeekTransport: DeepSeekTransport {
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession) {
         self.session = session
+    }
+
+    public init() {
+        session = ProviderURLSessionFactory.makeSession()
     }
 
     public func send(_ request: URLRequest) async throws -> DeepSeekTransportResponse {
@@ -70,6 +71,10 @@ public struct URLSessionDeepSeekTransport: DeepSeekTransport {
 public enum DeepSeekRefinementFailureKind: String, Equatable, Sendable {
     case invalidMode
     case invalidCredential
+    case credentialAccessDenied
+    case credentialInteractionUnavailable
+    case credentialMalformed
+    case credentialStorageUnavailable
     case invalidRequest
     case authentication
     case insufficientBalance
@@ -77,7 +82,7 @@ public enum DeepSeekRefinementFailureKind: String, Equatable, Sendable {
     case serverError
     case serviceUnavailable
     case network
-    case timeout
+    case systemNetworkTimeout
     case cancelled
     case invalidResponse
     case truncated
@@ -186,6 +191,7 @@ private struct DeepSeekChatCompletionResponse: Decodable {
         }
     }
 
+    let id: String?
     let choices: [Choice]
 }
 
@@ -224,7 +230,6 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
             throw DeepSeekRefinementFailure(kind: .invalidCredential)
         }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              configuration.timeout > 0,
               configuration.maximumOutputTokens > 0
         else {
             throw DeepSeekRefinementFailure(kind: .invalidRequest)
@@ -233,30 +238,13 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
         let request = try makeURLRequest(text: text, rule: rule, apiKey: apiKey)
         let response: DeepSeekTransportResponse
         do {
-            let transport = transport
-            let timeout = configuration.timeout
-            response = try await withThrowingTaskGroup(
-                of: DeepSeekTransportResponse.self
-            ) { group in
-                group.addTask {
-                    try await transport.send(request)
-                }
-                group.addTask {
-                    try await Task.sleep(for: .seconds(timeout))
-                    throw DeepSeekRefinementFailure(kind: .timeout)
-                }
-                guard let first = try await group.next() else {
-                    throw DeepSeekRefinementFailure(kind: .unexpected)
-                }
-                group.cancelAll()
-                return first
-            }
+            response = try await transport.send(request)
         } catch is CancellationError {
             throw DeepSeekRefinementFailure(kind: .cancelled)
         } catch let urlError as URLError where urlError.code == .cancelled {
             throw DeepSeekRefinementFailure(kind: .cancelled)
         } catch let urlError as URLError where urlError.code == .timedOut {
-            throw DeepSeekRefinementFailure(kind: .timeout)
+            throw DeepSeekRefinementFailure(kind: .systemNetworkTimeout)
         } catch let failure as DeepSeekRefinementFailure {
             throw failure
         } catch {
@@ -267,10 +255,13 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
             throw DeepSeekRefinementFailure(kind: .cancelled)
         }
 
-        let providerRequestID = response.header(named: "x-request-id")
+        let headerRequestID = response.header(named: "x-request-id")
             ?? response.header(named: "x-ds-trace-id")
         guard (200...299).contains(response.statusCode) else {
-            throw Self.mapHTTPFailure(response.statusCode, providerRequestID: providerRequestID)
+            throw Self.mapHTTPFailure(
+                response.statusCode,
+                providerRequestID: headerRequestID
+            )
         }
 
         let decoded: DeepSeekChatCompletionResponse
@@ -280,9 +271,11 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
             throw DeepSeekRefinementFailure(
                 kind: .invalidResponse,
                 httpStatusCode: response.statusCode,
-                providerRequestID: providerRequestID
+                providerRequestID: headerRequestID
             )
         }
+        let providerRequestID = headerRequestID
+            ?? VoiceDiagnosticSanitizer.clean(decoded.id, limit: 200)
         guard let choice = decoded.choices.first else {
             throw DeepSeekRefinementFailure(
                 kind: .emptyOutput,
@@ -332,10 +325,7 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
             maximumTokens: configuration.maximumOutputTokens,
             stream: false
         )
-        var request = URLRequest(
-            url: configuration.endpoint,
-            timeoutInterval: configuration.timeout
-        )
+        var request = URLRequest(url: configuration.endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

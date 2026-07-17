@@ -1,0 +1,60 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-install-identity.XXXXXX")"
+TEST_ROOT="${TEST_ROOT:A}"
+TEST_PARENT="$TEST_ROOT/Applications"
+INSTALL_APP="$TEST_PARENT/Speaker.app"
+BUILD_PENDING="$TEST_ROOT/build-pending"
+TEST_BUNDLE_IDENTIFIER="com.local.speaker.identitytest$RANDOM"
+
+cleanup() {
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
+mkdir -p "$TEST_PARENT"
+mkdir "$BUILD_PENDING"
+chmod 700 "$BUILD_PENDING"
+
+SPEAKER_INSTALL_APP="$INSTALL_APP" \
+SPEAKER_BUNDLE_PENDING_ROOT="$BUILD_PENDING" \
+SPEAKER_SWIFT_SCRATCH_PATH="$SCRIPT_DIR:h/.build" \
+SPEAKER_BUNDLE_OUTPUT_APP="$BUILD_PENDING/Speaker.app" \
+SPEAKER_OPEN_AFTER_INSTALL=0 \
+SPEAKER_VERSION=0.1.0 \
+SPEAKER_BUILD_NUMBER=51 \
+SPEAKER_BUNDLE_IDENTIFIER="$TEST_BUNDLE_IDENTIFIER" \
+SPEAKER_ENABLE_TEST_HOOKS=1 \
+SPEAKER_INSTALL_TEST_PARENT="$TEST_PARENT" \
+    /bin/zsh "$SCRIPT_DIR/install"
+
+codesign --remove-signature "$INSTALL_APP"
+if SPEAKER_INSTALL_APP="$INSTALL_APP" \
+    SPEAKER_BUNDLE_PENDING_ROOT="$BUILD_PENDING" \
+    SPEAKER_SWIFT_SCRATCH_PATH="$SCRIPT_DIR:h/.build" \
+    SPEAKER_BUNDLE_OUTPUT_APP="$BUILD_PENDING/Speaker.app" \
+    SPEAKER_OPEN_AFTER_INSTALL=0 \
+    SPEAKER_VERSION=0.1.0 \
+    SPEAKER_BUILD_NUMBER=52 \
+    SPEAKER_BUNDLE_IDENTIFIER="$TEST_BUNDLE_IDENTIFIER" \
+    SPEAKER_ENABLE_TEST_HOOKS=1 \
+    SPEAKER_INSTALL_TEST_PARENT="$TEST_PARENT" \
+        /bin/zsh "$SCRIPT_DIR/install"
+then
+    print -u2 "Installer replaced a same-ID app with an invalid signature."
+    exit 1
+fi
+
+[[ "$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CFBundleVersion' \
+        "$INSTALL_APP/Contents/Info.plist"
+)" == "51" ]]
+if codesign --verify --deep --strict "$INSTALL_APP" 2>/dev/null; then
+    print -u2 "Rejected installed fixture was unexpectedly modified."
+    exit 1
+fi
+
+print "PASS: installer rejects a same-ID app with an invalid signature"

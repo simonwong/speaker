@@ -10,6 +10,7 @@ public enum PermissionState: String, Equatable, Sendable {
     case granted
     case denied
     case notDetermined
+    case restricted
 }
 
 public struct PermissionSnapshot: Equatable, Sendable {

@@ -1,0 +1,198 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
+
+VERSION="${SPEAKER_VERSION:-}"
+BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-}"
+SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
+
+load_reviewed_release_identity "$ROOT"
+load_reviewed_release_candidate "$ROOT"
+if [[ -z "$VERSION" || -z "$BUILD_NUMBER" ]]; then
+    print -u2 "SPEAKER_VERSION and SPEAKER_BUILD_NUMBER are required."
+    exit 1
+fi
+if [[ -z "$SPARKLE_KEY_ACCOUNT" ]]; then
+    print -u2 "SPEAKER_SPARKLE_KEY_ACCOUNT is required to verify the signed feed."
+    exit 1
+fi
+reject_release_candidate_override "$VERSION" "$BUILD_NUMBER"
+verify_release_candidate_history "$ROOT"
+validate_production_metadata \
+    "$VERSION" \
+    "$BUILD_NUMBER" \
+    "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" \
+    "$REVIEWED_RELEASE_TEAM_IDENTIFIER"
+
+VERIFY_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-published-update.XXXXXX")"
+APPCAST_FILE="$VERIFY_ROOT/appcast.xml"
+ARCHIVE_BASENAME="Speaker-$VERSION-$BUILD_NUMBER.dmg"
+ARCHIVE_URL="${REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX}${ARCHIVE_BASENAME}"
+ARCHIVE_FILE="$VERIFY_ROOT/$ARCHIVE_BASENAME"
+CHECKSUM_FILE="$VERIFY_ROOT/$ARCHIVE_BASENAME.sha256"
+MOUNT_POINT="$VERIFY_ROOT/mount"
+DMG_MOUNTED=0
+
+cleanup() {
+    if (( DMG_MOUNTED )); then
+        hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$VERIFY_ROOT"
+}
+trap cleanup EXIT
+
+download_https() {
+    local url="$1"
+    local destination="$2"
+
+    [[ "$url" == https://* ]] || {
+        print -u2 "Refusing a non-HTTPS publication URL: $url"
+        return 1
+    }
+    /usr/bin/curl \
+        --fail \
+        --silent \
+        --show-error \
+        --location \
+        --proto '=https' \
+        --tlsv1.2 \
+        --retry 2 \
+        --retry-all-errors \
+        --output "$destination" \
+        "$url"
+}
+
+download_https "$REVIEWED_UPDATE_FEED_URL" "$APPCAST_FILE"
+xmllint --noout "$APPCAST_FILE"
+
+resolve_sparkle_release_tools "$ROOT"
+SIGN_UPDATE="$REVIEWED_SPARKLE_SIGN_UPDATE"
+GENERATE_KEYS="$REVIEWED_SPARKLE_GENERATE_KEYS"
+ACTUAL_UPDATE_PUBLIC_KEY="$(
+    "$GENERATE_KEYS" \
+        --account "$SPARKLE_KEY_ACCOUNT" \
+        -p
+)"
+if [[ "$ACTUAL_UPDATE_PUBLIC_KEY" != "$REVIEWED_UPDATE_PUBLIC_ED_KEY" ]]; then
+    print -u2 "The Sparkle verification account does not match the reviewed public key."
+    exit 1
+fi
+"$SIGN_UPDATE" \
+    --account "$SPARKLE_KEY_ACCOUNT" \
+    --verify \
+    "$APPCAST_FILE"
+
+ITEM_XPATH="//*[local-name()='item'][*[local-name()='version' and text()='$BUILD_NUMBER']]"
+ITEM_COUNT="$(xmllint --xpath "count($ITEM_XPATH)" "$APPCAST_FILE")"
+if [[ "$ITEM_COUNT" != "1" ]]; then
+    print -u2 "Published appcast must contain exactly one item for build $BUILD_NUMBER."
+    exit 1
+fi
+validate_appcast_build_order "$BUILD_NUMBER" "$APPCAST_FILE" latest
+PUBLISHED_VERSION="$(
+    xmllint \
+        --xpath \
+        "string(($ITEM_XPATH/*[local-name()='shortVersionString'])[1])" \
+        "$APPCAST_FILE"
+)"
+PUBLISHED_URL="$(
+    xmllint \
+        --xpath \
+        "string(($ITEM_XPATH/enclosure/@url)[1])" \
+        "$APPCAST_FILE"
+)"
+PUBLISHED_LENGTH="$(
+    xmllint \
+        --xpath \
+        "string(($ITEM_XPATH/enclosure/@length)[1])" \
+        "$APPCAST_FILE"
+)"
+PUBLISHED_SIGNATURE="$(
+    xmllint \
+        --xpath \
+        "string(($ITEM_XPATH/enclosure/@*[local-name()='edSignature'])[1])" \
+        "$APPCAST_FILE"
+)"
+if [[ "$PUBLISHED_VERSION" != "$VERSION" \
+      || "$PUBLISHED_URL" != "$ARCHIVE_URL" \
+      || "$PUBLISHED_LENGTH" != <-> \
+      || -z "$PUBLISHED_SIGNATURE" ]]; then
+    print -u2 "Published appcast metadata does not match the reviewed release."
+    exit 1
+fi
+
+download_https "$ARCHIVE_URL" "$ARCHIVE_FILE"
+download_https "$ARCHIVE_URL.sha256" "$CHECKSUM_FILE"
+ACTUAL_LENGTH="$(wc -c < "$ARCHIVE_FILE" | tr -d '[:space:]')"
+if [[ "$ACTUAL_LENGTH" != "$PUBLISHED_LENGTH" ]]; then
+    print -u2 "Published DMG length differs from appcast.xml."
+    exit 1
+fi
+EXPECTED_CHECKSUM_LINE="$(cat "$CHECKSUM_FILE")"
+if ! validate_portable_checksum_line \
+    "$EXPECTED_CHECKSUM_LINE" \
+    "$ARCHIVE_BASENAME"; then
+    print -u2 "Published checksum file has an invalid or non-portable format."
+    exit 1
+fi
+EXPECTED_HASH="${EXPECTED_CHECKSUM_LINE%%  *}"
+ACTUAL_HASH="$(shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}')"
+if [[ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]]; then
+    print -u2 "Published DMG does not match its SHA-256 checksum."
+    exit 1
+fi
+"$SIGN_UPDATE" \
+    --account "$SPARKLE_KEY_ACCOUNT" \
+    --verify \
+    "$ARCHIVE_FILE" \
+    "$PUBLISHED_SIGNATURE"
+verify_notarized_dmg "$ARCHIVE_FILE"
+
+mkdir -p "$MOUNT_POINT"
+hdiutil attach \
+    "$ARCHIVE_FILE" \
+    -readonly \
+    -nobrowse \
+    -mountpoint "$MOUNT_POINT" >/dev/null
+DMG_MOUNTED=1
+APP="$MOUNT_POINT/Speaker.app"
+[[ -d "$APP" ]] || {
+    print -u2 "Published DMG does not contain Speaker.app."
+    exit 1
+}
+verify_production_app \
+    "$APP" \
+    "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" \
+    "$REVIEWED_RELEASE_TEAM_IDENTIFIER" \
+    "$ROOT/Resources/Speaker.entitlements" \
+    "$REVIEWED_UPDATE_FEED_URL" \
+    "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+verify_production_build_provenance_shape "$APP" "$VERSION" "$BUILD_NUMBER"
+verify_sparkle_layout "$APP"
+verify_production_sparkle_signatures \
+    "$APP" \
+    "$REVIEWED_RELEASE_TEAM_IDENTIFIER"
+verify_notarized_app "$APP"
+ACTUAL_VERSION="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CFBundleShortVersionString' \
+        "$APP/Contents/Info.plist"
+)"
+ACTUAL_BUILD="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CFBundleVersion' \
+        "$APP/Contents/Info.plist"
+)"
+if [[ "$ACTUAL_VERSION" != "$VERSION" \
+      || "$ACTUAL_BUILD" != "$BUILD_NUMBER" ]]; then
+    print -u2 "Published app version does not match the requested release."
+    exit 1
+fi
+
+hdiutil detach "$MOUNT_POINT" >/dev/null
+DMG_MOUNTED=0
+print "PASS: published Speaker $VERSION ($BUILD_NUMBER) update is authentic and installable"
