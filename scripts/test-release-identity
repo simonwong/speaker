@@ -9,6 +9,27 @@ TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-identity.XXXXXX")"
 trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
 mkdir -p "$TEST_ROOT/Resources"
 
+configure_notary_keychain ""
+[[ "${#REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[@]}" == "0" ]]
+NOTARY_KEYCHAIN_FIXTURE="$TEST_ROOT/release.keychain-db"
+print -r -- fixture > "$NOTARY_KEYCHAIN_FIXTURE"
+chmod 600 "$NOTARY_KEYCHAIN_FIXTURE"
+configure_notary_keychain "$NOTARY_KEYCHAIN_FIXTURE"
+[[ "${#REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[@]}" == "2" ]]
+[[ "$REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[1]" == "--keychain" ]]
+[[ "$REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[2]" == "$NOTARY_KEYCHAIN_FIXTURE" ]]
+chmod 640 "$NOTARY_KEYCHAIN_FIXTURE"
+if configure_notary_keychain "$NOTARY_KEYCHAIN_FIXTURE" 2>/dev/null; then
+    print -u2 "Group-readable notary Keychain was accepted."
+    exit 1
+fi
+chmod 600 "$NOTARY_KEYCHAIN_FIXTURE"
+ln -s "$NOTARY_KEYCHAIN_FIXTURE" "$TEST_ROOT/notary-link.keychain-db"
+if configure_notary_keychain "$TEST_ROOT/notary-link.keychain-db" 2>/dev/null; then
+    print -u2 "Symlinked notary Keychain was accepted."
+    exit 1
+fi
+
 write_identity() {
     local bundle_identifier="$1"
     local team_identifier="$2"

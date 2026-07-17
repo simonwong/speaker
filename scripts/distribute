@@ -16,6 +16,7 @@ recover_stale_release_pending_directories "$OUTPUT_DIR"
 recover_interrupted_release_promotion "$OUTPUT_DIR"
 IDENTITY="${SPEAKER_CODESIGN_IDENTITY:-}"
 NOTARY_PROFILE="${SPEAKER_NOTARY_PROFILE:-}"
+NOTARY_KEYCHAIN="${SPEAKER_NOTARY_KEYCHAIN:-}"
 SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
 RELEASE_NOTES_FILE="${SPEAKER_RELEASE_NOTES_FILE:-}"
 REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
@@ -38,6 +39,7 @@ if [[ -z "$NOTARY_PROFILE" ]]; then
     print -u2 "SPEAKER_NOTARY_PROFILE must name a notarytool Keychain profile."
     exit 1
 fi
+configure_notary_keychain "$NOTARY_KEYCHAIN"
 if [[ -z "$SPARKLE_KEY_ACCOUNT" ]]; then
     print -u2 "SPEAKER_SPARKLE_KEY_ACCOUNT must name the reviewed Sparkle EdDSA keychain account."
     exit 1
@@ -197,6 +199,7 @@ APP_SUBMISSION_HASH="$(shasum -a 256 "$PENDING_ARCHIVE" | awk '{print $1}')"
 APP_NOTARY_RESULT="$EVIDENCE_WORK/app-notary-submission.json"
 APP_NOTARY_LOG="$EVIDENCE_WORK/app-notary-log.json"
 xcrun notarytool submit \
+    "${REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[@]}" \
     "$PENDING_ARCHIVE" \
     --keychain-profile "$NOTARY_PROFILE" \
     --wait \
@@ -205,6 +208,7 @@ xcrun notarytool submit \
 validate_notary_submission_result "$APP_NOTARY_RESULT"
 APP_NOTARY_SUBMISSION_ID="$REVIEWED_NOTARY_SUBMISSION_ID"
 xcrun notarytool log \
+    "${REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[@]}" \
     --keychain-profile "$NOTARY_PROFILE" \
     "$APP_NOTARY_SUBMISSION_ID" \
     "$APP_NOTARY_LOG"
@@ -232,6 +236,7 @@ DMG_SUBMISSION_HASH="$(shasum -a 256 "$PENDING_DMG" | awk '{print $1}')"
 DMG_NOTARY_RESULT="$EVIDENCE_WORK/dmg-notary-submission.json"
 DMG_NOTARY_LOG="$EVIDENCE_WORK/dmg-notary-log.json"
 xcrun notarytool submit \
+    "${REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[@]}" \
     "$PENDING_DMG" \
     --keychain-profile "$NOTARY_PROFILE" \
     --wait \
@@ -240,6 +245,7 @@ xcrun notarytool submit \
 validate_notary_submission_result "$DMG_NOTARY_RESULT"
 DMG_NOTARY_SUBMISSION_ID="$REVIEWED_NOTARY_SUBMISSION_ID"
 xcrun notarytool log \
+    "${REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS[@]}" \
     --keychain-profile "$NOTARY_PROFILE" \
     "$DMG_NOTARY_SUBMISSION_ID" \
     "$DMG_NOTARY_LOG"

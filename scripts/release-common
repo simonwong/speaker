@@ -9,6 +9,28 @@ release_error() {
     return 1
 }
 
+configure_notary_keychain() {
+    local requested_path="${1:-}"
+    local mode
+
+    typeset -ga REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS=()
+    [[ -n "$requested_path" ]] || return 0
+    if [[ ! -f "$requested_path" || -L "$requested_path" \
+          || "$(stat -f %u "$requested_path")" != "$UID" ]]; then
+        release_error "Notary Keychain must be an owner-controlled regular file."
+        return 1
+    fi
+    mode="$(stat -f %Lp "$requested_path")" || return 1
+    if (( (8#$mode & 8#077) != 0 )); then
+        release_error "Notary Keychain must not be accessible by group or other users."
+        return 1
+    fi
+    REVIEWED_NOTARY_KEYCHAIN_ARGUMENTS=(
+        --keychain
+        "$requested_path"
+    )
+}
+
 verify_release_source_tree_clean() {
     local root="$1"
     local tree_status

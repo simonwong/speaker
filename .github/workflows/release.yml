@@ -1,0 +1,211 @@
+name: Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes_file:
+        description: Committed release notes path (.md, .txt, or .html)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: speaker-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sign, notarize, and retain release
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 180
+    environment: production
+    env:
+      CI: "true"
+      SPEAKER_NOTARY_PROFILE: speaker-release-ci
+      SPEAKER_SPARKLE_KEY_ACCOUNT: speaker-release-ci
+
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select macOS 26 SDK
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          SDK_CANONICAL_NAME="$(/usr/libexec/PlistBuddy \
+            -c 'Print :CanonicalName' \
+            "$SDK_PATH/SDKSettings.plist")"
+          SDK_MAJOR="${SDK_CANONICAL_NAME#macosx}"
+          SDK_MAJOR="${SDK_MAJOR%%.*}"
+          test "$SDK_MAJOR" -ge 26
+          echo "SPEAKER_SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
+          sw_vers
+          xcodebuild -version
+          swift --version
+          echo "Selected SDK: $SDK_CANONICAL_NAME ($SDK_PATH)"
+
+      - name: Load reviewed release candidate
+        shell: zsh {0}
+        env:
+          RELEASE_NOTES_INPUT: ${{ inputs.release_notes_file }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          VERSION="$(/usr/libexec/PlistBuddy \
+            -c 'Print :Version' Resources/ReleaseCandidate.plist)"
+          BUILD_NUMBER="$(/usr/libexec/PlistBuddy \
+            -c 'Print :BuildNumber' Resources/ReleaseCandidate.plist)"
+          [[ "$VERSION" != REPLACE_WITH_* ]]
+          [[ "$BUILD_NUMBER" != REPLACE_WITH_* ]]
+          case "$RELEASE_NOTES_INPUT" in
+            ""|/*|*..*|*[^A-Za-z0-9._/-]*)
+              print -u2 "Release notes path is unsafe."
+              exit 1
+              ;;
+          esac
+          case "$RELEASE_NOTES_INPUT" in
+            *.md|*.txt|*.html) ;;
+            *)
+              print -u2 "Release notes must use .md, .txt, or .html."
+              exit 1
+              ;;
+          esac
+          git ls-files --error-unmatch -- "$RELEASE_NOTES_INPUT"
+          [[ -f "$RELEASE_NOTES_INPUT" && ! -L "$RELEASE_NOTES_INPUT" ]]
+          echo "SPEAKER_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "SPEAKER_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+          echo "SPEAKER_RELEASE_NOTES_FILE=$RELEASE_NOTES_INPUT" >> "$GITHUB_ENV"
+
+      - name: Run complete deterministic gate
+        run: ./scripts/test
+
+      - name: Resolve pinned Sparkle tools
+        run: ./scripts/swiftw package resolve --disable-sandbox
+
+      - name: Configure ephemeral release keychain
+        shell: zsh {0}
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.SPEAKER_DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.SPEAKER_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_API_KEY_P8_BASE64: ${{ secrets.SPEAKER_NOTARY_API_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.SPEAKER_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.SPEAKER_NOTARY_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPEAKER_SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          for required in \
+            DEVELOPER_ID_P12_BASE64 \
+            DEVELOPER_ID_P12_PASSWORD \
+            NOTARY_API_KEY_P8_BASE64 \
+            NOTARY_KEY_ID \
+            NOTARY_ISSUER_ID \
+            SPARKLE_PRIVATE_KEY
+          do
+            [[ -n "${(P)required}" ]] || {
+              print -u2 "Missing production secret: $required"
+              exit 1
+            }
+          done
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-release.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          P12_PATH="$RUNNER_TEMP/speaker-developer-id.p12"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/speaker-notary-api-key.p8"
+          SPARKLE_KEY_PATH="$RUNNER_TEMP/speaker-sparkle-private-key"
+
+          print -rn -- "$DEVELOPER_ID_P12_BASE64" \
+            | /usr/bin/base64 -D > "$P12_PATH"
+          print -rn -- "$NOTARY_API_KEY_P8_BASE64" \
+            | /usr/bin/base64 -D > "$NOTARY_KEY_PATH"
+          print -rn -- "$SPARKLE_PRIVATE_KEY" > "$SPARKLE_KEY_PATH"
+          chmod 600 "$P12_PATH" "$NOTARY_KEY_PATH" "$SPARKLE_KEY_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -f pkcs12 \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          IDENTITIES="$(security find-identity \
+            -v -p codesigning "$KEYCHAIN_PATH" \
+            | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p')"
+          IDENTITY_COUNT="$(print -r -- "$IDENTITIES" \
+            | sed '/^$/d' \
+            | wc -l \
+            | tr -d '[:space:]')"
+          [[ "$IDENTITY_COUNT" == "1" ]] || {
+            print -u2 "Expected exactly one Developer ID Application identity."
+            exit 1
+          }
+          SPEAKER_CODESIGN_IDENTITY="$(print -r -- "$IDENTITIES" | head -n 1)"
+          echo "SPEAKER_CODESIGN_IDENTITY=$SPEAKER_CODESIGN_IDENTITY" \
+            >> "$GITHUB_ENV"
+
+          xcrun notarytool store-credentials "$SPEAKER_NOTARY_PROFILE" \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --keychain "$KEYCHAIN_PATH" \
+            --validate
+          echo "SPEAKER_NOTARY_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          GENERATE_KEYS=.build/artifacts/sparkle/Sparkle/bin/generate_keys
+          [[ -x "$GENERATE_KEYS" ]]
+          "$GENERATE_KEYS" \
+            --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
+            -f "$SPARKLE_KEY_PATH"
+          REVIEWED_PUBLIC_KEY="$(/usr/libexec/PlistBuddy \
+            -c 'Print :UpdatePublicEDKey' \
+            Resources/ReleaseIdentity.plist)"
+          ACTUAL_PUBLIC_KEY="$("$GENERATE_KEYS" \
+            --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
+            -p)"
+          [[ "$ACTUAL_PUBLIC_KEY" == "$REVIEWED_PUBLIC_KEY" ]]
+
+      - name: Build, sign, notarize, and verify distribution
+        run: ./scripts/distribute
+
+      - name: Retain protected production artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-production
+          path: |
+            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}.dmg
+            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}.dmg.sha256
+            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-evidence.zip
+            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-evidence.zip.sha256
+            .build/distribution/appcast.xml
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove ephemeral credentials
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: zsh {0}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-release.keychain-db"
+          security default-keychain -d user -s login.keychain-db || true
+          security list-keychains -d user -s login.keychain-db || true
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -f \
+            "$RUNNER_TEMP/speaker-developer-id.p12" \
+            "$RUNNER_TEMP/speaker-notary-api-key.p8" \
+            "$RUNNER_TEMP/speaker-sparkle-private-key"

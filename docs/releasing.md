@@ -88,6 +88,27 @@ SPEAKER_SPARKLE_KEY_ACCOUNT=<Sparkle 私钥的 Keychain account>
 SPEAKER_RELEASE_NOTES_FILE=<仓库内已提交、已审查的 .md/.txt/.html>
 ```
 
+仓库提供 `.github/workflows/release.yml` 作为唯一的 GitHub Actions 正式发布入口。
+它只允许从默认分支手动触发，并绑定 `production` Environment；建议为该
+Environment 开启 required reviewers、禁止发起者自批，并只允许受保护的 `main`
+部署。配置以下 Environment secrets：
+
+```text
+SPEAKER_DEVELOPER_ID_P12_BASE64
+SPEAKER_DEVELOPER_ID_P12_PASSWORD
+SPEAKER_NOTARY_API_KEY_P8_BASE64
+SPEAKER_NOTARY_KEY_ID
+SPEAKER_NOTARY_ISSUER_ID
+SPEAKER_SPARKLE_PRIVATE_KEY
+```
+
+P12 与 App Store Connect API `.p8` 以完整文件的 base64 保存；Sparkle secret
+保存 `generate_keys -x` 导出的文件内容。Workflow 在临时 Keychain 中导入三类
+凭据，先验证 Developer ID 唯一性、公证 API Key 和 Sparkle 公私钥绑定，再执行
+`scripts/distribute`。任务结束后删除临时 Keychain 和 secret files。它只把 DMG、
+checksum、appcast 与 evidence archive 留作 90 天的受保护 artifact，不会自行上传
+更新站点或创建 Git tag；完成外部发布后仍须执行下文的公开地址回读门禁。
+
 然后运行：
 
 ```bash
