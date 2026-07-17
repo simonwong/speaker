@@ -6,15 +6,32 @@ SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
 source "$SCRIPT_DIR/release-common"
 
-APP="${SPEAKER_EVIDENCE_TEST_APP:-$ROOT/.build/Speaker.app}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-evidence.XXXXXX")"
+trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
+if [[ -n "${SPEAKER_EVIDENCE_TEST_APP:-}" ]]; then
+    APP="$SPEAKER_EVIDENCE_TEST_APP"
+else
+    APP="$TEST_ROOT/Speaker.app"
+    mkdir -p "$APP/Contents/MacOS"
+    FIXTURE_SDK="$(/bin/zsh "$SCRIPT_DIR/swiftw" --print-sdk-path)"
+    print -r -- 'int main(void) { return 0; }' \
+        > "$TEST_ROOT/EvidenceFixture.c"
+    xcrun clang \
+        -isysroot "$FIXTURE_SDK" \
+        -g \
+        -c \
+        "$TEST_ROOT/EvidenceFixture.c" \
+        -o "$TEST_ROOT/EvidenceFixture.o"
+    xcrun clang \
+        "$TEST_ROOT/EvidenceFixture.o" \
+        -o "$APP/Contents/MacOS/SpeakerApp"
+fi
 EXECUTABLE="$APP/Contents/MacOS/SpeakerApp"
 [[ -x "$EXECUTABLE" && ! -L "$EXECUTABLE" ]] || {
-    print -u2 "A built Speaker.app is required for release evidence testing."
+    print -u2 "A built Speaker executable is required for release evidence testing."
     exit 1
 }
 
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-evidence.XXXXXX")"
-trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
 WORK="$TEST_ROOT/evidence"
 ARCHIVE="$TEST_ROOT/evidence.zip"
 CORRUPT_WORK="$TEST_ROOT/corrupt-evidence"
@@ -40,9 +57,13 @@ SDK_CANONICAL_NAME="$(
     /usr/libexec/PlistBuddy -c 'Print :CanonicalName' "$SDK_SETTINGS"
 )"
 SDK_SETTINGS_HASH="$(shasum -a 256 "$SDK_SETTINGS" | awk '{print $1}')"
+print -rn -- provider-matrix-fixture > "$WORK/provider-matrix.json"
+PROVIDER_EVIDENCE_HASH="$(
+    shasum -a 256 "$WORK/provider-matrix.json" | awk '{print $1}'
+)"
 
 plutil -create xml1 "$WORK/ReleaseManifest.plist"
-plutil -insert SchemaVersion -integer 1 "$WORK/ReleaseManifest.plist"
+plutil -insert SchemaVersion -integer 2 "$WORK/ReleaseManifest.plist"
 for pair in \
     "Version|$VERSION" \
     "BuildNumber|$BUILD_NUMBER" \
@@ -56,6 +77,7 @@ for pair in \
     "SourceCommit|$SOURCE_COMMIT" \
     "PackageResolvedSHA256|$PACKAGE_HASH" \
     "ReleaseNotesSHA256|$NOTES_HASH" \
+    "ProviderEvidenceSHA256|$PROVIDER_EVIDENCE_HASH" \
     "SDKCanonicalName|$SDK_CANONICAL_NAME" \
     "SDKSettingsSHA256|$SDK_SETTINGS_HASH"; do
     plutil -insert "${pair%%|*}" -string "${pair#*|}" \

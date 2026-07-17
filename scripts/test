@@ -10,6 +10,8 @@ SCRIPT_DIR="${0:A:h}"
 /bin/zsh "$SCRIPT_DIR/test-compatibility-smoke"
 /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
 /bin/zsh "$SCRIPT_DIR/test-install-identity"
+/bin/zsh "$SCRIPT_DIR/test-release-evidence"
+/bin/zsh "$SCRIPT_DIR/test-release-identity"
 /bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
     --product SpeakerProviderSmoke \
     -Xswiftc -warnings-as-errors
