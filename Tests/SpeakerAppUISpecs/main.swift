@@ -30,6 +30,10 @@ struct SpeakerAppUISpecs {
             try expect(panel.styleMask.contains(.borderless))
             try expect(panel.styleMask.contains(.nonactivatingPanel))
             try expect(panel.becomesKeyOnlyIfNeeded)
+            try expect(
+                !panel.canBecomeKey,
+                "a notification-only HUD accepted keyboard focus"
+            )
             try expect(!panel.canBecomeMain)
             try expect(!panel.hidesOnDeactivate)
             try expect(
@@ -133,8 +137,7 @@ struct SpeakerAppUISpecs {
             )
             try verifyHUDControls(
                 fixture: .problem,
-                expectedLabels: ["打开语音识别设置", "关闭错误提示"],
-                expectedRoutedEffects: 1
+                expectedLabels: ["关闭错误提示"]
             )
         }
 

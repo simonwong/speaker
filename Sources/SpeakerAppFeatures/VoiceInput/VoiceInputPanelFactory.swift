@@ -2,7 +2,7 @@
 
 @MainActor
 private final class NonactivatingVoiceInputPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 

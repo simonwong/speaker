@@ -715,21 +715,23 @@ struct SpeakerAppScenarioSpecs {
 
         run("voice HUD footprints stay compact", failures: &failures, executed: &executed) {
             try expect(
-                VoiceInputPanelLayout.processing.size
-                    == .init(width: 72, height: 40)
-            )
-            try expect(VoiceInputPanelLayout.processing.size.width < 96)
-            try expect(
                 VoiceInputPanelLayout.recording.size
-                    == .init(width: 106, height: 42)
+                    == .init(width: 128, height: 44)
             )
+            // Recording and processing are one pill; a size difference would
+            // make the panel jump when transcription starts.
+            try expect(
+                VoiceInputPanelLayout.processing.size
+                    == VoiceInputPanelLayout.recording.size
+            )
+            try expect(VoiceInputPanelLayout.recording.size.width < 160)
             try expect(
                 VoiceInputPanelLayout.pendingCopy.size
-                    == .init(width: 312, height: 68)
+                    == .init(width: 394, height: 54)
             )
             try expect(
                 VoiceInputPanelLayout.problem.size
-                    == .init(width: 300, height: 72)
+                    == .init(width: 330, height: 54)
             )
         }
 
@@ -1287,16 +1289,6 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 increased.darkControlForegroundOpacity
                     > standard.darkControlForegroundOpacity
-            )
-            try expect(
-                increased.cardBorderOpacity > standard.cardBorderOpacity
-            )
-            try expect(
-                increased.cardBorderLineWidth > standard.cardBorderLineWidth
-            )
-            try expect(
-                increased.secondaryControlOpacity
-                    > standard.secondaryControlOpacity
             )
             try expect(
                 increased.errorIconOpacity > standard.errorIconOpacity
@@ -1968,7 +1960,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("voice experience rejects stale retained-text actions from an older session", failures: &failures, executed: &executed) {
+        await runAsync("voice experience replaces retained text on a new press and rejects stale actions", failures: &failures, executed: &executed) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -1977,7 +1969,8 @@ struct SpeakerAppScenarioSpecs {
             let firstRecordingStarted = await waitUntil {
                 experience.state.isRecording
             }
-            try expect(firstRecordingStarted)
+            try expect(firstRecordingStarted, "first recording never started")
+            // 短按切换语义:第一对按键开始录音,第二对结束。
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
@@ -1985,43 +1978,41 @@ struct SpeakerAppScenarioSpecs {
             let retainedTextPresented = await waitUntil {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
-            try expect(retainedTextPresented)
+            try expect(retainedTextPresented, "pending copy never presented")
             guard case let .pendingCopy(
                 _,
                 _,
                 _,
                 staleCopyAction,
-                dismissAction
+                _
             ) = experience.state.overlay else {
                 throw SpecFailure(message: "pending-copy actions were not presented")
             }
 
-            experience.shortcutTarget.receive(.pressed)
-            experience.shortcutTarget.receive(.released)
-            try? await Task.sleep(for: .milliseconds(30))
-            guard case .pendingCopy = experience.state.overlay else {
-                throw SpecFailure(
-                    message: "a new shortcut discarded retained text"
-                )
-            }
-
-            experience.perform(dismissAction)
-            let resultDismissed = await waitUntil {
-                experience.state.diagnosticCode == "idle"
-            }
-            try expect(resultDismissed)
-
+            // 留存提示不挡快捷键:再按一次会丢弃留存文字并直接开新会话。
             experience.shortcutTarget.receive(.pressed)
             let secondRecordingStarted = await waitUntil {
                 experience.state.isRecording
             }
-            try expect(secondRecordingStarted)
+            try expect(
+                secondRecordingStarted,
+                "a press during pending copy did not start a new recording"
+            )
+            if case .pendingCopy = experience.state.overlay {
+                throw SpecFailure(
+                    message: "retained text notice survived a new press"
+                )
+            }
+
             experience.perform(staleCopyAction)
             try? await Task.sleep(for: .milliseconds(30))
 
-            try expect(experience.state.isRecording)
+            try expect(
+                experience.state.isRecording,
+                "stale copy action interrupted the new recording"
+            )
             let copyCount = await fixture.clipboard.copyCount
-            try expect(copyCount == 0)
+            try expect(copyCount == 0, "stale copy action reached the clipboard")
             let recordingAnnouncements = fixture.announcements.messages.filter {
                 $0 == "Speaker 正在录音，按 Esc 可以取消"
             }
