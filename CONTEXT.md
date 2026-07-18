@@ -1,53 +1,83 @@
 # macOS Voice Input
 
-一个通过全局按键触发语音输入，并将整理后的文本送往当前工作位置的个人 macOS 工具。
+Speaker is a personal macOS tool that starts voice input from a global shortcut and delivers the processed text to the work position selected when recording ends.
 
 ## Language
 
-**整理模式**：
-用户为一次语音输入选择的文本整理策略。每个整理模式有明确名称，并规定在忠实保留原意的前提下如何处理转录文本。
-_Avoid_: 规则、转录提示词
+**Voice Input Session**
 
-**默认顺滑**：
-只清除停顿、语气词、重复表达等口语杂质，不主动重组内容的内置整理模式。
-_Avoid_: 默认规则、智能重写
+One attempt from shortcut activation through recording, transcription, optional refinement, and delivery or fallback. At most one session is active at a time.
 
-**自定义模式**：
-由用户命名并描述整理要求的整理模式。
-_Avoid_: 自定义规则、自定义转录
+_Avoid_: request, job, recording session
 
-**个人词库**：
-仅属于当前用户并保存在本机的标准词条集合，用于提高专有词的识别一致性。
-_Avoid_: 云词库、团队词库
+**Refinement Mode**
 
-**词条**：
-一个标准写法，以及零个或多个说出该词时可能使用的口语别名。词条可以被暂时停用而无需删除。
-_Avoid_: 热词、替换规则
+The text-processing strategy selected for a Voice Input Session. Each mode has a stable name and states how it may transform a transcript while preserving meaning.
 
-**输入目标**：
-结束录音时处于聚焦状态的可编辑位置。一旦确定，本次语音输入后续的处理过程不因用户切换窗口而改变输入目标。
-_Avoid_: 开始录音时的输入框、当前窗口
+_Avoid_: rule, transcription prompt
 
-**待复制结果**：
-无法送达输入目标但仍可由用户查看和复制的一次完整语音输入结果。
-_Avoid_: 失败文本、丢失结果
+**Default Smoothing**
 
-**会话记录**：
-一次语音输入从开始到送达的本地历史记录，包含各阶段文本、所用整理模式、目标应用、状态和时间信息，但不包含原始音频。
-_Avoid_: 录音历史、聊天记录
+The built-in Refinement Mode that removes pauses, fillers, and repeated speech without deliberately reorganizing the content. It uses Doubao only.
 
-**阶段结果**：
-一次语音输入在转录、顺滑或进一步整理阶段产生的文本，用于区分模型的输入、输出与最终送达内容。
-_Avoid_: 多个版本、临时文本
+_Avoid_: default rule, smart rewrite
 
-**等待结果**：
-一次语音输入已进入外部处理阶段，但尚未收到阶段结果或明确问题的非终态。等待结果不会仅因应用内经过了一段时间而被判定为失败。
-_Avoid_: 超时、卡死、处理失败
+**Custom Mode**
 
-**会话问题**：
-由系统、输入目标或模型服务明确报告，并影响本次语音输入继续处理或送达的事实。会话问题保留报告方、所在阶段和可用诊断标识，但不推测未被证实的根因。
-_Avoid_: 猜测原因、兜底错误、通用失败
+A user-named Refinement Mode with a user-authored refinement instruction.
 
-**用户取消**：
-用户主动结束尚未完成的一次语音输入。用户取消不是会话问题，取消后的迟到阶段结果不再送达，但会话记录仍保留取消发生时的阶段。
-_Avoid_: 处理失败、网络中断
+_Avoid_: custom rule, custom transcription
+
+**Personal Dictionary**
+
+The local collection of canonical terms that belongs only to the current user and improves recognition consistency for names and specialist vocabulary.
+
+_Avoid_: cloud dictionary, team dictionary
+
+**Entry**
+
+A canonical spelling, zero or more spoken aliases, and an enabled state. Disabling an Entry preserves it without applying it to new sessions.
+
+_Avoid_: hotword, replacement rule
+
+**Input Target**
+
+The editable position focused when recording ends. Once captured, it is the Voice Input Session's only target; later window or focus changes never retarget the session.
+
+_Avoid_: input focused when recording starts, current window
+
+**Pending Copy Result**
+
+A complete Voice Input Session result that could not be safely delivered to its Input Target and remains available for explicit user copy.
+
+_Avoid_: failed text, lost result
+
+**Session Record**
+
+The local history record for a Voice Input Session. It may contain Stage Results, the Refinement Mode, target application, status, timing, and content-free diagnostics, but never raw audio.
+
+_Avoid_: recording history, chat record
+
+**Stage Result**
+
+Text produced by transcription, smoothing, or further refinement within a Voice Input Session. The term distinguishes provider input, provider output, and the final delivered text.
+
+_Avoid_: version, temporary text
+
+**Waiting For Result**
+
+A non-terminal state in which a Voice Input Session has entered external processing but has received neither a Stage Result nor an explicit Session Problem. Local elapsed time alone never changes this state into failure.
+
+_Avoid_: timeout, stuck, processing failure
+
+**Session Problem**
+
+An explicit fact reported by the system, Input Target, or provider that prevents a Voice Input Session from continuing or delivering. It records the reporting party, stage, and safe diagnostic identifiers without inventing an unverified root cause.
+
+_Avoid_: guessed cause, fallback error, generic failure
+
+**User Cancellation**
+
+The user's explicit termination of an unfinished Voice Input Session. User Cancellation is not a Session Problem. Late Stage Results are discarded, while the Session Record retains the stage at which cancellation occurred.
+
+_Avoid_: processing failure, network interruption

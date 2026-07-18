@@ -112,4 +112,4 @@ Matrix 在发出请求前固定源码 commit、源码树 clean/dirty、`Package.
 
 ## 当前人工校准项
 
-不同 App 的 Accessibility 文本控件实现并不一致。TextEdit、浏览器普通输入框、Electron、富文本和 Terminal 应在你的 Mac 解锁并授予权限后分别 smoke；无法证明安全送达的目标会稳定降级为待复制，不会模拟粘贴、强制焦点或整段覆盖控件值。详见 [本机兼容性矩阵](.scratch/macos-voice-input/compatibility.md)。
+不同 App 的 Accessibility 文本控件实现并不一致。TextEdit、浏览器普通输入框、Electron、富文本和 Terminal 应在你的 Mac 解锁并授予权限后分别 smoke；无法证明安全送达的目标会稳定降级为待复制，不会模拟粘贴、强制焦点或整段覆盖控件值。详见 [本机兼容性矩阵](docs/compatibility.md)。
