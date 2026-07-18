@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — 录音 HUD 交互原型（可丢弃，不进产品）
+
+  回答的问题：录音胶囊的波形形态、出入场动画和各提示状态的观感对不对？
+
+  运行：open docs/prototypes/recording-hud-prototype.html
+  操作：按住「空格」代替 Fn 录音（浏览器拿不到 Fn 键）；松开进入转写；
+       Esc 或悬停点 × 取消。
+  结局：底部浮条或数字键切换松开后的走向 —
+       1 成功送达 · 2 需手动粘贴（待复制卡片） · 3 出错（错误卡片）
+  变体：底部浮条切换波形，或 URL 加 ?v=history|mirror|curve|dots
+  麦克风：首次按空格会请求麦克风权限；拒绝则自动用模拟音量。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE · Speaker 录音 HUD</title>
+<style>
+  :root {
+    --accent: rgb(247, 222, 181);
+    --spring: cubic-bezier(0.34, 1.45, 0.64, 1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #2c3140 0%, #1b1e27 60%, #15161c 100%);
+    overflow: hidden;
+  }
+
+  /* 胶囊背后的彩色光斑：玻璃需要有内容可透，模糊折射才读得出来 */
+  .aurora { position: absolute; inset: 0; pointer-events: none; }
+  .aurora i {
+    position: absolute; display: block; border-radius: 50%;
+    filter: blur(46px); opacity: 0.55;
+    animation: drift 14s ease-in-out infinite alternate;
+  }
+  .aurora i:nth-child(1) {
+    width: 260px; height: 200px; left: calc(50% - 220px); bottom: -60px;
+    background: radial-gradient(circle, #ff9d6c, transparent 70%);
+  }
+  .aurora i:nth-child(2) {
+    width: 300px; height: 220px; left: calc(50% - 60px); bottom: -90px;
+    background: radial-gradient(circle, #6c8cff, transparent 70%);
+    animation-delay: -5s;
+  }
+  .aurora i:nth-child(3) {
+    width: 240px; height: 190px; left: calc(50% + 90px); bottom: -50px;
+    background: radial-gradient(circle, #62d9c4, transparent 70%);
+    animation-delay: -9s;
+  }
+  @keyframes drift {
+    from { transform: translateX(-28px) scale(1); }
+    to   { transform: translateX(28px) scale(1.15); }
+  }
+
+  /* ── 假的目标应用窗口，提供“正在往输入框里说话”的语境 ── */
+  .fake-app {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fake-window {
+    width: 620px; border-radius: 12px; overflow: hidden;
+    background: rgba(255,255,255,0.92);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.45);
+  }
+  .fake-titlebar {
+    height: 38px; display: flex; align-items: center; gap: 8px;
+    padding: 0 14px; background: #ececec;
+  }
+  .fake-titlebar i {
+    width: 12px; height: 12px; border-radius: 50%; display: block;
+  }
+  .fake-body { padding: 22px 24px 26px; }
+  .fake-body h1 { font-size: 15px; color: #333; margin-bottom: 14px; }
+  .fake-input {
+    min-height: 92px; border: 1.5px solid #c9cdd6; border-radius: 10px;
+    padding: 12px 14px; font-size: 14px; line-height: 1.7; color: #222;
+    outline: 2px solid rgba(70,120,255,0.35); outline-offset: 1px;
+    white-space: pre-wrap;
+  }
+  .fake-input .caret {
+    display: inline-block; width: 1.5px; height: 17px; margin-left: 1px;
+    background: #4678ff; vertical-align: text-bottom;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .fake-hint { margin-top: 12px; font-size: 12px; color: #999; }
+  .fake-hint kbd {
+    background: #f0f1f4; border: 1px solid #d5d8de; border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 7px; font-size: 11px; color: #555;
+  }
+
+  /* ── 共享玻璃表面：浏览器版“液态玻璃”，app 里对应 NSVisualEffectView ── */
+  .glass {
+    position: fixed; left: 50%; bottom: 28px;
+    background: linear-gradient(
+      rgba(64,66,74,0.28), rgba(28,29,33,0.44) 68%, rgba(22,22,26,0.5));
+    backdrop-filter: blur(30px) saturate(2.1) brightness(1.12);
+    border: 0.5px solid rgba(255,255,255,0.16);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.28),
+      inset 0 -1px 1px rgba(0,0,0,0.28),
+      inset 1px 0 0.5px rgba(255,255,255,0.07),
+      inset -1px 0 0.5px rgba(255,255,255,0.07),
+      0 6px 18px rgba(0,0,0,0.34), 0 1px 4px rgba(0,0,0,0.24);
+    /* 退场：干脆利落地缩小坠落 */
+    transform: translate(-50%, 8px) scale(0.9);
+    opacity: 0; pointer-events: none;
+    transition: opacity .14s ease-in, transform .16s ease-in;
+  }
+  .glass.visible {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1; pointer-events: auto;
+    /* 入场：上浮 + 轻微过冲的弹簧 */
+    transition: opacity .2s ease-out, transform .34s var(--spring);
+  }
+  /* 顶部弧形高光：玻璃的镜面反射 */
+  .glass::before {
+    content: ""; position: absolute; inset: 1px 6px auto 6px; height: 45%;
+    border-radius: 16px 16px 40% 40%;
+    background: linear-gradient(rgba(255,255,255,0.16), rgba(255,255,255,0));
+    pointer-events: none;
+  }
+
+  /* ── 录音胶囊 ── */
+  .hud {
+    width: 118px; height: 34px; border-radius: 17px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .hud canvas { width: 118px; height: 34px; transition: opacity .12s ease-out; }
+  .hud.hovered canvas { opacity: 0.3; }
+  .hud .close { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); }
+  .hud .close { opacity: 0; }
+  .hud.hovered .close { opacity: 1; }
+
+  /* ── 提示条（待复制 / 出错）：一行式，按 Fn 可直接打断重录 ── */
+  .card {
+    height: 44px; border-radius: 22px;
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 9px 0 16px;
+  }
+  .card.pending { width: 384px; }
+  .card.problem { width: 320px; }
+  .mini-icon {
+    font-size: 13px; font-weight: 700; flex: none; line-height: 1;
+  }
+  .mini-icon.neutral { color: var(--accent); }
+  .mini-icon.error { color: #ff6f64; }
+  .card .line {
+    flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.4;
+    color: rgba(255,255,255,0.85);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cap-btn {
+    height: 26px; padding: 0 11px; border-radius: 13px; border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.92);
+    font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+    transition: background .1s ease-out;
+  }
+  .cap-btn:hover { background: rgba(255,255,255,0.18); }
+
+  .close {
+    width: 24px; height: 24px; border-radius: 50%; border: none; flex: none;
+    background: transparent; color: rgba(255,255,255,0.55);
+    font-size: 11px; line-height: 1; cursor: pointer;
+    transition: opacity .12s ease-out, background .12s ease-out;
+  }
+  .close:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.92); }
+
+  /* ── 底部浮条（原型自身的工具，不属于设计） ── */
+  .variant-bar {
+    position: fixed; left: 50%; bottom: 138px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(20,21,26,0.82); backdrop-filter: blur(16px);
+    border: 0.5px solid rgba(255,255,255,0.1); border-radius: 12px;
+    padding: 7px 10px; z-index: 10;
+  }
+  .variant-bar .group-label {
+    font-size: 11px; color: rgba(255,255,255,0.35); margin: 0 2px 0 6px;
+  }
+  .variant-bar button {
+    border: none; border-radius: 8px; padding: 5px 12px;
+    background: transparent; color: rgba(255,255,255,0.55);
+    font-size: 12px; cursor: pointer;
+  }
+  .variant-bar button.active {
+    background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.95);
+  }
+  .variant-bar .status {
+    margin-left: 8px; padding-left: 12px;
+    border-left: 1px solid rgba(255,255,255,0.12);
+    font-size: 11px; color: rgba(255,255,255,0.45);
+    font-variant-numeric: tabular-nums; min-width: 210px;
+  }
+</style>
+</head>
+<body>
+
+<div class="aurora"><i></i><i></i><i></i></div>
+
+<div class="fake-app">
+  <div class="fake-window">
+    <div class="fake-titlebar">
+      <i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+    </div>
+    <div class="fake-body">
+      <h1>备忘录 — 语音输入目标</h1>
+      <div class="fake-input" id="input"><span class="caret"></span></div>
+      <p class="fake-hint">
+        按住 <kbd>空格</kbd> 说话（代替 Fn）· 松开转写 · <kbd>Esc</kbd> 取消 ·
+        <kbd>1</kbd> 送达 <kbd>2</kbd> 待复制 <kbd>3</kbd> 出错
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 录音/转写胶囊 -->
+<div class="glass hud" id="hud">
+  <canvas id="wave" width="236" height="68"></canvas>
+  <button class="close" id="cancel" title="取消这次输入">✕</button>
+</div>
+
+<!-- 待复制条：没能自动输入时，识别文字一行展示，复制即走 -->
+<div class="glass card pending" id="cardPending">
+  <span class="mini-icon neutral">⧉</span>
+  <span class="line" id="pendingText"></span>
+  <button class="cap-btn" id="copyBtn">复制</button>
+  <button class="close" id="pendingClose" title="关闭">✕</button>
+</div>
+
+<!-- 错误条：一行说明，不给按钮 — 重按 Fn 直接重录 -->
+<div class="glass card problem" id="cardProblem">
+  <span class="mini-icon error">!</span>
+  <span class="line">识别没成功，按 Fn 再试一次</span>
+  <button class="close" id="problemClose" title="关闭">✕</button>
+</div>
+
+<div class="variant-bar" id="bar">
+  <span class="group-label">波形</span>
+  <button data-v="history">流动历史</button>
+  <button data-v="mirror">对称电平</button>
+  <button data-v="curve">连续曲线</button>
+  <button data-v="dots">点阵</button>
+  <span class="group-label">结局</span>
+  <button data-o="deliver">送达</button>
+  <button data-o="pending">待复制</button>
+  <button data-o="problem">出错</button>
+  <span class="status" id="status">idle</span>
+</div>
+
+<script>
+"use strict";
+/* PROTOTYPE 状态机：
+   idle → recording →(松开)→ processing →(按结局)→
+     deliver: 文字逐字进输入框，胶囊淡出，不再打扰
+     pending: 一行待复制条（识别文字 + 复制）
+     problem: 一行错误条（无按钮）
+   任何提示态下按空格（Fn）都会打断提示、直接重新录音 */
+
+const ACCENT = [247, 222, 181];
+const BAR_COUNT = 15;
+const hud = document.getElementById("hud");
+const cardPending = document.getElementById("cardPending");
+const cardProblem = document.getElementById("cardProblem");
+const canvas = document.getElementById("wave");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const inputEl = document.getElementById("input");
+const DPR = 2;
+
+const DELIVER_TEXT = "帮我把周四的评审会挪到下午三点，再给设计组同步一下新的原型链接。";
+document.getElementById("pendingText").textContent = DELIVER_TEXT;
+
+let phase = "idle";     // idle | recording | processing | delivered | pending | problem
+let outcome = "deliver"; // deliver | pending | problem
+let history = new Array(BAR_COUNT).fill(0);
+let level = 0;
+let micSource = "未请求";
+let analyser = null, audioCtx = null;
+let note = "";
+let variant = new URLSearchParams(location.search).get("v") || "history";
+if (!["history", "mirror", "curve", "dots"].includes(variant)) variant = "history";
+
+/* ── 浮条 ── */
+const bar = document.getElementById("bar");
+function syncBar() {
+  bar.querySelectorAll("button[data-v]").forEach(b =>
+    b.classList.toggle("active", b.dataset.v === variant));
+  bar.querySelectorAll("button[data-o]").forEach(b =>
+    b.classList.toggle("active", b.dataset.o === outcome));
+}
+bar.addEventListener("click", e => {
+  const v = e.target.dataset?.v, o = e.target.dataset?.o;
+  if (v) {
+    variant = v;
+    const url = new URL(location);
+    url.searchParams.set("v", v);
+    window.history.replaceState(null, "", url);
+  }
+  if (o) outcome = o;
+  syncBar();
+});
+syncBar();
+
+/* ── 麦克风（拒绝/失败自动降级为模拟音量） ── */
+async function ensureMic() {
+  if (analyser || micSource === "模拟音量") return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new AudioContext();
+    const src = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+    micSource = "真实麦克风";
+  } catch {
+    micSource = "模拟音量";
+  }
+}
+const timeData = new Float32Array(512);
+let fakePhase = 0;
+function sampleLevel() {
+  if (analyser) {
+    analyser.getFloatTimeDomainData(timeData);
+    let sum = 0;
+    for (let i = 0; i < timeData.length; i++) sum += timeData[i] * timeData[i];
+    const rms = Math.sqrt(sum / timeData.length);
+    const db = 20 * Math.log10(Math.max(rms, 1e-5));
+    const n = Math.min(1, Math.max(0, (db + 52) / 44));  // 与 app 相同的映射
+    return Math.pow(n, 1.4);
+  }
+  fakePhase += 1;
+  const burst = Math.max(0, Math.sin(fakePhase / 4.2)) * (0.35 + 0.45 * Math.random());
+  return Math.min(1, 0.04 + Math.random() * 0.05 + (Math.random() < 0.75 ? burst : 0));
+}
+
+/* ── 状态机 ── */
+function hideAll() {
+  hud.classList.remove("visible", "hovered");
+  cardPending.classList.remove("visible");
+  cardProblem.classList.remove("visible");
+}
+function setPhase(next) {
+  phase = next;
+  note = "";
+  if (next === "recording") {
+    history.fill(0);
+    cardPending.classList.remove("visible");
+    cardProblem.classList.remove("visible");
+    hud.classList.add("visible");
+  } else if (next === "processing") {
+    setTimeout(() => {
+      if (phase !== "processing") return;
+      if (outcome === "deliver") deliver();
+      else if (outcome === "pending") { hideAll(); setPhase("pending"); }
+      else { hideAll(); setPhase("problem"); }
+    }, 1800);
+  } else if (next === "pending") {
+    cardPending.classList.add("visible");
+  } else if (next === "problem") {
+    cardProblem.classList.add("visible");
+  } else if (next === "idle") {
+    hideAll();
+  }
+}
+function deliver() {
+  setPhase("delivered");
+  hideAll();
+  let i = 0;
+  const typer = setInterval(() => {
+    if (i >= DELIVER_TEXT.length) {
+      clearInterval(typer);
+      setPhase("idle");
+      return;
+    }
+    inputEl.insertBefore(
+      document.createTextNode(DELIVER_TEXT[i++]), inputEl.lastChild);
+  }, 24);
+}
+function cancel() {
+  if (phase !== "idle" && phase !== "delivered") setPhase("idle");
+}
+
+window.addEventListener("keydown", async e => {
+  if (e.code === "Space" && !e.repeat) {
+    /* 提示条不挡主流程：任何提示态下按 Fn 都直接打断、重新开录 */
+    if (phase === "idle" || phase === "pending" || phase === "problem") {
+      e.preventDefault();
+      await ensureMic();
+      setPhase("recording");
+    }
+  }
+  if (e.code === "Escape") cancel();
+  if (e.key >= "1" && e.key <= "3") {
+    outcome = ["deliver", "pending", "problem"][e.key - 1];
+    syncBar();
+  }
+});
+window.addEventListener("keyup", e => {
+  if (e.code === "Space" && phase === "recording") {
+    e.preventDefault();
+    setPhase("processing");
+  }
+});
+hud.addEventListener("mouseenter", () => {
+  if (phase === "recording" || phase === "processing") hud.classList.add("hovered");
+});
+hud.addEventListener("mouseleave", () => hud.classList.remove("hovered"));
+document.getElementById("cancel").addEventListener("click", cancel);
+document.getElementById("pendingClose").addEventListener("click", cancel);
+document.getElementById("problemClose").addEventListener("click", cancel);
+document.getElementById("copyBtn").addEventListener("click", async e => {
+  try { await navigator.clipboard.writeText(DELIVER_TEXT); } catch {}
+  e.target.textContent = "已复制 ✓";
+  setTimeout(() => { e.target.textContent = "复制"; cancel(); }, 600);
+});
+
+/* ── 采样：与 app 一致，每 50ms 推一格历史 ── */
+setInterval(() => {
+  if (phase !== "recording") return;
+  level = sampleLevel();
+  history.shift();
+  history.push(level);
+}, 50);
+
+/* ── 渲染 ── */
+function accent(a) { return `rgba(${ACCENT[0]},${ACCENT[1]},${ACCENT[2]},${a})`; }
+function white(a) { return `rgba(255,255,255,${a})`; }
+
+function draw(now) {
+  requestAnimationFrame(draw);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawStatus();
+  if (phase !== "recording" && phase !== "processing") return;
+
+  const W = canvas.width, H = canvas.height, midY = H / 2;
+  const processing = phase === "processing";
+  const t = now / 1000;
+
+  /* 处理中：自行流动的行波（白色系）；录音：真实电平（暖白） */
+  const values = new Array(BAR_COUNT);
+  for (let i = 0; i < BAR_COUNT; i++) {
+    if (processing) {
+      const pos = i / (BAR_COUNT - 1);
+      const envelope = 0.7 + 0.3 * Math.sin(pos * Math.PI);
+      values[i] = envelope * (0.5 + 0.5 * Math.sin(t * 3.4 - i * 0.55)) * 0.65;
+    } else {
+      values[i] = history[i];
+    }
+  }
+  const colA = processing ? white(0.32) : accent(0.5);
+  const colB = processing ? white(0.68) : accent(0.98);
+
+  const gap = 3.5 * DPR, bw = 2.5 * DPR;
+  const total = BAR_COUNT * bw + (BAR_COUNT - 1) * gap;
+  const x0 = (W - total) / 2;
+  const grad = ctx.createLinearGradient(0, midY + 10 * DPR, 0, midY - 10 * DPR);
+  grad.addColorStop(0, colA); grad.addColorStop(1, colB);
+  ctx.fillStyle = grad;
+
+  if (variant === "curve") {
+    ctx.beginPath();
+    const step = (W - 24 * DPR) / (BAR_COUNT - 1);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const idx = pass === 0 ? i : BAR_COUNT - 1 - i;
+        const x = 12 * DPR + idx * step;
+        const amp = (1.5 + values[idx] * 10) * DPR * (pass === 0 ? 1 : -1);
+        i === 0 && pass === 0 ? ctx.moveTo(x, midY - amp) : ctx.lineTo(x, midY - amp);
+      }
+    }
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const x = x0 + i * (bw + gap);
+      let v = values[i];
+      if (variant === "mirror" && !processing) {
+        const pos = i / (BAR_COUNT - 1);
+        v = level * (0.35 + 0.65 * Math.sin(pos * Math.PI));
+      }
+      if (variant === "dots") {
+        const r = (1.4 + v * 5.6) * DPR;
+        ctx.beginPath();
+        ctx.arc(x + bw / 2, midY, r, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const h = Math.max(3 * DPR, (3 + 17 * v) * DPR);
+        ctx.beginPath();
+        ctx.roundRect(x, midY - h / 2, bw, h, bw / 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+function drawStatus() {
+  statusEl.textContent =
+    `${variant} · ${outcome} · ${phase} · ${micSource} · 电平 ${(level * 100) | 0}%`
+    + (note ? ` · ${note}` : "");
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
