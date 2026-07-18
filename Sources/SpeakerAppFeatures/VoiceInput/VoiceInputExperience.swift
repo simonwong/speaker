@@ -453,10 +453,16 @@ package final class VoiceInputExperience: ObservableObject {
     private func apply(_ presentation: VoiceInputPresentation) {
         guard !isShuttingDown else { return }
         currentPresentation = presentation
+        // pendingCopy stays open on purpose: pressing the shortcut while a
+        // notice is up dismisses it and starts a fresh session instead of
+        // silently ignoring the user. Only in-flight processing keeps the
+        // gate shut, because a stray press there would race the session's
+        // own completion.
         let allowsSessionTriggers = switch presentation.activity {
-        case .processing, .pendingCopy:
+        case .processing:
             false
-        case .idle, .preparing, .recording, .delivered, .cancelled, .failed:
+        case .idle, .preparing, .recording, .delivered, .cancelled, .failed,
+             .pendingCopy:
             true
         }
         triggerIntakeGate.setAllowsSessionTriggers(allowsSessionTriggers)

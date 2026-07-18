@@ -735,12 +735,11 @@ public actor VoiceInputSessions {
             }
             return
         }
-        if case .pendingCopy = presentation.activity {
-            if let triggerSequence {
-                finishRejectedTriggerSequence(triggerSequence)
-            }
-            return
-        }
+        // A press while retained text is awaiting copy deliberately abandons
+        // that text: the user chose to re-record, and the notice must never
+        // block the next session. The retained body may exist nowhere else
+        // (unclassified targets keep it out of history), so this is an
+        // explicit, user-initiated discard.
         let id = VoiceInputSessionID()
         let requestedAt = Date()
         releasePending = false
