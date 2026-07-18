@@ -1359,18 +1359,6 @@ struct SpeakerCoreSpecs {
                 "unclassified target persisted body inside its outcome"
             )
 
-            await sessions.send(.pressed)
-            var retainedAfterNewPress: VoiceInputPresentation?
-            for await presentation in await sessions.observe() {
-                retainedAfterNewPress = presentation
-                break
-            }
-            try expect(
-                retainedAfterNewPress?.activity.pendingCopyReason
-                    == .missingTarget,
-                "a new recording discarded text awaiting explicit copy"
-            )
-
             let hiddenAfterCopy = Task {
                 for await presentation in await sessions.observe() {
                     if presentation.activity == .idle { return true }
@@ -1382,6 +1370,48 @@ struct SpeakerCoreSpecs {
             let didHideAfterCopy = await hiddenAfterCopy.value
             try expect(copiedAfter == ["请手动复制。"])
             try expect(didHideAfterCopy)
+        }
+
+        await runAsync("a new press replaces text awaiting explicit copy", failures: &failures) {
+            let clipboard = ClipboardFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "旧的留存文字。"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: clipboard,
+                history: SessionHistoryFake()
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            let retained = await terminal.value
+            try expect(retained?.activity.pendingCopyReason == .missingTarget)
+
+            // 用户在留存提示挂着时再按快捷键 = 主动放弃旧文字重录,
+            // 会话层必须开新会话而不是拒绝按键。
+            let replaced = Task { () -> VoiceInputPresentation? in
+                for await presentation in await sessions.observe() {
+                    if presentation.activity.pendingCopyReason == nil,
+                       presentation.activity != .idle {
+                        return presentation
+                    }
+                }
+                return nil
+            }
+            await sessions.send(.pressed)
+            let next = await replaced.value
+            try expect(
+                next?.activity.sessionID != nil,
+                "a press during pending copy did not start a new session"
+            )
+            try expect(
+                next?.activity.pendingCopyReason == nil,
+                "the retained-text notice survived a new press"
+            )
+            let copied = await clipboard.copiedTexts
+            try expect(copied.isEmpty, "replacing retained text touched the clipboard")
+            await sessions.send(.cancel)
         }
 
         await runAsync("dismiss pending copy hides without changing clipboard", failures: &failures) {
