@@ -17,6 +17,9 @@ final class VoiceInputPanelController {
     private var stateCancellable: AnyCancellable?
     private var placementCancellables: Set<AnyCancellable> = []
     private var presentedLayout: VoiceInputPanelLayout?
+    /// Bumped on every show/hide request so a pending fade-out completion
+    /// never tears down a panel that was re-shown while it was still fading.
+    private var hideGeneration = 0
 
     init(
         experience: VoiceInputExperience,
@@ -77,10 +80,7 @@ final class VoiceInputPanelController {
     private func apply(_ overlay: VoiceInputOverlayPresentation) {
         switch overlay {
         case .hidden:
-            hostingView.rootView = rootView(for: overlay)
-            panel.orderOut(nil)
-            panel.alphaValue = 1
-            presentedLayout = nil
+            hidePanel()
         case .recording, .processing, .pendingCopy, .problem:
             guard let layout = VoiceInputPanelLayout(overlay) else { return }
             // Resize the AppKit window before replacing the SwiftUI tree.
@@ -94,28 +94,32 @@ final class VoiceInputPanelController {
 
     private func showPanel(for overlay: VoiceInputOverlayPresentation) {
         guard let layout = VoiceInputPanelLayout(overlay) else { return }
+        hideGeneration += 1
         let wasVisible = panel.isVisible
         let needsPlacement = presentedLayout != layout || !wasVisible
         VoiceInputPanelFactory.apply(layout, to: panel)
         if needsPlacement {
             repositionVisiblePanel()
         }
-        switch overlay {
-        case .recording, .processing, .pendingCopy, .problem:
-            if !wasVisible {
-                panel.alphaValue = 0
-            }
-            panel.orderFrontRegardless()
-        case .hidden:
-            break
-        }
+        let targetFrame = panel.frame
         if !wasVisible {
+            panel.alphaValue = 0
+            panel.setFrame(
+                targetFrame.offsetBy(dx: 0, dy: -6),
+                display: false
+            )
+        }
+        panel.orderFrontRegardless()
+        if panel.alphaValue < 1 {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.1
+                context.duration = wasVisible ? 0.12 : 0.18
                 context.timingFunction = CAMediaTimingFunction(
                     name: .easeOut
                 )
                 panel.animator().alphaValue = 1
+                if !wasVisible {
+                    panel.animator().setFrame(targetFrame, display: true)
+                }
             }
         }
         panel.displayIfNeeded()
@@ -128,6 +132,33 @@ final class VoiceInputPanelController {
         )
 #endif
 
+    }
+
+    private func hidePanel() {
+        hideGeneration += 1
+        let generation = hideGeneration
+        presentedLayout = nil
+        guard panel.isVisible else {
+            hostingView.rootView = rootView(for: .hidden)
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            return
+        }
+        // Keep the last presentation on screen while it fades; swapping the
+        // SwiftUI tree to `.hidden` first would blank the panel instantly and
+        // make the fade invisible.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(140))
+            guard let self, self.hideGeneration == generation else { return }
+            self.panel.orderOut(nil)
+            self.hostingView.rootView = self.rootView(for: .hidden)
+            self.panel.alphaValue = 1
+        }
     }
 
     private func repositionVisiblePanel() {

@@ -27,157 +27,265 @@ package struct VoiceInputHUD: View {
 
     package var body: some View {
         Group {
-            switch presentation {
-            case let .recording(peakPower, cancelAction):
-                RecordingWaveformOverlay(
-                    peakPower: peakPower,
+            if let activity = ActivityPillModel(presentation) {
+                ActivityPill(
+                    model: activity,
                     palette: palette,
-                    cancel: { _ = performAction(cancelAction) }
+                    cancel: { _ = performAction(activity.cancelAction) }
                 )
-            case let .pendingCopy(
-                title,
-                text,
-                copyButtonTitle,
-                copyAction,
-                dismissAction
-            ):
-                PendingResultOverlay(
-                    title: title,
-                    text: text,
-                    copyButtonTitle: copyButtonTitle,
-                    palette: palette,
-                    copy: { _ = performAction(copyAction) },
-                    dismiss: { _ = performAction(dismissAction) }
-                )
-            case let .problem(
-                icon,
-                title,
-                guidance,
-                recoveryAction,
-                dismissAction
-            ):
-                FailureResultOverlay(
-                    icon: icon,
-                    title: title,
-                    guidance: guidance,
-                    palette: palette,
-                    recover: recoveryAction.map { action in
-                        {
-                            guard let effect = performAction(action) else {
-                                return
-                            }
-                            routeEffect(effect)
-                        }
-                    },
-                    dismiss: { _ = performAction(dismissAction) }
-                )
-            case let .processing(title, cancelAction):
-                ProcessingIndicatorOverlay(
-                    accessibilityTitle: title,
-                    palette: palette,
-                    cancel: { _ = performAction(cancelAction) }
-                )
-            case .hidden:
-                Color.clear
+            } else {
+                noticeBody
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    @ViewBuilder
+    private var noticeBody: some View {
+        switch presentation {
+        case let .pendingCopy(
+            _,
+            text,
+            copyButtonTitle,
+            copyAction,
+            dismissAction
+        ):
+            PendingCopyStrip(
+                text: text,
+                copyButtonTitle: copyButtonTitle,
+                palette: palette,
+                copy: { _ = performAction(copyAction) },
+                dismiss: { _ = performAction(dismissAction) }
+            )
+        case let .problem(icon, title, guidance, _, dismissAction):
+            ProblemStrip(
+                icon: icon,
+                title: title,
+                guidance: guidance,
+                palette: palette,
+                dismiss: { _ = performAction(dismissAction) }
+            )
+        case .hidden, .recording, .processing:
+            Color.clear
+        }
+    }
 }
 
-private struct ProcessingIndicatorOverlay: View {
+/// The single warm accent the HUD uses for anything "live" — the recording
+/// waveform and the informational notice badge. It is pulled from the app
+/// icon's glyph tone so the floating HUD reads as the same product rather
+/// than a generic system control.
+private extension Color {
+    static let hudAccent = Color(red: 0.97, green: 0.87, blue: 0.71)
+}
+
+/// One pill serves both live phases of a session — recording and processing —
+/// so the surface keeps a single SwiftUI identity from press to result. The
+/// panel footprint never changes between the two and only the waveform's
+/// motion source crossfades, which is what makes the transition read as one
+/// object changing state rather than two windows swapping.
+private struct ActivityPillModel: Equatable {
+    enum Phase: Equatable {
+        case recording(peakPower: Float?)
+        case processing
+    }
+
+    let phase: Phase
     let accessibilityTitle: String
+    let cancelHint: String
+    let cancelAction: VoiceInputExperienceAction
+
+    init?(_ presentation: VoiceInputOverlayPresentation) {
+        switch presentation {
+        case let .recording(peakPower, cancelAction):
+            phase = .recording(peakPower: peakPower)
+            accessibilityTitle = "正在录音"
+            cancelHint = "停止录音并忽略本次内容"
+            self.cancelAction = cancelAction
+        case let .processing(title, cancelAction):
+            phase = .processing
+            accessibilityTitle = title
+            cancelHint = "停止当前处理并忽略迟到结果"
+            self.cancelAction = cancelAction
+        case .hidden, .pendingCopy, .problem:
+            return nil
+        }
+    }
+
+    var isProcessing: Bool {
+        phase == .processing
+    }
+}
+
+private struct ActivityPill: View {
+    let model: ActivityPillModel
     let palette: VoiceInputHUDContrastPalette
     let cancel: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var levels: [Double] = Array(
+        repeating: 0,
+        count: ActivityWaveform.barCount
+    )
+    @State private var isHovered = false
+
     var body: some View {
         ActivityHUDSurface(
-            width: 64,
-            height: 32,
+            width: 118,
+            height: 34,
             palette: palette
         ) {
-            HStack(spacing: 6) {
-                ProcessingOrbitGlyph()
-                    .frame(width: 24, height: 32)
-                    .accessibilityLabel(accessibilityTitle)
-
-                ActivityHUDCloseButton(
-                    palette: palette,
-                    help: "取消这次输入",
-                    accessibilityHint: "停止当前处理并忽略迟到结果",
-                    action: cancel
+            ZStack {
+                ActivityWaveform(
+                    phase: model.phase,
+                    levels: levels,
+                    reduceMotion: reduceMotion
                 )
+                .opacity(isHovered ? 0.3 : 1)
+                .animation(
+                    .easeInOut(duration: 0.35),
+                    value: model.isProcessing
+                )
+                .accessibilityLabel(model.accessibilityTitle)
+
+                HStack {
+                    Spacer()
+                    ActivityHUDCloseButton(
+                        palette: palette,
+                        help: "取消这次输入",
+                        accessibilityHint: model.cancelHint,
+                        action: cancel
+                    )
+                }
+                .padding(.trailing, 4)
+                .opacity(isHovered ? 1 : 0)
             }
-            .padding(.horizontal, 5)
         }
-        .padding(4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(5)
+        .accessibilityElement(children: .contain)
+        .onHover { hovered in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovered
+            }
+        }
+        .onChange(of: liveStrength, initial: true) { _, strength in
+            guard case .recording = model.phase else { return }
+            var advanced = levels
+            advanced.removeFirst()
+            advanced.append(strength)
+            withAnimation(
+                reduceMotion ? nil : .easeOut(duration: 0.1)
+            ) {
+                levels = advanced
+            }
+        }
+    }
+
+    /// Microphone power mapped into 0…1 bar strength. The gamma keeps room
+    /// noise near the floor so silence reads as a flat dotted line while
+    /// normal speech still spans most of the pill height.
+    private var liveStrength: Double {
+        guard case let .recording(peakPower) = model.phase,
+              let peakPower
+        else { return 0 }
+        let normalized = min(1, max(0, (Double(peakPower) + 52) / 44))
+        return pow(normalized, 1.4)
     }
 }
 
-private struct ProcessingOrbitGlyph: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// The pill's only content: a row of centre-anchored bars. While recording
+/// the bars replay the recent microphone history (new samples enter on the
+/// right); while processing they run a self-driven travelling wave in a
+/// cooler tone, signalling "no longer listening, still working".
+private struct ActivityWaveform: View {
+    static let barCount = 15
+
+    let phase: ActivityPillModel.Phase
+    let levels: [Double]
+    let reduceMotion: Bool
 
     var body: some View {
-        if reduceMotion {
-            glyph(rotation: -35)
-        } else {
+        if phase == .processing, !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                glyph(
-                    rotation:
-                        timeline.date.timeIntervalSinceReferenceDate * 210
-                )
+                bars(at: timeline.date.timeIntervalSinceReferenceDate)
             }
+        } else {
+            bars(at: 0)
         }
     }
 
-    private func glyph(rotation: Double) -> some View {
-        ZStack {
-            Circle()
-                .stroke(.white.opacity(0.13), lineWidth: 1.6)
-
-            Circle()
-                .trim(from: 0.06, to: 0.72)
-                .stroke(
-                    AngularGradient(
-                        colors: [
-                            .white.opacity(0.1),
-                            .white.opacity(0.94),
-                        ],
-                        center: .center
-                    ),
-                    style: StrokeStyle(
-                        lineWidth: 1.8,
-                        lineCap: .round
+    private func bars(at time: TimeInterval) -> some View {
+        HStack(spacing: 3.5) {
+            ForEach(0..<Self.barCount, id: \.self) { index in
+                Capsule()
+                    .fill(barGradient)
+                    .frame(
+                        width: 2.5,
+                        height: barHeight(index: index, time: time)
                     )
-                )
-                .rotationEffect(.degrees(rotation))
+            }
         }
-        .frame(width: 14, height: 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityHidden(true)
+    }
+
+    private var barGradient: LinearGradient {
+        switch phase {
+        case .recording:
+            LinearGradient(
+                colors: [
+                    Color.hudAccent.opacity(0.5),
+                    Color.hudAccent.opacity(0.98),
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        case .processing:
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.32),
+                    Color.white.opacity(0.68),
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        }
+    }
+
+    private func barHeight(index: Int, time: TimeInterval) -> Double {
+        switch phase {
+        case .recording:
+            return 3 + 17 * (levels.indices.contains(index) ? levels[index] : 0)
+        case .processing:
+            let position = Double(index) / Double(Self.barCount - 1)
+            let envelope = 0.7 + 0.3 * sin(position * .pi)
+            let swell = reduceMotion
+                ? 0.35
+                : 0.5 + 0.5 * sin(time * 3.4 - Double(index) * 0.55)
+            return 3 + 13 * envelope * swell
+        }
     }
 }
 
 private struct ActivityHUDSurface<Content: View>: View {
     let width: CGFloat
     let height: CGFloat
+    let cornerRadius: CGFloat
     let palette: VoiceInputHUDContrastPalette
     let content: Content
 
     init(
         width: CGFloat,
         height: CGFloat,
+        cornerRadius: CGFloat? = nil,
         palette: VoiceInputHUDContrastPalette,
         @ViewBuilder content: () -> Content
     ) {
         self.width = width
         self.height = height
+        self.cornerRadius = cornerRadius ?? height / 2
         self.palette = palette
         self.content = content()
-    }
-
-    private var cornerRadius: CGFloat {
-        height / 2
     }
 
     var body: some View {
@@ -221,7 +329,7 @@ private struct ActivityHUDSurface<Content: View>: View {
                     lineWidth: palette.darkBorderLineWidth
                 )
             }
-            .shadow(color: .black.opacity(0.26), radius: 12, y: 4)
+            .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
     }
 }
 
@@ -237,8 +345,11 @@ private struct HUDVisualEffect: NSViewRepresentable {
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
-private struct PendingResultOverlay: View {
-    let title: String
+/// One-line retained-text strip. There is no headline on purpose: the
+/// transcribed text sitting next to a copy button is self-explanatory, and
+/// the strip never blocks the shortcut — a new press abandons the text and
+/// starts over.
+private struct PendingCopyStrip: View {
     let text: String
     let copyButtonTitle: String
     let palette: VoiceInputHUDContrastPalette
@@ -246,136 +357,97 @@ private struct PendingResultOverlay: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.up.doc.on.clipboard")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+        ActivityHUDSurface(
+            width: 384,
+            height: 44,
+            palette: palette
+        ) {
+            HStack(spacing: 9) {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.hudAccent)
+                    .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
                 Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(text)
+                    .layoutPriority(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
 
-            HUDSecondaryButton(
-                title: copyButtonTitle,
-                accessibilityHint: "将保留的文字复制到剪贴板",
-                action: copy
-            )
+                HUDSecondaryButton(
+                    title: "复制",
+                    accessibilityLabel: copyButtonTitle,
+                    accessibilityHint: "将保留的文字复制到剪贴板",
+                    palette: palette,
+                    action: copy
+                )
                 .keyboardShortcut(.defaultAction)
 
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(
-                        Color.secondary.opacity(palette.secondaryControlOpacity)
-                    )
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("关闭")
-            .keyboardShortcut(.cancelAction)
-            .accessibilityHidden(true)
-            .overlay {
-                HUDAccessibilityAction(
-                    label: "关闭待复制文字",
-                    hint: "不复制并关闭这个提示",
+                ActivityHUDCloseButton(
+                    palette: palette,
+                    accessibilityLabel: "关闭待复制文字",
+                    help: "关闭",
+                    accessibilityHint: "不复制并关闭这个提示",
+                    respondsToEscape: true,
                     action: dismiss
                 )
             }
+            .padding(.leading, 16)
+            .padding(.trailing, 9)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    .separator.opacity(palette.cardBorderOpacity),
-                    lineWidth: palette.cardBorderLineWidth
-                )
-        }
-        .shadow(color: .black.opacity(0.045), radius: 7, y: 2)
         .padding(5)
     }
 }
 
-private struct FailureResultOverlay: View {
+/// One-line failure strip. Recovery guidance lives in the tooltip and the
+/// menu bar item; the strip itself only names the failure, because the cause
+/// varies (network, key, permission) and re-recording is always the primary
+/// way out.
+private struct ProblemStrip: View {
     let icon: String
     let title: String
     let guidance: String
     let palette: VoiceInputHUDContrastPalette
-    let recover: (() -> Void)?
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.red.opacity(palette.errorIconOpacity))
-                .frame(width: 17)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(guidance)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .help(guidance)
-            }
-
-            Spacer(minLength: 8)
-
-            if let recover {
-                HUDSecondaryButton(
-                    title: "设置",
-                    accessibilityLabel: "打开语音识别设置",
-                    accessibilityHint: "检查系统权限或语音识别服务配置",
-                    action: recover
-                )
-                .keyboardShortcut(.defaultAction)
-            }
-
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
+        ActivityHUDSurface(
+            width: 320,
+            height: 44,
+            palette: palette
+        ) {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(
-                        Color.secondary.opacity(palette.secondaryControlOpacity)
+                        .red.opacity(max(0.82, palette.errorIconOpacity))
                     )
-                    .frame(width: 22, height: 22)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("关闭")
-            .keyboardShortcut(.cancelAction)
-            .accessibilityHidden(true)
-            .overlay {
-                HUDAccessibilityAction(
-                    label: "关闭错误提示",
-                    hint: "关闭当前错误，不会自动重试",
+                    .accessibilityHidden(true)
+
+                Text(title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(title + "\n" + guidance)
+                    .layoutPriority(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                ActivityHUDCloseButton(
+                    palette: palette,
+                    accessibilityLabel: "关闭错误提示",
+                    help: "关闭",
+                    accessibilityHint: "关闭当前错误，不会自动重试",
+                    respondsToEscape: true,
                     action: dismiss
                 )
             }
+            .padding(.leading, 16)
+            .padding(.trailing, 9)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    .separator.opacity(palette.cardBorderOpacity),
-                    lineWidth: palette.cardBorderLineWidth
-                )
-        }
-        .shadow(color: .black.opacity(0.045), radius: 7, y: 2)
         .padding(5)
     }
 }
@@ -384,6 +456,7 @@ private struct HUDSecondaryButton: View {
     let title: String
     let accessibilityLabel: String?
     let accessibilityHint: String
+    let palette: VoiceInputHUDContrastPalette
     let action: () -> Void
 
     @State private var isHovered = false
@@ -392,11 +465,13 @@ private struct HUDSecondaryButton: View {
         title: String,
         accessibilityLabel: String? = nil,
         accessibilityHint: String,
+        palette: VoiceInputHUDContrastPalette,
         action: @escaping () -> Void
     ) {
         self.title = title
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityHint = accessibilityHint
+        self.palette = palette
         self.action = action
     }
 
@@ -404,16 +479,13 @@ private struct HUDSecondaryButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.86))
-                .padding(.horizontal, 10)
+                .foregroundStyle(.white.opacity(foregroundOpacity))
+                .lineLimit(1)
+                .padding(.horizontal, 11)
                 .frame(height: 26)
-                .background(
-                    .primary.opacity(isHovered ? 0.14 : 0.09),
-                    in: Capsule()
-                )
+                .background(.white.opacity(backgroundOpacity), in: Capsule())
                 .overlay {
-                    Capsule()
-                        .stroke(.primary.opacity(isHovered ? 0.14 : 0.08))
+                    Capsule().stroke(.white.opacity(borderOpacity))
                 }
                 .contentShape(Capsule())
         }
@@ -432,129 +504,39 @@ private struct HUDSecondaryButton: View {
             }
         }
     }
-}
 
-private struct RecordingWaveformOverlay: View {
-    let peakPower: Float?
-    let palette: VoiceInputHUDContrastPalette
-    let cancel: () -> Void
-
-    private let barCount = 5
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var displayedStrength = 0.08
-
-    var body: some View {
-        ActivityHUDSurface(
-            width: 96,
-            height: 32,
-            palette: palette
-        ) {
-            HStack(spacing: 4) {
-                waveform
-
-                ActivityHUDCloseButton(
-                    palette: palette,
-                    help: "取消这次输入",
-                    accessibilityHint: "停止录音并忽略本次内容",
-                    action: cancel
-                )
-            }
-            .padding(.horizontal, 4)
-        }
-        .padding(5)
-        .accessibilityElement(children: .contain)
-        .onChange(of: inputStrength, initial: true) { _, strength in
-            let duration = strength > displayedStrength ? 0.06 : 0.18
-            withAnimation(
-                reduceMotion ? nil : .easeOut(duration: duration)
-            ) {
-                displayedStrength = strength
-            }
-        }
+    private var foregroundOpacity: Double {
+        max(isHovered ? 0.98 : 0.92, palette.darkControlForegroundOpacity)
     }
 
-    private var waveform: some View {
-        HStack(spacing: 6) {
-            RecordingPulseDot(reduceMotion: reduceMotion)
-            .frame(width: 7, height: 30)
-            .accessibilityHidden(true)
-
-            HStack(spacing: 3) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.46),
-                                    Color.white.opacity(0.94),
-                                ],
-                                startPoint: .bottom,
-                                endPoint: .top
-                            )
-                        )
-                        .frame(
-                            width: 2.6,
-                            height: barHeight(index: index)
-                        )
-                }
-            }
-            .frame(width: 26, height: 21)
-            .accessibilityHidden(true)
-        }
-        .frame(width: 60, height: 32)
-        .accessibilityLabel("正在录音")
+    private var backgroundOpacity: Double {
+        max(isHovered ? 0.18 : 0.12, palette.darkControlBackgroundOpacity)
     }
 
-    private var inputStrength: Double {
-        guard let peakPower else { return 0.28 }
-        return min(1, max(0.08, Double(peakPower + 55) / 55))
-    }
-
-    private func barHeight(index: Int) -> Double {
-        let position = Double(index) / Double(max(1, barCount - 1))
-        let envelope = 0.48 + sin(position * .pi) * 0.52
-        return 3.5 + 17.5 * envelope * displayedStrength
-    }
-}
-
-private struct RecordingPulseDot: View {
-    let reduceMotion: Bool
-
-    var body: some View {
-        if reduceMotion {
-            dot(pulse: 0.5)
-        } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-                dot(
-                    pulse: (
-                        sin(
-                            timeline.date.timeIntervalSinceReferenceDate * 4.2
-                        ) + 1
-                    ) / 2
-                )
-            }
-        }
-    }
-
-    private func dot(pulse: Double) -> some View {
-        Circle()
-            .fill(.red)
-            .frame(width: 5.5, height: 5.5)
-            .scaleEffect(0.92 + pulse * 0.12)
-            .opacity(0.78 + pulse * 0.22)
-            .shadow(color: .red.opacity(0.24), radius: 3)
+    private var borderOpacity: Double {
+        max(isHovered ? 0.16 : 0.1, palette.darkBorderOpacity)
     }
 }
 
 private struct ActivityHUDCloseButton: View {
     let palette: VoiceInputHUDContrastPalette
+    var accessibilityLabel: String = "取消语音输入"
     let help: String
     let accessibilityHint: String
+    var respondsToEscape: Bool = false
     let action: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
+        if respondsToEscape {
+            button.keyboardShortcut(.cancelAction)
+        } else {
+            button
+        }
+    }
+
+    private var button: some View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 8.5, weight: .semibold))
@@ -585,7 +567,7 @@ private struct ActivityHUDCloseButton: View {
         .accessibilityHidden(true)
         .overlay {
             HUDAccessibilityAction(
-                label: "取消语音输入",
+                label: accessibilityLabel,
                 hint: accessibilityHint,
                 action: action
             )

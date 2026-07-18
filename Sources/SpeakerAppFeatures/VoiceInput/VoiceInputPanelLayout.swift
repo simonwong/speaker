@@ -23,14 +23,15 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
 
     package var size: CGSize {
         switch self {
-        case .processing:
-            CGSize(width: 72, height: 40)
-        case .recording:
-            CGSize(width: 106, height: 42)
+        // Recording and processing share one footprint on purpose: the two
+        // phases are the same pill, and any size difference would make the
+        // panel jump mid-session.
+        case .processing, .recording:
+            CGSize(width: 128, height: 44)
         case .pendingCopy:
-            CGSize(width: 312, height: 68)
+            CGSize(width: 394, height: 54)
         case .problem:
-            CGSize(width: 300, height: 72)
+            CGSize(width: 330, height: 54)
         }
     }
 }
