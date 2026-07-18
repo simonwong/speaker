@@ -12,6 +12,8 @@ Building needs Swift 6 and the macOS 26 SDK. `scripts/swiftw` pins `SDKROOT` to 
 
 Always build and test through `scripts/*` — the wrappers set `SDKROOT`, a per-UID module cache, and `--disable-sandbox` (SwiftPM can't nest `sandbox-exec` here). Bare `swift build`/`swift run`/`swift test` diverges from CI.
 
+Any command that bundles or launches the app (`scripts/launch`, `scripts/release`, `scripts/bundle`) must be run with `SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Dev"` (a self-signed code-signing cert in the login keychain). Without it the bundle is ad-hoc signed, the code identity changes every build, and macOS TCC silently drops the accessibility/microphone grants — the user then has to re-add the app in System Settings after every rebuild.
+
 - `./scripts/test` — full deterministic suite: the four spec executables, the `test-*` scripts, then warnings-as-errors builds of both `Tools/` executables.
 - `./scripts/build` — debug build of `SpeakerApp` (`SPEAKER_CONFIGURATION=release` for release).
 - `./scripts/launch` — build and open the debug `.build/Speaker.app`.

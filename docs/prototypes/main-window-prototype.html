@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — Speaker 主窗口 Tab 化原型（可丢弃，不进产品）
+
+  回答的问题：主窗口从整屏设置改为 Tab 结构（概览看板 / 历史 / 设置 / 词典）
+  的信息架构和观感对不对？
+
+  运行：open docs/prototypes/main-window-prototype.html
+  切换：点顶部 Tab，或 URL 加 ?tab=overview|history|settings|dictionary
+  数据全部是假的，仅演示布局与层级。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE · Speaker 主窗口</title>
+<style>
+  :root {
+    --accent: rgb(247, 222, 181);
+    --accent-dim: rgba(247, 222, 181, 0.16);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #2c3140 0%, #1b1e27 60%, #15161c 100%);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .aurora { position: absolute; inset: 0; pointer-events: none; }
+  .aurora i {
+    position: absolute; display: block; border-radius: 50%;
+    filter: blur(56px); opacity: 0.4;
+    animation: drift 16s ease-in-out infinite alternate;
+  }
+  .aurora i:nth-child(1) {
+    width: 380px; height: 300px; left: 8%; top: 12%;
+    background: radial-gradient(circle, #ff9d6c, transparent 70%);
+  }
+  .aurora i:nth-child(2) {
+    width: 420px; height: 340px; right: 6%; bottom: 8%;
+    background: radial-gradient(circle, #6c8cff, transparent 70%);
+    animation-delay: -7s;
+  }
+  @keyframes drift {
+    from { transform: translate(-24px, 0) scale(1); }
+    to   { transform: translate(24px, 12px) scale(1.12); }
+  }
+
+  /* ── 窗口 ── */
+  .window {
+    position: relative; width: 780px; height: 560px;
+    border-radius: 14px; overflow: hidden;
+    background: linear-gradient(rgba(46,48,56,0.72), rgba(30,31,36,0.82));
+    backdrop-filter: blur(40px) saturate(1.8);
+    border: 0.5px solid rgba(255,255,255,0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      0 30px 90px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;
+  }
+  .titlebar {
+    height: 48px; flex: none; display: flex; align-items: center;
+    padding: 0 16px; gap: 8px;
+  }
+  .titlebar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .tabs {
+    position: absolute; left: 50%; top: 9px; transform: translateX(-50%);
+    display: flex; gap: 2px; padding: 3px;
+    background: rgba(0,0,0,0.25); border-radius: 9px;
+  }
+  .tabs button {
+    border: none; border-radius: 7px; padding: 5px 16px;
+    background: transparent; color: rgba(255,255,255,0.55);
+    font-size: 12.5px; cursor: pointer;
+  }
+  .tabs button.active {
+    background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.95);
+  }
+  .content { flex: 1; overflow-y: auto; padding: 8px 28px 26px; }
+  .pane { display: none; }
+  .pane.active { display: block; animation: fadein .18s ease-out; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+
+  h2 {
+    font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.4);
+    margin: 20px 2px 10px; letter-spacing: 0.4px;
+  }
+
+  /* ── 概览 ── */
+  .hero { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .stat {
+    border-radius: 14px; padding: 16px 18px;
+    background: rgba(255,255,255,0.055);
+    border: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .stat .label { font-size: 12px; color: rgba(255,255,255,0.5); }
+  .stat .value {
+    margin-top: 7px; font-size: 24px; font-weight: 700;
+    color: rgba(255,255,255,0.95); font-variant-numeric: tabular-nums;
+    letter-spacing: 0.2px;
+  }
+  .stat .value small { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.55); margin: 0 1px; }
+  .stat .sub { margin-top: 5px; font-size: 11px; color: var(--accent); opacity: 0.9; }
+
+  /* GitHub 风格贡献热力图：列 = 周，行 = 周一…周日 */
+  .chart {
+    border-radius: 14px; padding: 16px 18px 14px;
+    background: rgba(255,255,255,0.055);
+    border: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .heat-months {
+    position: relative; height: 13px; margin-bottom: 6px;
+    font-size: 10px; color: rgba(255,255,255,0.35);
+  }
+  .heat-months span { position: absolute; top: 0; }
+  .heatmap {
+    display: grid; grid-auto-flow: column;
+    grid-template-rows: repeat(7, 13px); grid-auto-columns: 13px;
+    gap: 3px; justify-content: center;
+  }
+  .heatmap i { border-radius: 3.5px; background: rgba(255,255,255,0.07); }
+  .heatmap i.l1 { background: rgba(247,222,181,0.22); }
+  .heatmap i.l2 { background: rgba(247,222,181,0.42); }
+  .heatmap i.l3 { background: rgba(247,222,181,0.68); }
+  .heatmap i.l4 { background: rgba(247,222,181,0.95); }
+  .heatmap i.future { visibility: hidden; }
+  .heat-legend {
+    display: flex; align-items: center; justify-content: flex-end; gap: 3px;
+    margin-top: 9px; font-size: 10.5px; color: rgba(255,255,255,0.4);
+  }
+  .heat-legend i { width: 11px; height: 11px; border-radius: 3px; display: block; }
+
+  /* ── 历史 ── */
+  .search {
+    width: 100%; margin-top: 14px; height: 32px; border-radius: 8px;
+    border: 0.5px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.22); color: rgba(255,255,255,0.9);
+    padding: 0 12px; font-size: 12.5px; outline: none;
+  }
+  .search::placeholder { color: rgba(255,255,255,0.3); }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 10px; border-radius: 10px;
+  }
+  .row:hover { background: rgba(255,255,255,0.05); }
+  .row + .row { border-top: 0.5px solid rgba(255,255,255,0.06); }
+  .row .time { flex: none; width: 84px; font-size: 11px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; }
+  .row .app {
+    flex: none; font-size: 10.5px; padding: 2px 8px; border-radius: 9px;
+    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6);
+  }
+  .row .text {
+    flex: 1; min-width: 0; font-size: 12.5px; color: rgba(255,255,255,0.85);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row .copy {
+    flex: none; opacity: 0; border: none; cursor: pointer;
+    font-size: 11px; padding: 4px 10px; border-radius: 10px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.9);
+    transition: opacity .1s;
+  }
+  .row:hover .copy { opacity: 1; }
+
+  /* ── 设置 ── */
+  .group {
+    border-radius: 14px; overflow: hidden;
+    background: rgba(255,255,255,0.055);
+    border: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 16px;
+  }
+  .item + .item { border-top: 0.5px solid rgba(255,255,255,0.07); }
+  .item .txt { flex: 1; }
+  .item .name { font-size: 13px; color: rgba(255,255,255,0.92); }
+  .item .desc { margin-top: 2px; font-size: 11px; color: rgba(255,255,255,0.4); }
+  .chip {
+    font-size: 11px; padding: 3px 10px; border-radius: 10px; flex: none;
+  }
+  .chip.ok { background: rgba(90,200,120,0.16); color: #7ddc9a; }
+  .chip.warn { background: rgba(255,180,60,0.14); color: #ffc36b; }
+  .kbd {
+    font-size: 11px; padding: 3px 9px; border-radius: 6px;
+    background: rgba(0,0,0,0.3); color: rgba(255,255,255,0.75);
+    border: 0.5px solid rgba(255,255,255,0.14); border-bottom-width: 1.5px;
+  }
+  .toggle {
+    width: 36px; height: 21px; border-radius: 11px; flex: none;
+    background: rgba(255,255,255,0.16); position: relative; cursor: pointer;
+    transition: background .15s;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: #fff; transition: left .15s;
+  }
+  .toggle.on { background: rgba(247,222,181,0.85); }
+  .toggle.on::after { left: 17px; }
+  .seg { display: flex; gap: 2px; padding: 2px; background: rgba(0,0,0,0.25); border-radius: 8px; flex: none; }
+  .seg button {
+    border: none; border-radius: 6px; padding: 4px 10px;
+    background: transparent; color: rgba(255,255,255,0.5);
+    font-size: 11px; cursor: pointer;
+  }
+  .seg button.active { background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.95); }
+
+  /* ── 词典 ── */
+  .dict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .term {
+    font-size: 12px; padding: 5px 12px; border-radius: 12px;
+    background: var(--accent-dim); color: var(--accent);
+  }
+  .dict-add { display: flex; gap: 8px; margin-top: 16px; }
+  .dict-add input {
+    flex: 1; height: 32px; border-radius: 8px; outline: none;
+    border: 0.5px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.22); color: rgba(255,255,255,0.9);
+    padding: 0 12px; font-size: 12.5px;
+  }
+  .dict-add button {
+    border: none; border-radius: 8px; padding: 0 16px; cursor: pointer;
+    background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.92);
+    font-size: 12px;
+  }
+  .note { margin-top: 12px; font-size: 11px; color: rgba(255,255,255,0.35); line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<div class="aurora"><i></i><i></i></div>
+
+<div class="window">
+  <div class="titlebar">
+    <i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+    <div class="tabs" id="tabs">
+      <button data-t="overview">概览</button>
+      <button data-t="history">历史</button>
+      <button data-t="settings">设置</button>
+      <button data-t="dictionary">词典</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- ── 概览：打开 app 的第一眼 ── -->
+    <div class="pane" id="pane-overview">
+      <h2>累计</h2>
+      <div class="hero">
+        <div class="stat">
+          <div class="label">说话时长</div>
+          <div class="value">14<small>时</small>22<small>分</small>08<small>秒</small></div>
+          <div class="sub">↑ 本周 1 时 47 分</div>
+        </div>
+        <div class="stat">
+          <div class="label">识别字数</div>
+          <div class="value">132,480<small>字</small></div>
+          <div class="sub">↑ 本周 12,904 字</div>
+        </div>
+        <div class="stat">
+          <div class="label">少敲的键盘</div>
+          <div class="value">约 9.2<small>小时</small></div>
+          <div class="sub">连续使用 12 天 🔥</div>
+        </div>
+      </div>
+
+      <h2>过去半年 · 每日识别字数</h2>
+      <div class="chart">
+        <div class="heat-months" id="heatMonths"></div>
+        <div class="heatmap" id="heatmap"></div>
+        <div class="heat-legend">
+          少 <i style="background:rgba(255,255,255,0.07)"></i><i class="l1"
+          style="background:rgba(247,222,181,0.22)"></i><i
+          style="background:rgba(247,222,181,0.42)"></i><i
+          style="background:rgba(247,222,181,0.68)"></i><i
+          style="background:rgba(247,222,181,0.95)"></i> 多
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 历史 ── -->
+    <div class="pane" id="pane-history">
+      <input class="search" placeholder="搜索历史记录…">
+      <h2>今天</h2>
+      <div class="row"><span class="time">14:32</span><span class="app">备忘录</span>
+        <span class="text">帮我把周四的评审会挪到下午三点，再给设计组同步一下新的原型链接。</span>
+        <button class="copy">复制</button></div>
+      <div class="row"><span class="time">11:05</span><span class="app">微信</span>
+        <span class="text">好的收到，我下午把新版本发到群里，大家先看录音交互那部分。</span>
+        <button class="copy">复制</button></div>
+      <div class="row"><span class="time">09:41</span><span class="app">Safari</span>
+        <span class="text">macOS 菜单栏 App 语音输入 最佳实践</span>
+        <button class="copy">复制</button></div>
+      <h2>昨天</h2>
+      <div class="row"><span class="time">20:18</span><span class="app">邮件</span>
+        <span class="text">这周的进展汇总：HUD 视觉重做完成，录音波形改为实时电平驱动……</span>
+        <button class="copy">复制</button></div>
+      <div class="row"><span class="time">16:52</span><span class="app">VS Code</span>
+        <span class="text">修复面板在多显示器下的定位问题，优先跟随聚焦窗口所在屏幕。</span>
+        <button class="copy">复制</button></div>
+      <div class="row"><span class="time">10:07</span><span class="app">备忘录</span>
+        <span class="text">买咖啡豆、取快递、给花浇水。</span>
+        <button class="copy">复制</button></div>
+    </div>
+
+    <!-- ── 设置 ── -->
+    <div class="pane" id="pane-settings">
+      <h2>快捷键</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">语音输入</div>
+            <div class="desc">按住说话，松开输入；短按开始/结束</div></div>
+          <span class="kbd">Fn 🌐</span>
+        </div>
+      </div>
+      <h2>语音识别</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">豆包 API Key</div>
+            <div class="desc">音频实时流式识别</div></div>
+          <span class="chip ok">已配置 ✓</span>
+        </div>
+      </div>
+      <h2>文字润色</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">DeepSeek API Key</div>
+            <div class="desc">仅发送识别出的文字，不发送音频</div></div>
+          <span class="chip warn">未配置</span>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">润色模式</div>
+            <div class="desc">识别后如何整理文字</div></div>
+          <div class="seg" id="refine">
+            <button class="active">原样</button><button>顺口语</button><button>要点</button>
+          </div>
+        </div>
+      </div>
+      <h2>通用</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">开机自动启动</div></div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">历史记录</div>
+            <div class="desc">仅保存在本机，随时可清空</div></div>
+          <div class="toggle on"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 词典 ── -->
+    <div class="pane" id="pane-dictionary">
+      <h2>个人词典 · 识别时优先匹配这些词</h2>
+      <div class="dict" id="dict">
+        <span class="term">Speaker</span>
+        <span class="term">豆包</span>
+        <span class="term">DeepSeek</span>
+        <span class="term">HUD</span>
+        <span class="term">声纹胶囊</span>
+        <span class="term">SwiftUI</span>
+      </div>
+      <div class="dict-add">
+        <input id="dictInput" placeholder="添加词条，如人名、术语、产品名…">
+        <button id="dictAdd">添加</button>
+      </div>
+      <p class="note">识别引擎会把这些词作为热词上传给豆包（仅词条文本），
+        提高专有名词的识别准确率。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const tabs = document.getElementById("tabs");
+let current = new URLSearchParams(location.search).get("tab") || "overview";
+if (!["overview","history","settings","dictionary"].includes(current)) current = "overview";
+
+function show(t) {
+  current = t;
+  document.querySelectorAll(".pane").forEach(p =>
+    p.classList.toggle("active", p.id === "pane-" + t));
+  tabs.querySelectorAll("button").forEach(b =>
+    b.classList.toggle("active", b.dataset.t === t));
+  const url = new URL(location);
+  url.searchParams.set("tab", t);
+  window.history.replaceState(null, "", url);
+}
+tabs.addEventListener("click", e => {
+  if (e.target.dataset?.t) show(e.target.dataset.t);
+});
+show(current);
+
+/* GitHub 风格热力图：26 周假数据，列 = 周（周一起始），今天在最后一列 */
+(function buildHeatmap() {
+  const grid = document.getElementById("heatmap");
+  const months = document.getElementById("heatMonths");
+  const WEEKS = 26, CELL = 16; /* 13px 格 + 3px 间距 */
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(start.getDate() - start.getDay() + 1 - (WEEKS - 1) * 7); /* 周一 */
+  let lastMonth = -1;
+  for (let w = 0; w < WEEKS; w++) {
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(start);
+      day.setDate(start.getDate() + w * 7 + d);
+      const cell = document.createElement("i");
+      if (day > today) {
+        cell.className = "future";
+      } else {
+        /* 假数据：工作日多、周末少，偶尔空 */
+        const weekend = d >= 5;
+        const zero = Math.random() < (weekend ? 0.45 : 0.12);
+        const words = zero ? 0 :
+          Math.floor((weekend ? 400 : 900) * (0.3 + Math.random() * 1.6));
+        const level = words === 0 ? 0 : words < 400 ? 1 : words < 900 ? 2
+          : words < 1500 ? 3 : 4;
+        if (level) cell.className = "l" + level;
+        cell.title = `${day.getMonth() + 1}月${day.getDate()}日 · ${
+          words.toLocaleString()} 字`;
+      }
+      grid.appendChild(cell);
+      if (d === 0 && day.getMonth() !== lastMonth && day <= today) {
+        lastMonth = day.getMonth();
+        const label = document.createElement("span");
+        label.textContent = `${lastMonth + 1}月`;
+        label.style.left = `calc(50% - ${(WEEKS * CELL - 3) / 2}px + ${w * CELL}px)`;
+        months.appendChild(label);
+      }
+    }
+  }
+})();
+
+/* 假交互：开关、润色分段、词典添加、历史复制 */
+document.querySelectorAll(".toggle").forEach(t =>
+  t.addEventListener("click", () => t.classList.toggle("on")));
+document.getElementById("refine").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON") return;
+  document.querySelectorAll("#refine button").forEach(b =>
+    b.classList.toggle("active", b === e.target));
+});
+document.getElementById("dictAdd").addEventListener("click", () => {
+  const input = document.getElementById("dictInput");
+  const value = input.value.trim();
+  if (!value) return;
+  const span = document.createElement("span");
+  span.className = "term";
+  span.textContent = value;
+  document.getElementById("dict").appendChild(span);
+  input.value = "";
+});
+document.querySelectorAll(".row .copy").forEach(b =>
+  b.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(
+        b.parentElement.querySelector(".text").textContent);
+    } catch {}
+    b.textContent = "已复制";
+    setTimeout(() => b.textContent = "复制", 700);
+  }));
+</script>
+</body>
+</html>
