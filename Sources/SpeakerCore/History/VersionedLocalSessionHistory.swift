@@ -438,7 +438,7 @@ package struct HistoryRecordV1: Codable {
     let refinementFailureMessage: String?
     let cancelledAtStage: String?
     let dictionarySnapshotID: UUID?
-    let dictionarySnapshotEntries: [DictionaryEntry]?
+    let dictionarySnapshotEntries: [RecordedDictionaryEntry]?
     let dictionaryRequestContext: DictionaryRequestContext?
     let dictionaryReplacements: [DictionaryReplacement]?
     let durationMilliseconds: Int?

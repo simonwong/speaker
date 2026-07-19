@@ -11,26 +11,6 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
         self.id = id
         self.word = word.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case word
-        case canonicalTerm
-    }
-
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(UUID.self, forKey: .id)
-        let decodedWord = try container.decodeIfPresent(String.self, forKey: .word)
-            ?? container.decode(String.self, forKey: .canonicalTerm)
-        word = decodedWord.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(word, forKey: .word)
-    }
 }
 
 extension DictionaryEntry {

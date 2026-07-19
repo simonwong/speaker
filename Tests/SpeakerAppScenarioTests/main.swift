@@ -936,7 +936,7 @@ struct SpeakerAppScenarioSpecs {
                 refinementFailureMessage: "SECRET REFINEMENT MESSAGE",
                 cancelledAtStage: "doubao",
                 dictionarySnapshotEntries: [
-                    DictionaryEntry(word: "SECRET TERM"),
+                    RecordedDictionaryEntry(word: "SECRET TERM"),
                 ],
                 durationMilliseconds: 1_234,
                 stageDurationsMilliseconds: [

@@ -328,7 +328,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let refinementFailureMessage: String?
     public let cancelledAtStage: String?
     public let dictionarySnapshotID: UUID?
-    public let dictionarySnapshotEntries: [DictionaryEntry]
+    public let dictionarySnapshotEntries: [RecordedDictionaryEntry]
     public let dictionaryRequestContext: DictionaryRequestContext?
     public let dictionaryReplacements: [DictionaryReplacement]
     public let durationMilliseconds: Int
@@ -358,7 +358,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         refinementFailureMessage: String? = nil,
         cancelledAtStage: String? = nil,
         dictionarySnapshotID: UUID? = nil,
-        dictionarySnapshotEntries: [DictionaryEntry] = [],
+        dictionarySnapshotEntries: [RecordedDictionaryEntry] = [],
         dictionaryRequestContext: DictionaryRequestContext? = nil,
         dictionaryReplacements: [DictionaryReplacement] = [],
         durationMilliseconds: Int = 0,
@@ -843,7 +843,9 @@ public actor VoiceInputSessions {
                 refinementModeName: snapshot.refinementMode.displayName,
                 refinementPrompt: snapshot.refinementMode.deepSeekRule,
                 dictionarySnapshotID: snapshot.dictionary.id,
-                dictionarySnapshotEntries: snapshot.dictionary.entries,
+                dictionarySnapshotEntries: snapshot.dictionary.entries.map(
+                    RecordedDictionaryEntry.init
+                ),
                 dictionaryRequestContext: snapshot.dictionaryContext,
                 durationMilliseconds: elapsed,
                 stageDurationsMilliseconds: audit.stageDurations,
@@ -1238,7 +1240,8 @@ public actor VoiceInputSessions {
             refinementPrompt: processingSnapshot?.refinementMode.deepSeekRule,
             cancelledAtStage: cancelledAtStage,
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
-            dictionarySnapshotEntries: processingSnapshot?.dictionary.entries ?? [],
+            dictionarySnapshotEntries: processingSnapshot?.dictionary.entries
+                .map(RecordedDictionaryEntry.init) ?? [],
             dictionaryRequestContext: processingSnapshot?.dictionaryContext,
             durationMilliseconds: elapsed,
             stageDurationsMilliseconds: audit.stageDurations.isEmpty
@@ -1361,7 +1364,8 @@ public actor VoiceInputSessions {
             refinementFailureStatusCode: refinementDiagnostic?.statusCode,
             refinementFailureMessage: nil,
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
-            dictionarySnapshotEntries: processingSnapshot?.dictionary.entries ?? [],
+            dictionarySnapshotEntries: processingSnapshot?.dictionary.entries
+                .map(RecordedDictionaryEntry.init) ?? [],
             dictionaryRequestContext: processingSnapshot?.dictionaryContext,
             dictionaryReplacements: [],
             durationMilliseconds: max(
@@ -1543,7 +1547,9 @@ public actor VoiceInputSessions {
             refinementModeName: snapshot.refinementMode.displayName,
             refinementPrompt: snapshot.refinementMode.deepSeekRule,
             dictionarySnapshotID: snapshot.dictionary.id,
-            dictionarySnapshotEntries: snapshot.dictionary.entries,
+            dictionarySnapshotEntries: snapshot.dictionary.entries.map(
+                RecordedDictionaryEntry.init
+            ),
             dictionaryRequestContext: snapshot.dictionaryContext,
             durationMilliseconds: max(
                 0,
@@ -1622,7 +1628,8 @@ public actor VoiceInputSessions {
             refinementModeName: snapshot?.refinementMode.displayName,
             refinementPrompt: snapshot?.refinementMode.deepSeekRule,
             dictionarySnapshotID: snapshot?.dictionary.id,
-            dictionarySnapshotEntries: snapshot?.dictionary.entries ?? [],
+            dictionarySnapshotEntries: snapshot?.dictionary.entries
+                .map(RecordedDictionaryEntry.init) ?? [],
             dictionaryRequestContext: snapshot?.dictionaryContext,
             outcome: activity
         ))

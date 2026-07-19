@@ -420,7 +420,6 @@ final class SpeakerRuntime: ObservableObject {
             self.historyModel.shutdown()
             await self.refinementSettings.shutdown()
             await self.doubaoSettings.shutdown()
-            await self.dictionarySettings.shutdown()
             await self.voiceInput.shutdown()
             await startupTask?.value
             await self.shortcut.flushPersistence()
@@ -670,7 +669,6 @@ final class SpeakerRuntime: ObservableObject {
         historyModel.shutdown()
         await refinementSettings.shutdown()
         await doubaoSettings.shutdown()
-        await dictionarySettings.shutdown()
         await voiceInput.shutdown()
         await startupTask?.value
         await shortcut.flushPersistence()

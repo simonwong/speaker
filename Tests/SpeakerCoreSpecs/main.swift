@@ -3753,7 +3753,7 @@ struct SpeakerCoreSpecs {
                 refinementPrompt: "只清理口语杂质",
                 refinementStatus: "succeeded",
                 dictionarySnapshotID: snapshotID,
-                dictionarySnapshotEntries: [dictionaryEntry],
+                dictionarySnapshotEntries: [RecordedDictionaryEntry(dictionaryEntry)],
                 dictionaryRequestContext: .init(
                     snapshotID: snapshotID,
                     hotwords: ["豆包"],
@@ -3809,7 +3809,10 @@ struct SpeakerCoreSpecs {
                     == "directReceipt.unconfirmed"
             )
             try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")
-            try expect(allRecords.last?.dictionarySnapshotEntries == [dictionaryEntry])
+            try expect(
+                allRecords.last?.dictionarySnapshotEntries
+                    == [RecordedDictionaryEntry(dictionaryEntry)]
+            )
             try expect(allRecords.last?.dictionaryRequestContext?.hotwords == ["豆包"])
             try expect(allRecords.last?.dictionaryReplacements.count == 1)
             try expect(allRecords.last?.stageDurationsMilliseconds["doubao"] == 500)
@@ -3822,6 +3825,78 @@ struct SpeakerCoreSpecs {
             await reloaded.clear()
             let recordsAfterClear = await reloaded.allRecords()
             try expect(recordsAfterClear.isEmpty)
+        }
+
+        await runAsync("legacy history aliases survive JSON import and SQLite rewrite", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-history-dictionary-v1-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let legacyURL = directory.appendingPathComponent("history.json")
+            let sqliteURL = directory.appendingPathComponent("history.sqlite3")
+            let sessionID = VoiceInputSessionID()
+            let entryID = UUID()
+            let writer = VersionedLocalSessionHistory(fileURL: legacyURL)
+            await writer.save(.init(
+                sessionID: sessionID,
+                startedAt: Date(timeIntervalSince1970: 100),
+                applicationName: "TextEdit",
+                transcription: "旧记录",
+                finalText: "旧记录",
+                dictionarySnapshotEntries: [RecordedDictionaryEntry(
+                    id: entryID,
+                    word: "豆包",
+                    legacyAliases: ["豆宝"]
+                )],
+                outcome: .delivered(
+                    sessionID,
+                    applicationName: "TextEdit",
+                    text: "旧记录"
+                )
+            ))
+
+            guard var document = try JSONSerialization.jsonObject(
+                with: Data(contentsOf: legacyURL)
+            ) as? [String: Any],
+                  var records = document["records"] as? [[String: Any]],
+                  !records.isEmpty,
+                  var entries = records[0]["dictionarySnapshotEntries"]
+                    as? [[String: Any]],
+                  !entries.isEmpty
+            else {
+                throw SpecFailure(message: "legacy history fixture was not encoded")
+            }
+            entries[0]["canonicalTerm"] = entries[0].removeValue(forKey: "word")
+            entries[0]["isEnabled"] = true
+            records[0]["dictionarySnapshotEntries"] = entries
+            document["records"] = records
+            try JSONSerialization.data(withJSONObject: document).write(to: legacyURL)
+
+            let legacy = VersionedLocalSessionHistory(fileURL: legacyURL)
+            let importedRecords = await legacy.allRecords()
+            let legacyMatches = await legacy.search("豆宝")
+            let sqlite = SQLiteSessionHistory(fileURL: sqliteURL)
+            let imported = await sqlite.importLegacyRecords(importedRecords)
+            let sqliteMatches = await sqlite.search("豆宝")
+            let rewritten = await sqlite.record(sessionID: sessionID)
+
+            try expect(
+                importedRecords.first?.dictionarySnapshotEntries.first?.word
+                    == "豆包"
+            )
+            try expect(
+                importedRecords.first?.dictionarySnapshotEntries.first?.legacyAliases
+                    == ["豆宝"]
+            )
+            try expect(legacyMatches.map(\.sessionID) == [sessionID])
+            try expect(imported)
+            try expect(sqliteMatches.map(\.sessionID) == [sessionID])
+            try expect(
+                rewritten?.dictionarySnapshotEntries.first?.legacyAliases
+                    == ["豆宝"]
+            )
         }
 
         await runAsync("SQLite history scrubs provider response text written by older builds", failures: &failures) {
