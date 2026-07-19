@@ -37,6 +37,67 @@ public enum VoiceInputUsagePresentation {
         return Double(recognizedCharacterCount) / Double(charactersTypedPerHour)
     }
 
+    /// Recognized characters from the current Monday through today.
+    public static func recognizedCharacterCountThisWeek(
+        summary: VoiceInputUsageSummary,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> Int {
+        let today = calendar.startOfDay(for: now)
+        let weekday = calendar.component(.weekday, from: today)
+        let daysSinceMonday = (weekday + 5) % 7
+        guard let monday = calendar.date(
+            byAdding: .day,
+            value: -daysSinceMonday,
+            to: today
+        ) else {
+            return 0
+        }
+
+        return summary.daily.reduce(into: 0) { total, usage in
+            let day = calendar.startOfDay(for: usage.day)
+            guard day >= monday, day <= today else { return }
+            total += max(0, usage.recognizedCharacterCount)
+        }
+    }
+
+    /// One recognized-character count per calendar day, oldest first.
+    public static func recentRecognizedCharacterCounts(
+        summary: VoiceInputUsageSummary,
+        now: Date,
+        calendar: Calendar = .current,
+        days: Int
+    ) -> [Int] {
+        guard days > 0 else { return [] }
+        let today = calendar.startOfDay(for: now)
+        guard let firstDay = calendar.date(
+            byAdding: .day,
+            value: -(days - 1),
+            to: today
+        ) else {
+            return []
+        }
+
+        var countsByDay: [Date: Int] = [:]
+        for usage in summary.daily {
+            let day = calendar.startOfDay(for: usage.day)
+            guard day >= firstDay, day <= today else { continue }
+            countsByDay[day, default: 0] += max(
+                0,
+                usage.recognizedCharacterCount
+            )
+        }
+
+        return (0 ..< days).map { offset in
+            let day = calendar.date(
+                byAdding: .day,
+                value: offset,
+                to: firstDay
+            ) ?? firstDay
+            return countsByDay[day] ?? 0
+        }
+    }
+
     /// GitHub-style shade level 0…4 for a day's recognized character count.
     public static func heatmapLevel(recognizedCharacterCount: Int) -> Int {
         switch recognizedCharacterCount {
