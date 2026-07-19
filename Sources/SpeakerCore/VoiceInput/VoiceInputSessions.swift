@@ -1363,9 +1363,7 @@ public actor VoiceInputSessions {
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
             dictionarySnapshotEntries: processingSnapshot?.dictionary.entries ?? [],
             dictionaryRequestContext: processingSnapshot?.dictionaryContext,
-            dictionaryReplacements: mayPersistBody
-                ? (processedText?.dictionaryReplacements ?? [])
-                : [],
+            dictionaryReplacements: [],
             durationMilliseconds: max(
                 0,
                 Int(Date().timeIntervalSince(startedAt) * 1_000)

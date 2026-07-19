@@ -143,6 +143,43 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "dictionary chip exposes a labelled delete action",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let recorder = DictionaryActionRecorder()
+            let hostingView = NSHostingView(rootView: DictionaryEntryChip(
+                word: "Speaker",
+                onDelete: recorder.record
+            ))
+            hostingView.frame = NSRect(x: 0, y: 0, width: 180, height: 60)
+            let window = NSWindow(
+                contentRect: NSRect(x: -10_000, y: -10_000, width: 180, height: 60),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = hostingView
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let buttons = accessibilityButtons(in: hostingView)
+            let button = buttons.first {
+                $0.label == "删除词条 Speaker"
+            }
+
+            try expect(
+                button != nil,
+                "dictionary delete action has no AX label; found \(buttons.map(\.label))"
+            )
+            try expect(button?.press() == true, "dictionary delete action cannot be pressed")
+            try expect(recorder.performedActions == 1)
+        }
+
+        run(
             "onboarding window remains usable on the available screen",
             failures: &failures,
             executed: &executed
@@ -630,6 +667,15 @@ private final class HUDActionRecorder {
 
     func route(_ effect: VoiceInputExperienceEffect) {
         routedEffects += 1
+    }
+}
+
+@MainActor
+private final class DictionaryActionRecorder {
+    private(set) var performedActions = 0
+
+    func record() {
+        performedActions += 1
     }
 }
 

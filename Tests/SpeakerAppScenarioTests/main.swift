@@ -936,7 +936,7 @@ struct SpeakerAppScenarioSpecs {
                 refinementFailureMessage: "SECRET REFINEMENT MESSAGE",
                 cancelledAtStage: "doubao",
                 dictionarySnapshotEntries: [
-                    DictionaryEntry(canonicalTerm: "SECRET TERM"),
+                    DictionaryEntry(word: "SECRET TERM"),
                 ],
                 durationMilliseconds: 1_234,
                 stageDurationsMilliseconds: [
@@ -2406,8 +2406,7 @@ private struct ExperienceFallbackProcessor: VoiceTextProcessing {
             doubaoRequestID: "doubao-request",
             deepSeekRequestID: nil,
             refinementStatus: .fellBack,
-            refinementFailure: .init(kind: .network),
-            dictionaryReplacements: []
+            refinementFailure: .init(kind: .network)
         )
     }
 }
