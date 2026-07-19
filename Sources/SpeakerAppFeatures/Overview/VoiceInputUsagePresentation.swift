@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import SpeakerCore
 
@@ -64,6 +65,8 @@ public enum VoiceInputUsagePresentation {
 /// column-per-week (Monday…Sunday down each column) with today in the final
 /// column. Deterministic given a `now` and `calendar`, so it can be unit-tested.
 public struct ContributionHeatmap: Equatable, Sendable {
+    public static let defaultWeekCount = 52
+
     public struct Cell: Equatable, Sendable {
         public let date: Date
         public let recognizedCharacterCount: Int
@@ -108,7 +111,7 @@ public struct ContributionHeatmap: Equatable, Sendable {
         summary: VoiceInputUsageSummary,
         now: Date,
         calendar: Calendar = .current,
-        weeks: Int = 26
+        weeks: Int = defaultWeekCount
     ) -> ContributionHeatmap {
         let today = calendar.startOfDay(for: now)
         // weekday: 1 = Sunday … 7 = Saturday. Shift so Monday is the first row.
@@ -137,7 +140,8 @@ public struct ContributionHeatmap: Equatable, Sendable {
         var columns: [[Cell]] = []
         columns.reserveCapacity(weeks)
         var monthLabels: [MonthLabel] = []
-        var lastLabeledMonth = -1
+        var lastObservedMonth = -1
+        var lastLabelColumn: Int?
 
         for week in 0 ..< weeks {
             var column: [Cell] = []
@@ -164,9 +168,12 @@ public struct ContributionHeatmap: Equatable, Sendable {
             }
             if let monday = column.first {
                 let month = calendar.component(.month, from: monday.date)
-                if month != lastLabeledMonth {
-                    monthLabels.append(MonthLabel(column: week, text: "\(month)月"))
-                    lastLabeledMonth = month
+                if month != lastObservedMonth {
+                    lastObservedMonth = month
+                    if lastLabelColumn.map({ week - $0 >= 4 }) ?? true {
+                        monthLabels.append(MonthLabel(column: week, text: "\(month)月"))
+                        lastLabelColumn = week
+                    }
                 }
             }
             columns.append(column)
@@ -177,5 +184,36 @@ public struct ContributionHeatmap: Equatable, Sendable {
             monthLabels: monthLabels,
             hasData: summary.totalSessionCount > 0
         )
+    }
+}
+
+package struct ContributionHeatmapLayout: Equatable, Sendable {
+    package static let gap: CGFloat = 3
+
+    package let availableWidth: CGFloat
+    package let columnCount: Int
+    package let cellLength: CGFloat
+
+    package init(availableWidth: CGFloat, columnCount: Int) {
+        self.availableWidth = max(0, availableWidth)
+        self.columnCount = max(0, columnCount)
+
+        guard columnCount > 0 else {
+            cellLength = 0
+            return
+        }
+
+        let totalGap = CGFloat(columnCount - 1) * Self.gap
+        cellLength = max(0, self.availableWidth - totalGap) / CGFloat(columnCount)
+    }
+
+    package var gridWidth: CGFloat {
+        guard columnCount > 0 else { return 0 }
+        return CGFloat(columnCount) * cellLength
+            + CGFloat(columnCount - 1) * Self.gap
+    }
+
+    package func leadingOffset(forColumn column: Int) -> CGFloat {
+        CGFloat(column) * (cellLength + Self.gap)
     }
 }

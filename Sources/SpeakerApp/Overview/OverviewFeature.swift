@@ -28,7 +28,6 @@ struct OverviewView: View {
                 SectionHeader("累计")
                 cards
 
-                SectionHeader("过去半年 · 每日识别字数")
                 OverviewHeatmapCard(summary: model.summary)
             }
             .frame(maxWidth: 640)
@@ -205,10 +204,9 @@ private struct OverviewHeatmapCard: View {
 }
 
 private enum HeatmapMetrics {
-    static let cell: CGFloat = 13
-    static let gap: CGFloat = 3
+    static let gap = ContributionHeatmapLayout.gap
     static let corner: CGFloat = 3
-    static let columnStride = cell + gap
+    static let monthAxisHeight: CGFloat = 12
 }
 
 private struct ContributionHeatmapGrid: View {
@@ -217,31 +215,47 @@ private struct ContributionHeatmapGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             monthAxis
-            HStack(alignment: .top, spacing: HeatmapMetrics.gap) {
-                ForEach(Array(heatmap.columns.enumerated()), id: \.offset) { _, column in
-                    VStack(spacing: HeatmapMetrics.gap) {
-                        ForEach(Array(column.enumerated()), id: \.offset) { _, cell in
-                            HeatmapCellView(cell: cell)
-                        }
-                    }
+            LazyVGrid(columns: gridColumns, alignment: .leading, spacing: HeatmapMetrics.gap) {
+                ForEach(Array(rowMajorCells.enumerated()), id: \.offset) { _, cell in
+                    HeatmapCellView(cell: cell)
                 }
             }
         }
     }
 
     private var monthAxis: some View {
-        let labels = Dictionary(
-            heatmap.monthLabels.map { ($0.column, $0.text) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return HStack(spacing: HeatmapMetrics.gap) {
-            ForEach(Array(heatmap.columns.indices), id: \.self) { column in
-                Text(labels[column] ?? " ")
+        GeometryReader { geometry in
+            let layout = ContributionHeatmapLayout(
+                availableWidth: geometry.size.width,
+                columnCount: heatmap.columns.count
+            )
+            ZStack(alignment: .topLeading) {
+                ForEach(heatmap.monthLabels, id: \.column) { label in
+                    Text(label.text)
                     .font(.system(size: 9.5))
                     .foregroundStyle(.secondary)
                     .fixedSize()
-                    .frame(width: HeatmapMetrics.cell, alignment: .leading)
+                    .offset(x: layout.leadingOffset(forColumn: label.column))
+                }
             }
+        }
+        .frame(height: HeatmapMetrics.monthAxisHeight)
+    }
+
+    private var gridColumns: [GridItem] {
+        Array(
+            repeating: GridItem(
+                .flexible(minimum: 0),
+                spacing: HeatmapMetrics.gap
+            ),
+            count: heatmap.columns.count
+        )
+    }
+
+    private var rowMajorCells: [ContributionHeatmap.Cell] {
+        guard let rowCount = heatmap.columns.first?.count else { return [] }
+        return (0 ..< rowCount).flatMap { row in
+            heatmap.columns.map { $0[row] }
         }
     }
 }
@@ -252,7 +266,7 @@ private struct HeatmapCellView: View {
     var body: some View {
         RoundedRectangle(cornerRadius: HeatmapMetrics.corner, style: .continuous)
             .fill(HeatmapPalette.color(forLevel: cell.level))
-            .frame(width: HeatmapMetrics.cell, height: HeatmapMetrics.cell)
+            .aspectRatio(1, contentMode: .fit)
             .opacity(cell.isFuture ? 0 : 1)
             .help(
                 cell.isFuture
