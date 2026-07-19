@@ -10,10 +10,12 @@ package struct HistoryDashboardFeedback: Equatable, Sendable {
         case error
     }
 
+    package let id: UUID
     package let kind: Kind
     package let message: String
 
-    package init(kind: Kind, message: String) {
+    package init(id: UUID, kind: Kind, message: String) {
+        self.id = id
         self.kind = kind
         self.message = message
     }

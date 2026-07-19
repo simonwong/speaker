@@ -5,19 +5,6 @@ import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
-struct HistoryFeedback: Equatable {
-    enum Kind: Equatable {
-        case information
-        case success
-        case warning
-        case error
-    }
-
-    let id: UUID
-    let kind: Kind
-    let message: String
-}
-
 enum HistoryOperation: Equatable {
     case copying(VoiceInputSessionID)
     case deleting(VoiceInputSessionID)
@@ -30,7 +17,7 @@ final class HistoryModel: ObservableObject {
     @Published private(set) var totalRecordCount = 0
     @Published var query = ""
     @Published private(set) var notice: String?
-    @Published private(set) var feedback: HistoryFeedback?
+    @Published private(set) var feedback: HistoryDashboardFeedback?
     @Published private(set) var activeOperation: HistoryOperation?
     @Published private(set) var isRedeliveryArmed = false
     @Published private(set) var retentionPolicy: HistoryRetentionPolicy = .forever
@@ -68,9 +55,10 @@ final class HistoryModel: ObservableObject {
     }
 
     func refresh() async {
-        records = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? await store.allRecords()
-            : await store.search(query)
+        records = HistoryPresentation.filteredRecords(
+            await store.allRecords(),
+            query: query
+        )
         let status = await store.persistenceStatus()
         totalRecordCount = status.recordCount
         retentionPolicy = await store.currentRetentionPolicy()
@@ -484,10 +472,10 @@ final class HistoryModel: ObservableObject {
     }
 
     private func publishFeedback(
-        _ kind: HistoryFeedback.Kind,
+        _ kind: HistoryDashboardFeedback.Kind,
         _ message: String
     ) {
-        let feedback = HistoryFeedback(
+        let feedback = HistoryDashboardFeedback(
             id: UUID(),
             kind: kind,
             message: message
@@ -516,7 +504,7 @@ struct HistoryView: View {
                 records: model.records,
                 totalRecordCount: model.totalRecordCount,
                 notice: model.notice,
-                feedback: model.feedback?.dashboardFeedback,
+                feedback: model.feedback,
                 isBusy: model.activeOperation != nil,
                 isRedeliveryArmed: model.isRedeliveryArmed,
                 retentionPolicy: model.retentionPolicy,
@@ -551,20 +539,5 @@ struct HistoryView: View {
             Task { await model.refresh() }
         }
         .onDisappear { model.cancelRedelivery() }
-    }
-}
-
-private extension HistoryFeedback {
-    var dashboardFeedback: HistoryDashboardFeedback {
-        let dashboardKind: HistoryDashboardFeedback.Kind = switch kind {
-        case .information: .information
-        case .success: .success
-        case .warning: .warning
-        case .error: .error
-        }
-        return HistoryDashboardFeedback(
-            kind: dashboardKind,
-            message: message
-        )
     }
 }
