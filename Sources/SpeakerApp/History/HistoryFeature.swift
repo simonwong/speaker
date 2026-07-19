@@ -89,8 +89,7 @@ final class HistoryModel: ObservableObject {
     @discardableResult
     func copy(_ record: VoiceInputHistoryRecord) async -> Bool {
         guard activeOperation == nil,
-              let text = record.finalText ?? record.transcription,
-              !text.isEmpty
+              let text = HistoryPresentation.retainedText(for: record)
         else { return false }
         activeOperation = .copying(record.sessionID)
         defer { activeOperation = nil }
@@ -168,7 +167,7 @@ final class HistoryModel: ObservableObject {
     }
 
     func redeliver(_ record: VoiceInputHistoryRecord) async {
-        guard let text = record.finalText ?? record.transcription, !text.isEmpty else {
+        guard let text = HistoryPresentation.retainedText(for: record) else {
             notice = "这条记录没有可重新送达的文本。"
             return
         }
@@ -510,409 +509,62 @@ final class HistoryModel: ObservableObject {
 
 struct HistoryView: View {
     @ObservedObject var model: HistoryModel
-    @State private var selection: VoiceInputSessionID?
-    @State private var confirmsClear = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                TextField("搜索文字或应用", text: $model.query)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await model.refresh() } }
-                Button("搜索") { Task { await model.refresh() } }
-                Button("刷新") { Task { await model.refresh() } }
-                Picker("保留", selection: Binding(
-                    get: { model.retentionPolicy },
-                    set: { policy in
-                        Task { await model.setRetentionPolicy(policy) }
-                    }
-                )) {
-                    ForEach(HistoryRetentionPolicy.allCases, id: \.self) { policy in
-                        Text(policy.displayName).tag(policy)
-                    }
-                }
-                .pickerStyle(.menu)
-                .frame(width: 145)
-                .disabled(model.isUpdatingRetention)
-                .help("所有选项最多保留 10000 条，防止本地文件无限增长。")
-                Button("全部清空", role: .destructive) {
-                    confirmsClear = true
-                }
-                .disabled(model.totalRecordCount == 0)
-            }
-            .padding(12)
-
-            Divider()
-
-            if model.records.isEmpty {
-                ContentUnavailableView(
-                    model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "还没有会话记录"
-                        : "没有找到匹配记录",
-                    systemImage: model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? "clock.arrow.circlepath"
-                        : "magnifyingglass",
-                    description: Text(
-                        model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? "完成第一次语音输入后，豆包与可选 DeepSeek 的阶段结果会显示在这里。"
-                            : "尝试缩短关键词，或清空搜索后查看全部记录。"
-                    )
-                )
-            } else {
-                NavigationSplitView {
-                    List(model.records, id: \.sessionID, selection: $selection) { record in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(record.finalText ?? record.transcription ?? record.outcome.historyLabel)
-                                    .lineLimit(2)
-                                Spacer(minLength: 8)
-                                Label(record.outcome.historyLabel, systemImage: record.outcome.icon)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text("\(record.startedAt.formatted()) · \(record.applicationName ?? "无目标")")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .tag(record.sessionID)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(
-                            record.finalText
-                                ?? record.transcription
-                                ?? record.outcome.historyLabel
-                        )
-                        .accessibilityValue(
-                            "\(record.outcome.historyLabel)，\(record.applicationName ?? "无目标")，\(record.startedAt.formatted())"
-                        )
-                        .accessibilityHint("选择后可查看、复制、重新输入或删除")
-                    }
-                } detail: {
-                    if let record = selectedRecord {
-                        HistoryDetailView(
-                            record: record,
-                            isRedeliveryArmed: model.isRedeliveryArmed,
-                            isBusy: model.activeOperation != nil,
-                            copy: {
-                                Task { await model.copy(record) }
-                            },
-                            redeliver: {
-                                if model.isRedeliveryArmed {
-                                    model.cancelRedelivery()
-                                } else {
-                                    Task { await model.redeliver(record) }
-                                }
-                            },
-                            delete: {
-                                let replacement = replacementSelection(
-                                    afterDeleting: record.sessionID
-                                )
-                                Task {
-                                    if await model.delete(record.sessionID) {
-                                        selection = replacement
-                                    }
-                                }
-                            }
-                        )
+        HistoryDashboard(
+            state: HistoryDashboardState(
+                records: model.records,
+                totalRecordCount: model.totalRecordCount,
+                notice: model.notice,
+                feedback: model.feedback?.dashboardFeedback,
+                isBusy: model.activeOperation != nil,
+                isRedeliveryArmed: model.isRedeliveryArmed,
+                retentionPolicy: model.retentionPolicy,
+                isUpdatingRetention: model.isUpdatingRetention
+            ),
+            query: $model.query,
+            actions: HistoryDashboardActions(
+                refresh: { Task { await model.refresh() } },
+                setRetentionPolicy: { policy in
+                    Task { await model.setRetentionPolicy(policy) }
+                },
+                clear: { Task { _ = await model.clear() } },
+                copy: { record in
+                    Task { _ = await model.copy(record) }
+                },
+                toggleRedelivery: { record in
+                    if model.isRedeliveryArmed {
+                        model.cancelRedelivery()
                     } else {
-                        ContentUnavailableView("选择一条会话", systemImage: "text.magnifyingglass")
+                        Task { await model.redeliver(record) }
                     }
+                },
+                delete: { id in
+                    Task { _ = await model.delete(id) }
                 }
-            }
-
-            if let feedback = model.feedback {
-                Divider()
-                Label(
-                    feedback.message,
-                    systemImage: feedback.kind.systemImage
-                )
-                .font(.caption)
-                .foregroundStyle(feedback.kind.color)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel(feedback.message)
-            } else if let notice = model.notice {
-                Divider()
-                Label(
-                    notice,
-                    systemImage: model.isRedeliveryArmed
-                        ? "arrow.up.forward.app.fill"
-                        : "exclamationmark.circle.fill"
-                )
-                    .font(.caption)
-                    .foregroundStyle(
-                        model.isRedeliveryArmed ? Color.secondary : .red
-                    )
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
+            )
+        )
         .task { await model.refresh() }
         .onReceive(
             NotificationCenter.default.publisher(for: .speakerHistoryDidChange)
         ) { _ in
             Task { await model.refresh() }
         }
-        .onChange(of: model.records.map(\.sessionID)) { _, ids in
-            if let selection, ids.contains(selection) {
-                return
-            }
-            selection = ids.first
-        }
         .onDisappear { model.cancelRedelivery() }
-        .confirmationDialog(
-            "清空所有会话历史？",
-            isPresented: $confirmsClear,
-            titleVisibility: .visible
-        ) {
-            Button("清空历史", role: .destructive) {
-                Task {
-                    if await model.clear() {
-                        selection = nil
-                    }
-                }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("文字记录会从本机永久删除，此操作无法撤销。")
-        }
-    }
-
-    private var selectedRecord: VoiceInputHistoryRecord? {
-        guard let selection else { return nil }
-        return model.records.first { $0.sessionID == selection }
-    }
-
-    private func replacementSelection(
-        afterDeleting id: VoiceInputSessionID
-    ) -> VoiceInputSessionID? {
-        guard let index = model.records.firstIndex(
-            where: { $0.sessionID == id }
-        ) else {
-            return model.records.first?.sessionID
-        }
-        if model.records.indices.contains(index + 1) {
-            return model.records[index + 1].sessionID
-        }
-        if index > 0 {
-            return model.records[index - 1].sessionID
-        }
-        return nil
     }
 }
 
-private struct HistoryDetailView: View {
-    let record: VoiceInputHistoryRecord
-    let isRedeliveryArmed: Bool
-    let isBusy: Bool
-    let copy: () -> Void
-    let redeliver: () -> Void
-    let delete: () -> Void
-    @State private var confirmsDelete = false
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Label(record.outcome.historyLabel, systemImage: record.outcome.icon)
-                            .font(.headline)
-                        Text(record.startedAt.formatted(date: .abbreviated, time: .standard))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(record.applicationName ?? "未指定应用")
-                        Text(record.refinementModeName ?? "默认顺滑")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                HistoryTextBlock(
-                    title: "最终文字",
-                    text: record.finalText ?? record.transcription
-                )
-
-                if record.refinementStatus == "fellBack" {
-                    Label("进一步整理未完成，已保留豆包结果", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.orange, .primary)
-                }
-
-                DisclosureGroup("查看处理过程") {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HistoryTextBlock(title: "豆包转录", text: record.transcription)
-                        if record.deepSeekText != nil || record.refinementStatus != nil {
-                            HistoryTextBlock(title: "DeepSeek 整理", text: record.deepSeekText)
-                        }
-                    }
-                    .padding(.top, 10)
-                }
-
-                DisclosureGroup("技术详情") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        technicalDetails
-                    }
-                    .padding(.top, 10)
-                }
-
-                HStack {
-                    Button("复制文字", action: copy)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        isBusy
-                            || (record.finalText == nil
-                                && record.transcription == nil)
-                    )
-                    .accessibilityHint("复制最终文字到剪贴板")
-                    Button(
-                        isRedeliveryArmed ? "取消重新输入" : "重新输入到光标处",
-                        action: redeliver
-                    )
-                        .disabled(
-                            isBusy
-                                || (record.finalText == nil
-                                    && record.transcription == nil)
-                        )
-                    Spacer()
-                    Button("删除…", role: .destructive) {
-                        confirmsDelete = true
-                    }
-                    .disabled(isBusy)
-                }
-            }
-            .padding(24)
-            .textSelection(.enabled)
+private extension HistoryFeedback {
+    var dashboardFeedback: HistoryDashboardFeedback {
+        let dashboardKind: HistoryDashboardFeedback.Kind = switch kind {
+        case .information: .information
+        case .success: .success
+        case .warning: .warning
+        case .error: .error
         }
-        .confirmationDialog(
-            "删除这条会话记录？",
-            isPresented: $confirmsDelete,
-            titleVisibility: .visible
-        ) {
-            Button("删除记录", role: .destructive, action: delete)
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("记录只保存在本机，删除后无法恢复。")
-        }
-    }
-
-    @ViewBuilder
-    private var technicalDetails: some View {
-        LabeledContent("总耗时", value: "\(record.durationMilliseconds) ms")
-        if !record.stageDurationsMilliseconds.isEmpty {
-            LabeledContent(
-                "阶段耗时",
-                value: record.stageDurationsMilliseconds
-                    .sorted { $0.key < $1.key }
-                    .map { "\($0.key) \($0.value) ms" }
-                    .joined(separator: " · ")
-            )
-        }
-        if let refinementPrompt = record.refinementPrompt {
-            HistoryTextBlock(title: "整理提示词快照", text: refinementPrompt)
-        }
-        if !record.dictionarySnapshotEntries.isEmpty {
-            Text("词库快照").font(.headline)
-            ForEach(record.dictionarySnapshotEntries) { entry in
-                Text(
-                    entry.aliases.isEmpty
-                        ? entry.canonicalTerm
-                        : "\(entry.canonicalTerm) ← \(entry.aliases.joined(separator: "、"))"
-                )
-            }
-            if let context = record.dictionaryRequestContext {
-                LabeledContent("发送词数", value: "\(context.hotwords.count)")
-                LabeledContent("省略词数", value: "\(context.omissions.count)")
-            }
-        }
-        if !record.dictionaryReplacements.isEmpty {
-            Text("词库替换").font(.headline)
-            ForEach(record.dictionaryReplacements, id: \.utf16Location) { replacement in
-                Text("\(replacement.matchedText) → \(replacement.canonicalTerm)")
-            }
-        }
-        if let providerRequestID = record.providerRequestID {
-            LabeledContent(
-                "\(record.transcriptionProvider ?? "转录提供商") 请求 ID",
-                value: providerRequestID
-            )
-        }
-        if let providerOperation = record.providerOperation {
-            LabeledContent("问题发生阶段", value: providerOperation)
-        }
-        if let providerErrorCode = record.providerErrorCode {
-            LabeledContent("服务错误代码", value: providerErrorCode)
-        }
-        if let providerStatusCode = record.providerStatusCode {
-            LabeledContent("服务状态码", value: providerStatusCode)
-        }
-        if let deliveryDiagnosticCode = record.deliveryDiagnosticCode {
-            LabeledContent(
-                "送达诊断",
-                value: deliveryDiagnosticCode
-            )
-        }
-        if let deepSeekRequestID = record.deepSeekRequestID {
-            LabeledContent("DeepSeek 请求 ID", value: deepSeekRequestID)
-        }
-        if let refinementFailureCode = record.refinementFailureCode {
-            LabeledContent("DeepSeek 错误代码", value: refinementFailureCode)
-        }
-        if let refinementFailureStatusCode = record.refinementFailureStatusCode {
-            LabeledContent("DeepSeek 状态码", value: refinementFailureStatusCode)
-        }
-        if let cancelledAtStage = record.cancelledAtStage {
-            LabeledContent("取消时阶段", value: cancelledAtStage)
-        }
-    }
-
-}
-
-private struct HistoryTextBlock: View {
-    let title: String
-    let text: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            Text(text ?? "无")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-private extension HistoryRetentionPolicy {
-    var displayName: String {
-        switch self {
-        case .thirtyDays: "最近 30 天"
-        case .ninetyDays: "最近 90 天"
-        case .oneYear: "最近一年"
-        case .forever: "不按日期清理"
-        }
-    }
-}
-
-private extension HistoryFeedback.Kind {
-    var systemImage: String {
-        switch self {
-        case .information: "info.circle.fill"
-        case .success: "checkmark.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .error: "xmark.circle.fill"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .information: .secondary
-        case .success: .green
-        case .warning: .orange
-        case .error: .red
-        }
+        return HistoryDashboardFeedback(
+            kind: dashboardKind,
+            message: message
+        )
     }
 }
