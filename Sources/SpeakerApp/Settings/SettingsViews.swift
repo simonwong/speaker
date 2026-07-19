@@ -1510,49 +1510,29 @@ private struct RefinementModeButton: View {
 
 private struct DictionarySettingsPage: View {
     @ObservedObject var model: DictionarySettingsModel
-    @State private var pendingDeleteID: UUID?
 
     var body: some View {
         SettingsCard(
             "个人词库",
-            subtitle: "识别后会把完整且无歧义的别名替换成标准写法",
+            subtitle: "添加人名、术语和产品名，提高豆包识别准确率",
             icon: "text.book.closed"
         ) {
-            HStack {
-                StatusBadge(
-                    text: "\(model.entries.filter(\.isEnabled).count) 个启用词条",
-                    icon: "checkmark",
-                    color: .green
+            HStack(spacing: 8) {
+                TextField(
+                    "添加词条：人名、术语、产品名…回车添加",
+                    text: $model.draftWord
                 )
-                Spacer()
-                Text("修改后自动保存")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                .onSubmit { Task { await model.add() } }
 
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-                GridRow {
-                    Text("标准写法")
-                        .font(.caption.weight(.medium))
-                    TextField("例如：DeepSeek", text: $model.draftCanonical)
+                Button("添加") {
+                    Task { await model.add() }
                 }
-                GridRow {
-                    Text("口语别名")
-                        .font(.caption.weight(.medium))
-                    HStack(spacing: 8) {
-                        TextField("例如：deep seek，深度求索", text: $model.draftAliases)
-                            .onSubmit { Task { await model.add() } }
-                        Button("添加词条") {
-                            Task { await model.add() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(
-                            model.draftCanonical
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty
-                        )
-                    }
-                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.draftWord
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                )
             }
 
             Divider()
@@ -1565,88 +1545,92 @@ private struct DictionarySettingsPage: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("还没有词条")
                             .font(.subheadline.weight(.medium))
-                        Text("添加产品名、人名或专业术语，提高最终文本一致性。")
+                        Text("添加产品名、人名或专业术语，识别更准。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 14)
             } else {
-                VStack(spacing: 8) {
-                    ForEach($model.entries) { $entry in
-                        HStack(spacing: 10) {
-                            Toggle("", isOn: $entry.isEnabled)
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                                .onChange(of: entry.isEnabled) {
-                                    model.scheduleSave()
-                                }
-
-                            TextField("标准写法", text: $entry.canonicalTerm)
-                                .frame(minWidth: 130)
-                                .onSubmit { Task { await model.saveEdits() } }
-                                .onChange(of: entry.canonicalTerm) {
-                                    model.scheduleSave()
-                                }
-
-                            TextField(
-                                "别名（逗号分隔）",
-                                text: Binding(
-                                    get: { entry.aliases.joined(separator: "，") },
-                                    set: { value in
-                                        entry.aliases = value
-                                            .split(whereSeparator: {
-                                                $0 == "," || $0 == "，" || $0.isNewline
-                                            })
-                                            .map(String.init)
-                                    }
-                                )
-                            )
-                            .onSubmit { Task { await model.saveEdits() } }
-                            .onChange(of: entry.aliases) {
-                                model.scheduleSave()
-                            }
-
-                            Button {
-                                pendingDeleteID = entry.id
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.red)
-                            .help("删除词条")
-                            .accessibilityLabel("删除词条 \(entry.canonicalTerm)")
-                            .accessibilityHint("删除前会再次确认")
+                DictionaryChipFlowLayout(spacing: 8) {
+                    ForEach(model.entries) { entry in
+                        DictionaryEntryChip(word: entry.word) {
+                            Task { await model.delete(entry.id) }
                         }
-                        .padding(10)
-                        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 9))
                     }
                 }
             }
+
+            Text("词条会随每次识别请求发送给豆包（仅词条文本），直接提升这些词的识别准确率。悬停词条可删除。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if let notice = model.notice {
                 SettingsNotice(text: notice)
             }
         }
-        .confirmationDialog(
-            "删除这个词条？",
-            isPresented: Binding(
-                get: { pendingDeleteID != nil },
-                set: { if !$0 { pendingDeleteID = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("删除词条", role: .destructive) {
-                guard let id = pendingDeleteID else { return }
-                pendingDeleteID = nil
-                Task { await model.delete(id) }
+    }
+}
+
+private struct DictionaryChipFlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let availableWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var contentWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth > 0, rowWidth + spacing + size.width > availableWidth {
+                totalHeight += rowHeight + spacing
+                contentWidth = max(contentWidth, rowWidth)
+                rowWidth = 0
+                rowHeight = 0
             }
-            Button("取消", role: .cancel) {
-                pendingDeleteID = nil
+            rowWidth += (rowWidth == 0 ? 0 : spacing) + size.width
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        contentWidth = max(contentWidth, rowWidth)
+        totalHeight += rowHeight
+        return CGSize(
+            width: proposal.width ?? contentWidth,
+            height: totalHeight
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var point = bounds.origin
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if point.x > bounds.minX,
+               point.x + size.width > bounds.maxX
+            {
+                point.x = bounds.minX
+                point.y += rowHeight + spacing
+                rowHeight = 0
             }
-        } message: {
-            Text("删除后仅影响新的语音输入，已有会话历史不会改变。")
+            subview.place(
+                at: point,
+                anchor: .topLeading,
+                proposal: ProposedViewSize(size)
+            )
+            point.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }

@@ -40,8 +40,8 @@ Delivery mutates the frozen Input Target only after it remains safe, current, an
 20. As a user, I want every DeepSeek failure to fall back to the confirmed Doubao Stage Result, so that optional refinement cannot lose a transcript.
 21. As a user, I want to supply my own provider credentials and keep them in Keychain, so that Speaker has no shared provider backend or embedded secret.
 22. As a user, I want content-free provider diagnostics and connection checks, so that configuration and transport problems are actionable without exposing audio or text.
-23. As a user, I want a local Personal Dictionary of canonical spellings, spoken aliases, and enabled states, so that specialist terms are recognized consistently.
-24. As a user, I want ambiguous Entries rejected and each session to use a stable dictionary snapshot, so that edits and aliases remain deterministic.
+23. As a user, I want a local Personal Dictionary of names and specialist terms, so that those words are recognized more accurately.
+24. As a user, I want empty and duplicate Entries rejected and each session to use a stable dictionary snapshot, so that edits remain deterministic.
 25. As a user, I want Session Records with Stage Results, Refinement Mode, target application, timing, delivery status, and sanitized diagnostics, so that the pipeline is inspectable.
 26. As a user, I want to search, inspect, copy, redeliver, delete, and clear Session Records, so that local history remains useful and controllable.
 27. As a user, I want history retention to follow an explicit policy with a safety cap, so that storage behavior reflects my intent.
@@ -59,8 +59,8 @@ Delivery mutates the frozen Input Target only after it remains safe, current, an
 - Commands are serialized. Duplicate edges are idempotent, asynchronous work carries session identity, and late results from cancelled or superseded sessions are discarded.
 - Audio is converted to 16 kHz, 16-bit, mono PCM in memory and placed in a bounded stream. It is never persisted as a normal application artifact.
 - Audio streams over Doubao's bidirectional `bigmodel_async` WebSocket while recording. Release sends the final audio frame and begins final-result settlement; the selected resource must match the user's activated provider resource.
-- A press snapshots the Refinement Mode and enabled Personal Dictionary. A release freezes the precise focused Accessibility element as the Input Target. Later capture and delivery must consume that same bounded target token.
-- The Personal Dictionary is local. Enabled Entries influence request context, and local alias normalization applies only to an exact, unambiguous configured match.
+- A press snapshots the Refinement Mode and Personal Dictionary. A release freezes the precise focused Accessibility element as the Input Target. Later capture and delivery must consume that same bounded target token.
+- The Personal Dictionary is local. Entries are sent as request-scoped Doubao direct hotwords; Speaker does not apply local alias replacement to the confirmed transcript.
 - Default Smoothing does not call DeepSeek. Other Refinement Modes send only the confirmed Doubao text and the selected rule through a non-thinking, non-streaming JSON request. Only a bounded, non-empty normal completion with the expected shape may replace the Doubao Stage Result.
 - Provider credentials live in Keychain. Settings, the Personal Dictionary, Session Records, and development credentials use owner-only persistence appropriate to their data type.
 - Session Records use versioned SQLite transactions. Secure targets never persist transcript text or provider request identifiers, including non-terminal and cancelled records.

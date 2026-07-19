@@ -2530,6 +2530,13 @@ struct SpeakerCoreSpecs {
             let body = try JSONSerialization.jsonObject(with: fullRequest.payload) as? [String: Any]
             let recognition = body?["request"] as? [String: Any]
             let audio = body?["audio"] as? [String: Any]
+            let corpus = recognition?["corpus"] as? [String: Any]
+            let context = corpus?["context"] as? String
+            let contextData = context.map { Data($0.utf8) }
+            let hotwordContext = try contextData.flatMap {
+                try JSONSerialization.jsonObject(with: $0) as? [String: Any]
+            }
+            let hotwords = hotwordContext?["hotwords"] as? [[String: String]]
 
             try expect(request.url == DoubaoStreamingASRConfiguration.defaultEndpoint)
             try expect(request.value(forHTTPHeaderField: "X-Api-Key") == "test-api-key")
@@ -2540,6 +2547,8 @@ struct SpeakerCoreSpecs {
             try expect(recognition?["enable_itn"] as? Bool == true)
             try expect(recognition?["enable_punc"] as? Bool == true)
             try expect(recognition?["enable_ddc"] as? Bool == true)
+            try expect(recognition?["context"] == nil)
+            try expect(hotwords == [["word": "Speaker"]])
             try expect(audio?["format"] as? String == "pcm")
             try expect(audio?["rate"] as? Int == 16_000)
             try expect(fullRequest.messageType == 0x01)
@@ -3431,7 +3440,7 @@ struct SpeakerCoreSpecs {
 
         await runAsync("voice session freezes dictionary and refinement mode at press", failures: &failures) {
             let initialDictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "Swift", aliases: ["swift-lang"]),
+                .init(word: "Swift"),
             ])
             let configuration = VoiceInputConfigurationController(
                 dictionary: initialDictionary,
@@ -3470,16 +3479,16 @@ struct SpeakerCoreSpecs {
             let record = await history.records.first
             try expect(hotwordCalls == [["Swift"]])
             try expect(refinementModes == [.conciseCleanup])
-            try expect(refinementInputs == ["Use Swift"])
+            try expect(refinementInputs == ["Use swift-lang"])
             try expect(deliveredTexts == ["Use Swift."])
             try expect(record?.transcription == "Use swift-lang")
             try expect(record?.deepSeekText == "Use Swift.")
             try expect(record?.refinementModeName == "精简清理")
             try expect(record?.refinementPrompt?.isEmpty == false)
             try expect(record?.refinementStatus == "succeeded")
-            try expect(record?.dictionarySnapshotEntries.map(\.canonicalTerm) == ["Swift"])
+            try expect(record?.dictionarySnapshotEntries.map(\.word) == ["Swift"])
             try expect(record?.dictionaryRequestContext?.hotwords == ["Swift"])
-            try expect(record?.dictionaryReplacements.count == 1)
+            try expect(record?.dictionaryReplacements.isEmpty == true)
             try expect(record?.stageDurationsMilliseconds["targetCapture"] != nil)
             try expect(record?.stageDurationsMilliseconds["delivery"] != nil)
         }
@@ -3725,7 +3734,7 @@ struct SpeakerCoreSpecs {
             let firstID = VoiceInputSessionID()
             let secondID = VoiceInputSessionID()
             let snapshotID = UUID()
-            let dictionaryEntry = DictionaryEntry(canonicalTerm: "豆包", aliases: ["豆宝"])
+            let dictionaryEntry = DictionaryEntry(word: "豆包")
             let store = VersionedLocalSessionHistory(fileURL: fileURL)
             await store.save(.init(
                 sessionID: firstID,
@@ -4701,76 +4710,96 @@ struct SpeakerCoreSpecs {
             }
         }
 
-        run("personal dictionary reports empty duplicate and conflicting enabled aliases", failures: &failures) {
+        run("personal dictionary reports empty and duplicate words", failures: &failures) {
             let emptyID = UUID()
             let duplicateOne = UUID()
             let duplicateTwo = UUID()
-            let aliasOne = UUID()
-            let aliasTwo = UUID()
             let issues = PersonalDictionaryValidator.validate([
-                .init(id: emptyID, canonicalTerm: " "),
-                .init(id: duplicateOne, canonicalTerm: "Speaker"),
-                .init(id: duplicateTwo, canonicalTerm: "speaker"),
-                .init(id: aliasOne, canonicalTerm: "Swift", aliases: ["斯威夫特"]),
-                .init(id: aliasTwo, canonicalTerm: "SwiftUI", aliases: ["斯威夫特"]),
+                .init(id: emptyID, word: " "),
+                .init(id: duplicateOne, word: "Speaker"),
+                .init(id: duplicateTwo, word: "speaker"),
             ])
 
-            try expect(issues.contains(.emptyCanonicalTerm(entryID: emptyID)))
+            try expect(issues.contains(.emptyWord(entryID: emptyID)))
             try expect(issues.contains { issue in
-                if case .duplicateCanonicalTerm = issue { true } else { false }
-            })
-            try expect(issues.contains { issue in
-                if case .conflictingEnabledAlias = issue { true } else { false }
+                if case .duplicateWord = issue { true } else { false }
             })
         }
 
-        run("dictionary snapshot and provider truncation are deterministic", failures: &failures) {
+        await runAsync("versioned personal dictionary store migrates v1 canonical terms", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-dictionary-v1-spec-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("dictionary.json")
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let retainedID = UUID()
+            let discardedStateID = UUID()
+            let legacyDocument: [String: Any] = [
+                "version": 1,
+                "entries": [
+                    [
+                        "id": retainedID.uuidString,
+                        "canonicalTerm": "Speaker",
+                        "aliases": ["说话者"],
+                        "isEnabled": true,
+                    ],
+                    [
+                        "id": discardedStateID.uuidString,
+                        "canonicalTerm": "DeepSeek",
+                        "aliases": ["deep seek"],
+                        "isEnabled": false,
+                    ],
+                ],
+            ]
+            let legacyData = try JSONSerialization.data(withJSONObject: legacyDocument)
+            try legacyData.write(to: fileURL)
+            let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
+
+            let dictionary = try await store.load()
+            let migratedData = try Data(contentsOf: fileURL)
+            let migratedDocument = try JSONSerialization.jsonObject(with: migratedData)
+                as? [String: Any]
+            let migratedEntries = migratedDocument?["entries"] as? [[String: Any]]
+
+            try expect(dictionary.entries.map(\.word) == ["Speaker", "DeepSeek"])
+            try expect(migratedDocument?["version"] as? Int == 2)
+            try expect(migratedEntries?.allSatisfy { entry in
+                entry["word"] != nil
+                    && entry["canonicalTerm"] == nil
+                    && entry["aliases"] == nil
+                    && entry["isEnabled"] == nil
+            } == true)
+        }
+
+        run("dictionary snapshot preserves entry order before provider guard", failures: &failures) {
             let alpha = DictionaryEntry(
                 id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-                canonicalTerm: "Alpha",
-                aliases: ["A"]
+                word: "Alpha"
             )
             let beta = DictionaryEntry(
                 id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
-                canonicalTerm: "Beta"
+                word: "Beta"
             )
-            let disabled = DictionaryEntry(canonicalTerm: "Disabled", isEnabled: false)
-            let long = DictionaryEntry(canonicalTerm: "VeryLongTerm")
-            let dictionary = try PersonalDictionary(entries: [long, disabled, beta, alpha])
-            let snapshot = dictionary.snapshotEnabled(
+            let long = DictionaryEntry(word: "VeryLongTerm")
+            let dictionary = try PersonalDictionary(entries: [beta, alpha, long])
+            let snapshot = dictionary.snapshot(
                 id: UUID(uuidString: "00000000-0000-0000-0000-000000000099")!,
                 createdAt: Date(timeIntervalSince1970: 10)
             )
             let context = DictionaryRequestContextBuilder.makeContext(
                 from: snapshot,
-                capacity: .init(maximumHotwordCount: 1, maximumCharactersPerHotword: 6)
+                capacity: .init(maximumHotwordCount: 1)
             )
 
-            try expect(snapshot.entries.map(\.canonicalTerm) == ["Alpha", "Beta", "VeryLongTerm"])
-            try expect(context.hotwords == ["Alpha"])
-            try expect(context.includedEntryIDs == [alpha.id])
-            try expect(context.omissions.contains { $0.reason == .providerCountLimit })
-            try expect(context.omissions.contains { $0.reason == .providerTermLengthLimit })
-        }
-
-        run("dictionary alias normalization replaces only complete unambiguous tokens", failures: &failures) {
-            let dictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "Swift", aliases: ["swift-lang"]),
-                .init(canonicalTerm: "SwiftUI", aliases: ["swift-ui"]),
-                .init(canonicalTerm: "豆包", aliases: ["豆宝"]),
-            ])
-            let result = DictionaryAliasNormalizer.normalize(
-                "我用豆宝写字。Use swift-lang, not swift-language; then swift-ui.",
-                using: dictionary.snapshotEnabled()
-            )
-
-            try expect(result.normalizedText == "我用豆包写字。Use Swift, not swift-language; then SwiftUI.")
-            try expect(result.replacements.map(\.matchedText) == ["豆宝", "swift-lang", "swift-ui"])
-            let ordinarySubstring = DictionaryAliasNormalizer.normalize(
-                "豆宝贝",
-                using: dictionary.snapshotEnabled()
-            )
-            try expect(ordinarySubstring.normalizedText == "豆宝贝")
+            try expect(DictionaryProviderCapacity.doubao.maximumHotwordCount == 100)
+            try expect(snapshot.entries.map(\.word) == ["Beta", "Alpha", "VeryLongTerm"])
+            try expect(context.hotwords == ["Beta"])
+            try expect(context.includedEntryIDs == [beta.id])
+            try expect(context.omissions.count == 2)
+            try expect(context.omissions.allSatisfy { $0.reason == .providerCountLimit })
         }
 
         await runAsync("versioned personal dictionary store round trips locally", failures: &failures) {
@@ -4780,8 +4809,8 @@ struct SpeakerCoreSpecs {
             let fileURL = directory.appendingPathComponent("dictionary.json")
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
             let dictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "豆包", aliases: ["豆宝"]),
-                .init(canonicalTerm: "DeepSeek", aliases: ["deep seek"], isEnabled: false),
+                .init(word: "豆包"),
+                .init(word: "DeepSeek"),
             ])
 
             try await store.save(dictionary)
@@ -4801,11 +4830,11 @@ struct SpeakerCoreSpecs {
             let fileURL = directory.appendingPathComponent("dictionary.json")
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
             let retained = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "retained-term"),
+                .init(word: "retained-term"),
             ])
             try await store.save(retained)
             let oversized = try PersonalDictionary(entries: [
-                .init(canonicalTerm: String(repeating: "字", count: 3 * 1_024 * 1_024)),
+                .init(word: String(repeating: "字", count: 3 * 1_024 * 1_024)),
             ])
 
             do {
@@ -4832,7 +4861,7 @@ struct SpeakerCoreSpecs {
             let writer = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
             try await writer.save(
                 PersonalDictionary(entries: [
-                    .init(canonicalTerm: "private term"),
+                    .init(word: "private term"),
                 ])
             )
             let protected = VersionedJSONPersonalDictionaryStore(
@@ -4862,7 +4891,7 @@ struct SpeakerCoreSpecs {
             let primaryURL = directory
                 .appendingPathComponent("Speaker/personal-dictionary.json")
             let dictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "豆包", aliases: ["豆宝"]),
+                .init(word: "豆包"),
             ])
             try await VersionedJSONPersonalDictionaryStore(fileURL: legacyURL)
                 .save(dictionary)
@@ -4894,10 +4923,10 @@ struct SpeakerCoreSpecs {
             let legacyURL = directory.appendingPathComponent("legacy.json")
             let primaryURL = directory.appendingPathComponent("primary.json")
             let legacyDictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "旧词条"),
+                .init(word: "旧词条"),
             ])
             let primaryDictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "新词条"),
+                .init(word: "新词条"),
             ])
             try await VersionedJSONPersonalDictionaryStore(fileURL: legacyURL)
                 .save(legacyDictionary)
@@ -5003,7 +5032,7 @@ struct SpeakerCoreSpecs {
             let dictionaryTarget = directory.appendingPathComponent("dictionary-target.json")
             let dictionaryLink = directory.appendingPathComponent("dictionary.json")
             let expectedDictionary = try PersonalDictionary(entries: [
-                .init(canonicalTerm: "private-term"),
+                .init(word: "private-term"),
             ])
             try await VersionedJSONPersonalDictionaryStore(fileURL: dictionaryTarget)
                 .save(expectedDictionary)
@@ -5892,13 +5921,12 @@ private actor ContextualTranscriberFake: ContextualSpeechTranscribing {
     }
 
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
-        try await transcribe(audio, hotwords: [], context: nil)
+        try await transcribe(audio, hotwords: [])
     }
 
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult {
         hotwordCalls.append(hotwords)
         return TranscriptionResult(text: text, providerRequestID: "doubao-context-spec")
@@ -6170,8 +6198,7 @@ private actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoi
             doubaoRequestID: "streaming-spec",
             deepSeekRequestID: nil,
             refinementStatus: .notRequested,
-            refinementFailure: nil,
-            dictionaryReplacements: []
+            refinementFailure: nil
         )
     }
 }
@@ -6460,8 +6487,7 @@ private struct DoubaoFailureTranscriber: ContextualSpeechTranscribing {
 
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult {
         throw failure
     }
@@ -6476,8 +6502,7 @@ private struct CredentialFailureTranscriber: ContextualSpeechTranscribing {
 
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult {
         throw error
     }

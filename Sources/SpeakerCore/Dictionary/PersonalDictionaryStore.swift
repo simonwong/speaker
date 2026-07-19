@@ -39,7 +39,7 @@ public enum PersonalDictionaryMigrationOutcome: Equatable, Sendable {
 }
 
 public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
     private static let maximumDocumentByteCount = 8 * 1_024 * 1_024
 
     private struct VersionHeader: Decodable {
@@ -49,6 +49,15 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
     private struct Envelope: Codable {
         let version: Int
         let entries: [DictionaryEntry]
+    }
+
+    private struct LegacyEnvelopeV1: Decodable {
+        let entries: [LegacyEntryV1]
+    }
+
+    private struct LegacyEntryV1: Decodable {
+        let id: UUID
+        let canonicalTerm: String
     }
 
     public let fileURL: URL
@@ -163,21 +172,28 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         } catch {
             throw PersonalDictionaryStoreError.corruptedData
         }
-        guard version == Self.currentVersion else {
+        switch version {
+        case Self.currentVersion:
+            do {
+                let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+                return try PersonalDictionary(entries: envelope.entries)
+            } catch {
+                throw PersonalDictionaryStoreError.corruptedData
+            }
+        case 1:
+            let dictionary: PersonalDictionary
+            do {
+                let envelope = try JSONDecoder().decode(LegacyEnvelopeV1.self, from: data)
+                dictionary = try PersonalDictionary(entries: envelope.entries.map {
+                    DictionaryEntry(id: $0.id, word: $0.canonicalTerm)
+                })
+            } catch {
+                throw PersonalDictionaryStoreError.corruptedData
+            }
+            try await save(dictionary)
+            return dictionary
+        default:
             throw PersonalDictionaryStoreError.unsupportedVersion(version)
-        }
-
-        let envelope: Envelope
-        do {
-            envelope = try JSONDecoder().decode(Envelope.self, from: data)
-        } catch {
-            throw PersonalDictionaryStoreError.corruptedData
-        }
-
-        do {
-            return try PersonalDictionary(entries: envelope.entries)
-        } catch {
-            throw PersonalDictionaryStoreError.corruptedData
         }
     }
 

@@ -34,7 +34,6 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
     public let deepSeekRequestID: String?
     public let refinementStatus: DeepSeekRefinementStatus
     public let refinementFailure: DeepSeekRefinementFailure?
-    public let dictionaryReplacements: [DictionaryReplacement]
     public let stageDurationsMilliseconds: [String: Int]
 
     public init(
@@ -46,7 +45,6 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
         deepSeekRequestID: String?,
         refinementStatus: DeepSeekRefinementStatus,
         refinementFailure: DeepSeekRefinementFailure?,
-        dictionaryReplacements: [DictionaryReplacement],
         stageDurationsMilliseconds: [String: Int] = [:]
     ) {
         self.doubaoText = doubaoText
@@ -57,7 +55,6 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
         self.deepSeekRequestID = deepSeekRequestID
         self.refinementStatus = refinementStatus
         self.refinementFailure = refinementFailure
-        self.dictionaryReplacements = dictionaryReplacements
         self.stageDurationsMilliseconds = stageDurationsMilliseconds
     }
 }
@@ -112,16 +109,14 @@ public protocol VoiceTextProcessing: Sendable {
 public protocol ContextualSpeechTranscribing: SpeechTranscribing {
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult
 }
 
 public protocol StreamingContextualSpeechTranscribing: Sendable {
     func transcribe(
         _ audioChunks: AsyncStream<Data>,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult
 }
 
@@ -146,7 +141,7 @@ public actor VoiceInputConfigurationController {
     }
 
     public func captureSnapshot() -> VoiceTextProcessingSnapshot {
-        let dictionarySnapshot = dictionary.snapshotEnabled()
+        let dictionarySnapshot = dictionary.snapshot()
         return VoiceTextProcessingSnapshot(
             dictionary: dictionarySnapshot,
             dictionaryContext: DictionaryRequestContextBuilder.makeContext(from: dictionarySnapshot),
@@ -197,8 +192,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         do {
             doubaoResult = try await doubao.transcribe(
                 audio,
-                hotwords: snapshot.dictionaryContext.hotwords,
-                context: nil
+                hotwords: snapshot.dictionaryContext.hotwords
             )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
@@ -232,8 +226,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         do {
             doubaoResult = try await streamingDoubao.transcribe(
                 audioChunks,
-                hotwords: snapshot.dictionaryContext.hotwords,
-                context: nil
+                hotwords: snapshot.dictionaryContext.hotwords
             )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
@@ -257,10 +250,6 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         doubaoDuration: Duration,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
-        let normalization = DictionaryAliasNormalizer.normalize(
-            doubaoResult.text,
-            using: snapshot.dictionary
-        )
         if snapshot.refinementMode.requiresDeepSeek {
             await progress(.init(
                 stage: .refining,
@@ -269,7 +258,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         }
         let refinementStarted = ContinuousClock.now
         let refinementOutcome = try await refinement.refine(
-            doubaoText: normalization.normalizedText,
+            doubaoText: doubaoResult.text,
             mode: snapshot.refinementMode
         )
         let refinementDuration = refinementStarted.duration(to: .now)
@@ -285,14 +274,13 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         }
         return VoiceTextProcessingResult(
             doubaoText: doubaoResult.text,
-            normalizedText: normalization.normalizedText,
+            normalizedText: doubaoResult.text,
             deepSeekText: refinementOutcome.deepSeekText,
             finalText: refinementOutcome.finalText,
             doubaoRequestID: doubaoResult.providerRequestID,
             deepSeekRequestID: refinementOutcome.providerRequestID,
             refinementStatus: refinementOutcome.status,
             refinementFailure: refinementOutcome.failure,
-            dictionaryReplacements: normalization.replacements,
             stageDurationsMilliseconds: stageDurations
         )
     }
@@ -334,7 +322,6 @@ struct BasicVoiceTextProcessor: VoiceTextProcessing {
             deepSeekRequestID: nil,
             refinementStatus: .notRequested,
             refinementFailure: nil,
-            dictionaryReplacements: [],
             stageDurationsMilliseconds: [
                 "recording": Self.milliseconds(audio.duration)
             ]

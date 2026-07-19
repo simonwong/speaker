@@ -411,13 +411,11 @@ final class RefinementSettingsModel: ObservableObject {
 @MainActor
 final class DictionarySettingsModel: ObservableObject {
     @Published var entries: [DictionaryEntry] = []
-    @Published var draftCanonical = ""
-    @Published var draftAliases = ""
+    @Published var draftWord = ""
     @Published private(set) var notice: String?
 
     private let store: VersionedJSONPersonalDictionaryStore
     private let configuration: VoiceInputConfigurationController
-    private var saveTask: Task<Void, Never>?
     private var allowsPersistence = false
 
     init(
@@ -442,40 +440,16 @@ final class DictionarySettingsModel: ObservableObject {
     }
 
     func add() async {
-        let aliases = draftAliases
-            .split(whereSeparator: { $0 == "," || $0 == "，" || $0.isNewline })
-            .map(String.init)
-        let entry = DictionaryEntry(canonicalTerm: draftCanonical, aliases: aliases)
+        let entry = DictionaryEntry(word: draftWord)
         guard await save(entries + [entry]) else { return }
-        draftCanonical = ""
-        draftAliases = ""
-    }
-
-    func saveEdits() async {
-        saveTask?.cancel()
-        saveTask = nil
-        _ = await save(entries)
-    }
-
-    func scheduleSave() {
-        saveTask?.cancel()
-        saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            await self?.saveEdits()
-        }
+        draftWord = ""
     }
 
     func delete(_ id: UUID) async {
         _ = await save(entries.filter { $0.id != id })
     }
 
-    func shutdown() async {
-        let task = saveTask
-        saveTask = nil
-        task?.cancel()
-        await task?.value
-    }
+    func shutdown() async {}
 
     private func save(_ candidate: [DictionaryEntry]) async -> Bool {
         guard allowsPersistence else {

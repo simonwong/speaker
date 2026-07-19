@@ -44,7 +44,7 @@ The upgrade carries the API Key, Resource ID, request/connect identifiers, and s
 - Microphone input is converted in memory to 16 kHz, 16-bit, mono PCM.
 - Audio is placed in a bounded stream and sent in paced chunks; no normal audio file is created.
 - ITN, punctuation, and semantic smoothing are enabled for Default Smoothing.
-- Enabled Personal Dictionary context accompanies the request.
+- Personal Dictionary Entries accompany the request as direct hotwords at `request.corpus.context`; the exact shape and current capacity are recorded in [Doubao Direct Hotword Contract](doubao-hotwords.md).
 - Sender and receiver run concurrently so explicit provider errors can end recording early.
 - User Cancellation closes the local task and suppresses late frames or results. It does not claim that remote work or billing stopped.
 

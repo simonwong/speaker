@@ -2,49 +2,58 @@ import Foundation
 
 public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
-    public var canonicalTerm: String
-    public var aliases: [String]
-    public var isEnabled: Bool
+    public let word: String
 
     public init(
         id: UUID = UUID(),
-        canonicalTerm: String,
-        aliases: [String] = [],
-        isEnabled: Bool = true
+        word: String
     ) {
         self.id = id
-        self.canonicalTerm = canonicalTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.aliases = Self.cleanAliases(aliases)
-        self.isEnabled = isEnabled
+        self.word = word.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func cleanAliases(_ aliases: [String]) -> [String] {
-        var seen = Set<String>()
-        return aliases.compactMap { alias in
-            let cleanAlias = alias.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleanAlias.isEmpty else { return nil }
-            let key = DictionaryTermKey(cleanAlias).value
-            guard seen.insert(key).inserted else { return nil }
-            return cleanAlias
-        }
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case word
+        case canonicalTerm
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        let decodedWord = try container.decodeIfPresent(String.self, forKey: .word)
+            ?? container.decode(String.self, forKey: .canonicalTerm)
+        word = decodedWord.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(word, forKey: .word)
+    }
+}
+
+extension DictionaryEntry {
+    static func stableOrder(_ lhs: DictionaryEntry, _ rhs: DictionaryEntry) -> Bool {
+        let lhsKey = DictionaryTermKey(lhs.word).value
+        let rhsKey = DictionaryTermKey(rhs.word).value
+        if lhsKey != rhsKey { return lhsKey < rhsKey }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 }
 
 public enum PersonalDictionaryValidationIssue: Equatable, Sendable {
-    case emptyCanonicalTerm(entryID: UUID)
-    case duplicateCanonicalTerm(term: String, entryIDs: [UUID])
-    case conflictingEnabledAlias(alias: String, entryIDs: [UUID])
+    case emptyWord(entryID: UUID)
+    case duplicateWord(word: String, entryIDs: [UUID])
 }
 
 extension PersonalDictionaryValidationIssue: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case .emptyCanonicalTerm:
-            "标准写法不能为空。"
-        case let .duplicateCanonicalTerm(term, _):
-            "标准写法“\(term)”已存在。"
-        case let .conflictingEnabledAlias(alias, _):
-            "口语别名“\(alias)”同时属于多个已启用词条。"
+        case .emptyWord:
+            "词条不能为空。"
+        case let .duplicateWord(word, _):
+            "词条“\(word)”已存在。"
         }
     }
 }
@@ -67,45 +76,19 @@ public enum PersonalDictionaryValidator {
     public static func validate(_ entries: [DictionaryEntry]) -> [PersonalDictionaryValidationIssue] {
         var issues: [PersonalDictionaryValidationIssue] = []
 
-        for entry in entries where entry.canonicalTerm.isEmpty {
-            issues.append(.emptyCanonicalTerm(entryID: entry.id))
+        for entry in entries where entry.word.isEmpty {
+            issues.append(.emptyWord(entryID: entry.id))
         }
 
-        let canonicalGroups = Dictionary(grouping: entries.filter { !$0.canonicalTerm.isEmpty }) {
-            DictionaryTermKey($0.canonicalTerm).value
+        let wordGroups = Dictionary(grouping: entries.filter { !$0.word.isEmpty }) {
+            DictionaryTermKey($0.word).value
         }
-        for group in canonicalGroups.values where group.count > 1 {
+        for group in wordGroups.values where group.count > 1 {
             let ordered = group.sorted(by: DictionaryEntry.stableOrder)
             issues.append(
-                .duplicateCanonicalTerm(
-                    term: ordered[0].canonicalTerm,
+                .duplicateWord(
+                    word: ordered[0].word,
                     entryIDs: ordered.map(\.id)
-                )
-            )
-        }
-
-        struct AliasClaim {
-            let spelling: String
-            let entry: DictionaryEntry
-        }
-        var aliasClaims: [String: [AliasClaim]] = [:]
-        for entry in entries where entry.isEnabled {
-            for alias in entry.aliases {
-                aliasClaims[DictionaryTermKey(alias).value, default: []].append(
-                    AliasClaim(spelling: alias, entry: entry)
-                )
-            }
-        }
-        for claims in aliasClaims.values {
-            let uniqueEntries = Dictionary(grouping: claims, by: { $0.entry.id })
-                .values
-                .compactMap(\.first)
-                .sorted { DictionaryEntry.stableOrder($0.entry, $1.entry) }
-            guard uniqueEntries.count > 1 else { continue }
-            issues.append(
-                .conflictingEnabledAlias(
-                    alias: uniqueEntries[0].spelling,
-                    entryIDs: uniqueEntries.map(\.entry.id)
                 )
             )
         }
@@ -122,12 +105,10 @@ public enum PersonalDictionaryValidator {
 
     private static func issueKey(_ issue: PersonalDictionaryValidationIssue) -> String {
         switch issue {
-        case let .emptyCanonicalTerm(id):
+        case let .emptyWord(id):
             "0:\(id.uuidString)"
-        case let .duplicateCanonicalTerm(term, _):
-            "1:\(DictionaryTermKey(term).value)"
-        case let .conflictingEnabledAlias(alias, _):
-            "2:\(DictionaryTermKey(alias).value)"
+        case let .duplicateWord(word, _):
+            "1:\(DictionaryTermKey(word).value)"
         }
     }
 }
@@ -145,14 +126,14 @@ public struct PersonalDictionary: Equatable, Sendable {
         self.entries = entries
     }
 
-    public func snapshotEnabled(
+    public func snapshot(
         id: UUID = UUID(),
         createdAt: Date = Date()
     ) -> PersonalDictionarySnapshot {
         PersonalDictionarySnapshot(
             id: id,
             createdAt: createdAt,
-            entries: entries.filter(\.isEnabled).sorted(by: DictionaryEntry.stableOrder)
+            entries: entries
         )
     }
 }
@@ -165,16 +146,7 @@ public struct PersonalDictionarySnapshot: Codable, Equatable, Identifiable, Send
     public init(id: UUID = UUID(), createdAt: Date = Date(), entries: [DictionaryEntry]) {
         self.id = id
         self.createdAt = createdAt
-        self.entries = entries.filter(\.isEnabled).sorted(by: DictionaryEntry.stableOrder)
-    }
-}
-
-extension DictionaryEntry {
-    static func stableOrder(_ lhs: DictionaryEntry, _ rhs: DictionaryEntry) -> Bool {
-        let lhsKey = DictionaryTermKey(lhs.canonicalTerm).value
-        let rhsKey = DictionaryTermKey(rhs.canonicalTerm).value
-        if lhsKey != rhsKey { return lhsKey < rhsKey }
-        return lhs.id.uuidString < rhs.id.uuidString
+        self.entries = entries
     }
 }
 

@@ -4,8 +4,8 @@
 
   回答的问题：词典要不要别名映射层？
   答案（经用户拍板 + 豆包 API 核实）：不要。豆包大模型流式识别原生支持
-  热词直传（request.context = {"hotwords":[{"word":"…"}]}，上限 200 token，
-  超出自动截断），一列纯词即可直接提升识别 —— Typeless 式。
+  热词直传（request.corpus.context = {"hotwords":[{"word":"…"}]} 的 JSON 字符串）；
+  最新官方文档为双向流式 100 tokens，未承诺热词自动截断，一列纯词即可直接提升识别 —— Typeless 式。
   原"标准写法 + 口语别名 + 启用开关"模型废弃：别名替换是本地自加的复杂度，
   整层移除；词条不要了就删，无启用开关。
 
@@ -17,7 +17,7 @@
   - chips = FlowLayout；悬停删除 = onHover + 右上角小 ×（含 AX label）
   - 数据模型简化为 [String]；旧 personal-dictionary.json 迁移取 canonicalTerm，
     aliases 丢弃；DictionaryAliasNormalizer 及调用点整体移除
-  - 请求侧从 dialog_ctx 换成官方热词直传格式，截断策略按 200 token
+  - 请求侧从 dialog_ctx 换成官方热词直传格式；本地最多发送 100 个稳定排序词条
 -->
 <html lang="zh-CN">
 <head>

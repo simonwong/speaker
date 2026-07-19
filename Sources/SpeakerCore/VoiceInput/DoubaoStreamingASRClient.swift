@@ -43,7 +43,6 @@ public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
     public var resource: DoubaoStreamingResource
     public var requestUserID: String
     public var hotwords: [String]
-    public var context: String?
     public var options: DoubaoTranscriptionOptions
     public var endpoint: URL
 
@@ -52,7 +51,6 @@ public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
         resource: DoubaoStreamingResource = .default,
         requestUserID: String,
         hotwords: [String] = [],
-        context: String? = nil,
         options: DoubaoTranscriptionOptions = .init(),
         endpoint: URL = Self.defaultEndpoint
     ) {
@@ -60,7 +58,6 @@ public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
         self.resource = resource
         self.requestUserID = requestUserID
         self.hotwords = hotwords
-        self.context = context
         self.options = options
         self.endpoint = endpoint
     }
@@ -369,18 +366,22 @@ private struct DoubaoStreamingRequestBody: Encodable, Sendable {
     }
 
     struct RecognitionRequest: Encodable, Sendable {
+        struct Corpus: Encodable, Sendable {
+            let context: String
+        }
+
         let modelName = "bigmodel"
         let enableITN: Bool
         let enablePunctuation: Bool
         let enableSemanticSmoothing: Bool
-        let context: String?
+        let corpus: Corpus?
 
         enum CodingKeys: String, CodingKey {
             case modelName = "model_name"
             case enableITN = "enable_itn"
             case enablePunctuation = "enable_punc"
             case enableSemanticSmoothing = "enable_ddc"
-            case context
+            case corpus
         }
     }
 
@@ -739,38 +740,26 @@ public actor DoubaoStreamingASRClient {
                 enableITN: configuration.options.enableITN,
                 enablePunctuation: configuration.options.enablePunctuation,
                 enableSemanticSmoothing: configuration.options.enableSemanticSmoothing,
-                context: try Self.makeContext(
-                    hotwords: configuration.hotwords,
-                    context: configuration.context
-                )
+                corpus: try Self.makeHotwordContext(hotwords: configuration.hotwords).map {
+                    .init(context: $0)
+                }
             )
         )
     }
 
-    private static func makeContext(hotwords: [String], context: String?) throws -> String? {
-        let texts = hotwords
+    private static func makeHotwordContext(hotwords: [String]) throws -> String? {
+        let words = hotwords
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-            + [context?.trimmingCharacters(in: .whitespacesAndNewlines)]
-                .compactMap { value in
-                    guard let value, !value.isEmpty else { return nil }
-                    return value
-                }
-        guard !texts.isEmpty else { return nil }
+        guard !words.isEmpty else { return nil }
 
-        struct DialogContext: Encodable {
-            struct Entry: Encodable { let text: String }
-            let contextType = "dialog_ctx"
-            let contextData: [Entry]
-
-            enum CodingKeys: String, CodingKey {
-                case contextType = "context_type"
-                case contextData = "context_data"
-            }
+        struct HotwordContext: Encodable {
+            struct Hotword: Encodable { let word: String }
+            let hotwords: [Hotword]
         }
 
         let data = try JSONEncoder().encode(
-            DialogContext(contextData: texts.map(DialogContext.Entry.init(text:)))
+            HotwordContext(hotwords: words.map(HotwordContext.Hotword.init(word:)))
         )
         guard let string = String(data: data, encoding: .utf8) else {
             throw DoubaoASRFailure(kind: .invalidRequest)

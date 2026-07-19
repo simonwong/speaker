@@ -1,34 +1,58 @@
 import Foundation
 
 public struct DictionaryProviderCapacity: Equatable, Sendable {
+    /// Doubao documents 100 provider tokens for bidirectional streaming but
+    /// publishes no compatible tokenizer. This 100-entry guard is conservative
+    /// request hygiene, not a claim that every Entry maps to one provider token.
     public static let doubao = DictionaryProviderCapacity(
-        maximumHotwordCount: 5_000,
-        maximumCharactersPerHotword: 9
+        maximumHotwordCount: 100
     )
 
     public let maximumHotwordCount: Int
-    public let maximumCharactersPerHotword: Int?
 
-    public init(maximumHotwordCount: Int, maximumCharactersPerHotword: Int? = nil) {
+    public init(maximumHotwordCount: Int) {
         self.maximumHotwordCount = max(0, maximumHotwordCount)
-        self.maximumCharactersPerHotword = maximumCharactersPerHotword.map { max(0, $0) }
     }
 }
 
 public enum DictionaryContextOmissionReason: String, Codable, Equatable, Sendable {
     case providerCountLimit
+    /// Retained only so historical records written before the direct-hotword
+    /// migration remain readable.
     case providerTermLengthLimit
 }
 
 public struct DictionaryContextOmission: Codable, Equatable, Sendable {
     public let entryID: UUID
-    public let canonicalTerm: String
+    public let word: String
     public let reason: DictionaryContextOmissionReason
 
-    public init(entryID: UUID, canonicalTerm: String, reason: DictionaryContextOmissionReason) {
+    public init(entryID: UUID, word: String, reason: DictionaryContextOmissionReason) {
         self.entryID = entryID
-        self.canonicalTerm = canonicalTerm
+        self.word = word
         self.reason = reason
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case entryID
+        case word
+        case canonicalTerm
+        case reason
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entryID = try container.decode(UUID.self, forKey: .entryID)
+        word = try container.decodeIfPresent(String.self, forKey: .word)
+            ?? container.decode(String.self, forKey: .canonicalTerm)
+        reason = try container.decode(DictionaryContextOmissionReason.self, forKey: .reason)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(entryID, forKey: .entryID)
+        try container.encode(word, forKey: .word)
+        try container.encode(reason, forKey: .reason)
     }
 }
 
@@ -60,30 +84,18 @@ public enum DictionaryRequestContextBuilder {
         var includedEntryIDs: [UUID] = []
         var omissions: [DictionaryContextOmission] = []
 
-        for entry in snapshot.entries.sorted(by: DictionaryEntry.stableOrder) {
-            if let maximumLength = capacity.maximumCharactersPerHotword,
-               entry.canonicalTerm.count > maximumLength
-            {
-                omissions.append(
-                    DictionaryContextOmission(
-                        entryID: entry.id,
-                        canonicalTerm: entry.canonicalTerm,
-                        reason: .providerTermLengthLimit
-                    )
-                )
-                continue
-            }
+        for entry in snapshot.entries {
             guard hotwords.count < capacity.maximumHotwordCount else {
                 omissions.append(
                     DictionaryContextOmission(
                         entryID: entry.id,
-                        canonicalTerm: entry.canonicalTerm,
+                        word: entry.word,
                         reason: .providerCountLimit
                     )
                 )
                 continue
             }
-            hotwords.append(entry.canonicalTerm)
+            hotwords.append(entry.word)
             includedEntryIDs.append(entry.id)
         }
 

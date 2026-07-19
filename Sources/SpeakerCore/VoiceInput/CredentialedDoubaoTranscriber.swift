@@ -27,32 +27,28 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     }
 
     public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
-        try await transcribe(audio, hotwords: [], context: nil)
+        try await transcribe(audio, hotwords: [])
     }
 
     public func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult {
         let pcm = try Self.pcm16LE(from: audio.data)
         return try await transcribe(
             Self.chunkStream(from: pcm),
             hotwords: hotwords,
-            context: context,
             runtimeOperation: .voiceInput
         )
     }
 
     public func transcribe(
         _ audioChunks: AsyncStream<Data>,
-        hotwords: [String],
-        context: String?
+        hotwords: [String]
     ) async throws -> TranscriptionResult {
         try await transcribe(
             audioChunks,
             hotwords: hotwords,
-            context: context,
             runtimeOperation: .voiceInput
         )
     }
@@ -60,7 +56,6 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     private func transcribe(
         _ audioChunks: AsyncStream<Data>,
         hotwords: [String],
-        context: String?,
         runtimeOperation: VoiceProviderRuntimeOperation
     ) async throws -> TranscriptionResult {
         guard let apiKey = try await credentials.apiKey(for: .doubao) else {
@@ -71,8 +66,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
                 apiKey: apiKey,
                 resource: resource,
                 requestUserID: requestUserID(),
-                hotwords: hotwords,
-                context: context
+                hotwords: hotwords
             ),
             connector: connector,
             runtimeDiagnostics: runtimeDiagnostics,
@@ -107,7 +101,6 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
             return try await transcribe(
                 Self.chunkStream(from: Self.silentProbePCM),
                 hotwords: [],
-                context: nil,
                 runtimeOperation: .connectionCheck
             ).providerRequestID
         } catch let failure as DoubaoASRFailure

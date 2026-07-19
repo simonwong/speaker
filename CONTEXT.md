@@ -30,15 +30,15 @@ _Avoid_: custom rule, custom transcription
 
 **Personal Dictionary**
 
-The local collection of canonical terms that belongs only to the current user and improves recognition consistency for names and specialist vocabulary.
+The local collection of user-supplied terms that belongs only to the current user and improves recognition accuracy for names and specialist vocabulary.
 
 _Avoid_: cloud dictionary, team dictionary
 
 **Entry**
 
-A canonical spelling, zero or more spoken aliases, and an enabled state. Disabling an Entry preserves it without applying it to new sessions.
+A single user-supplied spelling sent with a Voice Input Session to improve its recognition accuracy. Removing an Entry stops applying it to new sessions.
 
-_Avoid_: hotword, replacement rule
+_Avoid_: hotword, alias mapping, replacement rule, disabled entry
 
 **Input Target**
 
