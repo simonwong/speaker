@@ -39,6 +39,28 @@ package struct HistoryRecordRowPresentation: Equatable, Sendable {
 /// Presentation policy for the History tab. Calendar grouping belongs here,
 /// outside `SpeakerCore`, because labels such as Today are interface language.
 package enum HistoryPresentation {
+    package static func filteredRecords(
+        _ records: [VoiceInputHistoryRecord],
+        query: String
+    ) -> [VoiceInputHistoryRecord] {
+        let normalizedQuery = query.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !normalizedQuery.isEmpty else { return records }
+
+        return records.filter { record in
+            [retainedText(for: record), record.applicationName]
+                .compactMap { $0 }
+                .contains { value in
+                    value.range(
+                        of: normalizedQuery,
+                        options: [.caseInsensitive, .diacriticInsensitive],
+                        locale: .current
+                    ) != nil
+                }
+        }
+    }
+
     package static func retainedText(
         for record: VoiceInputHistoryRecord
     ) -> String? {

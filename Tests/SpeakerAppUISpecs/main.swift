@@ -530,6 +530,58 @@ struct SpeakerAppUISpecs {
             try expect(!redacted.canCopy)
         }
 
+        run(
+            "history search matches only the displayed body and source application",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let hiddenTranscriptID = VoiceInputSessionID()
+            let bodyID = VoiceInputSessionID()
+            let appID = VoiceInputSessionID()
+            let records = [
+                makeHistoryRecord(
+                    id: hiddenTranscriptID,
+                    startedAt: Date(timeIntervalSince1970: 300),
+                    applicationName: "备忘录",
+                    transcription: "只在原始转录出现的暗号",
+                    finalText: "屏幕展示的最终正文"
+                ),
+                makeHistoryRecord(
+                    id: bodyID,
+                    startedAt: Date(timeIntervalSince1970: 200),
+                    applicationName: "邮件",
+                    transcription: "初稿",
+                    finalText: "需要搜索的正文"
+                ),
+                makeHistoryRecord(
+                    id: appID,
+                    startedAt: Date(timeIntervalSince1970: 100),
+                    applicationName: "Safari",
+                    transcription: "网页内容",
+                    finalText: nil
+                ),
+            ]
+
+            try expect(
+                HistoryPresentation.filteredRecords(
+                    records,
+                    query: "暗号"
+                ).isEmpty
+            )
+            try expect(
+                HistoryPresentation.filteredRecords(
+                    records,
+                    query: "搜索的正文"
+                ).map(\.sessionID) == [bodyID]
+            )
+            try expect(
+                HistoryPresentation.filteredRecords(
+                    records,
+                    query: "safari"
+                ).map(\.sessionID) == [appID]
+            )
+        }
+
         guard failures.isEmpty else {
             for failure in failures {
                 FileHandle.standardError.write(
