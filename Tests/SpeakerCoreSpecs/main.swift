@@ -4898,6 +4898,35 @@ struct SpeakerCoreSpecs {
             )
         }
 
+        await runAsync("versioned personal dictionary rejects whitespace-only v2 words", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-dictionary-blank-v2-spec-\(UUID().uuidString)"
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let fileURL = directory.appendingPathComponent("dictionary.json")
+            let document: [String: Any] = [
+                "version": 2,
+                "entries": [[
+                    "id": UUID().uuidString,
+                    "word": "   ",
+                ]],
+            ]
+            try JSONSerialization.data(withJSONObject: document).write(to: fileURL)
+            let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
+
+            do {
+                _ = try await store.load()
+                throw SpecFailure(message: "whitespace-only v2 word was loaded")
+            } catch let error as PersonalDictionaryStoreError {
+                try expect(error == .corruptedData)
+            }
+        }
+
         await runAsync("personal dictionary refuses an unreadable oversized save and retains the old file", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-dictionary-size-spec-\(UUID().uuidString)")
