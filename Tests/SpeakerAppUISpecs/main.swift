@@ -332,6 +332,98 @@ struct SpeakerAppUISpecs {
             try expect(description.contains("204"))
         }
 
+        run(
+            "overview weekly characters include Monday through today only",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let now = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 19, hour: 15
+            ))!
+            let daily = [
+                (12, 9_999),
+                (13, 400),
+                (18, 600),
+                (19, 800),
+                (20, 7_777),
+            ].map { day, count in
+                VoiceInputDailyUsage(
+                    day: calendar.date(from: DateComponents(
+                        year: 2026, month: 7, day: day
+                    ))!,
+                    recognizedCharacterCount: count,
+                    speakingMilliseconds: 0,
+                    sessionCount: 1
+                )
+            }
+            let summary = VoiceInputUsageSummary(
+                totalRecognizedCharacterCount: 19_576,
+                totalSpeakingMilliseconds: 0,
+                totalSessionCount: daily.count,
+                daily: daily
+            )
+
+            try expect(
+                VoiceInputUsagePresentation.recognizedCharacterCountThisWeek(
+                    summary: summary,
+                    now: now,
+                    calendar: calendar
+                ) == 1_800
+            )
+        }
+
+        run(
+            "overview voiceprint fills the latest 18 calendar days",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let now = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 19, hour: 15
+            ))!
+            let daily = [
+                (1, 111),
+                (2, 200),
+                (18, 1_800),
+                (19, 1_900),
+                (20, 2_000),
+            ].map { day, count in
+                VoiceInputDailyUsage(
+                    day: calendar.date(from: DateComponents(
+                        year: 2026, month: 7, day: day
+                    ))!,
+                    recognizedCharacterCount: count,
+                    speakingMilliseconds: 0,
+                    sessionCount: 1
+                )
+            }
+            let summary = VoiceInputUsageSummary(
+                totalRecognizedCharacterCount: 6_011,
+                totalSpeakingMilliseconds: 0,
+                totalSessionCount: daily.count,
+                daily: daily
+            )
+            let expected = [
+                200,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0,
+                1_800,
+                1_900,
+            ]
+            let counts = VoiceInputUsagePresentation
+                .recentRecognizedCharacterCounts(
+                    summary: summary,
+                    now: now,
+                    calendar: calendar,
+                    days: 18
+                )
+
+            try expect(counts == expected)
+        }
+
         guard failures.isEmpty else {
             for failure in failures {
                 FileHandle.standardError.write(

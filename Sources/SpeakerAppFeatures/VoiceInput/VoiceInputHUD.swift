@@ -75,8 +75,8 @@ package struct VoiceInputHUD: View {
 /// waveform and the informational notice badge. It is pulled from the app
 /// icon's glyph tone so the floating HUD reads as the same product rather
 /// than a generic system control.
-private extension Color {
-    static let hudAccent = Color(red: 0.97, green: 0.87, blue: 0.71)
+extension Color {
+    package static let hudAccent = Color(red: 0.97, green: 0.87, blue: 0.71)
 }
 
 /// One pill serves both live phases of a session — recording and processing —

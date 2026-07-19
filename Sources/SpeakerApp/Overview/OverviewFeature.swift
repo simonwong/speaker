@@ -21,19 +21,33 @@ final class OverviewModel: ObservableObject {
 
 struct OverviewView: View {
     @ObservedObject var model: OverviewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                SectionHeader("累计")
-                cards
-
-                OverviewHeatmapCard(summary: model.summary)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    OverviewHero(
+                        summary: model.summary,
+                        reduceMotion: reduceMotion
+                    )
+                    OverviewMetrics(summary: model.summary, now: Date())
+                        .padding(.top, 38)
+                    Spacer(minLength: 36)
+                    OverviewHeatmap(
+                        summary: model.summary,
+                        reduceMotion: reduceMotion
+                    )
+                }
+                .frame(maxWidth: 780)
+                .frame(
+                    minHeight: max(0, geometry.size.height - 56),
+                    alignment: .top
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 36)
+                .padding(.vertical, 28)
             }
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .task { await model.refresh() }
@@ -43,48 +57,161 @@ struct OverviewView: View {
             Task { await model.refresh() }
         }
     }
+}
 
-    private var cards: some View {
-        HStack(alignment: .top, spacing: 12) {
-            OverviewStatCard(label: "说话时长") {
-                speakingValue
+private struct OverviewHero: View {
+    let summary: VoiceInputUsageSummary
+    let reduceMotion: Bool
+
+    private var characterCount: Int {
+        max(0, summary.totalRecognizedCharacterCount)
+    }
+
+    private var voiceprintCounts: [Int] {
+        VoiceInputUsagePresentation.recentRecognizedCharacterCounts(
+            summary: summary,
+            now: Date(),
+            days: 18
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("说出的文字 · 累计")
+                .font(.system(size: 12, weight: .medium))
+                .tracking(3)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .lastTextBaseline, spacing: 10) {
+                Text(characterCount.formatted(.number.grouping(.automatic)))
+                    .font(.system(size: 76, weight: .semibold, design: .serif))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                    .contentTransition(.numericText())
+
+                Text("字")
+                    .font(.system(size: 17, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
             }
-            OverviewStatCard(label: "识别字数") {
-                charactersValue
+            .padding(.top, 12)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.7),
+                value: characterCount
+            )
+
+            OverviewVoiceprint(
+                counts: voiceprintCounts,
+                reduceMotion: reduceMotion
+            )
+            .padding(.top, 15)
+
+            if summary.totalSessionCount == 0 {
+                Text("按住 Fn，说出第一句话。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 11)
             }
-            OverviewStatCard(label: "少敲的键盘") {
-                keyboardSavedValue
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct OverviewVoiceprint: View {
+    let counts: [Int]
+    let reduceMotion: Bool
+    @State private var isPresented = false
+
+    private var peak: Double {
+        Double(max(1, counts.max() ?? 0))
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(Array(counts.enumerated()), id: \.offset) { index, count in
+                let ratio = Double(max(0, count)) / peak
+                Capsule()
+                    .fill(
+                        count == 0
+                            ? Color.primary.opacity(0.07)
+                            : Color.hudAccent
+                    )
+                    .frame(
+                        width: 5,
+                        height: 6 + 18 * pow(ratio, 0.7)
+                    )
+                    .scaleEffect(
+                        x: 1,
+                        y: reduceMotion || isPresented ? 1 : 0.1
+                    )
+                    .opacity(count == 0 ? 1 : 0.55 + 0.45 * ratio)
+                    .animation(
+                        reduceMotion
+                            ? nil
+                            : .spring(response: 0.45, dampingFraction: 0.74)
+                                .delay(0.2 + Double(index) * 0.028),
+                        value: isPresented
+                    )
             }
+        }
+        .frame(height: 26)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.35),
+            value: counts
+        )
+        .onAppear { isPresented = true }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct OverviewMetrics: View {
+    let summary: VoiceInputUsageSummary
+    let now: Date
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            OverviewMetric(label: "说话时长", value: speakingValue)
+            MetricDivider()
+            OverviewMetric(label: "少敲的键盘", value: keyboardSavedValue)
+            MetricDivider()
+            OverviewMetric(label: "本周", value: weeklyValue)
         }
     }
 
     private var speakingValue: Text {
         let duration = VoiceInputUsagePresentation.speakingDuration(
-            milliseconds: model.summary.totalSpeakingMilliseconds
+            milliseconds: summary.totalSpeakingMilliseconds
         )
-        return number(duration.hours) + unit("时")
-            + number(duration.minutes) + unit("分")
-            + number(duration.seconds) + unit("秒")
-    }
-
-    private var charactersValue: Text {
-        let formatted = model.summary.totalRecognizedCharacterCount
-            .formatted(.number.grouping(.automatic))
-        return Text(formatted).font(Self.valueFont) + unit("字")
+        if duration.hours > 0 {
+            return number(duration.hours) + unit("时")
+                + number(duration.minutes) + unit("分")
+        }
+        return number(duration.minutes) + unit("分")
     }
 
     private var keyboardSavedValue: Text {
         let hours = VoiceInputUsagePresentation.keyboardSavedHours(
-            recognizedCharacterCount: model.summary.totalRecognizedCharacterCount
+            recognizedCharacterCount: summary.totalRecognizedCharacterCount
         )
         let formatted = String(format: "%.1f", hours)
-        return unit("约 ") + Text(formatted).font(Self.valueFont) + unit(" 小时")
+        return unit("约 ") + Text(formatted).font(Self.valueFont) + unit("小时")
+    }
+
+    private var weeklyValue: Text {
+        let count = VoiceInputUsagePresentation.recognizedCharacterCountThisWeek(
+            summary: summary,
+            now: now
+        )
+        let formatted = count.formatted(.number.grouping(.automatic))
+        return Text(count > 0 ? "+\(formatted)" : formatted)
+            .font(Self.valueFont) + unit("字")
     }
 
     private static let valueFont = Font.system(
-        size: 25,
-        weight: .bold,
-        design: .rounded
+        size: 21,
+        weight: .semibold,
+        design: .serif
     ).monospacedDigit()
 
     private func number(_ value: Int) -> Text {
@@ -93,113 +220,59 @@ struct OverviewView: View {
 
     private func unit(_ text: String) -> Text {
         Text(text)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.secondary)
     }
 }
 
-private struct SectionHeader: View {
-    let title: String
-
-    init(_ title: String) {
-        self.title = title
-    }
-
-    var body: some View {
-        Text(title)
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.leading, 2)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
-private struct OverviewStatCard: View {
+private struct OverviewMetric: View {
     let label: String
     let value: Text
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    init(label: String, @ViewBuilder value: () -> Text) {
-        self.label = label
-        self.value = value()
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 5) {
             value
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .minimumScaleFactor(0.72)
+            Text(label)
+                .font(.system(size: 11.5))
+                .tracking(0.5)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            Color(nsColor: .controlBackgroundColor),
-            in: RoundedRectangle(cornerRadius: 14)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    Color.primary.opacity(contrast == .increased ? 0.32 : 0.07),
-                    lineWidth: contrast == .increased ? 1.5 : 1
-                )
-        }
         .accessibilityElement(children: .combine)
     }
 }
 
-private struct OverviewHeatmapCard: View {
+private struct MetricDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.12))
+            .frame(width: 0.5, height: 43)
+            .padding(.horizontal, 34)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct OverviewHeatmap: View {
     let summary: VoiceInputUsageSummary
-    @Environment(\.colorSchemeContrast) private var contrast
+    let reduceMotion: Bool
 
     private var heatmap: ContributionHeatmap {
         ContributionHeatmap.build(summary: summary, now: Date())
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             let heatmap = heatmap
-            if heatmap.hasData {
-                ContributionHeatmapGrid(heatmap: heatmap)
-                HeatmapLegend()
-            } else {
-                emptyState
-            }
+            ContributionHeatmapGrid(
+                heatmap: heatmap,
+                reduceMotion: reduceMotion
+            )
+            .id(heatmap.hasData)
+            HeatmapLegend()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(
-            Color(nsColor: .controlBackgroundColor),
-            in: RoundedRectangle(cornerRadius: 14)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    Color.primary.opacity(contrast == .increased ? 0.32 : 0.07),
-                    lineWidth: contrast == .increased ? 1.5 : 1
-                )
-        }
-    }
-
-    private var emptyState: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "square.grid.3x3")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("还没有语音输入记录")
-                    .font(.subheadline.weight(.medium))
-                Text("完成第一次语音输入后，这里会按天显示识别字数的活跃度。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 18)
     }
 }
 
@@ -211,16 +284,24 @@ private enum HeatmapMetrics {
 
 private struct ContributionHeatmapGrid: View {
     let heatmap: ContributionHeatmap
+    let reduceMotion: Bool
+    @State private var isPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             monthAxis
             LazyVGrid(columns: gridColumns, alignment: .leading, spacing: HeatmapMetrics.gap) {
-                ForEach(Array(rowMajorCells.enumerated()), id: \.offset) { _, cell in
-                    HeatmapCellView(cell: cell)
+                ForEach(Array(rowMajorCells.enumerated()), id: \.offset) { index, cell in
+                    HeatmapCellView(
+                        cell: cell,
+                        column: index % max(1, heatmap.columns.count),
+                        isPresented: isPresented,
+                        reduceMotion: reduceMotion
+                    )
                 }
             }
         }
+        .onAppear { isPresented = true }
     }
 
     private var monthAxis: some View {
@@ -262,12 +343,27 @@ private struct ContributionHeatmapGrid: View {
 
 private struct HeatmapCellView: View {
     let cell: ContributionHeatmap.Cell
+    let column: Int
+    let isPresented: Bool
+    let reduceMotion: Bool
 
     var body: some View {
         RoundedRectangle(cornerRadius: HeatmapMetrics.corner, style: .continuous)
             .fill(HeatmapPalette.color(forLevel: cell.level))
             .aspectRatio(1, contentMode: .fit)
-            .opacity(cell.isFuture ? 0 : 1)
+            .scaleEffect(reduceMotion || isPresented ? 1 : 0.55)
+            .opacity(
+                cell.isFuture
+                    ? 0
+                    : (reduceMotion || isPresented ? 1 : 0)
+            )
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .easeOut(duration: 0.24)
+                        .delay(0.3 + Double(column) * 0.007),
+                value: isPresented
+            )
             .help(
                 cell.isFuture
                     ? ""
@@ -301,10 +397,10 @@ private struct HeatmapLegend: View {
 private enum HeatmapPalette {
     static func color(forLevel level: Int) -> Color {
         switch level {
-        case 1: Color.accentColor.opacity(0.28)
-        case 2: Color.accentColor.opacity(0.5)
-        case 3: Color.accentColor.opacity(0.72)
-        case 4: Color.accentColor
+        case 1: Color.hudAccent.opacity(0.24)
+        case 2: Color.hudAccent.opacity(0.44)
+        case 3: Color.hudAccent.opacity(0.68)
+        case 4: Color.hudAccent.opacity(0.95)
         default: Color.primary.opacity(0.06)
         }
     }
