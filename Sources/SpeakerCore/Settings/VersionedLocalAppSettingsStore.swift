@@ -184,6 +184,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var launchAtLogin: Bool
     public var doubaoResourceID: String?
     public var historyRetention: HistoryRetentionPolicy
+    public var historyRetentionWhenEnabled: HistoryRetentionPolicy
 
     public init(
         shortcut: VoiceShortcutPreference = .functionKey,
@@ -191,7 +192,8 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         savedCustomRefinement: RefinementPreference? = nil,
         launchAtLogin: Bool = false,
         doubaoResourceID: String? = nil,
-        historyRetention: HistoryRetentionPolicy = .forever
+        historyRetention: HistoryRetentionPolicy = .forever,
+        historyRetentionWhenEnabled: HistoryRetentionPolicy? = nil
     ) {
         self.shortcut = shortcut
         self.refinement = refinement
@@ -199,6 +201,9 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.launchAtLogin = launchAtLogin
         self.doubaoResourceID = doubaoResourceID
         self.historyRetention = historyRetention
+        self.historyRetentionWhenEnabled = Self.enabledRetention(
+            historyRetentionWhenEnabled ?? historyRetention
+        )
     }
 
     public static let `default` = SpeakerAppSettings()
@@ -210,6 +215,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         case launchAtLogin
         case doubaoResourceID
         case historyRetention
+        case historyRetentionWhenEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -237,6 +243,19 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
             HistoryRetentionPolicy.self,
             forKey: .historyRetention
         ) ?? .forever
+        let rememberedRetention = try container.decodeIfPresent(
+            HistoryRetentionPolicy.self,
+            forKey: .historyRetentionWhenEnabled
+        ) ?? historyRetention
+        historyRetentionWhenEnabled = Self.enabledRetention(
+            rememberedRetention
+        )
+    }
+
+    private static func enabledRetention(
+        _ policy: HistoryRetentionPolicy
+    ) -> HistoryRetentionPolicy {
+        policy.savesNewRecords ? policy : .forever
     }
 }
 
@@ -446,6 +465,9 @@ public actor VersionedLocalAppSettingsStore {
         _ policy: HistoryRetentionPolicy
     ) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
+        if policy.savesNewRecords {
+            settings.historyRetentionWhenEnabled = policy
+        }
         settings.historyRetention = policy
         try save(settings)
         return settings
