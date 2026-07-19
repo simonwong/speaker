@@ -25,28 +25,32 @@ struct SpeakerApp: App {
                 softwareUpdate: runtime.softwareUpdate,
                 dataErasure: runtime.dataErasure,
                 settingsNavigation: runtime.settingsNavigation,
+                mainWindow: runtime.mainWindow,
                 startRuntime: runtime.start,
                 refreshPermissions: runtime.refreshPermissions
             )
         }
         .menuBarExtraStyle(.menu)
 
+        // Secondary Preferences surface kept for the standard ⌘, shortcut and the
+        // voice HUD's "check speech settings" recovery, which routes through the
+        // system `openSettings` action. The tabbed main window is the primary UI.
         Settings {
             SettingsView(workspace: runtime.settingsWorkspace)
+                .frame(width: 860, height: 650)
         }
 
-        Window("会话历史", id: "history") {
-            if runtime.dataErasure.state == .idle {
-                HistoryView(model: runtime.historyModel)
-            } else {
-                ContentUnavailableView(
-                    "本地数据清除中",
-                    systemImage: "externaldrive.badge.xmark",
-                    description: Text("完成清除或解决失败原因后才能查看会话历史。")
-                )
-            }
+        Window("Speaker", id: MainWindowModel.windowID) {
+            MainWindowView(
+                mainWindow: runtime.mainWindow,
+                dataErasure: runtime.dataErasure,
+                overview: runtime.overviewModel,
+                history: runtime.historyModel,
+                settingsWorkspace: runtime.settingsWorkspace,
+                dictionary: runtime.dictionarySettings
+            )
         }
-        .defaultSize(width: 820, height: 560)
+        .defaultSize(width: 900, height: 640)
     }
 
     private var menuBarIcon: String {

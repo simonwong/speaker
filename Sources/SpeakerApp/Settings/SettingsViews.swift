@@ -210,7 +210,6 @@ struct SettingsView: View {
             workspace: workspace,
             shortcutRecorder: shortcutRecorder
         )
-        .frame(width: 860, height: 650)
         .task {
             await workspace.refresh()
         }
@@ -292,9 +291,15 @@ private struct SettingsOverviewView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    // The personal dictionary now lives in its own top-level tab, so the settings
+    // tab lists every section except `.dictionary`.
+    private static let tabSections: [SettingsOverviewSection] = [
+        .voice, .transcription, .refinement, .permissions, .about,
+    ]
+
     private var visibleSections: [SettingsOverviewSection] {
         dataErasure.state == .idle
-            ? SettingsOverviewSection.allCases
+            ? Self.tabSections
             : [.about]
     }
 
@@ -1667,5 +1672,22 @@ private struct DictionarySettingsPage: View {
         } message: {
             Text("删除后仅影响新的语音输入，已有会话历史不会改变。")
         }
+    }
+}
+
+struct DictionaryTabView: View {
+    @ObservedObject var model: DictionarySettingsModel
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                DictionarySettingsPage(model: model)
+            }
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

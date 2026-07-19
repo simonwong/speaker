@@ -10,21 +10,26 @@ struct MenuBarContent: View {
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var settingsNavigation: SettingsNavigationModel
+    @ObservedObject var mainWindow: MainWindowModel
     let startRuntime: () -> Void
     let refreshPermissions: () -> Void
-    @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
     private var commandRouter: MenuBarCommandRouter {
         MenuBarCommandRouter(
             navigation: settingsNavigation,
-            openSettings: { openSettings() },
-            openHistory: { openWindow(id: "history") },
+            openSettings: { openMainWindow(.settings) },
+            openHistory: { openMainWindow(.history) },
             activate: {
                 NSApp.activate(ignoringOtherApps: true)
             },
             terminate: { NSApp.terminate(nil) }
         )
+    }
+
+    private func openMainWindow(_ tab: MainWindowTab) {
+        mainWindow.select(tab)
+        openWindow(id: MainWindowModel.windowID)
     }
 
     var body: some View {
@@ -88,6 +93,11 @@ struct MenuBarContent: View {
                 Button("继续完成权限设置…") {
                     commandRouter.perform(.permissionSettings)
                 }
+            }
+
+            Button("概览看板") {
+                openMainWindow(.overview)
+                NSApp.activate(ignoringOtherApps: true)
             }
 
             Button("会话历史") {

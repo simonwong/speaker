@@ -13,6 +13,8 @@ final class SpeakerRuntime: ObservableObject {
     let refinementSettings: RefinementSettingsModel
     let dictionarySettings: DictionarySettingsModel
     let historyModel: HistoryModel
+    let overviewModel: OverviewModel
+    let mainWindow = MainWindowModel()
     let loginItemSettings: LoginItemSettingsModel
     let settingsNavigation: SettingsNavigationModel
     let shortcut: VoiceShortcutFeature
@@ -291,6 +293,7 @@ final class SpeakerRuntime: ObservableObject {
             announce: Self.announceAccessibility,
             interactionRouter: globalInteraction
         )
+        overviewModel = OverviewModel(store: history)
         loginItemSettings = LoginItemSettingsModel(
             service: LoginItemServiceAdapter(),
             settingsStore: settingsStore
