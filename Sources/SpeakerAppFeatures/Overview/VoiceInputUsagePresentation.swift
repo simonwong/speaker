@@ -38,7 +38,7 @@ public enum VoiceInputUsagePresentation {
     }
 
     /// Recognized characters from the current Monday through today.
-    public static func recognizedCharacterCountThisWeek(
+    package static func recognizedCharacterCountThisWeek(
         summary: VoiceInputUsageSummary,
         now: Date,
         calendar: Calendar = .current
@@ -62,7 +62,7 @@ public enum VoiceInputUsagePresentation {
     }
 
     /// One recognized-character count per calendar day, oldest first.
-    public static func recentRecognizedCharacterCounts(
+    package static func recentRecognizedCharacterCounts(
         summary: VoiceInputUsageSummary,
         now: Date,
         calendar: Calendar = .current,

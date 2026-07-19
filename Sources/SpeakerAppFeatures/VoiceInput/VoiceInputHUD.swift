@@ -71,14 +71,6 @@ package struct VoiceInputHUD: View {
     }
 }
 
-/// The single warm accent the HUD uses for anything "live" — the recording
-/// waveform and the informational notice badge. It is pulled from the app
-/// icon's glyph tone so the floating HUD reads as the same product rather
-/// than a generic system control.
-extension Color {
-    package static let hudAccent = Color(red: 0.97, green: 0.87, blue: 0.71)
-}
-
 /// One pill serves both live phases of a session — recording and processing —
 /// so the surface keeps a single SwiftUI identity from press to result. The
 /// panel footprint never changes between the two and only the waveform's
@@ -234,8 +226,8 @@ private struct ActivityWaveform: View {
         case .recording:
             LinearGradient(
                 colors: [
-                    Color.hudAccent.opacity(0.5),
-                    Color.hudAccent.opacity(0.98),
+                    SpeakerVisualIdentity.warmAccent.opacity(0.5),
+                    SpeakerVisualIdentity.warmAccent.opacity(0.98),
                 ],
                 startPoint: .bottom,
                 endPoint: .top
@@ -365,7 +357,7 @@ private struct PendingCopyStrip: View {
             HStack(spacing: 9) {
                 Image(systemName: "doc.on.clipboard")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.hudAccent)
+                    .foregroundStyle(SpeakerVisualIdentity.warmAccent)
                     .accessibilityHidden(true)
 
                 Text(text)
