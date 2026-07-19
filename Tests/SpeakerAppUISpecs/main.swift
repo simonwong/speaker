@@ -183,7 +183,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "contribution heatmap lays out 26 Monday-first weeks with today in the final column",
+            "contribution heatmap lays out 52 Monday-first weeks with today in the final column",
             failures: &failures,
             executed: &executed
         ) {
@@ -207,13 +207,12 @@ struct SpeakerAppUISpecs {
             let heatmap = ContributionHeatmap.build(
                 summary: summary,
                 now: now,
-                calendar: calendar,
-                weeks: 26
+                calendar: calendar
             )
 
-            try expect(heatmap.columns.count == 26)
+            try expect(heatmap.columns.count == 52)
             try expect(heatmap.columns.allSatisfy { $0.count == 7 })
-            try expect(heatmap.columns.flatMap { $0 }.count == 182)
+            try expect(heatmap.columns.flatMap { $0 }.count == 364)
             try expect(heatmap.hasData)
             // First row of the first column is a Monday (Gregorian weekday 2).
             try expect(
@@ -221,7 +220,7 @@ struct SpeakerAppUISpecs {
             )
             // Today sits in the final column.
             try expect(
-                heatmap.columns[25].contains { $0.date == today && !$0.isFuture }
+                heatmap.columns[51].contains { $0.date == today && !$0.isFuture }
             )
             let todayCell = heatmap.columns.flatMap { $0 }.first { $0.date == today }
             try expect(todayCell?.recognizedCharacterCount == 1_000)
@@ -230,6 +229,39 @@ struct SpeakerAppUISpecs {
             let futureCells = heatmap.columns.flatMap { $0 }.filter { $0.date > today }
             try expect(futureCells.allSatisfy { $0.isFuture && $0.level == 0 })
             try expect(heatmap.monthLabels.first?.column == 0)
+            try expect(
+                zip(heatmap.monthLabels, heatmap.monthLabels.dropFirst())
+                    .allSatisfy { next in
+                        next.1.column - next.0.column >= 4
+                    }
+            )
+        }
+
+        run(
+            "contribution heatmap cells resize to fill the available width",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let compact = ContributionHeatmapLayout(
+                availableWidth: 480,
+                columnCount: ContributionHeatmap.defaultWeekCount
+            )
+            let wide = ContributionHeatmapLayout(
+                availableWidth: 604,
+                columnCount: ContributionHeatmap.defaultWeekCount
+            )
+
+            try expect(compact.cellLength > 0)
+            try expect(compact.cellLength < wide.cellLength)
+            try expect(abs(compact.gridWidth - 480) < 0.001)
+            try expect(abs(wide.gridWidth - 604) < 0.001)
+            try expect(
+                abs(
+                    wide.leadingOffset(forColumn: 51)
+                        + wide.cellLength
+                        - wide.availableWidth
+                ) < 0.001
+            )
         }
 
         run(
@@ -241,7 +273,7 @@ struct SpeakerAppUISpecs {
                 summary: .empty,
                 now: Date()
             )
-            try expect(heatmap.columns.count == 26)
+            try expect(heatmap.columns.count == 52)
             try expect(!heatmap.hasData)
             try expect(
                 heatmap.columns.flatMap { $0 }.allSatisfy {
