@@ -157,21 +157,41 @@ struct SettingsNotice: View {
 
 struct SettingsView: View {
     let workspace: SettingsWorkspace
+    @ObservedObject private var dataErasure: SpeakerDataErasureCoordinator
     @StateObject private var shortcutRecorder = ShortcutRecorderModel()
 
     init(workspace: SettingsWorkspace) {
         self.workspace = workspace
+        dataErasure = workspace.dataErasure
     }
 
+    @ViewBuilder
     var body: some View {
-        SettingsOverviewView(
-            workspace: workspace,
-            shortcutRecorder: shortcutRecorder
-        )
-        .task {
-            await workspace.refresh()
+        switch dataErasure.state.workspaceRoute {
+        case .normal:
+            SettingsOverviewView(
+                workspace: workspace,
+                shortcutRecorder: shortcutRecorder
+            )
+            .task {
+                await workspace.refresh()
+            }
+            .onDisappear { shortcutRecorder.stop() }
+        case .erasing:
+            DataErasureInProgressView()
+        case .aboutRecovery:
+            AboutView(workspace: workspace)
         }
-        .onDisappear { shortcutRecorder.stop() }
+    }
+}
+
+struct DataErasureInProgressView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "本地数据清除中",
+            systemImage: "externaldrive.badge.xmark",
+            description: Text("Speaker 会在安全清除完成后自动退出。")
+        )
     }
 }
 
@@ -634,9 +654,9 @@ private struct ShortcutSettingsPage: View {
 }
 
 private struct GeneralSettingsPage: View {
-    @ObservedObject var loginItemSettings: LoginItemSettingsModel
-    @ObservedObject var history: HistoryModel
-    @ObservedObject var softwareUpdate: SoftwareUpdateFeature
+    let loginItemSettings: LoginItemSettingsModel
+    let history: HistoryModel
+    let softwareUpdate: SoftwareUpdateFeature
 
     var body: some View {
         SettingsCard(
@@ -644,71 +664,80 @@ private struct GeneralSettingsPage: View {
             subtitle: "启动、历史保留与软件更新",
             icon: "switch.2"
         ) {
-            Toggle(
-                "登录 Mac 时自动启动 Speaker",
-                isOn: Binding(
-                    get: { loginItemSettings.isEnabled },
-                    set: { enabled in
-                        Task { await loginItemSettings.setEnabled(enabled) }
-                    }
-                )
-            )
-            .toggleStyle(.switch)
-
-            if let notice = loginItemSettings.notice {
-                SettingsNotice(text: notice, color: .orange)
-            }
-            if loginItemSettings.showsSystemSettingsButton {
-                Button("打开登录项设置") {
-                    loginItemSettings.openSystemSettings()
-                }
-                .controlSize(.small)
-            }
-
-            Divider()
-
-            Picker(
-                "保存历史",
-                selection: Binding(
-                    get: { history.retentionPolicy },
-                    set: { policy in
-                        Task { await history.setRetentionPolicy(policy) }
-                    }
-                )
-            ) {
-                ForEach(HistoryRetentionPolicy.allCases, id: \.self) { policy in
-                    Text(policy.settingsDisplayName).tag(policy)
-                }
-            }
-            .disabled(history.isUpdatingRetention)
-
-            if softwareUpdate.state.isAvailable {
-                Divider()
-
-                Toggle(
-                    "自动检查更新",
-                    isOn: Binding(
-                        get: {
-                            softwareUpdate.state.automaticallyChecksForUpdates
-                        },
-                        set: {
-                            softwareUpdate.setAutomaticallyChecksForUpdates($0)
-                        }
-                    )
-                )
-                .toggleStyle(.switch)
-            }
+            LaunchAtLoginSettingsRow(model: loginItemSettings)
+            HistorySavingSettingsRow(model: history)
+            AutomaticUpdateSettingsRow(model: softwareUpdate)
         }
     }
 }
 
-private extension HistoryRetentionPolicy {
-    var settingsDisplayName: String {
-        switch self {
-        case .thirtyDays: "最近 30 天"
-        case .ninetyDays: "最近 90 天"
-        case .oneYear: "最近一年"
-        case .forever: "永久保留"
+private struct LaunchAtLoginSettingsRow: View {
+    @ObservedObject var model: LoginItemSettingsModel
+
+    var body: some View {
+        Toggle(
+            "登录 Mac 时自动启动 Speaker",
+            isOn: Binding(
+                get: { model.isEnabled },
+                set: { enabled in
+                    Task { await model.setEnabled(enabled) }
+                }
+            )
+        )
+        .toggleStyle(.switch)
+
+        if let notice = model.notice {
+            SettingsNotice(text: notice, color: .orange)
+        }
+        if model.showsSystemSettingsButton {
+            Button("打开登录项设置") {
+                model.openSystemSettings()
+            }
+            .controlSize(.small)
+        }
+
+        Divider()
+    }
+}
+
+private struct HistorySavingSettingsRow: View {
+    @ObservedObject var model: HistoryModel
+
+    var body: some View {
+        Toggle(
+            "保存历史",
+            isOn: Binding(
+                get: { model.retentionPolicy.savesNewRecords },
+                set: { enabled in
+                    Task {
+                        await model.setRetentionPolicy(
+                            enabled ? .forever : .disabled
+                        )
+                    }
+                }
+            )
+        )
+        .toggleStyle(.switch)
+        .disabled(model.isUpdatingRetention)
+    }
+}
+
+private struct AutomaticUpdateSettingsRow: View {
+    @ObservedObject var model: SoftwareUpdateFeature
+
+    @ViewBuilder
+    var body: some View {
+        if model.state.isAvailable {
+            Divider()
+
+            Toggle(
+                "自动检查更新",
+                isOn: Binding(
+                    get: { model.state.automaticallyChecksForUpdates },
+                    set: { model.setAutomaticallyChecksForUpdates($0) }
+                )
+            )
+            .toggleStyle(.switch)
         }
     }
 }
@@ -719,10 +748,8 @@ struct AboutView: View {
     var body: some View {
         ScrollView {
             AboutSettingsPage(
-                diagnostics: workspace.diagnostics,
                 dataErasure: workspace.dataErasure,
-                softwareUpdate: workspace.softwareUpdate,
-                copyDiagnostics: workspace.copyDiagnostics
+                softwareUpdate: workspace.softwareUpdate
             )
             .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
@@ -735,10 +762,8 @@ struct AboutView: View {
 }
 
 private struct AboutSettingsPage: View {
-    @ObservedObject var diagnostics: DiagnosticNoticeModel
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
-    let copyDiagnostics: () async -> Void
     @State private var confirmsDataErasure = false
 
     private var versionText: String {
@@ -748,14 +773,6 @@ private struct AboutSettingsPage: View {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")
             as? String ?? "—"
         return "版本 \(version)（\(build)）"
-    }
-
-    private var signingMode: SpeakerSigningMode {
-        SpeakerSigningMode(
-            infoValue: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSigningMode"
-            ) as? String
-        )
     }
 
     var body: some View {
@@ -773,8 +790,8 @@ private struct AboutSettingsPage: View {
                 Divider()
                 PrivacyBoundaryRow(
                     icon: "text.alignleft",
-                    title: "转录文字",
-                    detail: "默认只发送给豆包；仅当你启用进一步整理时，豆包文字才会发送给 DeepSeek。"
+                    title: "识别文字",
+                    detail: "豆包返回的识别文字保留在本机；仅当你启用需要 DeepSeek 的整理模式时，文字才会发送给 DeepSeek。"
                 )
                 Divider()
                 PrivacyBoundaryRow(
@@ -841,15 +858,6 @@ private struct AboutSettingsPage: View {
                 icon: AboutSection.version.icon
             ) {
                 HStack {
-                    StatusBadge(
-                        text: signingMode.displayName,
-                        icon: signingMode.permissionIdentityIsStable
-                            ? "checkmark.seal.fill"
-                            : "hammer.fill",
-                        color: signingMode.permissionIdentityIsStable
-                            ? .green
-                            : .orange
-                    )
                     Spacer()
                     if softwareUpdate.state.isAvailable {
                         Button("检查更新…") {
@@ -858,30 +866,10 @@ private struct AboutSettingsPage: View {
                         .disabled(!softwareUpdate.state.canCheckForUpdates)
                     }
                     Link(
-                        "GitHub",
+                        "github.com/simonwong/speaker",
                         destination: URL(
                             string: "https://github.com/simonwong/speaker"
                         )!
-                    )
-                }
-
-                if let notice = signingMode.permissionIdentityNotice {
-                    SettingsNotice(text: notice, color: .orange)
-                }
-
-                HStack {
-                    Button("复制脱敏诊断信息") {
-                        Task { await copyDiagnostics() }
-                    }
-                    Spacer()
-                }
-
-                if let notice = diagnostics.notice {
-                    SettingsNotice(
-                        text: notice,
-                        color: notice.hasPrefix("诊断信息已复制")
-                            ? .green
-                            : .orange
                     )
                 }
             }
@@ -1010,20 +998,20 @@ private struct PermissionSettingsPage: View {
             }
 
             PermissionSettingsRow(
-                title: "辅助功能",
-                explanation: "监听全局快捷键，并把文本安全送达到结束录音时的输入框。",
-                kind: .accessibility,
-                state: permissions.snapshot.accessibility,
+                title: "麦克风",
+                explanation: "音频只在内存中流式处理，不会写入磁盘或历史。",
+                kind: .microphone,
+                state: permissions.snapshot.microphone,
                 requestPermission: requestPermission
             )
 
             Divider()
 
             PermissionSettingsRow(
-                title: "麦克风",
-                explanation: "音频只在内存中流式处理，不会写入磁盘或历史。",
-                kind: .microphone,
-                state: permissions.snapshot.microphone,
+                title: "辅助功能",
+                explanation: "监听全局快捷键，并把文本安全送达到结束录音时的输入框。",
+                kind: .accessibility,
+                state: permissions.snapshot.accessibility,
                 requestPermission: requestPermission
             )
         }

@@ -1604,6 +1604,24 @@ struct SpeakerAppScenarioSpecs {
                     "版本",
                 ]
             )
+            try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
+        }
+
+        run("data erasure keeps failure recovery reachable", failures: &failures, executed: &executed) {
+            let failure = SpeakerDataErasureFailure(
+                issues: [],
+                remaining: [.history]
+            )
+            try expect(
+                SpeakerDataErasureState.idle.workspaceRoute == .normal
+            )
+            try expect(
+                SpeakerDataErasureState.erasing.workspaceRoute == .erasing
+            )
+            try expect(
+                SpeakerDataErasureState.failed(failure).workspaceRoute
+                    == .aboutRecovery
+            )
         }
 
         run("menu commands route to the intended product destination", failures: &failures, executed: &executed) {
