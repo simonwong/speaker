@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — Speaker 词典 Tab 重设计稿（可丢弃，不进产品）
+
+  回答的问题：词条数据模型是 标准写法 + 口语别名[] + 启用开关，
+  纯 chips 表达不了后两者 —— 怎么既保住"一个一个文字"的轻盈，又能编辑完整模型？
+
+  方案：chips 总览 + 点选编辑卡。
+    - 平时只见 chips：词条 = 标准写法；有别名的带 ·N 角标；停用的变暗。
+    - 点一个 chip，下方展开编辑卡：标准写法、别名 token（×删、回车加）、
+      启用开关、删除（二次确认）；卡里有一句活的预览
+      "说出「抖包」「豆宝」时，会写成「豆包」"，把别名语义讲明白。
+    - 顶部一行输入 + 回车即添加，新词条直接进入编辑卡补别名。
+
+  运行：open docs/prototypes/dictionary-redesign-prototype.html
+  空态：?empty
+  交互全是假的，改动不落盘。
+
+  SwiftUI 落地映射：chips = FlowLayout（Layout 协议）；编辑卡 = 选中态下的
+  卡片视图；别名 token = 自定义小视图 + TextField；删除确认沿用
+  confirmationDialog 与现有文案；校验错误沿用 model.notice 呈现。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE · Speaker 词典</title>
+<style>
+  :root {
+    --accent: rgb(247, 222, 181);
+    --accent-rgb: 247, 222, 181;
+    --accent-dim: rgba(247, 222, 181, 0.16);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #2c3140 0%, #1b1e27 60%, #15161c 100%);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .aurora { position: absolute; inset: 0; pointer-events: none; }
+  .aurora i {
+    position: absolute; display: block; border-radius: 50%;
+    filter: blur(56px); opacity: 0.35;
+    animation: drift 16s ease-in-out infinite alternate;
+  }
+  .aurora i:nth-child(1) {
+    width: 380px; height: 300px; left: 8%; top: 12%;
+    background: radial-gradient(circle, #ff9d6c, transparent 70%);
+  }
+  .aurora i:nth-child(2) {
+    width: 420px; height: 340px; right: 6%; bottom: 8%;
+    background: radial-gradient(circle, #6c8cff, transparent 70%);
+    animation-delay: -7s;
+  }
+  @keyframes drift {
+    from { transform: translate(-24px, 0) scale(1); }
+    to   { transform: translate(24px, 12px) scale(1.12); }
+  }
+
+  .window {
+    position: relative; width: 780px; height: 580px;
+    border-radius: 14px; overflow: hidden;
+    background: linear-gradient(rgba(46,48,56,0.72), rgba(30,31,36,0.82));
+    backdrop-filter: blur(40px) saturate(1.8);
+    border: 0.5px solid rgba(255,255,255,0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      0 30px 90px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;
+  }
+  .titlebar {
+    height: 48px; flex: none; display: flex; align-items: center;
+    padding: 0 16px; gap: 8px;
+  }
+  .titlebar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .tabs {
+    position: absolute; left: 50%; top: 9px; transform: translateX(-50%);
+    display: flex; gap: 2px; padding: 3px;
+    background: rgba(0,0,0,0.25); border-radius: 9px;
+  }
+  .tabs span {
+    border-radius: 7px; padding: 5px 14px;
+    color: rgba(255,255,255,0.4); font-size: 12.5px;
+  }
+  .tabs span.active {
+    background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.95);
+  }
+  .content { flex: 1; overflow-y: auto; padding: 10px 28px 26px; }
+
+  .meta {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 12px 2px 0; font-size: 11px; color: rgba(255,255,255,0.4);
+  }
+  .meta b { color: #7ddc9a; font-weight: 500; }
+
+  .add { display: flex; gap: 8px; margin-top: 12px; }
+  .add input {
+    flex: 1; height: 34px; border-radius: 9px; outline: none;
+    border: 0.5px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.22); color: rgba(255,255,255,0.9);
+    padding: 0 12px; font-size: 12.5px;
+  }
+  .add input::placeholder { color: rgba(255,255,255,0.3); }
+  .add input:focus { border-color: rgba(var(--accent-rgb), 0.5); }
+  .add button {
+    border: none; border-radius: 9px; padding: 0 16px; cursor: pointer;
+    background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.92);
+    font-size: 12px;
+  }
+
+  .dict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .term {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; padding: 5px 12px; border-radius: 12px;
+    background: var(--accent-dim); color: var(--accent);
+    border: 1px solid transparent; cursor: pointer;
+  }
+  .term small { font-size: 10px; opacity: 0.65; }
+  .term.off {
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.35);
+  }
+  .term.selected { border-color: rgba(var(--accent-rgb), 0.65); }
+  .term:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); }
+
+  /* 编辑卡 */
+  .editor {
+    margin-top: 16px; border-radius: 14px; overflow: hidden;
+    background: rgba(255,255,255,0.055);
+    border: 0.5px solid rgba(255,255,255,0.08);
+    animation: fadein .16s ease-out;
+  }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+  .editor .row {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  }
+  .editor .row + .row { border-top: 0.5px solid rgba(255,255,255,0.07); }
+  .editor .lbl {
+    flex: none; width: 60px; font-size: 11.5px; color: rgba(255,255,255,0.45);
+  }
+  .editor input.canon {
+    flex: 1; height: 28px; border-radius: 7px; outline: none;
+    border: 0.5px solid rgba(255,255,255,0.12);
+    background: rgba(0,0,0,0.22); color: rgba(255,255,255,0.92);
+    padding: 0 10px; font-size: 12.5px;
+  }
+  .aliases { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .alias {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; padding: 3px 8px 3px 10px; border-radius: 10px;
+    background: rgba(255,255,255,0.09); color: rgba(255,255,255,0.8);
+  }
+  .alias button {
+    border: none; background: none; cursor: pointer;
+    color: rgba(255,255,255,0.4); font-size: 11px; padding: 0;
+  }
+  .alias button:hover { color: #ff8a80; }
+  .aliases input {
+    min-width: 96px; height: 24px; border: none; outline: none;
+    background: transparent; color: rgba(255,255,255,0.85); font-size: 11.5px;
+  }
+  .aliases input::placeholder { color: rgba(255,255,255,0.28); }
+  .preview {
+    font-size: 11.5px; color: rgba(255,255,255,0.5); line-height: 1.6; flex: 1;
+  }
+  .preview b { color: var(--accent); font-weight: 500; }
+  .editor .foot { justify-content: space-between; }
+  .foot .left { display: flex; align-items: center; gap: 10px; }
+  .foot .save { font-size: 10.5px; color: rgba(255,255,255,0.3); }
+  .toggle {
+    width: 36px; height: 21px; border-radius: 11px; flex: none;
+    background: rgba(255,255,255,0.16); position: relative; cursor: pointer;
+    transition: background .15s;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: #fff; transition: left .15s;
+  }
+  .toggle.on { background: rgba(var(--accent-rgb), 0.85); }
+  .toggle.on::after { left: 17px; }
+  .tgllbl { font-size: 11.5px; color: rgba(255,255,255,0.6); }
+  .danger {
+    border: none; border-radius: 8px; padding: 5px 12px; cursor: pointer;
+    background: rgba(255,90,80,0.14); color: #ff8a80; font-size: 11.5px;
+  }
+
+  .note {
+    margin-top: 14px; font-size: 11px; color: rgba(255,255,255,0.35);
+    line-height: 1.7;
+  }
+
+  .empty {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 40px; justify-content: center;
+    color: rgba(255,255,255,0.5); font-size: 12.5px;
+  }
+  .empty[hidden] { display: none; }
+  .empty .icon { font-size: 26px; opacity: 0.5; }
+  .empty .sub { margin-top: 3px; font-size: 11px; color: rgba(255,255,255,0.35); }
+</style>
+</head>
+<body>
+
+<div class="aurora"><i></i><i></i></div>
+
+<div class="window">
+  <div class="titlebar">
+    <i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+    <div class="tabs">
+      <span>概览</span><span>历史</span><span>设置</span><span class="active">词典</span><span>关于</span>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="meta">
+      <span id="metaCount"></span>
+      <span>修改后自动保存</span>
+    </div>
+
+    <div class="add">
+      <input id="addInput" placeholder="添加词条：输入标准写法，回车">
+      <button id="addBtn">添加</button>
+    </div>
+
+    <div class="dict" id="dict"></div>
+    <div id="editorHost"></div>
+    <div class="empty" id="empty" hidden>
+      <span class="icon">📖</span>
+      <span>还没有词条<div class="sub">添加产品名、人名或专业术语，识别更准、写法更稳。</div></span>
+    </div>
+
+    <p class="note">词条会作为热词发送给豆包（仅词条文本），提高专有名词的识别准确率；
+      识别后，完整且无歧义的口语别名会被替换成标准写法。</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const EMPTY = new URLSearchParams(location.search).has("empty");
+let entries = EMPTY ? [] : [
+  { c: "Speaker", a: [], on: true },
+  { c: "豆包", a: ["抖包", "豆宝"], on: true },
+  { c: "DeepSeek", a: ["deep seek", "深度求索"], on: true },
+  { c: "HUD", a: [], on: false },
+  { c: "声纹胶囊", a: ["声纹"], on: true },
+  { c: "SwiftUI", a: ["swift ui"], on: true },
+];
+let selected = EMPTY ? -1 : 1;
+let confirmingDelete = false;
+
+const dict = document.getElementById("dict");
+const host = document.getElementById("editorHost");
+
+function render() {
+  const enabled = entries.filter(e => e.on).length;
+  document.getElementById("metaCount").innerHTML = entries.length
+    ? `<b>${enabled} 个启用</b> · 共 ${entries.length} 个词条` : "";
+  document.getElementById("empty").hidden = entries.length > 0;
+
+  dict.innerHTML = "";
+  entries.forEach((entry, index) => {
+    const chip = document.createElement("button");
+    chip.className = "term" + (entry.on ? "" : " off")
+      + (index === selected ? " selected" : "");
+    chip.innerHTML = entry.c + (entry.a.length ? ` <small>·${entry.a.length}</small>` : "");
+    chip.title = entry.on
+      ? (entry.a.length ? `别名：${entry.a.join("、")}` : "点按编辑")
+      : "已停用";
+    chip.addEventListener("click", () => {
+      selected = index === selected ? -1 : index;
+      confirmingDelete = false;
+      render();
+    });
+    dict.appendChild(chip);
+  });
+
+  host.innerHTML = "";
+  const entry = entries[selected];
+  if (!entry) return;
+
+  const card = document.createElement("div");
+  card.className = "editor";
+
+  /* 标准写法 */
+  const rowCanon = document.createElement("div");
+  rowCanon.className = "row";
+  rowCanon.innerHTML = `<span class="lbl">标准写法</span>`;
+  const canon = document.createElement("input");
+  canon.className = "canon"; canon.value = entry.c;
+  canon.addEventListener("input", () => { entry.c = canon.value; renderChipsOnly(); });
+  rowCanon.appendChild(canon);
+  card.appendChild(rowCanon);
+
+  /* 口语别名 token */
+  const rowAlias = document.createElement("div");
+  rowAlias.className = "row";
+  rowAlias.innerHTML = `<span class="lbl">口语别名</span>`;
+  const aliases = document.createElement("div");
+  aliases.className = "aliases";
+  entry.a.forEach((alias, ai) => {
+    const token = document.createElement("span");
+    token.className = "alias";
+    token.innerHTML = `${alias} `;
+    const x = document.createElement("button");
+    x.textContent = "✕"; x.title = "移除别名";
+    x.addEventListener("click", () => { entry.a.splice(ai, 1); render(); });
+    token.appendChild(x);
+    aliases.appendChild(token);
+  });
+  const aliasInput = document.createElement("input");
+  aliasInput.placeholder = "输入别名，回车添加";
+  aliasInput.addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    const value = aliasInput.value.trim();
+    if (value) { entry.a.push(value); render(); }
+  });
+  aliases.appendChild(aliasInput);
+  rowAlias.appendChild(aliases);
+  card.appendChild(rowAlias);
+
+  /* 活的语义预览 */
+  const rowPrev = document.createElement("div");
+  rowPrev.className = "row";
+  rowPrev.innerHTML = `<span class="lbl"></span><span class="preview">${
+    entry.a.length
+      ? `说出 ${entry.a.map(a => `「<b>${a}</b>」`).join("")} 时，会写成「<b>${entry.c}</b>」。`
+      : `暂无别名 —— 词条只作为热词帮助识别「<b>${entry.c}</b>」这个写法。`
+  }</span>`;
+  card.appendChild(rowPrev);
+
+  /* 启用 / 删除 */
+  const foot = document.createElement("div");
+  foot.className = "row foot";
+  const left = document.createElement("div");
+  left.className = "left";
+  const toggle = document.createElement("div");
+  toggle.className = "toggle" + (entry.on ? " on" : "");
+  toggle.addEventListener("click", () => { entry.on = !entry.on; render(); });
+  const tglLabel = document.createElement("span");
+  tglLabel.className = "tgllbl";
+  tglLabel.textContent = entry.on ? "已启用" : "已停用";
+  left.appendChild(toggle); left.appendChild(tglLabel);
+  const save = document.createElement("span");
+  save.className = "save"; save.textContent = "修改后自动保存";
+  left.appendChild(save);
+  foot.appendChild(left);
+  const del = document.createElement("button");
+  del.className = "danger";
+  del.textContent = confirmingDelete ? "确认删除？（不影响已有历史）" : "删除词条";
+  del.addEventListener("click", () => {
+    if (!confirmingDelete) { confirmingDelete = true; render(); return; }
+    entries.splice(selected, 1);
+    selected = -1; confirmingDelete = false;
+    render();
+  });
+  foot.appendChild(del);
+  card.appendChild(foot);
+
+  host.appendChild(card);
+}
+
+function renderChipsOnly() {
+  [...dict.children].forEach((chip, index) => {
+    const entry = entries[index];
+    chip.innerHTML = entry.c + (entry.a.length ? ` <small>·${entry.a.length}</small>` : "");
+  });
+}
+
+function addEntry() {
+  const input = document.getElementById("addInput");
+  const value = input.value.trim();
+  if (!value) return;
+  entries.push({ c: value, a: [], on: true });
+  selected = entries.length - 1;
+  input.value = "";
+  render();
+}
+document.getElementById("addBtn").addEventListener("click", addEntry);
+document.getElementById("addInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") addEntry();
+});
+
+render();
+</script>
+</body>
+</html>
