@@ -1,12 +1,6 @@
 import Combine
+import SpeakerAppFeatures
 import SwiftUI
-
-enum MainWindowTab: Hashable {
-    case overview
-    case history
-    case settings
-    case dictionary
-}
 
 /// Shared selection for the single tabbed main window. The menu bar writes the
 /// desired tab before opening the window; the window observes it.

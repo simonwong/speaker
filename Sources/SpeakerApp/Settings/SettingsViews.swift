@@ -3,49 +3,7 @@ import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
-private enum SettingsOverviewSection: String, CaseIterable, Identifiable {
-    case voice
-    case transcription
-    case refinement
-    case dictionary
-    case permissions
-    case about
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .voice: "语音输入"
-        case .transcription: "转录"
-        case .refinement: "整理"
-        case .dictionary: "词库"
-        case .permissions: "权限"
-        case .about: "关于"
-        }
-    }
-
-    init(page: SettingsPage) {
-        switch page {
-        case .general: self = .voice
-        case .speech: self = .transcription
-        case .refinement: self = .refinement
-        case .dictionary: self = .dictionary
-        case .permissions: self = .permissions
-        case .about: self = .about
-        }
-    }
-
-    var page: SettingsPage {
-        switch self {
-        case .voice: .general
-        case .transcription: .speech
-        case .refinement: .refinement
-        case .dictionary: .dictionary
-        case .permissions: .permissions
-        case .about: .about
-        }
-    }
-}
+private typealias SettingsOverviewSection = SettingsPage
 
 private struct SettingsOverviewSectionFramePreference: PreferenceKey {
     static let defaultValue: [SettingsOverviewSection: CGFloat] = [:]
@@ -224,9 +182,8 @@ private struct SettingsOverviewView: View {
     @ObservedObject private var shortcut: VoiceShortcutFeature
     @ObservedObject private var doubao: DoubaoSettingsModel
     @ObservedObject private var refinement: RefinementSettingsModel
-    @ObservedObject private var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
-    @State private var activeSection = SettingsOverviewSection.voice
+    @State private var activeSection = SettingsOverviewSection.shortcut
 
     init(
         workspace: SettingsWorkspace,
@@ -238,7 +195,6 @@ private struct SettingsOverviewView: View {
         shortcut = workspace.shortcut
         doubao = workspace.doubao
         refinement = workspace.refinement
-        dataErasure = workspace.dataErasure
         self.shortcutRecorder = shortcutRecorder
     }
 
@@ -266,22 +222,19 @@ private struct SettingsOverviewView: View {
                 let passed = visibleSections.filter {
                     (frames[$0] ?? .infinity) <= 70
                 }
-                activeSection = passed.last ?? visibleSections.first ?? .voice
+                activeSection = passed.last ?? visibleSections.first ?? .shortcut
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 pinnedBar(proxy: proxy)
             }
             .onChange(of: navigation.page) { _, page in
-                navigate(
-                    to: SettingsOverviewSection(page: page),
-                    proxy: proxy
-                )
+                navigate(to: page, proxy: proxy)
             }
             .onAppear {
                 Task { @MainActor in
                     await Task.yield()
                     navigate(
-                        to: SettingsOverviewSection(page: navigation.page),
+                        to: navigation.page,
                         proxy: proxy,
                         animated: false
                     )
@@ -291,26 +244,22 @@ private struct SettingsOverviewView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    // The personal dictionary now lives in its own top-level tab, so the settings
-    // tab lists every section except `.dictionary`.
-    private static let tabSections: [SettingsOverviewSection] = [
-        .voice, .transcription, .refinement, .permissions, .about,
-    ]
+    private static let tabSections = SettingsOverviewSection.allCases
 
     private var visibleSections: [SettingsOverviewSection] {
-        dataErasure.state == .idle
-            ? Self.tabSections
-            : [.about]
+        Self.tabSections
     }
 
     private var pendingSections: [SettingsOverviewSection] {
         var pending: [SettingsOverviewSection] = []
         if !doubao.hasConfiguredKey {
-            pending.append(.transcription)
+            pending.append(.apiKeys)
         }
         if refinement.choice != .defaultSmooth,
            !refinement.hasStoredKey {
-            pending.append(.refinement)
+            if !pending.contains(.apiKeys) {
+                pending.append(.apiKeys)
+            }
         }
         if !permissions.snapshot.allGranted {
             pending.append(.permissions)
@@ -354,9 +303,7 @@ private struct SettingsOverviewView: View {
                 anchorChip(section, proxy: proxy)
             }
             Spacer()
-            if dataErasure.state == .idle {
-                readinessChip(proxy: proxy)
-            }
+            readinessChip(proxy: proxy)
         }
 
         if #available(macOS 26.0, *) {
@@ -474,32 +421,31 @@ private struct SettingsOverviewView: View {
         proxy: ScrollViewProxy
     ) -> some View {
         switch section {
-        case .voice:
-            GeneralSettingsPage(
+        case .shortcut:
+            ShortcutSettingsPage(
                 shortcut: workspace.shortcut,
                 shortcutRecorder: shortcutRecorder,
-                loginItemSettings: workspace.loginItemSettings,
-                softwareUpdate: workspace.softwareUpdate,
                 openSpeechSettings: {
                     open(.permissions, proxy: proxy)
                 }
             )
-        case .transcription:
-            DoubaoSettingsCard(model: workspace.doubao)
-        case .refinement:
-            RefinementSettingsPage(model: workspace.refinement)
-        case .dictionary:
-            DictionarySettingsPage(model: workspace.dictionary)
         case .permissions:
             PermissionSettingsPage(
                 permissions: workspace.permissions,
                 requestPermission: workspace.requestPermission
             )
-        case .about:
-            AboutSettingsPage(
-                diagnostics: workspace.diagnostics,
-                dataErasure: workspace.dataErasure,
-                copyDiagnostics: workspace.copyDiagnostics
+        case .apiKeys:
+            VStack(spacing: 16) {
+                DoubaoSettingsCard(model: workspace.doubao)
+                DeepSeekSettingsCard(model: workspace.refinement)
+            }
+        case .refinement:
+            RefinementSettingsPage(model: workspace.refinement)
+        case .general:
+            GeneralSettingsPage(
+                loginItemSettings: workspace.loginItemSettings,
+                history: workspace.history,
+                softwareUpdate: workspace.softwareUpdate
             )
         }
     }
@@ -508,10 +454,10 @@ private struct SettingsOverviewView: View {
         _ section: SettingsOverviewSection,
         proxy: ScrollViewProxy
     ) {
-        if navigation.page == section.page {
+        if navigation.page == section {
             navigate(to: section, proxy: proxy)
         } else {
-            navigation.open(section.page)
+            navigation.open(section)
         }
     }
 
@@ -535,18 +481,18 @@ private struct SettingsOverviewView: View {
         for section: SettingsOverviewSection
     ) -> Color? {
         switch section {
-        case .voice, .dictionary, .about:
+        case .shortcut, .refinement, .general:
             return nil
-        case .transcription:
+        case .apiKeys:
             if case .failure = doubao.status { return .red }
             if case .checking = doubao.status { return .blue }
-            return doubao.hasConfiguredKey ? .green : .orange
-        case .refinement:
-            guard refinement.choice != .defaultSmooth else {
-                return nil
-            }
             if refinement.connectionFailure != nil { return .red }
-            return refinement.hasStoredKey ? .green : .orange
+            if !doubao.hasConfiguredKey { return .orange }
+            if refinement.choice != .defaultSmooth,
+               !refinement.hasStoredKey {
+                return .orange
+            }
+            return .green
         case .permissions:
             if permissions.snapshot.microphone == .restricted
                 || permissions.snapshot.accessibility == .restricted {
@@ -557,11 +503,9 @@ private struct SettingsOverviewView: View {
     }
 }
 
-private struct GeneralSettingsPage: View {
+private struct ShortcutSettingsPage: View {
     @ObservedObject var shortcut: VoiceShortcutFeature
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
-    @ObservedObject var loginItemSettings: LoginItemSettingsModel
-    @ObservedObject var softwareUpdate: SoftwareUpdateFeature
     let openSpeechSettings: () -> Void
 
     var body: some View {
@@ -664,62 +608,6 @@ private struct GeneralSettingsPage: View {
                 }
             }
 
-            SettingsCard(
-                "启动与后台运行",
-                subtitle: "Speaker 作为菜单栏应用安静运行",
-                icon: "power"
-            ) {
-                Toggle(
-                    "登录 Mac 时自动启动 Speaker",
-                    isOn: Binding(
-                        get: { loginItemSettings.isEnabled },
-                        set: { enabled in
-                            Task { await loginItemSettings.setEnabled(enabled) }
-                        }
-                    )
-                )
-                .toggleStyle(.switch)
-
-                if let notice = loginItemSettings.notice {
-                    SettingsNotice(text: notice, color: .orange)
-                }
-                if loginItemSettings.showsSystemSettingsButton {
-                    Button("打开登录项设置") {
-                        loginItemSettings.openSystemSettings()
-                    }
-                    .controlSize(.small)
-                }
-            }
-
-            if softwareUpdate.state.isAvailable {
-                SettingsCard(
-                    "软件更新",
-                    subtitle: "由 Speaker 的签名更新通道提供",
-                    icon: "arrow.triangle.2.circlepath"
-                ) {
-                    Toggle(
-                        "自动检查更新",
-                        isOn: Binding(
-                            get: {
-                                softwareUpdate.state
-                                    .automaticallyChecksForUpdates
-                            },
-                            set: {
-                                softwareUpdate
-                                    .setAutomaticallyChecksForUpdates($0)
-                            }
-                        )
-                    )
-                    .toggleStyle(.switch)
-
-                    Button("立即检查更新…") {
-                        softwareUpdate.checkForUpdates()
-                    }
-                    .disabled(
-                        !softwareUpdate.state.canCheckForUpdates
-                    )
-                }
-            }
         }
     }
 
@@ -745,9 +633,111 @@ private struct GeneralSettingsPage: View {
     }
 }
 
+private struct GeneralSettingsPage: View {
+    @ObservedObject var loginItemSettings: LoginItemSettingsModel
+    @ObservedObject var history: HistoryModel
+    @ObservedObject var softwareUpdate: SoftwareUpdateFeature
+
+    var body: some View {
+        SettingsCard(
+            "通用",
+            subtitle: "启动、历史保留与软件更新",
+            icon: "switch.2"
+        ) {
+            Toggle(
+                "登录 Mac 时自动启动 Speaker",
+                isOn: Binding(
+                    get: { loginItemSettings.isEnabled },
+                    set: { enabled in
+                        Task { await loginItemSettings.setEnabled(enabled) }
+                    }
+                )
+            )
+            .toggleStyle(.switch)
+
+            if let notice = loginItemSettings.notice {
+                SettingsNotice(text: notice, color: .orange)
+            }
+            if loginItemSettings.showsSystemSettingsButton {
+                Button("打开登录项设置") {
+                    loginItemSettings.openSystemSettings()
+                }
+                .controlSize(.small)
+            }
+
+            Divider()
+
+            Picker(
+                "保存历史",
+                selection: Binding(
+                    get: { history.retentionPolicy },
+                    set: { policy in
+                        Task { await history.setRetentionPolicy(policy) }
+                    }
+                )
+            ) {
+                ForEach(HistoryRetentionPolicy.allCases, id: \.self) { policy in
+                    Text(policy.settingsDisplayName).tag(policy)
+                }
+            }
+            .disabled(history.isUpdatingRetention)
+
+            if softwareUpdate.state.isAvailable {
+                Divider()
+
+                Toggle(
+                    "自动检查更新",
+                    isOn: Binding(
+                        get: {
+                            softwareUpdate.state.automaticallyChecksForUpdates
+                        },
+                        set: {
+                            softwareUpdate.setAutomaticallyChecksForUpdates($0)
+                        }
+                    )
+                )
+                .toggleStyle(.switch)
+            }
+        }
+    }
+}
+
+private extension HistoryRetentionPolicy {
+    var settingsDisplayName: String {
+        switch self {
+        case .thirtyDays: "最近 30 天"
+        case .ninetyDays: "最近 90 天"
+        case .oneYear: "最近一年"
+        case .forever: "永久保留"
+        }
+    }
+}
+
+struct AboutView: View {
+    let workspace: SettingsWorkspace
+
+    var body: some View {
+        ScrollView {
+            AboutSettingsPage(
+                diagnostics: workspace.diagnostics,
+                dataErasure: workspace.dataErasure,
+                softwareUpdate: workspace.softwareUpdate,
+                copyDiagnostics: workspace.copyDiagnostics
+            )
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 28)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .task { await workspace.refresh() }
+    }
+}
+
 private struct AboutSettingsPage: View {
     @ObservedObject var diagnostics: DiagnosticNoticeModel
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
+    @ObservedObject var softwareUpdate: SoftwareUpdateFeature
     let copyDiagnostics: () async -> Void
     @State private var confirmsDataErasure = false
 
@@ -771,52 +761,9 @@ private struct AboutSettingsPage: View {
     var body: some View {
         VStack(spacing: 16) {
             SettingsCard(
-                "Speaker",
-                subtitle: versionText,
-                icon: "waveform"
-            ) {
-                Text("按下快捷键讲话，把经过整理的文字安全送到当前输入位置。")
-                    .foregroundStyle(.secondary)
-
-                StatusBadge(
-                    text: signingMode.displayName,
-                    icon: signingMode.permissionIdentityIsStable
-                        ? "checkmark.seal.fill"
-                        : "hammer.fill",
-                    color: signingMode.permissionIdentityIsStable ? .green : .orange
-                )
-
-                if let notice = signingMode.permissionIdentityNotice {
-                    SettingsNotice(text: notice, color: .orange)
-                }
-
-                HStack {
-                    Button("复制脱敏诊断信息") {
-                        Task { await copyDiagnostics() }
-                    }
-                    if let privacyPolicyURL = Self.privacyPolicyURL {
-                        Button("查看隐私说明") {
-                            NSWorkspace.shared.open(privacyPolicyURL)
-                        }
-                    }
-                    Button("打开本地数据文件夹") {
-                        NSWorkspace.shared.open(Self.applicationSupportDirectory)
-                    }
-                    Spacer()
-                }
-
-                if let notice = diagnostics.notice {
-                    SettingsNotice(
-                        text: notice,
-                        color: notice.hasPrefix("诊断信息已复制") ? .green : .orange
-                    )
-                }
-            }
-
-            SettingsCard(
-                "隐私边界",
+                AboutSection.privacyBoundary.title,
                 subtitle: "你应该清楚每一类数据会去哪里",
-                icon: "hand.raised.fill"
+                icon: AboutSection.privacyBoundary.icon
             ) {
                 PrivacyBoundaryRow(
                     icon: "waveform",
@@ -832,34 +779,28 @@ private struct AboutSettingsPage: View {
                 Divider()
                 PrivacyBoundaryRow(
                     icon: "clock.arrow.circlepath",
-                    title: "会话历史",
-                    detail: "保存在当前 Mac 用户的 Application Support；包含文字和最小诊断，不包含音频或 API Key。"
+                    title: "历史、设置与词库",
+                    detail: "只保存在这台 Mac 的当前用户目录；会话历史不包含音频或 API Key。"
                 )
                 Divider()
-                PrivacyBoundaryRow(
-                    icon: "key.fill",
-                    title: "API Key",
-                    detail: Self.usesKeychain
-                        ? "当前正式签名构建使用 macOS Keychain。"
-                        : "当前是本机开发构建，使用仅当前用户可读写的本地文件；正式签名构建会迁移到 Keychain。"
-                )
+
+                HStack {
+                    if let privacyPolicyURL = Self.privacyPolicyURL {
+                        Button("查看完整隐私说明") {
+                            NSWorkspace.shared.open(privacyPolicyURL)
+                        }
+                    }
+                    Button("打开本地数据文件夹") {
+                        NSWorkspace.shared.open(Self.applicationSupportDirectory)
+                    }
+                    Spacer()
+                }
             }
 
             SettingsCard(
-                "遇到问题",
-                subtitle: "诊断信息不会包含转录文字、音频或凭据",
-                icon: "stethoscope"
-            ) {
-                Text("先复制脱敏诊断信息，再附上问题发生时使用的目标 App、操作步骤和可见错误。会话详情中的 provider 请求 ID 可帮助服务商定位，但请不要发送 API Key。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            SettingsCard(
-                "本地数据",
+                AboutSection.localData.title,
                 subtitle: "完全清除这台 Mac 上由 Speaker 保存的数据",
-                icon: "externaldrive.badge.xmark"
+                icon: AboutSection.localData.icon
             ) {
                 Text(
                     "清除 API Key、会话历史、个人词库、设置、缓存和登录项，然后退出 Speaker。系统中的麦克风与辅助功能授权不会被自动撤销。"
@@ -890,6 +831,57 @@ private struct AboutSettingsPage: View {
                     SettingsNotice(
                         text: Self.failureMessage(failure),
                         color: .red
+                    )
+                }
+            }
+
+            SettingsCard(
+                AboutSection.version.title,
+                subtitle: versionText,
+                icon: AboutSection.version.icon
+            ) {
+                HStack {
+                    StatusBadge(
+                        text: signingMode.displayName,
+                        icon: signingMode.permissionIdentityIsStable
+                            ? "checkmark.seal.fill"
+                            : "hammer.fill",
+                        color: signingMode.permissionIdentityIsStable
+                            ? .green
+                            : .orange
+                    )
+                    Spacer()
+                    if softwareUpdate.state.isAvailable {
+                        Button("检查更新…") {
+                            softwareUpdate.checkForUpdates()
+                        }
+                        .disabled(!softwareUpdate.state.canCheckForUpdates)
+                    }
+                    Link(
+                        "GitHub",
+                        destination: URL(
+                            string: "https://github.com/simonwong/speaker"
+                        )!
+                    )
+                }
+
+                if let notice = signingMode.permissionIdentityNotice {
+                    SettingsNotice(text: notice, color: .orange)
+                }
+
+                HStack {
+                    Button("复制脱敏诊断信息") {
+                        Task { await copyDiagnostics() }
+                    }
+                    Spacer()
+                }
+
+                if let notice = diagnostics.notice {
+                    SettingsNotice(
+                        text: notice,
+                        color: notice.hasPrefix("诊断信息已复制")
+                            ? .green
+                            : .orange
                     )
                 }
             }
@@ -931,11 +923,6 @@ private struct AboutSettingsPage: View {
         case .io:
             "部分本地数据无法删除，请关闭可能占用文件的程序后重试。"
         }
-    }
-
-    private static var usesKeychain: Bool {
-        Bundle.main.object(forInfoDictionaryKey: "SpeakerCredentialStorage") as? String
-            == "keychain"
     }
 
     private static var applicationSupportDirectory: URL {
@@ -1273,9 +1260,122 @@ private struct DoubaoSettingsCard: View {
     }
 }
 
-private struct RefinementSettingsPage: View {
+private struct DeepSeekSettingsCard: View {
     @ObservedObject var model: RefinementSettingsModel
     @State private var confirmingDelete = false
+
+    var body: some View {
+        SettingsCard(
+            "DeepSeek（可选）",
+            subtitle: "仅发送豆包转录文本和整理规则，不发送音频",
+            icon: "sparkles"
+        ) {
+            HStack {
+                StatusBadge(
+                    text: statusText,
+                    icon: statusIcon,
+                    color: statusColor
+                )
+                Spacer()
+                Link(
+                    "打开 DeepSeek 平台",
+                    destination: URL(
+                        string: "https://platform.deepseek.com/api_keys"
+                    )!
+                )
+                .font(.caption)
+            }
+
+            HStack(spacing: 8) {
+                SecureField(
+                    model.hasStoredKey
+                        ? "输入新 Key 以替换当前凭据"
+                        : "输入 DeepSeek API Key",
+                    text: $model.apiKeyDraft
+                )
+                .textContentType(.password)
+
+                Button(model.hasStoredKey ? "替换 Key" : "保存 Key") {
+                    Task { await model.saveAPIKey() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.apiKeyDraft
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                        || model.isCheckingConnection
+                )
+            }
+
+            HStack {
+                Button {
+                    model.checkConnection()
+                } label: {
+                    if model.isCheckingConnection {
+                        HStack(spacing: 5) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("检查中…")
+                        }
+                    } else {
+                        Text("检查连接")
+                    }
+                }
+                .disabled(!model.hasStoredKey || model.isCheckingConnection)
+
+                Spacer()
+
+                Button("删除 Key", role: .destructive) {
+                    confirmingDelete = true
+                }
+                .disabled(!model.hasStoredKey || model.isCheckingConnection)
+            }
+
+            if let credentialNotice = model.credentialNotice {
+                SettingsNotice(text: credentialNotice, color: .red)
+            }
+            if let connectionFailure = model.connectionFailure {
+                SettingsNotice(text: connectionFailure, color: .red)
+            }
+        }
+        .confirmationDialog(
+            "删除 DeepSeek API Key？",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("删除 Key", role: .destructive) {
+                Task { await model.deleteAPIKey() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后会自动切回默认顺滑，豆包转录仍可正常使用。")
+        }
+    }
+
+    private var statusText: String {
+        if model.isConnectionVerified { return "已验证" }
+        if model.connectionFailure != nil { return "连接失败" }
+        if model.hasStoredKey { return "已保存，待验证" }
+        return "未配置"
+    }
+
+    private var statusIcon: String {
+        if model.isConnectionVerified { return "checkmark.circle.fill" }
+        if model.connectionFailure != nil { return "xmark.circle.fill" }
+        if model.hasStoredKey { return "exclamationmark.circle.fill" }
+        return "key.slash"
+    }
+
+    private var statusColor: Color {
+        if model.isConnectionVerified { return .green }
+        if model.connectionFailure != nil { return .red }
+        if model.hasStoredKey { return .orange }
+        return .secondary
+    }
+}
+
+private struct RefinementSettingsPage: View {
+    @ObservedObject var model: RefinementSettingsModel
 
     var body: some View {
         VStack(spacing: 16) {
@@ -1305,94 +1405,6 @@ private struct RefinementSettingsPage: View {
                         color: model.isConnectionVerified ? .green : .secondary
                     )
                 }
-            }
-
-            SettingsCard(
-                "DeepSeek（可选）",
-                subtitle: "仅发送豆包转录文本和整理规则，不发送音频",
-                icon: "sparkles"
-            ) {
-                HStack {
-                    StatusBadge(
-                        text: deepSeekStatusText,
-                        icon: deepSeekStatusIcon,
-                        color: deepSeekStatusColor
-                    )
-                    Spacer()
-                    Link(
-                        "打开 DeepSeek 平台",
-                        destination: URL(string: "https://platform.deepseek.com/api_keys")!
-                    )
-                    .font(.caption)
-                }
-
-                HStack(spacing: 8) {
-                    SecureField(
-                        model.hasStoredKey ? "输入新 Key 以替换当前凭据" : "输入 DeepSeek API Key",
-                        text: $model.apiKeyDraft
-                    )
-                    .textContentType(.password)
-
-                    Button(model.hasStoredKey ? "替换 Key" : "保存 Key") {
-                        Task { await model.saveAPIKey() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        model.apiKeyDraft
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                            .isEmpty
-                            || model.isCheckingConnection
-                    )
-                }
-
-                HStack {
-                    Button {
-                        model.checkConnection()
-                    } label: {
-                        if model.isCheckingConnection {
-                            HStack(spacing: 5) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("检查中…")
-                            }
-                        } else {
-                            Text("检查连接")
-                        }
-                    }
-                    .disabled(
-                        !model.hasStoredKey
-                            || model.isCheckingConnection
-                    )
-
-                    Spacer()
-
-                    Button("删除 Key", role: .destructive) {
-                        confirmingDelete = true
-                    }
-                    .disabled(
-                        !model.hasStoredKey
-                            || model.isCheckingConnection
-                    )
-                }
-
-                if let credentialNotice = model.credentialNotice {
-                    SettingsNotice(text: credentialNotice, color: .red)
-                }
-                if let connectionFailure = model.connectionFailure {
-                    SettingsNotice(text: connectionFailure, color: .red)
-                }
-            }
-            .confirmationDialog(
-                "删除 DeepSeek API Key？",
-                isPresented: $confirmingDelete,
-                titleVisibility: .visible
-            ) {
-                Button("删除 Key", role: .destructive) {
-                    Task { await model.deleteAPIKey() }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("删除后会自动切回默认顺滑，豆包转录仍可正常使用。")
             }
 
             if model.isEditingCustomMode || model.choice == .custom {
@@ -1464,26 +1476,6 @@ private struct RefinementSettingsPage: View {
         }
     }
 
-    private var deepSeekStatusText: String {
-        if model.isConnectionVerified { return "已验证" }
-        if model.connectionFailure != nil { return "连接失败" }
-        if model.hasStoredKey { return "已保存，待验证" }
-        return "未配置"
-    }
-
-    private var deepSeekStatusIcon: String {
-        if model.isConnectionVerified { return "checkmark.circle.fill" }
-        if model.connectionFailure != nil { return "xmark.circle.fill" }
-        if model.hasStoredKey { return "exclamationmark.circle.fill" }
-        return "key.slash"
-    }
-
-    private var deepSeekStatusColor: Color {
-        if model.isConnectionVerified { return .green }
-        if model.connectionFailure != nil { return .red }
-        if model.hasStoredKey { return .orange }
-        return .secondary
-    }
 }
 
 private struct RefinementModeButton: View {

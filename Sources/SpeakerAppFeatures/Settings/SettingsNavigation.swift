@@ -1,45 +1,41 @@
 import Combine
 
 package enum SettingsPage: String, CaseIterable, Identifiable {
-    case general
-    case speech
-    case refinement
-    case dictionary
+    case shortcut
     case permissions
-    case about
+    case apiKeys
+    case refinement
+    case general
 
     package var id: String { rawValue }
 
     package var title: String {
         switch self {
+        case .shortcut: "快捷键"
+        case .permissions: "权限"
+        case .apiKeys: "API Key"
+        case .refinement: "整理"
         case .general: "通用"
-        case .speech: "语音识别"
-        case .refinement: "文本整理"
-        case .dictionary: "个人词库"
-        case .permissions: "系统权限"
-        case .about: "关于"
         }
     }
 
     package var subtitle: String {
         switch self {
-        case .general: "快捷键、录音方式与启动选项"
-        case .speech: "语音识别服务与连接状态"
-        case .refinement: "按需要选择文字的整理程度"
-        case .dictionary: "维护专有名词和常见口语别名"
+        case .shortcut: "选择开始语音输入的全局快捷键"
         case .permissions: "检查麦克风与辅助功能授权"
-        case .about: "版本、隐私、本地数据与问题诊断"
+        case .apiKeys: "配置豆包与可选的 DeepSeek 凭据"
+        case .refinement: "选择识别后文字的整理程度"
+        case .general: "启动、历史保留与软件更新"
         }
     }
 
     package var icon: String {
         switch self {
-        case .general: "switch.2"
-        case .speech: "waveform"
-        case .refinement: "text.alignleft"
-        case .dictionary: "text.book.closed"
+        case .shortcut: "keyboard"
         case .permissions: "checkmark.shield"
-        case .about: "info.circle"
+        case .apiKeys: "key.fill"
+        case .refinement: "text.alignleft"
+        case .general: "switch.2"
         }
     }
 }
@@ -48,7 +44,7 @@ package enum SettingsPage: String, CaseIterable, Identifiable {
 package final class SettingsNavigationModel: ObservableObject {
     @Published package var page: SettingsPage
 
-    package init(page: SettingsPage = .general) {
+    package init(page: SettingsPage = .shortcut) {
         self.page = page
     }
 
