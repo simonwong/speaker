@@ -3,14 +3,12 @@
   PROTOTYPE — Speaker 设置 / 关于 信息架构稿（可丢弃，不进产品）
 
   回答的问题："设置就是设置，关于和隐私权限等等单独做个板块" —— 板块怎么分？
-  方案：新增第五个 Tab「关于」。
-    设置（纯偏好，改了就生效的东西）：
-      快捷键 / 语音识别（豆包 Key）/ 文字润色（DeepSeek Key + 模式）/
+  方案（用户二轮反馈后修订）：新增第五个 Tab「关于」。
+    设置：快捷键 / 权限（麦克风、辅助功能：状态 + 修复入口）/
+      API Key（豆包 + DeepSeek 合一组）/ 整理（模式四档）/
       通用（自启动、保存历史、自动检查更新）
-    关于（状态、承诺与维护，不是日常要动的东西）：
-      权限（辅助功能、麦克风：状态 + 修复入口）/
-      隐私边界（每类数据去哪 + 完整说明 + 本地数据文件夹）/
-      本地数据（清除并退出）/ 版本（版本号 + 检查更新）
+    关于：隐私边界（每类数据去哪 + 完整说明 + 本地数据文件夹）/
+      本地数据（清除并退出）/ 版本（版本号 + 检查更新 + GitHub）
 
   运行：open docs/prototypes/settings-about-ia-prototype.html
   切换：点「设置」「关于」两个 Tab（其余 Tab 是摆设）；?tab=about 直达关于
@@ -173,24 +171,39 @@
         </div>
       </div>
 
-      <h2>语音识别</h2>
+      <h2>权限</h2>
       <div class="group">
         <div class="item">
-          <div class="txt"><div class="name">豆包 API Key</div>
+          <div class="txt"><div class="name">麦克风</div>
+            <div class="desc">录下你的声音用于识别</div></div>
+          <span class="chip ok">已授权 ✓</span>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">辅助功能</div>
+            <div class="desc">把识别出的文字送进当前输入框</div></div>
+          <span class="chip warn">未授权</span>
+          <button class="btn">前往系统设置…</button>
+        </div>
+      </div>
+
+      <h2>API Key</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">豆包</div>
             <div class="desc">音频实时流式识别</div></div>
           <span class="chip ok">已配置 ✓</span>
           <button class="btn">检查连接</button>
         </div>
-      </div>
-
-      <h2>文字润色</h2>
-      <div class="group">
         <div class="item">
-          <div class="txt"><div class="name">DeepSeek API Key</div>
+          <div class="txt"><div class="name">DeepSeek</div>
             <div class="desc">仅发送识别出的文字，不发送音频</div></div>
           <span class="chip warn">未配置</span>
           <button class="btn">填写…</button>
         </div>
+      </div>
+
+      <h2>整理</h2>
+      <div class="group">
         <div class="item">
           <div class="txt"><div class="name">整理模式</div>
             <div class="desc">识别后如何整理文字</div></div>
@@ -218,23 +231,8 @@
       </div>
     </div>
 
-    <!-- ── 关于：状态、承诺与维护 ── -->
+    <!-- ── 关于：承诺与维护 ── -->
     <div class="pane" id="pane-about">
-      <h2>权限</h2>
-      <div class="group">
-        <div class="item">
-          <div class="txt"><div class="name">麦克风</div>
-            <div class="desc">录下你的声音用于识别</div></div>
-          <span class="chip ok">已授权 ✓</span>
-        </div>
-        <div class="item">
-          <div class="txt"><div class="name">辅助功能</div>
-            <div class="desc">把识别出的文字送进当前输入框</div></div>
-          <span class="chip warn">未授权</span>
-          <button class="btn">前往系统设置…</button>
-        </div>
-      </div>
-
       <h2>隐私边界</h2>
       <div class="group">
         <div class="item">
@@ -274,6 +272,11 @@
           <div class="txt"><div class="name">Speaker</div>
             <div class="desc">版本 0.9.2（147）</div></div>
           <button class="btn">检查更新</button>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">GitHub</div>
+            <div class="desc">github.com/simonwong/speaker</div></div>
+          <button class="btn">打开</button>
         </div>
       </div>
     </div>
