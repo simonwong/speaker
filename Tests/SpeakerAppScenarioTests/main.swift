@@ -1568,6 +1568,39 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        run("main window uses one minimum and one responsive breakpoint", failures: &failures, executed: &executed) {
+            let minimum = MainWindowLayout(availableWidth: 720)
+            let justBelowRegular = MainWindowLayout(availableWidth: 779)
+            let regular = MainWindowLayout(availableWidth: 780)
+
+            try expect(
+                MainWindowLayout.minimumContentSize
+                    == CGSize(width: 720, height: 560)
+            )
+            try expect(
+                MainWindowLayout.preferredContentSize
+                    == CGSize(width: 900, height: 640)
+            )
+            try expect(
+                minimum.widthClass == .compact
+            )
+            try expect(
+                justBelowRegular.widthClass == .compact
+            )
+            try expect(
+                regular.widthClass == .regular
+            )
+            try expect(
+                MainWindowLayout(availableWidth: 900).widthClass == .regular
+            )
+            try expect(minimum.pageHorizontalPadding == 18)
+            try expect(regular.pageHorizontalPadding == 24)
+            try expect(minimum.overviewMetricDividerPadding == 18)
+            try expect(regular.overviewMetricDividerPadding == 34)
+            try expect(minimum.usesScrollableSettingsNavigation)
+            try expect(!regular.usesScrollableSettingsNavigation)
+        }
+
         run("settings and main window expose the approved information architecture", failures: &failures, executed: &executed) {
             try expect(
                 SettingsPage.allCases == [

@@ -165,13 +165,18 @@ private struct OverviewVoiceprint: View {
 private struct OverviewMetrics: View {
     let summary: VoiceInputUsageSummary
     let now: Date
+    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             OverviewMetric(label: "说话时长", value: speakingValue)
-            MetricDivider()
+            MetricDivider(
+                horizontalPadding: mainWindowLayout.overviewMetricDividerPadding
+            )
             OverviewMetric(label: "少敲的键盘", value: keyboardSavedValue)
-            MetricDivider()
+            MetricDivider(
+                horizontalPadding: mainWindowLayout.overviewMetricDividerPadding
+            )
             OverviewMetric(label: "本周", value: weeklyValue)
         }
     }
@@ -242,11 +247,13 @@ private struct OverviewMetric: View {
 }
 
 private struct MetricDivider: View {
+    let horizontalPadding: CGFloat
+
     var body: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.12))
             .frame(width: 0.5, height: 43)
-            .padding(.horizontal, 34)
+            .padding(.horizontal, horizontalPadding)
             .accessibilityHidden(true)
     }
 }

@@ -220,6 +220,78 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "main window keeps one minimum without changing its current geometry",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let window = NSWindow(
+                contentRect: NSRect(
+                    x: -10_000,
+                    y: -10_000,
+                    width: 900,
+                    height: 640
+                ),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            defer { window.close() }
+            let sizeBeforeConfiguration = window.frame.size
+
+            MainWindowWindowConfiguration.apply(to: window)
+
+            let expectedMinimum = CGSize(width: 720, height: 560)
+            let expectedFrameMinimum = window.frameRect(
+                forContentRect: NSRect(origin: .zero, size: expectedMinimum)
+            ).size
+            try expect(
+                window.minSize == expectedFrameMinimum,
+                "frame minimum is \(window.minSize)"
+            )
+            try expect(
+                window.contentMinSize == expectedMinimum,
+                "content minimum is \(window.contentMinSize)"
+            )
+            try expect(
+                window.frame.size == sizeBeforeConfiguration,
+                "configuring a tab changed the existing window geometry"
+            )
+        }
+
+        run(
+            "main window SwiftUI bridge applies the production minimum",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let window = NSWindow(
+                contentRect: NSRect(
+                    x: -10_000,
+                    y: -10_000,
+                    width: 900,
+                    height: 640
+                ),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = NSHostingView(
+                rootView: MainWindowWindowConfigurator()
+            )
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+            try expect(
+                window.contentMinSize == CGSize(width: 720, height: 560),
+                "SwiftUI bridge left content minimum at \(window.contentMinSize)"
+            )
+        }
+
+        run(
             "contribution heatmap lays out 52 Monday-first weeks with today in the final column",
             failures: &failures,
             executed: &executed

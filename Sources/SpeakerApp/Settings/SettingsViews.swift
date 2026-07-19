@@ -204,6 +204,7 @@ private struct SettingsOverviewView: View {
     @ObservedObject private var refinement: RefinementSettingsModel
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
     @State private var activeSection = SettingsOverviewSection.shortcut
+    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     init(
         workspace: SettingsWorkspace,
@@ -232,7 +233,10 @@ private struct SettingsOverviewView: View {
                 }
                 .frame(maxWidth: 680)
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 24)
+                .padding(
+                    .horizontal,
+                    mainWindowLayout.pageHorizontalPadding
+                )
                 .padding(.bottom, 28)
             }
             .coordinateSpace(name: "settingsOverviewScroll")
@@ -318,13 +322,7 @@ private struct SettingsOverviewView: View {
 
     @ViewBuilder
     private func pinnedBar(proxy: ScrollViewProxy) -> some View {
-        let bar = HStack(spacing: 6) {
-            ForEach(visibleSections) { section in
-                anchorChip(section, proxy: proxy)
-            }
-            Spacer()
-            readinessChip(proxy: proxy)
-        }
+        let bar = responsivePinnedBar(proxy: proxy)
 
         if #available(macOS 26.0, *) {
             GlassEffectContainer(spacing: 6) { bar }
@@ -333,6 +331,32 @@ private struct SettingsOverviewView: View {
                 .padding(.bottom, 6)
         } else {
             solidPinnedBar(bar)
+        }
+    }
+
+    @ViewBuilder
+    private func responsivePinnedBar(
+        proxy: ScrollViewProxy
+    ) -> some View {
+        if mainWindowLayout.usesScrollableSettingsNavigation {
+            ScrollView(.horizontal, showsIndicators: false) {
+                pinnedBarContent(proxy: proxy)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        } else {
+            pinnedBarContent(proxy: proxy)
+        }
+    }
+
+    private func pinnedBarContent(
+        proxy: ScrollViewProxy
+    ) -> some View {
+        HStack(spacing: 6) {
+            ForEach(visibleSections) { section in
+                anchorChip(section, proxy: proxy)
+            }
+            Spacer()
+            readinessChip(proxy: proxy)
         }
     }
 
@@ -740,6 +764,7 @@ private struct AutomaticUpdateSettingsRow: View {
 
 struct AboutView: View {
     let workspace: SettingsWorkspace
+    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     var body: some View {
         ScrollView {
@@ -749,7 +774,10 @@ struct AboutView: View {
             )
             .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
+            .padding(
+                .horizontal,
+                mainWindowLayout.pageHorizontalPadding
+            )
             .padding(.vertical, 28)
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -1637,6 +1665,7 @@ private struct DictionaryChipFlowLayout: Layout {
 
 struct DictionaryTabView: View {
     @ObservedObject var model: DictionarySettingsModel
+    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     var body: some View {
         ScrollView {
@@ -1645,7 +1674,10 @@ struct DictionaryTabView: View {
             }
             .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24)
+            .padding(
+                .horizontal,
+                mainWindowLayout.pageHorizontalPadding
+            )
             .padding(.vertical, 24)
         }
         .background(Color(nsColor: .windowBackgroundColor))

@@ -50,7 +50,10 @@ struct SpeakerApp: App {
                 dictionary: runtime.dictionarySettings
             )
         }
-        .defaultSize(width: 900, height: 640)
+        .defaultSize(
+            width: MainWindowLayout.preferredContentSize.width,
+            height: MainWindowLayout.preferredContentSize.height
+        )
     }
 
     private var menuBarIcon: String {
