@@ -46,3 +46,27 @@ package extension EnvironmentValues {
         set { self[MainWindowLayoutEnvironmentKey.self] = newValue }
     }
 }
+
+package struct MainWindowLayoutContainer<Content: View>: View {
+    private let content: Content
+
+    package init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    package var body: some View {
+        GeometryReader { geometry in
+            content
+                .environment(
+                    \.mainWindowLayout,
+                    MainWindowLayout(availableWidth: geometry.size.width)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(
+            minWidth: MainWindowLayout.minimumContentSize.width,
+            minHeight: MainWindowLayout.minimumContentSize.height
+        )
+        .background(MainWindowWindowConfigurator())
+    }
+}

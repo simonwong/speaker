@@ -292,6 +292,53 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "switching every main window tab preserves minimum and default geometry",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let selection = MainWindowSelectionFixture()
+            let window = NSWindow(
+                contentRect: NSRect(
+                    x: -10_000,
+                    y: -10_000,
+                    width: 900,
+                    height: 640
+                ),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = NSHostingView(
+                rootView: MainWindowGeometryFixture(selection: selection)
+            )
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+            for contentSize in [
+                CGSize(width: 720, height: 560),
+                CGSize(width: 900, height: 640),
+            ] {
+                window.setContentSize(contentSize)
+                let expectedFrame = window.frame
+
+                for tab in MainWindowTab.allCases {
+                    selection.selection = tab
+                    RunLoop.current.run(
+                        until: Date().addingTimeInterval(0.02)
+                    )
+                    try expect(
+                        window.frame == expectedFrame,
+                        "\(tab) changed \(contentSize) to \(window.frame.size)"
+                    )
+                }
+            }
+        }
+
+        run(
             "contribution heatmap lays out 52 Monday-first weeks with today in the final column",
             failures: &failures,
             executed: &executed
@@ -854,6 +901,33 @@ private func accessibilityButtons(in root: NSView) -> [AccessibilityButton] {
 
     visit(root)
     return buttons
+}
+
+@MainActor
+private final class MainWindowSelectionFixture: ObservableObject {
+    @Published var selection: MainWindowTab = .overview
+}
+
+private struct MainWindowGeometryFixture: View {
+    @ObservedObject var selection: MainWindowSelectionFixture
+
+    var body: some View {
+        MainWindowLayoutContainer {
+            TabView(selection: $selection.selection) {
+                ForEach(MainWindowTab.allCases) { tab in
+                    Color.clear
+                        .frame(
+                            minWidth: tab == .dictionary ? 980 : 200,
+                            minHeight: tab == .about ? 700 : 200
+                        )
+                        .tabItem {
+                            Label(tab.title, systemImage: tab.icon)
+                        }
+                        .tag(tab)
+                }
+            }
+        }
+    }
 }
 
 private struct SpecFailure: Error {
