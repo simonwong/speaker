@@ -19,6 +19,7 @@ struct MenuBarContent: View {
         MenuBarCommandRouter(
             navigation: settingsNavigation,
             openSettings: { openMainWindow(.settings) },
+            openAbout: { openMainWindow(.about) },
             openHistory: { openMainWindow(.history) },
             activate: {
                 NSApp.activate(ignoringOtherApps: true)

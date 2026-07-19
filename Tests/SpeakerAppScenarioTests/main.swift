@@ -1568,6 +1568,44 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        run("settings and main window expose the approved information architecture", failures: &failures, executed: &executed) {
+            try expect(
+                SettingsPage.allCases == [
+                    .shortcut,
+                    .permissions,
+                    .apiKeys,
+                    .refinement,
+                    .general,
+                ]
+            )
+            try expect(
+                SettingsPage.allCases.map(\.title) == [
+                    "快捷键",
+                    "权限",
+                    "API Key",
+                    "整理",
+                    "通用",
+                ]
+            )
+            try expect(
+                MainWindowTab.allCases == [
+                    .overview,
+                    .history,
+                    .settings,
+                    .dictionary,
+                    .about,
+                ]
+            )
+            try expect(MainWindowTab.about.title == "关于")
+            try expect(
+                AboutSection.allCases.map(\.title) == [
+                    "隐私边界",
+                    "本地数据",
+                    "版本",
+                ]
+            )
+        }
+
         run("menu commands route to the intended product destination", failures: &failures, executed: &executed) {
             let navigation = SettingsNavigationModel()
             var events: [String] = []
@@ -1578,6 +1616,7 @@ struct SpeakerAppScenarioSpecs {
                         "settings.\(navigation.page.rawValue)"
                     )
                 },
+                openAbout: { events.append("about") },
                 openHistory: { events.append("history") },
                 activate: { events.append("activate") },
                 terminate: { events.append("terminate") }
@@ -1590,9 +1629,9 @@ struct SpeakerAppScenarioSpecs {
             )
 
             router.perform(.about)
-            try expect(navigation.page == .about)
+            try expect(navigation.page == .permissions)
             try expect(
-                events.suffix(2) == ["settings.about", "activate"]
+                events.suffix(2) == ["about", "activate"]
             )
 
             router.perform(.history)
@@ -1600,7 +1639,7 @@ struct SpeakerAppScenarioSpecs {
 
             router.perform(.settings)
             try expect(
-                events.suffix(2) == ["settings.about", "activate"],
+                events.suffix(2) == ["settings.permissions", "activate"],
                 "ordinary settings did not preserve the current page"
             )
 

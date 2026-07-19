@@ -29,6 +29,7 @@ final class SpeakerRuntime: ObservableObject {
         permissions: permissions,
         shortcut: shortcut,
         loginItemSettings: loginItemSettings,
+        history: historyModel,
         doubao: doubaoSettings,
         refinement: refinementSettings,
         dictionary: dictionarySettings,
@@ -322,7 +323,7 @@ final class SpeakerRuntime: ObservableObject {
             routeEffect: { effect in
                 switch effect {
                 case .openSpeechSettings:
-                    settingsNavigation.open(.speech)
+                    settingsNavigation.open(.apiKeys)
                 }
             }
         )
@@ -351,7 +352,7 @@ final class SpeakerRuntime: ObservableObject {
                 guard let self else { return }
                 let outcome = await self.dataErasure.eraseAllAndExit()
                 if case let .incomplete(failure) = outcome {
-                    self.settingsNavigation.open(.about)
+                    self.mainWindow.select(.about)
                     self.diagnostics.publish(
                         Self.dataErasureMessage(for: failure)
                     )

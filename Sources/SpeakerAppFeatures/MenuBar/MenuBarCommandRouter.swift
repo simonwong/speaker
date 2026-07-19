@@ -11,6 +11,7 @@ package enum MenuBarCommand: Equatable, Sendable {
 package struct MenuBarCommandRouter {
     private let navigation: SettingsNavigationModel
     private let openSettings: () -> Void
+    private let openAbout: () -> Void
     private let openHistory: () -> Void
     private let activate: () -> Void
     private let terminate: () -> Void
@@ -18,12 +19,14 @@ package struct MenuBarCommandRouter {
     package init(
         navigation: SettingsNavigationModel,
         openSettings: @escaping () -> Void,
+        openAbout: @escaping () -> Void,
         openHistory: @escaping () -> Void,
         activate: @escaping () -> Void,
         terminate: @escaping () -> Void
     ) {
         self.navigation = navigation
         self.openSettings = openSettings
+        self.openAbout = openAbout
         self.openHistory = openHistory
         self.activate = activate
         self.terminate = terminate
@@ -42,8 +45,7 @@ package struct MenuBarCommandRouter {
             openSettings()
             activate()
         case .about:
-            navigation.open(.about)
-            openSettings()
+            openAbout()
             activate()
         case .quit:
             terminate()
