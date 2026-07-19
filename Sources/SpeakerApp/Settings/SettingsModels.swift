@@ -449,8 +449,6 @@ final class DictionarySettingsModel: ObservableObject {
         _ = await save(entries.filter { $0.id != id })
     }
 
-    func shutdown() async {}
-
     private func save(_ candidate: [DictionaryEntry]) async -> Bool {
         guard allowsPersistence else {
             notice = "个人词库未能安全加载，已停止保存以避免覆盖原文件。请修复文件后重新打开 Speaker。"

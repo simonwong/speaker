@@ -549,7 +549,11 @@ private struct HistoryExpandedRecord: View {
         if !record.dictionarySnapshotEntries.isEmpty {
             Text("词库快照").font(.headline)
             ForEach(record.dictionarySnapshotEntries) { entry in
-                Text(entry.word)
+                Text(
+                    entry.legacyAliases.isEmpty
+                        ? entry.word
+                        : "\(entry.word) ← \(entry.legacyAliases.joined(separator: "、"))"
+                )
             }
             if let context = record.dictionaryRequestContext {
                 LabeledContent("发送词数", value: "\(context.hotwords.count)")

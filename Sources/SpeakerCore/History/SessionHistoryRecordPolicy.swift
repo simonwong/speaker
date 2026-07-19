@@ -25,7 +25,7 @@ package enum SessionHistoryRecordPolicy {
             record.refinementFailureStatusCode,
             record.cancelledAtStage,
             record.dictionarySnapshotEntries
-                .map(\.word)
+                .flatMap { [$0.word] + $0.legacyAliases }
                 .joined(separator: " "),
             record.dictionaryRequestContext?.hotwords.joined(separator: " "),
         ].compactMap { $0 }
