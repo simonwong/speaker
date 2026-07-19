@@ -424,6 +424,112 @@ struct SpeakerAppUISpecs {
             try expect(counts == expected)
         }
 
+        run(
+            "history records are grouped by local day in reverse chronological order",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let now = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 20, hour: 15
+            ))!
+            let todayMorningID = VoiceInputSessionID()
+            let todayAfternoonID = VoiceInputSessionID()
+            let yesterdayID = VoiceInputSessionID()
+            let olderID = VoiceInputSessionID()
+            let records = [
+                makeHistoryRecord(
+                    id: olderID,
+                    startedAt: calendar.date(from: DateComponents(
+                        year: 2026, month: 7, day: 17, hour: 10
+                    ))!
+                ),
+                makeHistoryRecord(
+                    id: todayMorningID,
+                    startedAt: calendar.date(from: DateComponents(
+                        year: 2026, month: 7, day: 20, hour: 9
+                    ))!
+                ),
+                makeHistoryRecord(
+                    id: yesterdayID,
+                    startedAt: calendar.date(from: DateComponents(
+                        year: 2026, month: 7, day: 19, hour: 20
+                    ))!
+                ),
+                makeHistoryRecord(
+                    id: todayAfternoonID,
+                    startedAt: calendar.date(from: DateComponents(
+                        year: 2026, month: 7, day: 20, hour: 14
+                    ))!
+                ),
+            ]
+            let sections = HistoryPresentation.sections(
+                records: records,
+                now: now,
+                calendar: calendar
+            )
+
+            try expect(sections.map(\.title) == ["今天", "昨天", "7月17日"])
+            try expect(
+                sections.map { $0.records.map(\.sessionID) } == [
+                    [todayAfternoonID, todayMorningID],
+                    [yesterdayID],
+                    [olderID],
+                ]
+            )
+        }
+
+        run(
+            "history row presentation keeps textless records safe and uncopyable",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let startedAt = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 20, hour: 9, minute: 5
+            ))!
+            let textID = VoiceInputSessionID()
+            let secureID = VoiceInputSessionID()
+            let textRecord = makeHistoryRecord(
+                id: textID,
+                startedAt: startedAt,
+                applicationName: "备忘录",
+                transcription: "豆包初稿",
+                finalText: "最终正文"
+            )
+            let secureRecord = VoiceInputHistoryRecord(
+                sessionID: secureID,
+                startedAt: startedAt,
+                applicationName: "密码输入",
+                transcription: nil,
+                finalText: nil,
+                outcome: .pendingCopy(
+                    secureID,
+                    text: "",
+                    reason: .secureTarget
+                )
+            )
+
+            let visible = HistoryPresentation.row(
+                for: textRecord,
+                calendar: calendar
+            )
+            let redacted = HistoryPresentation.row(
+                for: secureRecord,
+                calendar: calendar
+            )
+
+            try expect(visible.text == "最终正文")
+            try expect(visible.applicationName == "备忘录")
+            try expect(visible.time == "09:05")
+            try expect(visible.canCopy)
+            try expect(redacted.text == "此会话未保留正文")
+            try expect(redacted.applicationName == "密码输入")
+            try expect(!redacted.canCopy)
+        }
+
         guard failures.isEmpty else {
             for failure in failures {
                 FileHandle.standardError.write(
@@ -435,6 +541,27 @@ struct SpeakerAppUISpecs {
 
         print("PASS: \(executed) AppKit UI specs")
     }
+}
+
+private func makeHistoryRecord(
+    id: VoiceInputSessionID,
+    startedAt: Date,
+    applicationName: String? = "备忘录",
+    transcription: String? = "测试文字",
+    finalText: String? = "测试文字"
+) -> VoiceInputHistoryRecord {
+    VoiceInputHistoryRecord(
+        sessionID: id,
+        startedAt: startedAt,
+        applicationName: applicationName,
+        transcription: transcription,
+        finalText: finalText,
+        outcome: .delivered(
+            id,
+            applicationName: applicationName ?? "未指定应用",
+            text: finalText ?? transcription ?? ""
+        )
+    )
 }
 
 @MainActor
