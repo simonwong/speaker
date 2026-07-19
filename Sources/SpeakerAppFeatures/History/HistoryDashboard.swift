@@ -87,7 +87,6 @@ package struct HistoryDashboard: View {
     @State private var expandedRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(
         state: HistoryDashboardState,
@@ -194,7 +193,7 @@ package struct HistoryDashboard: View {
             .help("刷新、保留与清空历史")
             .accessibilityLabel("历史选项")
         }
-        .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+        .padding(.horizontal, 18)
         .padding(.vertical, 12)
     }
 
@@ -266,7 +265,7 @@ package struct HistoryDashboard: View {
                     }
                 }
             }
-            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+            .padding(.horizontal, 18)
             .padding(.bottom, 20)
         }
     }
