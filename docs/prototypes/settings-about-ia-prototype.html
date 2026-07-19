@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — Speaker 设置 / 关于 信息架构稿（可丢弃，不进产品）
+
+  回答的问题："设置就是设置，关于和隐私权限等等单独做个板块" —— 板块怎么分？
+  方案：新增第五个 Tab「关于」。
+    设置（纯偏好，改了就生效的东西）：
+      快捷键 / 语音识别（豆包 Key）/ 文字润色（DeepSeek Key + 模式）/
+      通用（自启动、保存历史、自动检查更新）
+    关于（状态、承诺与维护，不是日常要动的东西）：
+      权限（辅助功能、麦克风：状态 + 修复入口）/
+      隐私边界（每类数据去哪 + 完整说明 + 本地数据文件夹）/
+      本地数据（清除并退出）/ 版本（版本号 + 检查更新）
+
+  运行：open docs/prototypes/settings-about-ia-prototype.html
+  切换：点「设置」「关于」两个 Tab（其余 Tab 是摆设）；?tab=about 直达关于
+  数据全部是假的；权限里故意放了一个"未授权"示例，展示修复入口的样子。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE · Speaker 设置/关于</title>
+<style>
+  :root {
+    --accent: rgb(247, 222, 181);
+    --accent-dim: rgba(247, 222, 181, 0.16);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    background: linear-gradient(160deg, #2c3140 0%, #1b1e27 60%, #15161c 100%);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .aurora { position: absolute; inset: 0; pointer-events: none; }
+  .aurora i {
+    position: absolute; display: block; border-radius: 50%;
+    filter: blur(56px); opacity: 0.35;
+    animation: drift 16s ease-in-out infinite alternate;
+  }
+  .aurora i:nth-child(1) {
+    width: 380px; height: 300px; left: 8%; top: 12%;
+    background: radial-gradient(circle, #ff9d6c, transparent 70%);
+  }
+  .aurora i:nth-child(2) {
+    width: 420px; height: 340px; right: 6%; bottom: 8%;
+    background: radial-gradient(circle, #6c8cff, transparent 70%);
+    animation-delay: -7s;
+  }
+  @keyframes drift {
+    from { transform: translate(-24px, 0) scale(1); }
+    to   { transform: translate(24px, 12px) scale(1.12); }
+  }
+
+  .window {
+    position: relative; width: 780px; height: 580px;
+    border-radius: 14px; overflow: hidden;
+    background: linear-gradient(rgba(46,48,56,0.72), rgba(30,31,36,0.82));
+    backdrop-filter: blur(40px) saturate(1.8);
+    border: 0.5px solid rgba(255,255,255,0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      0 30px 90px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;
+  }
+  .titlebar {
+    height: 48px; flex: none; display: flex; align-items: center;
+    padding: 0 16px; gap: 8px;
+  }
+  .titlebar i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .tabs {
+    position: absolute; left: 50%; top: 9px; transform: translateX(-50%);
+    display: flex; gap: 2px; padding: 3px;
+    background: rgba(0,0,0,0.25); border-radius: 9px;
+  }
+  .tabs button {
+    border: none; border-radius: 7px; padding: 5px 14px;
+    background: transparent; color: rgba(255,255,255,0.55);
+    font-size: 12.5px; cursor: pointer;
+  }
+  .tabs button:disabled { color: rgba(255,255,255,0.3); cursor: default; }
+  .tabs button.active {
+    background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.95);
+  }
+  .content { flex: 1; overflow-y: auto; padding: 4px 28px 26px; }
+  .pane { display: none; }
+  .pane.active { display: block; animation: fadein .18s ease-out; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+
+  h2 {
+    font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.4);
+    margin: 20px 2px 10px; letter-spacing: 0.4px;
+  }
+  .group {
+    border-radius: 14px; overflow: hidden;
+    background: rgba(255,255,255,0.055);
+    border: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 16px;
+  }
+  .item + .item { border-top: 0.5px solid rgba(255,255,255,0.07); }
+  .item .txt { flex: 1; min-width: 0; }
+  .item .name { font-size: 13px; color: rgba(255,255,255,0.92); }
+  .item .desc { margin-top: 2px; font-size: 11px; color: rgba(255,255,255,0.4); }
+  .chip { font-size: 11px; padding: 3px 10px; border-radius: 10px; flex: none; }
+  .chip.ok { background: rgba(90,200,120,0.16); color: #7ddc9a; }
+  .chip.warn { background: rgba(255,180,60,0.14); color: #ffc36b; }
+  .kbd {
+    font-size: 11px; padding: 3px 9px; border-radius: 6px;
+    background: rgba(0,0,0,0.3); color: rgba(255,255,255,0.75);
+    border: 0.5px solid rgba(255,255,255,0.14); border-bottom-width: 1.5px;
+  }
+  .btn {
+    border: none; border-radius: 8px; padding: 5px 12px; cursor: pointer;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.9);
+    font-size: 11.5px; flex: none;
+  }
+  .btn.danger { background: rgba(255,90,80,0.16); color: #ff8a80; }
+  .toggle {
+    width: 36px; height: 21px; border-radius: 11px; flex: none;
+    background: rgba(255,255,255,0.16); position: relative; cursor: pointer;
+    transition: background .15s;
+  }
+  .toggle::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: #fff; transition: left .15s;
+  }
+  .toggle.on { background: rgba(247,222,181,0.85); }
+  .toggle.on::after { left: 17px; }
+  .seg { display: flex; gap: 2px; padding: 2px; background: rgba(0,0,0,0.25); border-radius: 8px; flex: none; }
+  .seg button {
+    border: none; border-radius: 6px; padding: 4px 10px;
+    background: transparent; color: rgba(255,255,255,0.5);
+    font-size: 11px; cursor: pointer;
+  }
+  .seg button.active { background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.95); }
+  .flow {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    font-size: 11px; color: rgba(255,255,255,0.55);
+  }
+  .flow b { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="aurora"><i></i><i></i></div>
+
+<div class="window">
+  <div class="titlebar">
+    <i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+    <div class="tabs" id="tabs">
+      <button disabled>概览</button>
+      <button disabled>历史</button>
+      <button data-t="settings">设置</button>
+      <button disabled>词典</button>
+      <button data-t="about">关于</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- ── 设置：纯偏好 ── -->
+    <div class="pane" id="pane-settings">
+      <h2>快捷键</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">语音输入</div>
+            <div class="desc">按住说话，松开输入；短按开始/结束</div></div>
+          <span class="kbd">Fn 🌐</span>
+        </div>
+      </div>
+
+      <h2>语音识别</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">豆包 API Key</div>
+            <div class="desc">音频实时流式识别</div></div>
+          <span class="chip ok">已配置 ✓</span>
+          <button class="btn">检查连接</button>
+        </div>
+      </div>
+
+      <h2>文字润色</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">DeepSeek API Key</div>
+            <div class="desc">仅发送识别出的文字，不发送音频</div></div>
+          <span class="chip warn">未配置</span>
+          <button class="btn">填写…</button>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">整理模式</div>
+            <div class="desc">识别后如何整理文字</div></div>
+          <div class="seg" id="refine">
+            <button class="active">默认顺滑</button><button>精简清理</button><button>完整重写</button><button>自定义</button>
+          </div>
+        </div>
+      </div>
+
+      <h2>通用</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">开机自动启动</div></div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">保存历史</div>
+            <div class="desc">识别结果仅保存在本机，可在「关于」里一键清除</div></div>
+          <div class="toggle on"></div>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">自动检查更新</div></div>
+          <div class="toggle on"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 关于：状态、承诺与维护 ── -->
+    <div class="pane" id="pane-about">
+      <h2>权限</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">麦克风</div>
+            <div class="desc">录下你的声音用于识别</div></div>
+          <span class="chip ok">已授权 ✓</span>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">辅助功能</div>
+            <div class="desc">把识别出的文字送进当前输入框</div></div>
+          <span class="chip warn">未授权</span>
+          <button class="btn">前往系统设置…</button>
+        </div>
+      </div>
+
+      <h2>隐私边界</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">录音音频</div></div>
+          <div class="flow">只发送给 <b>豆包</b> 做实时识别</div>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">识别文字</div></div>
+          <div class="flow">配置 DeepSeek 后才发送去 <b>润色</b></div>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">历史、设置与词库</div></div>
+          <div class="flow">只保存在 <b>这台 Mac</b></div>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">完整隐私说明</div></div>
+          <button class="btn">查看</button>
+        </div>
+        <div class="item">
+          <div class="txt"><div class="name">本地数据文件夹</div></div>
+          <button class="btn">在访达中打开</button>
+        </div>
+      </div>
+
+      <h2>本地数据</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">清除本地数据并退出</div>
+            <div class="desc">移除 API Key、历史、词库、设置和登录项；系统权限记录不会被撤销</div></div>
+          <button class="btn danger">清除…</button>
+        </div>
+      </div>
+
+      <h2>版本</h2>
+      <div class="group">
+        <div class="item">
+          <div class="txt"><div class="name">Speaker</div>
+            <div class="desc">版本 0.9.2（147）</div></div>
+          <button class="btn">检查更新</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const tabs = document.getElementById("tabs");
+let current = new URLSearchParams(location.search).get("tab") || "settings";
+if (!["settings", "about"].includes(current)) current = "settings";
+
+function show(t) {
+  current = t;
+  document.querySelectorAll(".pane").forEach(p =>
+    p.classList.toggle("active", p.id === "pane-" + t));
+  tabs.querySelectorAll("button").forEach(b =>
+    b.classList.toggle("active", b.dataset.t === t));
+}
+tabs.addEventListener("click", e => {
+  if (e.target.dataset?.t) show(e.target.dataset.t);
+});
+show(current);
+
+document.querySelectorAll(".toggle").forEach(t =>
+  t.addEventListener("click", () => t.classList.toggle("on")));
+document.getElementById("refine").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON") return;
+  document.querySelectorAll("#refine button").forEach(b =>
+    b.classList.toggle("active", b === e.target));
+});
+</script>
+</body>
+</html>
