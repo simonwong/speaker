@@ -60,7 +60,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "SpeakerAppUISpecs",
-            dependencies: ["SpeakerAppFeatures"],
+            dependencies: ["SpeakerAppFeatures", "SpeakerCore"],
             path: "Tests/SpeakerAppUISpecs"
         ),
         .executableTarget(

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SpeakerAppFeatures
+import SpeakerCore
 import SwiftUI
 
 @main
@@ -179,6 +180,124 @@ struct SpeakerAppUISpecs {
                 window.contentView?.frame.size == layout.initialSize,
                 "the onboarding window ignored the constrained screen size"
             )
+        }
+
+        run(
+            "contribution heatmap lays out 26 Monday-first weeks with today in the final column",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let now = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 19, hour: 15
+            ))!
+            let today = calendar.startOfDay(for: now)
+            let summary = VoiceInputUsageSummary(
+                totalRecognizedCharacterCount: 1_000,
+                totalSpeakingMilliseconds: 60_000,
+                totalSessionCount: 1,
+                daily: [VoiceInputDailyUsage(
+                    day: today,
+                    recognizedCharacterCount: 1_000,
+                    speakingMilliseconds: 60_000,
+                    sessionCount: 1
+                )]
+            )
+            let heatmap = ContributionHeatmap.build(
+                summary: summary,
+                now: now,
+                calendar: calendar,
+                weeks: 26
+            )
+
+            try expect(heatmap.columns.count == 26)
+            try expect(heatmap.columns.allSatisfy { $0.count == 7 })
+            try expect(heatmap.columns.flatMap { $0 }.count == 182)
+            try expect(heatmap.hasData)
+            // First row of the first column is a Monday (Gregorian weekday 2).
+            try expect(
+                calendar.component(.weekday, from: heatmap.columns[0][0].date) == 2
+            )
+            // Today sits in the final column.
+            try expect(
+                heatmap.columns[25].contains { $0.date == today && !$0.isFuture }
+            )
+            let todayCell = heatmap.columns.flatMap { $0 }.first { $0.date == today }
+            try expect(todayCell?.recognizedCharacterCount == 1_000)
+            try expect(todayCell?.level == 3)
+            // Everything past today is a hidden future cell.
+            let futureCells = heatmap.columns.flatMap { $0 }.filter { $0.date > today }
+            try expect(futureCells.allSatisfy { $0.isFuture && $0.level == 0 })
+            try expect(heatmap.monthLabels.first?.column == 0)
+        }
+
+        run(
+            "empty usage summary yields a heatmap with no data",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let heatmap = ContributionHeatmap.build(
+                summary: .empty,
+                now: Date()
+            )
+            try expect(heatmap.columns.count == 26)
+            try expect(!heatmap.hasData)
+            try expect(
+                heatmap.columns.flatMap { $0 }.allSatisfy {
+                    $0.recognizedCharacterCount == 0 && $0.level == 0
+                }
+            )
+        }
+
+        run(
+            "usage presentation formats duration, keyboard savings and heatmap shades",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let duration = VoiceInputUsagePresentation.speakingDuration(
+                milliseconds: (14 * 3_600 + 22 * 60 + 8) * 1_000
+            )
+            try expect(
+                duration == .init(hours: 14, minutes: 22, seconds: 8)
+            )
+            try expect(
+                VoiceInputUsagePresentation.speakingDuration(milliseconds: -5)
+                    == .init(hours: 0, minutes: 0, seconds: 0)
+            )
+
+            // 132,480 recognized characters ≈ 9.2 hours at 240 chars/min.
+            let hours = VoiceInputUsagePresentation.keyboardSavedHours(
+                recognizedCharacterCount: 132_480
+            )
+            try expect(abs(hours - 9.2) < 0.05)
+            try expect(
+                VoiceInputUsagePresentation.keyboardSavedHours(
+                    recognizedCharacterCount: 0
+                ) == 0
+            )
+
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 0) == 0)
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 399) == 1)
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 400) == 2)
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 899) == 2)
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 900) == 3)
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 1_499) == 3)
+            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 1_500) == 4)
+
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let date = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 9
+            ))!
+            let description = VoiceInputUsagePresentation.heatmapCellDescription(
+                date: date,
+                recognizedCharacterCount: 1_204,
+                calendar: calendar
+            )
+            try expect(description.hasPrefix("7月9日 · "))
+            try expect(description.hasSuffix(" 字"))
+            try expect(description.contains("204"))
         }
 
         guard failures.isEmpty else {
