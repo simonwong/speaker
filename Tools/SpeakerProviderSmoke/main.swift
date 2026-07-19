@@ -391,8 +391,7 @@ private struct SpeakerProviderSmoke {
                     announceStarted(caseID)
                     let transcription = try await service.transcribe(
                         pacedAudioChunks(sample.pcm(durationSeconds: seconds)),
-                        hotwords: [],
-                        context: nil
+                        hotwords: []
                     )
                     guard !transcription.text
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -416,8 +415,7 @@ private struct SpeakerProviderSmoke {
             let cancellation = Task {
                 try await service.transcribe(
                     pacedAudioChunks(sample.pcm(durationSeconds: 60)),
-                    hotwords: [],
-                    context: nil
+                    hotwords: []
                 )
             }
             try? await Task.sleep(for: .milliseconds(600))
