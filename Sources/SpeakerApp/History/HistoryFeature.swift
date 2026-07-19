@@ -154,6 +154,17 @@ final class HistoryModel: ObservableObject {
         }
     }
 
+    func setHistorySavingEnabled(_ enabled: Bool) async {
+        let policy: HistoryRetentionPolicy
+        if enabled {
+            policy = await settingsStore.load().settings
+                .historyRetentionWhenEnabled
+        } else {
+            policy = .disabled
+        }
+        await setRetentionPolicy(policy)
+    }
+
     func redeliver(_ record: VoiceInputHistoryRecord) async {
         guard let text = HistoryPresentation.retainedText(for: record) else {
             notice = "这条记录没有可重新送达的文本。"

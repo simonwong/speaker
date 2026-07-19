@@ -710,9 +710,7 @@ private struct HistorySavingSettingsRow: View {
                 get: { model.retentionPolicy.savesNewRecords },
                 set: { enabled in
                     Task {
-                        await model.setRetentionPolicy(
-                            enabled ? .forever : .disabled
-                        )
+                        await model.setHistorySavingEnabled(enabled)
                     }
                 }
             )

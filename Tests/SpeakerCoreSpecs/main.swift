@@ -5332,6 +5332,32 @@ struct SpeakerCoreSpecs {
             try expect(loaded.settings.historyRetention == .forever)
         }
 
+        await runAsync("disabling history remembers the enabled retention across restart", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-settings-history-toggle-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let writer = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            try await writer.save(
+                SpeakerAppSettings(historyRetention: .thirtyDays)
+            )
+            try await writer.updateHistoryRetention(.disabled)
+
+            let reloaded = await VersionedLocalAppSettingsStore(
+                fileURL: fileURL
+            ).load().settings
+            try expect(reloaded.historyRetention == .disabled)
+            try expect(
+                reloaded.historyRetentionWhenEnabled == .thirtyDays
+            )
+
+            try await writer.updateHistoryRetention(
+                reloaded.historyRetentionWhenEnabled
+            )
+            let enabled = await writer.load().settings
+            try expect(enabled.historyRetention == .thirtyDays)
+        }
+
         await runAsync("settings refuse to load when owner-only protection fails", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
