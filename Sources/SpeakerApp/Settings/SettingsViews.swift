@@ -661,7 +661,7 @@ private struct GeneralSettingsPage: View {
     var body: some View {
         SettingsCard(
             "通用",
-            subtitle: "启动、历史保留与软件更新",
+            subtitle: "启动、历史保存与软件更新",
             icon: "switch.2"
         ) {
             LaunchAtLoginSettingsRow(model: loginItemSettings)
@@ -725,20 +725,18 @@ private struct HistorySavingSettingsRow: View {
 private struct AutomaticUpdateSettingsRow: View {
     @ObservedObject var model: SoftwareUpdateFeature
 
-    @ViewBuilder
     var body: some View {
-        if model.state.isAvailable {
-            Divider()
+        Divider()
 
-            Toggle(
-                "自动检查更新",
-                isOn: Binding(
-                    get: { model.state.automaticallyChecksForUpdates },
-                    set: { model.setAutomaticallyChecksForUpdates($0) }
-                )
+        Toggle(
+            "自动检查更新",
+            isOn: Binding(
+                get: { model.state.automaticallyChecksForUpdates },
+                set: { model.setAutomaticallyChecksForUpdates($0) }
             )
-            .toggleStyle(.switch)
-        }
+        )
+        .toggleStyle(.switch)
+        .disabled(!model.state.isAvailable)
     }
 }
 
@@ -858,13 +856,13 @@ private struct AboutSettingsPage: View {
                 icon: AboutSection.version.icon
             ) {
                 HStack {
+                    Text("Speaker")
+                        .font(.subheadline.weight(.medium))
                     Spacer()
-                    if softwareUpdate.state.isAvailable {
-                        Button("检查更新…") {
-                            softwareUpdate.checkForUpdates()
-                        }
-                        .disabled(!softwareUpdate.state.canCheckForUpdates)
+                    Button("检查更新…") {
+                        softwareUpdate.checkForUpdates()
                     }
+                    .disabled(!softwareUpdate.state.canCheckForUpdates)
                     Link(
                         "github.com/simonwong/speaker",
                         destination: URL(

@@ -25,7 +25,7 @@ package enum SettingsPage: String, CaseIterable, Identifiable {
         case .permissions: "检查麦克风与辅助功能授权"
         case .apiKeys: "配置豆包与可选的 DeepSeek 凭据"
         case .refinement: "选择识别后文字的整理程度"
-        case .general: "启动、历史保留与软件更新"
+        case .general: "启动、历史保存与软件更新"
         }
     }
 
