@@ -11,7 +11,8 @@ struct MainWindowView: View {
 
     var body: some View {
         Group {
-            if dataErasure.state == .idle {
+            switch dataErasure.state.workspaceRoute {
+            case .normal:
                 TabView(selection: $mainWindow.selection) {
                     OverviewView(model: overview)
                         .tabItem {
@@ -58,12 +59,10 @@ struct MainWindowView: View {
                         }
                         .tag(MainWindowTab.about)
                 }
-            } else {
-                ContentUnavailableView(
-                    "本地数据清除中",
-                    systemImage: "externaldrive.badge.xmark",
-                    description: Text("完成清除或解决失败原因后才能继续使用 Speaker。")
-                )
+            case .erasing:
+                DataErasureInProgressView()
+            case .aboutRecovery:
+                AboutView(workspace: settingsWorkspace)
             }
         }
         .frame(minWidth: 720, minHeight: 560)

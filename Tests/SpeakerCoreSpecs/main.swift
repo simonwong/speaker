@@ -4569,6 +4569,74 @@ struct SpeakerCoreSpecs {
             try expect(agedRecords.map(\.sessionID) == [currentID])
         }
 
+        await runAsync("disabled history preserves existing records and skips new saves", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-history-disabled-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let stores: [any LocalSessionHistoryStoring] = [
+                VersionedLocalSessionHistory(
+                    fileURL: directory.appendingPathComponent("history.json")
+                ),
+                SQLiteSessionHistory(
+                    fileURL: directory.appendingPathComponent("history.sqlite3")
+                ),
+            ]
+
+            for store in stores {
+                let existingID = VoiceInputSessionID()
+                await store.save(.init(
+                    sessionID: existingID,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "existing",
+                    finalText: "existing",
+                    outcome: .pendingCopy(
+                        existingID,
+                        text: "existing",
+                        reason: .missingTarget
+                    )
+                ))
+                let disabled = await store.applyRetentionPolicy(
+                    .disabled,
+                    now: Date()
+                )
+                try expect(disabled)
+
+                await store.save(.init(
+                    sessionID: existingID,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "updated",
+                    finalText: "updated",
+                    outcome: .pendingCopy(
+                        existingID,
+                        text: "updated",
+                        reason: .missingTarget
+                    )
+                ))
+
+                let skippedID = VoiceInputSessionID()
+                await store.save(.init(
+                    sessionID: skippedID,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "skipped",
+                    finalText: "skipped",
+                    outcome: .pendingCopy(
+                        skippedID,
+                        text: "skipped",
+                        reason: .missingTarget
+                    )
+                ))
+
+                let policy = await store.currentRetentionPolicy()
+                let records = await store.allRecords()
+                try expect(policy == .disabled)
+                try expect(records.map(\.sessionID) == [existingID])
+                try expect(records.first?.finalText == "updated")
+            }
+        }
+
         await runAsync("history delete and clear roll back when disk write fails", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-history-write-failure-\(UUID().uuidString)")

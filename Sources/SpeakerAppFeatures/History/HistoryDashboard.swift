@@ -622,6 +622,7 @@ private struct HistoryTextBlock: View {
 private extension HistoryRetentionPolicy {
     var displayName: String {
         switch self {
+        case .disabled: "不保存"
         case .thirtyDays: "最近 30 天"
         case .ninetyDays: "最近 90 天"
         case .oneYear: "最近一年"

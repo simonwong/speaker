@@ -113,6 +113,8 @@ The persistence decision is recorded in [ADR-0004](adr/0004-protect-local-sensit
 
 Concurrent requests share one task, and caller cancellation cannot interrupt destruction already in progress. Deletion targets must remain within verified, symlink-resolved user Library roots. A separate owner-only recovery marker survives preferences removal; partial failure preserves it for the next startup. Normal termination cannot write settings after erasure.
 
+Both the main window and the system Settings scene replace writable controls while erasure is running. A failed erasure routes to the guarded About recovery surface so its reason and retry action remain reachable without reopening ordinary settings.
+
 ## UI verification seams
 
 Debug builds provide a visual-scenario entry point for the recording, processing, Pending Copy Result, and problem HUD states. It does not load the voice runtime and is absent from Release binaries. `VoiceInputPanelLayout` is the single source for panel classification and size; AppKit specifications cover every state transition and require the window and hosting content to converge together.

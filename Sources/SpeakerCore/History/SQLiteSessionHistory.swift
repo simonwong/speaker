@@ -289,6 +289,12 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     public func save(_ record: VoiceInputHistoryRecord) async {
         guard let db = connection?.raw else { return }
+        guard retentionPolicy.savesNewRecords
+                || !loadRecords(
+                    whereClause: "WHERE session_id = ?",
+                    binding: record.sessionID.rawValue.uuidString
+                ).isEmpty
+        else { return }
         do {
             let payload = try Self.encoder.encode(HistoryRecordV1(record))
             let pruned: Bool

@@ -135,9 +135,13 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
     }
 
     public func save(_ record: VoiceInputHistoryRecord) async {
-        if let index = storedRecords.firstIndex(where: {
+        let existingIndex = storedRecords.firstIndex(where: {
             $0.sessionID == record.sessionID
-        }) {
+        })
+        guard retentionPolicy.savesNewRecords || existingIndex != nil else {
+            return
+        }
+        if let index = existingIndex {
             storedRecords[index] = record
         } else {
             storedRecords.append(record)

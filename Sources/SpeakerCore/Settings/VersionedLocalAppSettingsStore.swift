@@ -156,6 +156,7 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
 }
 
 public enum HistoryRetentionPolicy: String, CaseIterable, Equatable, Sendable, Codable {
+    case disabled
     case thirtyDays
     case ninetyDays
     case oneYear
@@ -163,11 +164,16 @@ public enum HistoryRetentionPolicy: String, CaseIterable, Equatable, Sendable, C
 
     public var maximumAgeDays: Int? {
         switch self {
+        case .disabled: nil
         case .thirtyDays: 30
         case .ninetyDays: 90
         case .oneYear: 365
         case .forever: nil
         }
+    }
+
+    public var savesNewRecords: Bool {
+        self != .disabled
     }
 }
 
