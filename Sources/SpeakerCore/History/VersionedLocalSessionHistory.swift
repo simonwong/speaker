@@ -19,11 +19,21 @@ public protocol LocalSessionHistoryStoring: SessionHistoryRecording {
         _ policy: HistoryRetentionPolicy,
         now: Date
     ) async -> Bool
+    func usageStatistics() async -> VoiceInputUsageSummary
 }
 
 public extension LocalSessionHistoryStoring {
     func latestRecord() async -> VoiceInputHistoryRecord? {
         await allRecords().first
+    }
+
+    /// Aggregates every stored session into all-time totals and per-day buckets.
+    ///
+    /// The default implementation folds `allRecords()`; stores backed by a
+    /// database should override it to stream rows instead of loading the whole
+    /// table into memory.
+    func usageStatistics() async -> VoiceInputUsageSummary {
+        VoiceInputUsageStatistics.summarize(await allRecords())
     }
 }
 

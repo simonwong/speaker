@@ -317,6 +317,40 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         loadRecords(whereClause: nil, binding: nil)
     }
 
+    /// Streams every row through a `VoiceInputUsageAccumulator` so the overview's
+    /// totals and per-day buckets never require the whole table in memory. Rows
+    /// with an unknown schema or an undecodable payload are skipped, matching how
+    /// `loadRecords` treats them.
+    public func usageStatistics() async -> VoiceInputUsageSummary {
+        guard let db = connection?.raw else { return .empty }
+        var accumulator = VoiceInputUsageAccumulator()
+        do {
+            let statement = try prepare(
+                "SELECT payload, payload_schema FROM history_records",
+                db: db
+            )
+            defer { sqlite3_finalize(statement) }
+            var stepStatus = sqlite3_step(statement)
+            while stepStatus == SQLITE_ROW {
+                defer { stepStatus = sqlite3_step(statement) }
+                guard sqlite3_column_int(statement, 1)
+                        == SQLiteHistoryConnection.schemaVersion,
+                      let bytes = sqlite3_column_blob(statement, 0)
+                else { continue }
+                let count = Int(sqlite3_column_bytes(statement, 0))
+                let data = Data(bytes: bytes, count: count)
+                guard let stored = try? Self.decoder.decode(
+                    HistoryRecordV1.self,
+                    from: data
+                ), let record = try? stored.domainRecord else { continue }
+                accumulator.add(record)
+            }
+            return accumulator.summary()
+        } catch {
+            return accumulator.summary()
+        }
+    }
+
     public func record(sessionID: VoiceInputSessionID) async -> VoiceInputHistoryRecord? {
         loadRecords(
             whereClause: "WHERE session_id = ?",
