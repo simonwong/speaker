@@ -1,13 +1,10 @@
 import AppKit
 import SpeakerAppFeatures
-import SpeakerCore
 import SwiftUI
 
 struct MenuBarContent: View {
-    @ObservedObject var permissions: PermissionModel
     @ObservedObject var voiceInput: VoiceInputExperience
     @ObservedObject var refinement: RefinementSettingsModel
-    @ObservedObject var softwareUpdate: SoftwareUpdateFeature
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var settingsNavigation: SettingsNavigationModel
     @ObservedObject var mainWindow: MainWindowModel
@@ -18,13 +15,20 @@ struct MenuBarContent: View {
     private var commandRouter: MenuBarCommandRouter {
         MenuBarCommandRouter(
             navigation: settingsNavigation,
+            openOverview: { openMainWindow(.overview) },
             openSettings: { openMainWindow(.settings) },
-            openAbout: { openMainWindow(.about) },
-            openHistory: { openMainWindow(.history) },
+            openDataErasureRecovery: { openMainWindow(.about) },
             activate: {
                 NSApp.activate(ignoringOtherApps: true)
             },
             terminate: { NSApp.terminate(nil) }
+        )
+    }
+
+    private var rows: [MenuBarRow] {
+        MenuBarPresentation.rows(
+            voice: MenuBarVoiceCapabilities(menu: voiceInput.state.menu),
+            workspaceRoute: dataErasure.state.workspaceRoute
         )
     }
 
@@ -35,7 +39,26 @@ struct MenuBarContent: View {
 
     var body: some View {
         Group {
+            ForEach(rows.indices, id: \.self) { index in
+                row(rows[index])
+            }
+        }
+        .task {
+            startRuntime()
             if dataErasure.state == .idle {
+                refreshPermissions()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ row: MenuBarRow) -> some View {
+        switch row {
+        case .openSpeaker:
+            Button("打开 Speaker") {
+                commandRouter.perform(.overview)
+            }
+        case .refinementMode:
             Menu {
                 Button("默认顺滑") { Task { await refinement.select(.defaultSmooth) } }
                 Button("精简清理") { Task { await refinement.select(.conciseCleanup) } }
@@ -48,22 +71,24 @@ struct MenuBarContent: View {
             } label: {
                 Label(refinement.mode.displayName, systemImage: "text.alignleft")
             }
+        case .voiceStatus:
             if let status = voiceInput.state.menu.status {
                 Label(
                     status.title,
                     systemImage: status.icon
                 )
-                if let cancelAction = voiceInput.state.menu.cancelAction {
-                    Button("取消当前输入") {
-                        voiceInput.perform(cancelAction)
-                    }
+            }
+        case .cancelVoiceInput:
+            if let cancelAction = voiceInput.state.menu.cancelAction {
+                Button("取消当前输入") {
+                    voiceInput.perform(cancelAction)
                 }
             }
-
+        case .voiceNotice:
             if let notice = voiceInput.state.menu.notice {
                 Label(notice, systemImage: "info.circle")
             }
-
+        case .copyRetainedText:
             if let copyAction = voiceInput.state.menu.copyRetainedTextAction {
                 Button(
                     voiceInput.state.menu.copyRetainedTextTitle
@@ -72,7 +97,7 @@ struct MenuBarContent: View {
                     voiceInput.perform(copyAction)
                 }
             }
-
+        case .recoverVoiceInput:
             if let recoveryAction = voiceInput.state.menu.recoveryAction {
                 Button("检查语音设置…") {
                     guard voiceInput.perform(recoveryAction) != nil else {
@@ -81,80 +106,37 @@ struct MenuBarContent: View {
                     commandRouter.perform(.permissionSettings)
                 }
             }
-
+        case .dismissVoiceInput:
             if let dismissAction = voiceInput.state.menu.dismissAction {
                 Button("关闭当前提示") {
                     voiceInput.perform(dismissAction)
                 }
             }
-
-            Divider()
-
-            if !permissions.snapshot.allGranted {
-                Button("继续完成权限设置…") {
-                    commandRouter.perform(.permissionSettings)
-                }
-            }
-
-            Button("概览看板") {
-                openMainWindow(.overview)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-
-            Button("会话历史") {
-                commandRouter.perform(.history)
-            }
-
+        case .settings:
             Button("设置…") {
                 commandRouter.perform(.settings)
             }
             .keyboardShortcut(",")
-
-            Button("关于 Speaker…") {
-                commandRouter.perform(.about)
+        case .dataErasureStatus:
+            Label(
+                dataErasure.state == .erasing
+                    ? "正在清除本地数据"
+                    : "本地数据尚未全部清除",
+                systemImage: dataErasure.state == .erasing
+                    ? "externaldrive.badge.timemachine"
+                    : "exclamationmark.triangle"
+            )
+        case .dataErasureRecovery:
+            Button("查看清除状态…") {
+                commandRouter.perform(.dataErasureRecovery)
             }
-
-            if softwareUpdate.state.isAvailable {
-                Button("检查更新…") {
-                    softwareUpdate.checkForUpdates()
-                }
-                .disabled(!softwareUpdate.state.canCheckForUpdates)
-            }
-
-            Divider()
-
+        case .quit:
             Button("退出 Speaker") {
                 commandRouter.perform(.quit)
             }
             .keyboardShortcut("q")
-            } else {
-                Label(
-                    dataErasure.state == .erasing
-                        ? "正在清除本地数据"
-                        : "本地数据尚未全部清除",
-                    systemImage: dataErasure.state == .erasing
-                        ? "externaldrive.badge.timemachine"
-                        : "exclamationmark.triangle"
-                )
-
-                Button("查看清除状态…") {
-                    commandRouter.perform(.about)
-                }
-
-                Divider()
-
-                Button("退出 Speaker") {
-                    commandRouter.perform(.quit)
-                }
-                .keyboardShortcut("q")
-            }
-        }
-        .task {
-            startRuntime()
-            if dataErasure.state == .idle {
-                refreshPermissions()
-            }
+        case .divider:
+            Divider()
         }
     }
-
 }

@@ -1704,36 +1704,138 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        run("menu bar presents only compact contextual shortcuts in exact order", failures: &failures, executed: &executed) {
+            let idle = MenuBarVoiceCapabilities()
+            let active = MenuBarVoiceCapabilities(
+                showsStatus: true,
+                canCancel: true
+            )
+            let retainedText = MenuBarVoiceCapabilities(
+                showsStatus: true,
+                canCopyRetainedText: true,
+                canDismiss: true
+            )
+            let blockedPermission = MenuBarVoiceCapabilities(
+                showsStatus: true,
+                canRecover: true,
+                canDismiss: true
+            )
+
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: idle,
+                    workspaceRoute: .normal
+                ) == [
+                    .openSpeaker,
+                    .refinementMode,
+                    .divider,
+                    .settings,
+                    .divider,
+                    .quit,
+                ]
+            )
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: active,
+                    workspaceRoute: .normal
+                ) == [
+                    .openSpeaker,
+                    .refinementMode,
+                    .divider,
+                    .voiceStatus,
+                    .cancelVoiceInput,
+                    .divider,
+                    .settings,
+                    .divider,
+                    .quit,
+                ]
+            )
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: retainedText,
+                    workspaceRoute: .normal
+                ) == [
+                    .openSpeaker,
+                    .refinementMode,
+                    .divider,
+                    .voiceStatus,
+                    .copyRetainedText,
+                    .dismissVoiceInput,
+                    .divider,
+                    .settings,
+                    .divider,
+                    .quit,
+                ]
+            )
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: blockedPermission,
+                    workspaceRoute: .normal
+                ) == [
+                    .openSpeaker,
+                    .refinementMode,
+                    .divider,
+                    .voiceStatus,
+                    .recoverVoiceInput,
+                    .dismissVoiceInput,
+                    .divider,
+                    .settings,
+                    .divider,
+                    .quit,
+                ]
+            )
+            let dataErasureRows: [MenuBarRow] = [
+                .dataErasureStatus,
+                .dataErasureRecovery,
+                .divider,
+                .quit,
+            ]
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: idle,
+                    workspaceRoute: .erasing
+                ) == dataErasureRows
+            )
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: idle,
+                    workspaceRoute: .aboutRecovery
+                ) == dataErasureRows
+            )
+        }
+
         run("menu commands route to the intended product destination", failures: &failures, executed: &executed) {
             let navigation = SettingsNavigationModel()
             var events: [String] = []
             let router = MenuBarCommandRouter(
                 navigation: navigation,
+                openOverview: { events.append("overview") },
                 openSettings: {
                     events.append(
                         "settings.\(navigation.page.rawValue)"
                     )
                 },
-                openAbout: { events.append("about") },
-                openHistory: { events.append("history") },
+                openDataErasureRecovery: {
+                    events.append("data-erasure-recovery")
+                },
                 activate: { events.append("activate") },
                 terminate: { events.append("terminate") }
             )
 
+            router.perform(.overview)
+            try expect(events == ["overview", "activate"])
+
             router.perform(.permissionSettings)
             try expect(navigation.page == .permissions)
             try expect(
-                events == ["settings.permissions", "activate"]
+                events.suffix(2) == ["settings.permissions", "activate"]
             )
 
-            router.perform(.about)
+            router.perform(.dataErasureRecovery)
             try expect(navigation.page == .permissions)
             try expect(
-                events.suffix(2) == ["about", "activate"]
+                events.suffix(2) == ["data-erasure-recovery", "activate"]
             )
-
-            router.perform(.history)
-            try expect(events.suffix(2) == ["history", "activate"])
 
             router.perform(.settings)
             try expect(

@@ -19,10 +19,8 @@ struct SpeakerApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuBarContent(
-                permissions: runtime.permissions,
                 voiceInput: runtime.voiceInput,
                 refinement: runtime.refinementSettings,
-                softwareUpdate: runtime.softwareUpdate,
                 dataErasure: runtime.dataErasure,
                 settingsNavigation: runtime.settingsNavigation,
                 mainWindow: runtime.mainWindow,
