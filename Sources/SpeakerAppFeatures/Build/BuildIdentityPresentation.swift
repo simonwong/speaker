@@ -81,39 +81,67 @@ package enum SpeakerSigningMode: Equatable, Sendable {
 }
 
 package struct DeliverySmokeLaunchRequest: Equatable, Sendable {
-    package let processID: Int32
+    package let processID: Int32?
     package let reportURL: URL
+    package let captureOnly: Bool
+    package let usesFrontmostTarget: Bool
+    package let exercisesVoiceSession: Bool
+    package let triggerURL: URL?
 
     package init?(
         arguments: [String],
         signingMode: SpeakerSigningMode
     ) {
         guard signingMode.permitsLocalDeliverySmoke,
-              let processIndex = arguments.firstIndex(
-                of: "--speaker-delivery-smoke-pid"
-              ), arguments.indices.contains(processIndex + 1),
-              let processID = Int32(arguments[processIndex + 1]),
-              processID > 0,
               let reportIndex = arguments.firstIndex(
                 of: "--speaker-delivery-smoke-report"
               ), arguments.indices.contains(reportIndex + 1)
         else {
             return nil
         }
+        let captureOnly = arguments.contains(
+            "--speaker-delivery-smoke-capture-only"
+        )
+        let exercisesVoiceSession = arguments.contains(
+            "--speaker-delivery-smoke-session"
+        )
+        let usesFrontmostTarget = captureOnly || arguments.contains(
+            "--speaker-delivery-smoke-frontmost"
+        )
+        let processID: Int32?
+        if usesFrontmostTarget {
+            processID = nil
+        } else {
+            guard let processIndex = arguments.firstIndex(
+                of: "--speaker-delivery-smoke-pid"
+            ), arguments.indices.contains(processIndex + 1),
+                  let parsedProcessID = Int32(arguments[processIndex + 1]),
+                  parsedProcessID > 0
+            else { return nil }
+            processID = parsedProcessID
+        }
         let reportURL = URL(
             fileURLWithPath: arguments[reportIndex + 1]
         ).standardizedFileURL
-        let temporaryRoot = URL(
-            fileURLWithPath: "/private/tmp",
-            isDirectory: true
-        ).standardizedFileURL
-        guard reportURL.deletingLastPathComponent().standardizedFileURL
-                == temporaryRoot,
-              reportURL.pathExtension == "txt"
+        let reportDirectory = reportURL.deletingLastPathComponent()
+            .standardizedFileURL
+        let temporaryRoot = reportDirectory.deletingLastPathComponent().path
+        guard ["/private/tmp", "/tmp"].contains(temporaryRoot),
+              reportDirectory.lastPathComponent.hasPrefix(
+                  "speaker-delivery-smoke-"
+              ),
+              reportURL.lastPathComponent == "report.txt"
         else {
             return nil
         }
+        let triggerURL = arguments.contains(
+            "--speaker-delivery-smoke-trigger"
+        ) ? reportDirectory.appendingPathComponent("trigger.txt") : nil
         self.processID = processID
         self.reportURL = reportURL
+        self.captureOnly = captureOnly
+        self.usesFrontmostTarget = usesFrontmostTarget
+        self.exercisesVoiceSession = exercisesVoiceSession
+        self.triggerURL = triggerURL
     }
 }

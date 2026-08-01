@@ -19,18 +19,15 @@ package struct HistoryDaySection: Equatable, Sendable {
 
 package struct HistoryRecordRowPresentation: Equatable, Sendable {
     package let time: String
-    package let applicationName: String
     package let text: String
     package let canCopy: Bool
 
     package init(
         time: String,
-        applicationName: String,
         text: String,
         canCopy: Bool
     ) {
         self.time = time
-        self.applicationName = applicationName
         self.text = text
         self.canCopy = canCopy
     }
@@ -49,15 +46,11 @@ package enum HistoryPresentation {
         guard !normalizedQuery.isEmpty else { return records }
 
         return records.filter { record in
-            [retainedText(for: record), record.applicationName]
-                .compactMap { $0 }
-                .contains { value in
-                    value.range(
-                        of: normalizedQuery,
-                        options: [.caseInsensitive, .diacriticInsensitive],
-                        locale: .current
-                    ) != nil
-                }
+            retainedText(for: record)?.range(
+                of: normalizedQuery,
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: .current
+            ) != nil
         }
     }
 
@@ -76,11 +69,6 @@ package enum HistoryPresentation {
         calendar: Calendar = .current
     ) -> HistoryRecordRowPresentation {
         let retainedText = retainedText(for: record)
-        let applicationName = record.applicationName.flatMap { name in
-            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? nil
-                : name
-        }
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -89,7 +77,6 @@ package enum HistoryPresentation {
 
         return HistoryRecordRowPresentation(
             time: formatter.string(from: record.startedAt),
-            applicationName: applicationName ?? "未指定应用",
             text: retainedText ?? "此会话未保留正文",
             canCopy: retainedText != nil
         )

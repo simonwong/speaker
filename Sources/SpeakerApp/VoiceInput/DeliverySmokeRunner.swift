@@ -9,14 +9,16 @@ enum DeliverySmokeRunner {
     static func request(
         arguments: [String] = ProcessInfo.processInfo.arguments
     ) -> DeliverySmokeLaunchRequest? {
-        DeliverySmokeLaunchRequest(
-            arguments: arguments,
-            signingMode: SpeakerSigningMode(
-                infoValue: Bundle.main.object(
-                    forInfoDictionaryKey: "SpeakerSigningMode"
-                ) as? String
-            )
+        let signingMode = SpeakerSigningMode(
+            infoValue: Bundle.main.object(
+                forInfoDictionaryKey: "SpeakerSigningMode"
+            ) as? String
         )
+        let request = DeliverySmokeLaunchRequest(
+            arguments: arguments,
+            signingMode: signingMode
+        )
+        return request
     }
 
     static func run(_ request: DeliverySmokeLaunchRequest) async {
@@ -28,7 +30,34 @@ enum DeliverySmokeRunner {
                     "reason=accessibilityPermissionMissing",
                     "accessibilityTrusted=false",
                     "frontmostPID=\((NSWorkspace.shared.frontmostApplication?.processIdentifier).map(String.init) ?? "none")",
-                    "targetPID=\(request.processID)",
+                    "targetPID=\(request.processID.map(String.init) ?? "frontmost")",
+                    "",
+                ].joined(separator: "\n"),
+                to: request.reportURL
+            )
+            NSApp.terminate(nil)
+            return
+        }
+        // Construct the production target tracker before activating the smoke
+        // target. This exercises the long-lived app-switch lifecycle used by
+        // the installed menu-bar app instead of a freshly seeded tracker.
+        let targets = AccessibilityInputTargets()
+        guard await waitForTriggerIfNeeded(request) else {
+            NSApp.terminate(nil)
+            return
+        }
+
+        let initialFrontmostProcessID = NSWorkspace.shared
+            .frontmostApplication?.processIdentifier
+        guard let targetProcessID = request.processID
+                ?? initialFrontmostProcessID,
+              targetProcessID > 0
+        else {
+            try? writeOwnerOnly(
+                [
+                    "result=FAIL",
+                    "stage=activation",
+                    "reason=targetUnavailable",
                     "",
                 ].joined(separator: "\n"),
                 to: request.reportURL
@@ -38,14 +67,14 @@ enum DeliverySmokeRunner {
         }
 
         guard let targetApplication = NSRunningApplication(
-            processIdentifier: request.processID
+            processIdentifier: targetProcessID
         ) else {
             try? writeOwnerOnly(
                 [
                     "result=FAIL",
                     "stage=activation",
                     "reason=targetUnavailable",
-                    "targetPID=\(request.processID)",
+                    "targetPID=\(targetProcessID)",
                     "",
                 ].joined(separator: "\n"),
                 to: request.reportURL
@@ -54,26 +83,50 @@ enum DeliverySmokeRunner {
             return
         }
 
-        var targetIsFrontmost = false
-        for _ in 0..<40 {
-            _ = targetApplication.activate(options: [.activateAllWindows])
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier
-                == request.processID
-            {
-                targetIsFrontmost = true
-                break
+        if !request.captureOnly {
+            var targetIsFrontmost = NSWorkspace.shared.frontmostApplication?
+                .processIdentifier == targetProcessID
+            if !targetIsFrontmost {
+                for _ in 0..<40 {
+                    _ = targetApplication.activate(
+                        options: [.activateAllWindows]
+                    )
+                    if NSWorkspace.shared.frontmostApplication?
+                        .processIdentifier == targetProcessID
+                    {
+                        targetIsFrontmost = true
+                        break
+                    }
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
             }
-            try? await Task.sleep(for: .milliseconds(50))
+            guard targetIsFrontmost else {
+                try? writeOwnerOnly(
+                    [
+                        "result=FAIL",
+                        "stage=activation",
+                        "reason=targetNotFrontmost",
+                        "accessibilityTrusted=\(AXIsProcessTrusted())",
+                        "frontmostPID=\((NSWorkspace.shared.frontmostApplication?.processIdentifier).map(String.init) ?? "none")",
+                        "targetPID=\(targetProcessID)",
+                        "",
+                    ].joined(separator: "\n"),
+                    to: request.reportURL
+                )
+                NSApp.terminate(nil)
+                return
+            }
         }
-        guard targetIsFrontmost else {
+        try? await Task.sleep(for: .milliseconds(250))
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == targetProcessID
+        else {
             try? writeOwnerOnly(
                 [
                     "result=FAIL",
                     "stage=activation",
-                    "reason=targetNotFrontmost",
-                    "accessibilityTrusted=\(AXIsProcessTrusted())",
-                    "frontmostPID=\((NSWorkspace.shared.frontmostApplication?.processIdentifier).map(String.init) ?? "none")",
-                    "targetPID=\(request.processID)",
+                    "reason=targetLostFocusBeforeCapture",
+                    "targetPID=\(targetProcessID)",
                     "",
                 ].joined(separator: "\n"),
                 to: request.reportURL
@@ -85,17 +138,52 @@ enum DeliverySmokeRunner {
         let isAccessibilityTrusted = true
         let frontmostProcessID = NSWorkspace.shared.frontmostApplication?
             .processIdentifier
-        let targets = AccessibilityInputTargets()
+        if request.exercisesVoiceSession {
+            let result = await runVoiceSession(
+                targets: targets,
+                targetProcessID: targetProcessID,
+                frontmostProcessID: frontmostProcessID
+            )
+            do {
+                try writeOwnerOnly(result + "\n", to: request.reportURL)
+            } catch {
+                NSLog("Speaker delivery smoke report write failed")
+            }
+            NSApp.terminate(nil)
+            return
+        }
+        let captureHint = targets.releaseCaptureHint()
+        let capture: InputTargetCaptureResult
+        if let captureHint,
+           captureHint.processID == targetProcessID
+        {
+            capture = await targets.capture(matching: captureHint)
+        } else {
+            capture = .unavailable(.invalidatedTarget)
+        }
         let result: String
-        switch await targets.capture(expectedProcessID: request.processID) {
+        switch capture {
         case let .unavailable(reason):
-            result = [
+            var lines = [
                 "result=FAIL",
                 "stage=capture",
                 "reason=\(reason)",
                 "accessibilityTrusted=\(isAccessibilityTrusted)",
                 "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
-                "targetPID=\(request.processID)",
+                "targetPID=\(targetProcessID)",
+            ]
+            if let diagnostic = targets.releaseCaptureDiagnostic {
+                lines.append("diagnostic=\(diagnostic)")
+            }
+            result = lines.joined(separator: "\n")
+        case let .writable(target) where request.captureOnly:
+            result = [
+                "result=PASS",
+                "stage=capture",
+                "accessibilityTrusted=\(isAccessibilityTrusted)",
+                "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
+                "targetPID=\(targetProcessID)",
+                "targetApplication=\(sanitize(target.applicationName))",
             ].joined(separator: "\n")
         case let .writable(target):
             let outcome = await targets.deliver(
@@ -107,10 +195,22 @@ enum DeliverySmokeRunner {
             case .delivered:
                 result = [
                     "result=PASS",
-                    "stage=receipt",
+                    "stage=delivery",
+                    "deliveryReceipt=confirmedTargetValue",
                     "accessibilityTrusted=\(isAccessibilityTrusted)",
                     "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
-                    "targetPID=\(request.processID)",
+                    "targetPID=\(targetProcessID)",
+                    "targetApplication=\(sanitize(target.applicationName))",
+                ].joined(separator: "\n")
+            case let .pasteCommandPosted(diagnostic):
+                result = [
+                    "result=PASS",
+                    "stage=delivery",
+                    "deliveryReceipt=pasteCommandPosted",
+                    "diagnostic=\(diagnostic.code)",
+                    "accessibilityTrusted=\(isAccessibilityTrusted)",
+                    "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
+                    "targetPID=\(targetProcessID)",
                     "targetApplication=\(sanitize(target.applicationName))",
                 ].joined(separator: "\n")
             case let .pendingCopy(reason):
@@ -120,7 +220,7 @@ enum DeliverySmokeRunner {
                     "reason=\(reason)",
                     "accessibilityTrusted=\(isAccessibilityTrusted)",
                     "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
-                    "targetPID=\(request.processID)",
+                    "targetPID=\(targetProcessID)",
                     "targetApplication=\(sanitize(target.applicationName))",
                 ].joined(separator: "\n")
             case let .pendingCopyDiagnosed(reason, diagnostic):
@@ -131,7 +231,7 @@ enum DeliverySmokeRunner {
                     "diagnostic=\(diagnostic.code)",
                     "accessibilityTrusted=\(isAccessibilityTrusted)",
                     "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
-                    "targetPID=\(request.processID)",
+                    "targetPID=\(targetProcessID)",
                     "targetApplication=\(sanitize(target.applicationName))",
                 ].joined(separator: "\n")
             }
@@ -148,6 +248,149 @@ enum DeliverySmokeRunner {
         NSApp.terminate(nil)
     }
 
+    private static func runVoiceSession(
+        targets: AccessibilityInputTargets,
+        targetProcessID: pid_t,
+        frontmostProcessID: pid_t?
+    ) async -> String {
+        let sessions = VoiceInputSessions(
+            audioCapture: DeliverySmokeAudioCapture(),
+            targetCapture: targets,
+            textProcessor: DeliverySmokeTextProcessor(text: "Speaker smoke"),
+            delivery: targets,
+            clipboard: SystemClipboardWriter(),
+            history: MemorySessionHistory()
+        )
+        let presentations = await sessions.observe()
+        let dispatcher = VoiceInputTriggerDispatcher(
+            sessions: sessions,
+            releaseCaptureHint: { targets.releaseCaptureHint() }
+        )
+        let terminalTask = Task {
+            await firstTerminalActivity(in: presentations)
+        }
+        let pressedAt = DispatchTime.now().uptimeNanoseconds
+        dispatcher.send(.pressed, at: pressedAt)
+        dispatcher.send(
+            .released,
+            at: pressedAt
+                + VoiceShortcutGestureStateMachine.defaultLongPressNanoseconds
+                + 1
+        )
+        let terminal = await terminalTask.value
+        await dispatcher.shutdown()
+
+        let base = [
+            "accessibilityTrusted=true",
+            "frontmostPID=\(frontmostProcessID.map(String.init) ?? "none")",
+            "targetPID=\(targetProcessID)",
+        ]
+        switch terminal {
+        case let .delivered(_, applicationName, text)
+            where text == "Speaker smoke":
+            return ([
+                "result=PASS",
+                "stage=voiceSession",
+                "targetApplication=\(sanitize(applicationName))",
+            ] + base).joined(separator: "\n")
+        case let .pendingCopy(_, _, reason):
+            var lines = [
+                "result=FAIL",
+                "stage=voiceSession",
+                "reason=\(reason)",
+            ]
+            if let diagnostic = targets.releaseCaptureDiagnostic {
+                lines.append("diagnostic=\(diagnostic)")
+            }
+            return (lines + base).joined(separator: "\n")
+        case let .failed(_, failure):
+            return ([
+                "result=FAIL",
+                "stage=voiceSession",
+                "reason=\(failure)",
+            ] + base).joined(separator: "\n")
+        case .cancelled:
+            return ([
+                "result=FAIL",
+                "stage=voiceSession",
+                "reason=cancelled",
+            ] + base).joined(separator: "\n")
+        case .delivered:
+            return ([
+                "result=FAIL",
+                "stage=voiceSession",
+                "reason=unexpectedDeliveredText",
+            ] + base).joined(separator: "\n")
+        case .none:
+            return ([
+                "result=FAIL",
+                "stage=voiceSession",
+                "reason=terminalTimeout",
+            ] + base).joined(separator: "\n")
+        case .idle, .preparing, .recording, .processing:
+            return ([
+                "result=FAIL",
+                "stage=voiceSession",
+                "reason=nonterminalResult",
+            ] + base).joined(separator: "\n")
+        }
+    }
+
+    private static func firstTerminalActivity(
+        in presentations: AsyncStream<VoiceInputPresentation>
+    ) async -> VoiceInputActivity? {
+        await withTaskGroup(of: VoiceInputActivity?.self) { group in
+            group.addTask {
+                for await presentation in presentations {
+                    if presentation.activity.isTerminal {
+                        return presentation.activity
+                    }
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private static func waitForTriggerIfNeeded(
+        _ request: DeliverySmokeLaunchRequest
+    ) async -> Bool {
+        guard let triggerURL = request.triggerURL else { return true }
+        let armedURL = triggerURL.deletingLastPathComponent()
+            .appendingPathComponent("armed.txt")
+        do {
+            try writeOwnerOnly("armed\n", to: armedURL)
+        } catch {
+            try? writeOwnerOnly(
+                "result=FAIL\nstage=arming\nreason=armedWriteFailed\n",
+                to: request.reportURL
+            )
+            return false
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(60))
+        while !FileManager.default.fileExists(atPath: triggerURL.path),
+              clock.now < deadline
+        {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard FileManager.default.fileExists(atPath: triggerURL.path) else {
+            try? writeOwnerOnly(
+                "result=FAIL\nstage=arming\nreason=triggerTimeout\n",
+                to: request.reportURL
+            )
+            return false
+        }
+        return true
+    }
+
     private static func writeOwnerOnly(
         _ content: String,
         to url: URL
@@ -161,5 +404,42 @@ enum DeliverySmokeRunner {
                 !CharacterSet.controlCharacters.contains($0)
             }
         ).prefix(80).description
+    }
+}
+
+private struct DeliverySmokeAudioCapture: AudioCapturing {
+    func start() async throws {}
+
+    func stop() async throws -> CapturedAudio {
+        CapturedAudio(
+            data: Data(),
+            duration: .seconds(1),
+            peakPower: -12
+        )
+    }
+
+    func cancel() async {}
+}
+
+private struct DeliverySmokeTextProcessor: VoiceTextProcessing {
+    let text: String
+
+    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    func process(
+        _ audio: CapturedAudio,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        VoiceTextProcessingResult(
+            doubaoText: text,
+            normalizedText: text,
+            deepSeekText: nil,
+            finalText: text,
+            doubaoRequestID: "delivery-smoke",
+            deepSeekRequestID: nil,
+            refinementStatus: .notRequested,
+            refinementFailure: nil
+        )
     }
 }

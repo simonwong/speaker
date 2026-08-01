@@ -46,6 +46,61 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "voice input panel keeps the hosting surface transparent outside the HUD",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let presentation = VoiceInputHUDContractFixture.recording.presentation
+            let size = VoiceInputPanelLayout.recording.size
+            let hostingView = NSHostingView(rootView: VoiceInputHUD(
+                presentation: presentation,
+                performAction: { _ in nil },
+                routeEffect: { _ in }
+            ))
+            hostingView.frame = NSRect(origin: .zero, size: size)
+            let panel = VoiceInputPanelFactory.make(
+                contentRect: NSRect(origin: .zero, size: size)
+            )
+            VoiceInputPanelFactory.install(hostingView, in: panel)
+            defer {
+                panel.orderOut(nil)
+                panel.close()
+            }
+
+            panel.orderFrontRegardless()
+            hostingView.layoutSubtreeIfNeeded()
+            panel.displayIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+            try expect(hostingView.wantsLayer)
+            try expect(hostingView.layer?.isOpaque == false)
+            try expect(
+                hostingView.layer?.backgroundColor?.alpha == 0,
+                "the hosting surface added an opaque rectangular background"
+            )
+            guard let image = hostingView.bitmapImageRepForCachingDisplay(
+                in: hostingView.bounds
+            ) else {
+                throw SpecFailure(message: "could not render the HUD hosting surface")
+            }
+            hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+            let corners = [
+                (x: 0, y: 0),
+                (x: image.pixelsWide - 1, y: 0),
+                (x: 0, y: image.pixelsHigh - 1),
+                (x: image.pixelsWide - 1, y: image.pixelsHigh - 1),
+            ]
+            let cornerAlphas = corners.compactMap {
+                image.colorAt(x: $0.x, y: $0.y)?.alphaComponent
+            }
+            try expect(cornerAlphas.count == corners.count)
+            try expect(
+                cornerAlphas.allSatisfy { $0 < 0.01 },
+                "rendered HUD corners were not transparent: \(cornerAlphas)"
+            )
+        }
+
+        run(
             "ordering the voice input panel does not activate or make it key",
             failures: &failures,
             executed: &executed
@@ -678,16 +733,14 @@ struct SpeakerAppUISpecs {
             )
 
             try expect(visible.text == "最终正文")
-            try expect(visible.applicationName == "备忘录")
             try expect(visible.time == "09:05")
             try expect(visible.canCopy)
             try expect(redacted.text == "此会话未保留正文")
-            try expect(redacted.applicationName == "密码输入")
             try expect(!redacted.canCopy)
         }
 
         run(
-            "history search matches only the displayed body and source application",
+            "history search matches displayed body without exposing target application",
             failures: &failures,
             executed: &executed
         ) {
@@ -734,7 +787,7 @@ struct SpeakerAppUISpecs {
                 HistoryPresentation.filteredRecords(
                     records,
                     query: "safari"
-                ).map(\.sessionID) == [appID]
+                ).isEmpty
             )
         }
 
@@ -766,7 +819,7 @@ private func makeHistoryRecord(
         finalText: finalText,
         outcome: .delivered(
             id,
-            applicationName: applicationName ?? "未指定应用",
+            applicationName: applicationName ?? "当前输入框",
             text: finalText ?? transcription ?? ""
         )
     )

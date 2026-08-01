@@ -473,7 +473,8 @@ package final class VoiceInputExperience: ObservableObject {
     }
 
     private func announceTransitionIfNeeded(_ activity: VoiceInputActivity) {
-        guard let key = Self.announcementKey(for: activity),
+        guard !Self.endsSilently(activity),
+              let key = Self.announcementKey(for: activity),
               key != lastAnnouncementKey,
               let message = activity.accessibilityAnnouncement
         else { return }
@@ -493,6 +494,23 @@ package final class VoiceInputExperience: ObservableObject {
         from presentation: VoiceInputPresentation
     ) -> VoiceInputExperienceState {
         let activity = presentation.activity
+        if endsSilently(activity) {
+            return VoiceInputExperienceState(
+                revision: presentation.revision,
+                menu: .init(
+                    status: nil,
+                    notice: nil,
+                    cancelAction: nil,
+                    copyRetainedTextTitle: nil,
+                    copyRetainedTextAction: nil,
+                    dismissAction: nil,
+                    recoveryAction: nil
+                ),
+                overlay: .hidden,
+                isRecording: false,
+                diagnosticCode: diagnosticCode(for: activity)
+            )
+        }
         // Idle notices are one-shot feedback effects (for example, successful
         // copy). They are announced below but must not become stale menu state.
         let retainedMenuNotice: String? = if case .idle = activity {
@@ -563,6 +581,14 @@ package final class VoiceInputExperience: ObservableObject {
             isRecording: activity.isRecording,
             diagnosticCode: diagnosticCode(for: activity)
         )
+    }
+
+    private static func endsSilently(_ activity: VoiceInputActivity) -> Bool {
+        if case .failed(_, .providerReturnedNoText) = activity {
+            true
+        } else {
+            false
+        }
     }
 
     private static func makeOverlay(

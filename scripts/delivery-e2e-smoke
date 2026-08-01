@@ -1,0 +1,141 @@
+#!/bin/zsh
+
+set -euo pipefail
+setopt NO_BG_NICE
+
+SCRIPT_DIR="${0:A:h}"
+REPOSITORY_ROOT="${SCRIPT_DIR:h}"
+APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
+EXPECTED_TEXT="Speaker smoke"
+REPORT_DIRECTORY=""
+SPEAKER_REPORT=""
+TARGET_READY=""
+TARGET_RECEIPT=""
+TARGET_PID=""
+SPEAKER_WAS_RUNNING=0
+SPEAKER_STOPPED_FOR_SMOKE=0
+
+cleanup() {
+    if [[ -n "$TARGET_PID" ]] && kill -0 "$TARGET_PID" 2>/dev/null; then
+        kill -TERM "$TARGET_PID" 2>/dev/null || true
+    fi
+    [[ -z "$SPEAKER_REPORT" ]] || rm -f "$SPEAKER_REPORT"
+    [[ -z "$TARGET_READY" ]] || rm -f "$TARGET_READY"
+    [[ -z "$TARGET_RECEIPT" ]] || rm -f "$TARGET_RECEIPT"
+    [[ -z "$REPORT_DIRECTORY" ]] \
+        || rmdir "$REPORT_DIRECTORY" 2>/dev/null || true
+    if (( SPEAKER_WAS_RUNNING && SPEAKER_STOPPED_FOR_SMOKE )); then
+        /usr/bin/open -n "$APP" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
+
+[[ -d "$APP" ]] || {
+    print -u2 "Speaker is not installed at $APP"
+    exit 1
+}
+
+SIGNING_MODE="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :SpeakerSigningMode' \
+        "$APP/Contents/Info.plist" 2>/dev/null || true
+)"
+if [[ "$SIGNING_MODE" != "development-ad-hoc" \
+      && "$SIGNING_MODE" != "development-signed" ]]; then
+    print -u2 "Delivery smoke is available only in local development builds"
+    exit 1
+fi
+
+"$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerDeliverySmokeTarget \
+    -Xswiftc -warnings-as-errors
+TARGET_EXECUTABLE="$REPOSITORY_ROOT/.build/debug/SpeakerDeliverySmokeTarget"
+[[ -x "$TARGET_EXECUTABLE" ]] || {
+    print -u2 "SpeakerDeliverySmokeTarget was not built"
+    exit 1
+}
+
+INSTALLED_EXECUTABLE="$APP/Contents/MacOS/SpeakerApp"
+BUNDLE_IDENTIFIER="$(
+    /usr/libexec/PlistBuddy \
+        -c 'Print :CFBundleIdentifier' \
+        "$APP/Contents/Info.plist"
+)"
+ESCAPED_EXECUTABLE="$(
+    print -r -- "$INSTALLED_EXECUTABLE" \
+        | sed 's/[][(){}.^$*+?|\\]/\\&/g'
+)"
+SPEAKER_PROCESS_PATTERN="^${ESCAPED_EXECUTABLE}([[:space:]].*)?$"
+
+REPORT_DIRECTORY="$(mktemp -d "/private/tmp/speaker-delivery-smoke-e2e.XXXXXX")"
+chmod 700 "$REPORT_DIRECTORY"
+SPEAKER_REPORT="$REPORT_DIRECTORY/report.txt"
+TARGET_READY="$REPORT_DIRECTORY/target-ready.txt"
+TARGET_RECEIPT="$REPORT_DIRECTORY/target-receipt.txt"
+
+if pgrep -f "$SPEAKER_PROCESS_PATTERN" >/dev/null 2>&1; then
+    SPEAKER_WAS_RUNNING=1
+    if ! /usr/bin/osascript \
+        -e "tell application id \"$BUNDLE_IDENTIFIER\" to quit"; then
+        print -u2 "Could not ask the running Speaker to quit safely"
+        exit 1
+    fi
+    for _ in {1..100}; do
+        if ! pgrep -f "$SPEAKER_PROCESS_PATTERN" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.1
+    done
+    if pgrep -f "$SPEAKER_PROCESS_PATTERN" >/dev/null 2>&1; then
+        print -u2 "Speaker did not finish its normal shutdown"
+        exit 1
+    fi
+    SPEAKER_STOPPED_FOR_SMOKE=1
+fi
+
+"$TARGET_EXECUTABLE" \
+    --speaker-smoke-ready "$TARGET_READY" \
+    --speaker-smoke-receipt "$TARGET_RECEIPT" \
+    --speaker-smoke-expected "$EXPECTED_TEXT" \
+    --speaker-smoke-wait-for-activation &
+TARGET_PID="$!"
+
+for _ in {1..100}; do
+    [[ -s "$TARGET_READY" ]] && break
+    kill -0 "$TARGET_PID" 2>/dev/null || break
+    sleep 0.05
+done
+[[ -s "$TARGET_READY" ]] || {
+    [[ ! -s "$TARGET_RECEIPT" ]] || cat "$TARGET_RECEIPT"
+    print -u2 "FAIL: smoke target did not become ready"
+    exit 1
+}
+
+/usr/bin/open -n "$APP" --args \
+    --speaker-delivery-smoke-pid "$TARGET_PID" \
+    --speaker-delivery-smoke-session \
+    --speaker-delivery-smoke-report "$SPEAKER_REPORT"
+
+for _ in {1..50}; do
+    if [[ -s "$SPEAKER_REPORT" && -s "$TARGET_RECEIPT" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+
+[[ -s "$SPEAKER_REPORT" ]] || {
+    print -u2 "FAIL: Speaker did not produce a delivery report"
+    exit 1
+}
+[[ -s "$TARGET_RECEIPT" ]] || {
+    cat "$SPEAKER_REPORT"
+    print -u2 "FAIL: target did not produce an observed-text receipt"
+    exit 1
+}
+
+print "speakerReport:"
+cat "$SPEAKER_REPORT"
+print "targetReceipt:"
+cat "$TARGET_RECEIPT"
+grep -qx 'result=PASS' "$SPEAKER_REPORT"
+grep -qx 'result=PASS' "$TARGET_RECEIPT"

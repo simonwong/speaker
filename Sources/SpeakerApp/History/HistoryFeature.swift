@@ -393,7 +393,7 @@ final class HistoryModel: ObservableObject {
             else { return true }
             finishRedelivery()
             switch outcome {
-            case .delivered:
+            case .delivered, .pasteCommandPosted:
                 publishFeedback(.success, "文字已重新输入")
             case let .pendingCopy(reason),
                  let .pendingCopyDiagnosed(reason, _):

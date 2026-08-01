@@ -4,7 +4,9 @@ set -euo pipefail
 
 APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
 TARGET="${1:-TextEdit}"
+EXPECTED_TEXT="Speaker smoke"
 REPORT=""
+REPORT_DIRECTORY=""
 FIXTURE=""
 
 case "$TARGET" in
@@ -53,6 +55,7 @@ SPEAKER_STOPPED_FOR_SMOKE=0
 TARGET_PID=""
 cleanup() {
     [[ -z "$REPORT" ]] || rm -f "$REPORT"
+    [[ -z "$REPORT_DIRECTORY" ]] || rmdir "$REPORT_DIRECTORY" 2>/dev/null || true
     [[ -z "$FIXTURE" ]] || rm -f "$FIXTURE"
     if [[ -n "$TARGET_PID" ]] && kill -0 "$TARGET_PID" 2>/dev/null; then
         kill -TERM "$TARGET_PID" 2>/dev/null || true
@@ -63,10 +66,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-REPORT="$(mktemp "/private/tmp/speaker-delivery-smoke-${TARGET:l}.XXXXXX.txt")"
-chmod 600 "$REPORT"
+REPORT_DIRECTORY="$(mktemp -d "/private/tmp/speaker-delivery-smoke-${TARGET:l}.XXXXXX")"
+chmod 700 "$REPORT_DIRECTORY"
+REPORT="$REPORT_DIRECTORY/report.txt"
 if [[ "$TARGET" == "TextEdit" ]]; then
-    FIXTURE="$(mktemp "/private/tmp/speaker-delivery-fixture-textedit.XXXXXX.txt")"
+    FIXTURE="$(mktemp "/private/tmp/speaker-delivery-fixture-textedit.XXXXXX")"
     chmod 600 "$FIXTURE"
 fi
 
@@ -94,12 +98,6 @@ fi
 
 typeset -a before after candidates
 before=(${(f)"$(pgrep -x "$TARGET_PROCESS" 2>/dev/null || true)"})
-if (( ${#before} > 0 )); then
-    print "result=SKIP"
-    print "reason=targetAlreadyRunning"
-    print "targetApplication=$TARGET"
-    exit 2
-fi
 if [[ "$TARGET" == "TextEdit" ]]; then
     /usr/bin/open -n -a "$TARGET_APP" "$FIXTURE"
 else
@@ -120,9 +118,8 @@ done
     exit 1
 }
 
-# The script refuses pre-existing instances above, so LaunchServices can only
-# activate the exact temporary process identified by TARGET_PID.
-/usr/bin/open -a "$TARGET_APP"
+# Speaker activates the exact temporary process identified by TARGET_PID;
+# existing instances of the same application are never targeted.
 /usr/bin/open -n "$APP" --args \
     --speaker-delivery-smoke-pid "$TARGET_PID" \
     --speaker-delivery-smoke-report "$REPORT"
@@ -136,5 +133,33 @@ done
     exit 1
 }
 
+print "speakerReport:"
 cat "$REPORT"
 grep -qx 'result=PASS' "$REPORT"
+
+if [[ "$TARGET" == "TextEdit" ]]; then
+    kill -TERM "$TARGET_PID"
+    for _ in {1..50}; do
+        if ! kill -0 "$TARGET_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+    if kill -0 "$TARGET_PID" 2>/dev/null; then
+        print -u2 "TextEdit did not finish its normal shutdown"
+        exit 1
+    fi
+    TARGET_PID=""
+
+    print "targetReceipt:"
+    if grep -qx 'deliveryReceipt=confirmedTargetValue' "$REPORT"; then
+        print "result=PASS"
+        print "stage=confirmedAccessibilityValue"
+        print "expectedLength=${#EXPECTED_TEXT}"
+    else
+        print "result=FAIL"
+        print "stage=confirmedAccessibilityValue"
+        print "reason=targetValueNotConfirmed"
+        exit 1
+    fi
+fi

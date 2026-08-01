@@ -47,7 +47,7 @@ final class VoiceInputPanelController {
             )
         )
         hostingView.autoresizingMask = [.width, .height]
-        panel.contentView = hostingView
+        VoiceInputPanelFactory.install(hostingView, in: panel)
     }
 
     private func rootView(

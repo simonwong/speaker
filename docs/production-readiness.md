@@ -8,10 +8,10 @@ Speaker 已可作为本机开发版持续试用，但还不能对外发布。主
 
 ## P0 发布阻断
 
-- [x] 未验证 App 禁止 PID Unicode 事件注入；统一保留文字等待复制。
+- [x] 全局快捷键回调禁止目标 App AX IPC；松键时只冻结前台 PID，回调返回后立即在该 PID 内抓取当前 focused element，元素不可用时退到 focused window。正确性不依赖可能延迟或丢失的 `AXObserver` 通知，跨进程变化仍 fail closed。
 - [x] 剪贴板写入必须在 `setString` 后精确读回确认；系统拒绝、被并发覆盖或内容不一致时保留结果供重试。
-- [x] 跨 App 送达使用可注入 AX adapter seam；直接 AX 写入允许回执滞后，mutation 后瞬时 `.cannotComplete` 会轮询回执，mutation 前 `.cannotComplete` 则按 security/role/value/selection/focus 精确阶段记录为目标应用 AX 未响应，不伪报焦点变化或控件不支持。未知 App 的 PID Unicode 仅限前台精确目标并要求值回执；mutation 无法确认时提示先检查输入框，避免重复粘贴。
-- [x] 自动送达降级保存内容无关的结构化边界，区分直接 AX 写入、回执确认、前台资格、并发编辑和 Unicode 投递；诊断可在历史、搜索及复制脱敏报告中使用，旧记录缺少字段时保持兼容。
+- [x] 跨 App 送达使用一个可注入的平台 seam；AX 仅冻结和复核目标身份及安全性，所有兼容目标统一走一次事务式 Command-V。事件发送使用 combined-session state 并在改动剪贴板前预检权限；剪贴板全量快照只在 change count 与私有 marker 仍匹配时恢复，用户的新复制内容优先。
+- [x] 自动送达保存内容无关的结构化边界，明确区分目标确认写入、已发送但无法回读，以及发送前 Pending Copy；已发送的粘贴永不暴露为可重试操作。诊断可在历史、搜索及复制脱敏报告中使用，旧记录缺少字段时保持兼容。
 - [x] Esc 只在 Speaker 会话活跃时消费完整 keyDown/repeat/keyUp 序列；空闲时透传给前台 App。
 - [x] 首次启动先解释用途，再由用户主动请求权限、选择豆包资源并通过真实连接检查。
 - [x] 音频流有明确的内存资源上限，耗尽时停止且报告事实，不静默丢帧。

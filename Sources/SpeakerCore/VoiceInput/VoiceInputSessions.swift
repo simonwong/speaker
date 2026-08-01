@@ -201,15 +201,12 @@ public struct DeliveryDiagnostic: Equatable, Sendable {
     public enum Stage: String, Equatable, Sendable {
         case securityRead
         case roleRead
-        case directSelection
-        case directWrite
-        case directReceipt
         case fallbackEligibility
         case focusRead
         case fallbackSelection
         case valueRead
-        case unicodePost
-        case unicodeReceipt
+        case pastePost
+        case pasteReceipt
     }
 
     public enum Cause: String, Equatable, Sendable {
@@ -242,6 +239,7 @@ public struct DeliveryDiagnostic: Equatable, Sendable {
 
 public enum DeliveryOutcome: Equatable, Sendable {
     case delivered
+    case pasteCommandPosted(DeliveryDiagnostic)
     case pendingCopy(PendingCopyReason)
     case pendingCopyDiagnosed(
         PendingCopyReason,
@@ -250,7 +248,7 @@ public enum DeliveryOutcome: Equatable, Sendable {
 
     public var pendingCopyReason: PendingCopyReason? {
         switch self {
-        case .delivered: nil
+        case .delivered, .pasteCommandPosted: nil
         case let .pendingCopy(reason),
              let .pendingCopyDiagnosed(reason, _):
             reason
@@ -258,9 +256,11 @@ public enum DeliveryOutcome: Equatable, Sendable {
     }
 
     public var deliveryDiagnostic: DeliveryDiagnostic? {
-        if case let .pendingCopyDiagnosed(_, diagnostic) = self {
+        switch self {
+        case let .pasteCommandPosted(diagnostic),
+             let .pendingCopyDiagnosed(_, diagnostic):
             diagnostic
-        } else {
+        case .delivered, .pendingCopy:
             nil
         }
     }
@@ -1058,7 +1058,7 @@ public actor VoiceInputSessions {
             )
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
             switch outcome {
-            case .delivered:
+            case .delivered, .pasteCommandPosted:
                 let activity = VoiceInputActivity.delivered(
                     id,
                     applicationName: targetSnapshot.applicationName,
@@ -1072,6 +1072,7 @@ public actor VoiceInputSessions {
                     transcription: processedText.doubaoText,
                     finalText: processedText.finalText,
                     providerRequestID: processedText.doubaoRequestID,
+                    deliveryDiagnosticCode: outcome.deliveryDiagnostic?.code,
                     processedText: processedText,
                     processingSnapshot: snapshot,
                     additionalStageDurations: sessionStageDurations
@@ -1231,7 +1232,7 @@ public actor VoiceInputSessions {
         _ = queueHistory(.init(
             sessionID: id,
             startedAt: startedAt,
-            applicationName: audit.applicationName,
+            applicationName: nil,
             transcription: confirmedDoubaoResult?.text,
             finalText: nil,
             transcriptionProvider: confirmedDoubaoResult == nil ? nil : "doubao",
@@ -1337,7 +1338,7 @@ public actor VoiceInputSessions {
         let record = VoiceInputHistoryRecord(
             sessionID: id,
             startedAt: startedAt,
-            applicationName: applicationName ?? audit.applicationName,
+            applicationName: nil,
             transcription: mayPersistBody ? transcription : nil,
             finalText: mayPersistBody ? finalText : nil,
             transcriptionProvider: providerDiagnostic?.provider
@@ -1535,7 +1536,7 @@ public actor VoiceInputSessions {
         _ = queueHistory(.init(
             sessionID: id,
             startedAt: startedAt,
-            applicationName: audit.applicationName,
+            applicationName: nil,
             transcription: nil,
             finalText: nil,
             transcriptionProvider: diagnostic?.provider ?? "doubao",
@@ -1602,7 +1603,7 @@ public actor VoiceInputSessions {
             activity,
             id: id,
             startedAt: startedAt,
-            applicationName: applicationName,
+            applicationName: nil,
             snapshot: snapshot
         )
     }

@@ -285,7 +285,7 @@ private struct ActivityHUDSurface<Content: View>: View {
             .frame(width: width, height: height)
             .background {
                 ZStack {
-                    HUDVisualEffect()
+                    HUDVisualEffect(cornerRadius: cornerRadius)
                     LinearGradient(
                         colors: [
                             .black.opacity(0.34),
@@ -321,20 +321,32 @@ private struct ActivityHUDSurface<Content: View>: View {
                     lineWidth: palette.darkBorderLineWidth
                 )
             }
-            .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
     }
 }
 
 private struct HUDVisualEffect: NSViewRepresentable {
+    let cornerRadius: CGFloat
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
+        applyShape(to: view)
         return view
     }
 
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        applyShape(to: view)
+    }
+
+    private func applyShape(to view: NSVisualEffectView) {
+        view.wantsLayer = true
+        view.layer?.isOpaque = false
+        view.layer?.cornerRadius = cornerRadius
+        view.layer?.cornerCurve = .continuous
+        view.layer?.masksToBounds = true
+    }
 }
 
 /// One-line retained-text strip. There is no headline on purpose: the
