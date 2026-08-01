@@ -8,4 +8,14 @@ package enum SpeakerVisualIdentity {
         green: 0.87,
         blue: 0.71
     )
+    package static let iconSurfaceTop = Color(
+        red: 0.13,
+        green: 0.13,
+        blue: 0.14
+    )
+    package static let iconSurfaceBottom = Color(
+        red: 0.08,
+        green: 0.08,
+        blue: 0.09
+    )
 }

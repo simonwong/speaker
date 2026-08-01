@@ -298,14 +298,7 @@ private struct SettingsOverviewView: View {
 
     private var hero: some View {
         HStack(spacing: 14) {
-            Image(systemName: "waveform")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(
-                    Color.accentColor.gradient,
-                    in: RoundedRectangle(cornerRadius: 12)
-                )
+            SpeakerIdentityTile(size: 44, accessibility: .named)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("按下 \(shortcut.preference.displayName) 开始说话")
@@ -882,6 +875,7 @@ private struct AboutSettingsPage: View {
                 icon: AboutSection.version.icon
             ) {
                 HStack {
+                    SpeakerIdentityTile(size: 30)
                     Text("Speaker")
                         .font(.subheadline.weight(.medium))
                     Spacer()

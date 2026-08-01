@@ -101,6 +101,133 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "Speaker menu bar mark stays legible and stateful at status-item size",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var renderedStates: [Data] = []
+            for (state, expectedLabel) in [
+                (MenuBarIconState.ready, "Speaker"),
+                (.recording, "Speaker，正在录音"),
+                (.needsPermission, "Speaker，需要完成权限设置"),
+            ] {
+                let hostingView = NSHostingView(rootView:
+                    SpeakerMenuBarLabel(state: state)
+                        .frame(width: 20, height: 18)
+                )
+                hostingView.frame = NSRect(x: 0, y: 0, width: 20, height: 18)
+                hostingView.layoutSubtreeIfNeeded()
+                try expect(
+                    accessibilityLabels(in: hostingView).contains(expectedLabel),
+                    "\(state) mark did not expose \(expectedLabel)"
+                )
+
+                guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(
+                    in: hostingView.bounds
+                ) else {
+                    throw SpecFailure(message: "could not render menu bar mark")
+                }
+                hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+
+                let visiblePixels = (0..<bitmap.pixelsHigh).flatMap { y in
+                    (0..<bitmap.pixelsWide).compactMap { x -> NSPoint? in
+                        guard let color = bitmap.colorAt(x: x, y: y),
+                              color.alphaComponent > 0.08
+                        else { return nil }
+                        return NSPoint(x: x, y: y)
+                    }
+                }
+                try expect(
+                    visiblePixels.count >= 24,
+                    "\(state) mark was not legible at status-item size"
+                )
+                let visibleX = visiblePixels.map(\.x)
+                let visibleY = visiblePixels.map(\.y)
+                guard let minX = visibleX.min(), let maxX = visibleX.max(),
+                      let minY = visibleY.min(), let maxY = visibleY.max()
+                else {
+                    throw SpecFailure(message: "menu bar mark rendered no bounds")
+                }
+                try expect(
+                    maxX - minX >= 13 && maxY - minY >= 6,
+                    "\(state) mark used undersized bounds \(minX)...\(maxX), \(minY)...\(maxY)"
+                )
+                let corners = [
+                    (0, 0),
+                    (bitmap.pixelsWide - 1, 0),
+                    (0, bitmap.pixelsHigh - 1),
+                    (bitmap.pixelsWide - 1, bitmap.pixelsHigh - 1),
+                ]
+                try expect(
+                    corners.allSatisfy { x, y in
+                        (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) < 0.01
+                    },
+                    "\(state) mark did not preserve a transparent outer background"
+                )
+                guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                    throw SpecFailure(message: "could not encode menu bar mark")
+                }
+                renderedStates.append(png)
+            }
+
+            try expect(
+                Set(renderedStates).count == renderedStates.count,
+                "menu bar states rendered as one indistinguishable mark"
+            )
+        }
+
+        run(
+            "Speaker identity tiles expose product identity only without adjacent text",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let named = NSHostingView(rootView:
+                SpeakerIdentityTile(size: 44, accessibility: .named)
+            )
+            named.frame = NSRect(x: 0, y: 0, width: 44, height: 44)
+            let namedWindow = NSWindow(
+                contentRect: named.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            namedWindow.contentView = named
+
+            let redundant = NSHostingView(rootView:
+                SpeakerIdentityTile(size: 30, accessibility: .hidden)
+            )
+            redundant.frame = NSRect(x: 0, y: 0, width: 30, height: 30)
+            let redundantWindow = NSWindow(
+                contentRect: redundant.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            redundantWindow.contentView = redundant
+            defer {
+                namedWindow.close()
+                redundantWindow.close()
+            }
+
+            namedWindow.orderFrontRegardless()
+            redundantWindow.orderFrontRegardless()
+            named.layoutSubtreeIfNeeded()
+            redundant.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+
+            let namedLabels = accessibilityLabels(in: named)
+            let redundantLabels = accessibilityLabels(in: redundant)
+            try expect(
+                namedLabels.contains("Speaker"),
+                "named identity tile exposed labels \(namedLabels)"
+            )
+            try expect(
+                !redundantLabels.contains("Speaker"),
+                "redundant identity tile exposed labels \(redundantLabels)"
+            )
+        }
+
+        run(
             "ordering the voice input panel does not activate or make it key",
             failures: &failures,
             executed: &executed
@@ -954,6 +1081,34 @@ private func accessibilityButtons(in root: NSView) -> [AccessibilityButton] {
 
     visit(root)
     return buttons
+}
+
+@MainActor
+private func accessibilityLabels(in root: NSView) -> [String] {
+    root.layoutSubtreeIfNeeded()
+    var visited = Set<ObjectIdentifier>()
+    var labels: [String] = []
+
+    func visit(_ view: NSView) {
+        let identifier = ObjectIdentifier(view)
+        guard visited.insert(identifier).inserted else { return }
+        if view.isAccessibilityElement(), let label = view.accessibilityLabel() {
+            labels.append(label)
+        }
+        for child in view.accessibilityChildren() ?? [] {
+            if let childView = child as? NSView {
+                visit(childView)
+            } else if let childElement = child as? NSAccessibilityElement,
+                      let label = childElement.accessibilityLabel()
+            {
+                labels.append(label)
+            }
+        }
+        view.subviews.forEach(visit)
+    }
+
+    visit(root)
+    return labels
 }
 
 @MainActor
