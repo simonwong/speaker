@@ -4,12 +4,23 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
-OUTPUT_DIR="$(/usr/bin/mktemp -d /private/tmp/speaker-compatibility-spec.XXXXXX)"
-trap 'rm -rf "$OUTPUT_DIR"' EXIT
-APP="${SPEAKER_COMPATIBILITY_TEST_APP:-$ROOT/.build/Speaker.app}"
+TEST_ROOT="$(/usr/bin/mktemp -d /private/tmp/speaker-compatibility-spec.XXXXXX)"
+OUTPUT_DIR="$TEST_ROOT/output"
+trap 'rm -rf "$TEST_ROOT"' EXIT
+APP="${SPEAKER_COMPATIBILITY_TEST_APP:-}"
 
-if [[ ! -d "$APP" ]]; then
-    SPEAKER_CONFIGURATION=debug /bin/zsh "$SCRIPT_DIR/bundle" >/dev/null
+if [[ -z "$APP" ]]; then
+    PENDING_ROOT="$TEST_ROOT/bundle-pending"
+    /bin/mkdir -m 700 "$PENDING_ROOT"
+    APP="$PENDING_ROOT/Speaker.app"
+    SPEAKER_CODESIGN_IDENTITY=- \
+    SPEAKER_LOCAL_CODESIGN_IDENTITY= \
+    SPEAKER_CONFIGURATION=debug \
+    SPEAKER_ENABLE_TEST_HOOKS=1 \
+    SPEAKER_BUNDLE_PENDING_ROOT="$PENDING_ROOT" \
+    SPEAKER_BUNDLE_OUTPUT_APP="$APP" \
+    SPEAKER_SWIFT_SCRATCH_PATH="$ROOT/.build" \
+        /bin/zsh "$SCRIPT_DIR/bundle" >/dev/null
 fi
 
 set +e

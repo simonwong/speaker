@@ -442,7 +442,7 @@ print -r -- "$RELEASE_SDK_SETTINGS_HASH" \
     > "$EVIDENCE_WORK/sdk-settings-sha256.txt"
 chmod 600 "$EVIDENCE_WORK"/*
 plutil -lint "$RELEASE_MANIFEST" >/dev/null
-ditto -c -k "$EVIDENCE_WORK" "$PENDING_EVIDENCE"
+ditto -c -k --norsrc "$EVIDENCE_WORK" "$PENDING_EVIDENCE"
 validate_release_evidence_archive \
     "$PENDING_EVIDENCE" \
     "$VERSION" \

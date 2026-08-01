@@ -358,7 +358,7 @@ PROVIDER_EVIDENCE_HASH="$(
 plutil -replace ProviderEvidenceSHA256 \
     -string "$PROVIDER_EVIDENCE_HASH" \
     "$EVIDENCE_MANIFEST"
-ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k --norsrc "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.3" \
@@ -373,7 +373,7 @@ validate_release_evidence_archive \
 print -rn -- tampered-provider-matrix \
     > "$EVIDENCE_FIXTURE_DIR/provider-matrix.json"
 rm -f "$EVIDENCE_FIXTURE_ZIP"
-ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k --norsrc "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 if validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.3" \
@@ -391,7 +391,7 @@ fi
 print -rn -- provider-matrix-fixture \
     > "$EVIDENCE_FIXTURE_DIR/provider-matrix.json"
 rm -f "$EVIDENCE_FIXTURE_ZIP"
-ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k --norsrc "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 if validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.4" \
@@ -409,7 +409,7 @@ fi
 print -r -- 'must-not-be-published' \
     > "$EVIDENCE_FIXTURE_DIR/unexpected-secret.txt"
 rm -f "$EVIDENCE_FIXTURE_ZIP"
-ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k --norsrc "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 if validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.3" \
@@ -428,7 +428,7 @@ rm -f "$EVIDENCE_FIXTURE_DIR/unexpected-secret.txt"
 print -r -- "$(printf 'f%.0s' {1..64})" \
     > "$EVIDENCE_FIXTURE_DIR/sdk-settings-sha256.txt"
 rm -f "$EVIDENCE_FIXTURE_ZIP"
-ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k --norsrc "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 if validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.3" \
@@ -446,7 +446,7 @@ fi
 print -r -- "$SDK_SETTINGS_HASH" \
     > "$EVIDENCE_FIXTURE_DIR/sdk-settings-sha256.txt"
 rm -f "$EVIDENCE_FIXTURE_DIR/sdk-version.txt" "$EVIDENCE_FIXTURE_ZIP"
-ditto -c -k "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
+ditto -c -k --norsrc "$EVIDENCE_FIXTURE_DIR" "$EVIDENCE_FIXTURE_ZIP"
 if validate_release_evidence_archive \
     "$EVIDENCE_FIXTURE_ZIP" \
     "1.2.3" \
