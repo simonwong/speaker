@@ -10,7 +10,6 @@ package enum SessionHistoryRecordPolicy {
         [
             record.transcription,
             record.finalText,
-            record.applicationName,
             record.providerErrorCode,
             record.providerOperation,
             record.providerStatusCode,

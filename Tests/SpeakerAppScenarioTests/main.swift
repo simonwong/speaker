@@ -641,9 +641,9 @@ struct SpeakerAppScenarioSpecs {
             executed: &executed
         ) {
             let reportURL = URL(
-                fileURLWithPath: "/private/tmp",
+                fileURLWithPath: "/private/tmp/speaker-delivery-smoke-spec",
                 isDirectory: true
-            ).appendingPathComponent("speaker-delivery-smoke-spec.txt")
+            ).appendingPathComponent("report.txt")
             let arguments = [
                 "SpeakerApp",
                 "--speaker-delivery-smoke-pid",
@@ -663,6 +663,53 @@ struct SpeakerAppScenarioSpecs {
                 local?.reportURL == reportURL.standardizedFileURL,
                 "the accepted report path changed unexpectedly"
             )
+            try expect(local?.captureOnly == false)
+            try expect(local?.usesFrontmostTarget == false)
+            try expect(local?.exercisesVoiceSession == false)
+            try expect(local?.triggerURL == nil)
+            let triggerURL = reportURL.deletingLastPathComponent()
+                .appendingPathComponent("trigger.txt")
+            let armedArguments = arguments + [
+                "--speaker-delivery-smoke-trigger",
+            ]
+            let armed = DeliverySmokeLaunchRequest(
+                arguments: armedArguments,
+                signingMode: .developmentSigned
+            )
+            try expect(armed?.triggerURL == triggerURL.standardizedFileURL)
+            let sessionArguments = arguments + [
+                "--speaker-delivery-smoke-session",
+            ]
+            let session = DeliverySmokeLaunchRequest(
+                arguments: sessionArguments,
+                signingMode: .developmentSigned
+            )
+            try expect(session?.exercisesVoiceSession == true)
+            let captureOnlyArguments = [
+                "SpeakerApp",
+                "--speaker-delivery-smoke-capture-only",
+                "--speaker-delivery-smoke-report",
+                reportURL.path,
+            ]
+            let captureOnly = DeliverySmokeLaunchRequest(
+                arguments: captureOnlyArguments,
+                signingMode: .developmentSigned
+            )
+            try expect(captureOnly?.processID == nil)
+            try expect(captureOnly?.captureOnly == true)
+            try expect(captureOnly?.usesFrontmostTarget == true)
+            let frontmostDelivery = DeliverySmokeLaunchRequest(
+                arguments: [
+                    "SpeakerApp",
+                    "--speaker-delivery-smoke-frontmost",
+                    "--speaker-delivery-smoke-report",
+                    reportURL.path,
+                ],
+                signingMode: .developmentSigned
+            )
+            try expect(frontmostDelivery?.processID == nil)
+            try expect(frontmostDelivery?.captureOnly == false)
+            try expect(frontmostDelivery?.usesFrontmostTarget == true)
             try expect(
                 DeliverySmokeLaunchRequest(
                     arguments: arguments,
@@ -925,7 +972,7 @@ struct SpeakerAppScenarioSpecs {
                 providerStatusCode: "503",
                 providerMessage: "SECRET PROVIDER MESSAGE",
                 deliveryDiagnosticCode:
-                    "directReceipt.unconfirmed",
+                    "pasteReceipt.unconfirmed",
                 deepSeekText: "SECRET DEEPSEEK TEXT",
                 deepSeekRequestID: "deepseek-safe-id",
                 refinementModeName: "SECRET CUSTOM NAME",
@@ -988,7 +1035,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(report.contains("latestProviderCode: provider-safe-code"))
             try expect(
                 report.contains(
-                    "latestDeliveryDiagnostic: directReceipt.unconfirmed"
+                    "latestDeliveryDiagnostic: pasteReceipt.unconfirmed"
                 )
             )
             try expect(report.contains("latestDeepSeekRequestID: deepseek-safe-id"))
@@ -1911,6 +1958,60 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        await runAsync(
+            "an empty provider transcript ends silently",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let announcements = AnnouncementRecorder()
+            let sessions = VoiceInputSessions(
+                audioCapture: ExperienceAudioCaptureFake(),
+                targetCapture: ExperienceWritableTargetCaptureFake(),
+                textProcessor: ExperienceNoTextProcessor(),
+                delivery: ExperienceSuccessfulDeliveryFake(),
+                clipboard: ExperienceClipboardFake(),
+                history: ExperienceHistoryFake()
+            )
+            let experience = VoiceInputExperience(
+                sessions: sessions,
+                announce: { announcements.messages.append($0) }
+            )
+            experience.start()
+
+            experience.shortcutTarget.receive(.pressed)
+            _ = await waitUntil { experience.state.isRecording }
+            experience.shortcutTarget.receive(.released)
+            experience.shortcutTarget.receive(.pressed)
+            experience.shortcutTarget.receive(.released)
+
+            let ended = await waitUntil {
+                experience.state.diagnosticCode
+                    == "failed.providerReturnedNoText"
+            }
+            let overlayIsHidden = if case .hidden = experience.state.overlay {
+                true
+            } else {
+                false
+            }
+            let menuIsIdle = experience.state.menu.status == nil
+                && experience.state.menu.dismissAction == nil
+                && experience.state.menu.recoveryAction == nil
+            let announcedEmptyResult = announcements.messages.contains {
+                $0.contains("没有返回文字")
+            }
+            await experience.shutdown()
+
+            try expect(ended)
+            try expect(
+                overlayIsHidden && menuIsIdle,
+                "an empty transcript remained visible as a user-facing problem"
+            )
+            try expect(
+                !announcedEmptyResult,
+                "an empty transcript was announced as a user-facing problem"
+            )
+        }
+
         await runAsync("clipboard failure produces one retained-result announcement", failures: &failures, executed: &executed) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
@@ -2316,6 +2417,24 @@ private actor ExperienceWritableTargetCaptureFake: InputTargetCapturing {
 private actor ExperienceTranscriberFake: SpeechTranscribing {
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
         .init(text: "保留的文字", providerRequestID: "scenario-request")
+    }
+}
+
+private struct ExperienceNoTextProcessor: VoiceTextProcessing {
+    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    func process(
+        _ audio: CapturedAudio,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        throw VoiceTextProcessingFailure(
+            userFailure: .providerReturnedNoText,
+            providerDiagnostic: .init(
+                provider: "doubao",
+                code: "emptyTranscript"
+            )
+        )
     }
 }
 

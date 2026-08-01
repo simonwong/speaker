@@ -1,6 +1,6 @@
 # macOS Input and Delivery Constraints
 
-Last reviewed: 2026-07-15
+Last reviewed: 2026-08-01
 
 This page records the platform evidence behind [ADR-0001](../adr/0001-run-outside-app-sandbox.md) and [ADR-0002](../adr/0002-freeze-the-input-target.md). It is a dated research record; Apple contracts and observed application behavior must be rechecked before widening delivery support.
 
@@ -23,18 +23,18 @@ The event-tap callback performs minimal edge bookkeeping and hands semantic inte
 
 ## Input Target contract
 
-Release captures the exact focused element, process identity, role, security classification, selection, and bounded change evidence. The target token remains in memory only for the session.
+Release snapshots the frontmost process identity without AX IPC. Immediately after the event-tap callback returns, Speaker queries that exact process for its current focused element, falling back to its focused window when necessary. Role, security classification, selection, and bounded change evidence are captured in the resulting one-session token. This design deliberately avoids an authoritative `AXObserver` cache: real same-process Terminal window switching showed that notifications can be delayed or absent, leaving stale focus evidence after the first successful session.
 
 Delivery follows a conservative ladder:
 
-1. validate that the exact element is still focused in the same frontmost process;
+1. capture the strongest current identity immediately after release inside the frozen process: exact element when exposed, otherwise exact focused window;
 2. confirm the target is editable and non-secure;
 3. recheck selection and value evidence for concurrent changes;
-4. attempt direct Accessibility mutation when its required attributes are supported;
-5. use PID-targeted Unicode only when the target remains exact and an expected-value receipt can confirm the mutation; and
-6. otherwise preserve the text as a Pending Copy Result.
+4. preflight event-post access and use one transactional Command-V for every compatible target while the retained element or window remains current, frontmost, and non-secure;
+5. conditionally restore the pasteboard only while Speaker's change count and private marker still match; and
+6. preserve the text as a Pending Copy Result only when no paste event was posted.
 
-Speaker does not restore focus, simulate Command-V, rewrite an entire rich document value, or report an unconfirmed mutation as delivered.
+Speaker does not restore focus, rewrite an entire rich document value, repeat a committed paste, or overwrite a newer user clipboard value. Detailed 2026-07-29 evidence for Chromium/Electron AX behavior, transactional paste timing, and HUD alpha verification lives in [Voice Input AX Delivery and HUD Transparency Best Practices](voice-input-ax-hud-best-practices.md).
 
 ## Permission and distribution implications
 

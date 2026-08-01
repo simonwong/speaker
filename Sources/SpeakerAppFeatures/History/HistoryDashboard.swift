@@ -331,17 +331,6 @@ private struct HistoryRecordRow: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 42, alignment: .leading)
 
-                Text(presentation.applicationName)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(
-                        Color.primary.opacity(0.065),
-                        in: Capsule()
-                    )
-
                 Text(presentation.text)
                     .font(.system(size: 12.5))
                     .foregroundStyle(
@@ -429,7 +418,6 @@ private struct HistoryExpandedRecord: View {
             )
 
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 7) {
-                metadataRow("来源", presentation.applicationName)
                 metadataRow("结果", record.outcome.historyLabel)
                 metadataRow("整理模式", record.refinementModeName ?? "默认顺滑")
                 metadataRow("总耗时", "\(record.durationMilliseconds) ms")

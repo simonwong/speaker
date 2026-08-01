@@ -3,17 +3,31 @@
 import AppKit
 import Foundation
 
+package enum AccessibilityTargetScope: Sendable {
+    case element
+    case window
+}
+
 package struct AccessibilityTargetReference: @unchecked Sendable, Equatable {
     package let id: UUID
+    package let scope: AccessibilityTargetScope
     fileprivate let element: AXUIElement?
 
-    package init(id: UUID = UUID()) {
+    package init(
+        id: UUID = UUID(),
+        scope: AccessibilityTargetScope = .element
+    ) {
         self.id = id
+        self.scope = scope
         element = nil
     }
 
-    fileprivate init(element: AXUIElement) {
+    fileprivate init(
+        element: AXUIElement,
+        scope: AccessibilityTargetScope = .element
+    ) {
         id = UUID()
+        self.scope = scope
         self.element = element
     }
 
@@ -25,31 +39,41 @@ package struct AccessibilityTargetReference: @unchecked Sendable, Equatable {
     }
 }
 
+package enum AccessibilityReleaseTargetSelection {
+    package static func select(
+        focusedElement: AccessibilityTargetReference?,
+        focusedWindow: AccessibilityTargetReference?,
+        processID: pid_t
+    ) -> AccessibilityReleaseTarget? {
+        guard let reference = focusedElement ?? focusedWindow else {
+            return nil
+        }
+        return AccessibilityReleaseTarget(
+            reference: reference,
+            processID: processID
+        )
+    }
+}
+
 package struct AccessibilityTargetEvidence: Sendable {
     package let reference: AccessibilityTargetReference
-    package let selection: NSRange
-    package let originalValue: String
+    package let selection: NSRange?
+    package let originalValue: String?
     package let processID: pid_t
-    package let applicationBundleIdentifier: String?
     package let applicationName: String
-    package let supportsDirectInsertion: Bool
 
     package init(
         reference: AccessibilityTargetReference,
-        selection: NSRange,
-        originalValue: String,
+        selection: NSRange?,
+        originalValue: String?,
         processID: pid_t,
-        applicationBundleIdentifier: String?,
-        applicationName: String,
-        supportsDirectInsertion: Bool
+        applicationName: String
     ) {
         self.reference = reference
         self.selection = selection
         self.originalValue = originalValue
         self.processID = processID
-        self.applicationBundleIdentifier = applicationBundleIdentifier
         self.applicationName = applicationName
-        self.supportsDirectInsertion = supportsDirectInsertion
     }
 }
 
@@ -67,11 +91,13 @@ package struct AccessibilityReleaseTarget: @unchecked Sendable {
 }
 
 package enum AccessibilityReleaseCapture: @unchecked Sendable {
+    case process(processID: pid_t)
     case target(AccessibilityReleaseTarget)
     case unavailable(processID: pid_t, reason: PendingCopyReason)
 
     package var processID: pid_t {
         switch self {
+        case let .process(processID): processID
         case let .target(target): target.processID
         case let .unavailable(processID, _): processID
         }
@@ -109,8 +135,50 @@ package enum AccessibilityOperationResult<Value: Sendable>: Sendable {
     case failure(AccessibilityOperationFailure)
 }
 
+package enum AccessibilityTextRangeDecoder {
+    package static func decode(
+        _ value: CFTypeRef?
+    ) -> AccessibilityOperationResult<NSRange?> {
+        guard let value else { return .success(nil) }
+        guard CFGetTypeID(value) == AXValueGetTypeID() else {
+            return .success(nil)
+        }
+        let axValue = unsafeDowncast(value, to: AXValue.self)
+        guard AXValueGetType(axValue) == .cfRange else {
+            return .success(nil)
+        }
+        var range = CFRange()
+        guard AXValueGetValue(axValue, .cfRange, &range) else {
+            return .failure(.other)
+        }
+        return .success(NSRange(
+            location: range.location,
+            length: range.length
+        ))
+    }
+}
+
+package enum AccessibilityAttributeReadPolicy {
+    package static func isAbsent(_ error: AXError) -> Bool {
+        error == .noValue
+    }
+}
+
+package enum AccessibilityPasteResult: Equatable, Sendable {
+    case posted
+    case secureTarget
+    case targetChanged
+    case clipboardFailed
+    case eventFailed
+    case targetFailure(AccessibilityOperationFailure)
+}
+
 package protocol AccessibilityTargetSystem: Sendable {
+    var captureDiagnostic: String? { get }
     func captureFocusedTarget() async -> AccessibilityTargetCapture
+    func captureFocusedTarget(
+        in processID: pid_t
+    ) async -> AccessibilityTargetCapture
     func captureTarget(
         _ target: AccessibilityReleaseTarget
     ) async -> AccessibilityTargetCapture
@@ -124,14 +192,6 @@ package protocol AccessibilityTargetSystem: Sendable {
     func value(
         of target: AccessibilityTargetReference
     ) async -> AccessibilityOperationResult<String?>
-    func setSelection(
-        _ selection: NSRange,
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<Void>
-    func setSelectedText(
-        _ text: String,
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<Void>
     func focusedState(
         _ target: AccessibilityTargetReference,
         in processID: pid_t
@@ -140,7 +200,38 @@ package protocol AccessibilityTargetSystem: Sendable {
     func selection(
         of target: AccessibilityTargetReference
     ) async -> AccessibilityOperationResult<NSRange?>
-    func postUnicode(_ text: String, to processID: pid_t) async -> Bool
+    func paste(
+        _ text: String,
+        to target: AccessibilityTargetReference,
+        in processID: pid_t
+    ) async -> AccessibilityPasteResult
+}
+
+package extension AccessibilityTargetSystem {
+    var captureDiagnostic: String? { nil }
+
+    func captureFocusedTarget(
+        in processID: pid_t
+    ) async -> AccessibilityTargetCapture {
+        let capture = await captureFocusedTarget()
+        guard case let .writable(evidence) = capture,
+              evidence.processID != processID
+        else { return capture }
+        return .unavailable(.invalidatedTarget)
+    }
+}
+
+private final class AccessibilityCaptureDiagnosticBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: String?
+
+    var value: String? {
+        lock.withLock { storedValue }
+    }
+
+    func set(_ value: String) {
+        lock.withLock { storedValue = value }
+    }
 }
 
 package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
@@ -150,13 +241,41 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     }
 
     private let isProcessTrusted: @Sendable () -> Bool
+    private let isSecureInputEnabled: @Sendable () -> Bool
+    private let frontmostProcessIdentifier: @Sendable () -> pid_t
+    private let canPostEvents: @Sendable () -> Bool
+    private let preparePasteboardTransaction:
+        @Sendable (String) async -> PasteboardDeliveryTransaction?
+    private let captureDiagnosticBox = AccessibilityCaptureDiagnosticBox()
+
+    package var captureDiagnostic: String? {
+        captureDiagnosticBox.value
+    }
 
     package init(
         isProcessTrusted: @escaping @Sendable () -> Bool = {
             AXIsProcessTrusted()
-        }
+        },
+        isSecureInputEnabled: @escaping @Sendable () -> Bool = {
+            IsSecureEventInputEnabled()
+        },
+        frontmostProcessIdentifier: @escaping @Sendable () -> pid_t = {
+            NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        },
+        canPostEvents: @escaping @Sendable () -> Bool = {
+            CGPreflightPostEventAccess()
+        },
+        preparePasteboardTransaction:
+            @escaping @Sendable (String) async
+                -> PasteboardDeliveryTransaction? = { text in
+                    await PasteboardDeliveryTransaction.prepare(text: text)
+                }
     ) {
         self.isProcessTrusted = isProcessTrusted
+        self.isSecureInputEnabled = isSecureInputEnabled
+        self.frontmostProcessIdentifier = frontmostProcessIdentifier
+        self.canPostEvents = canPostEvents
+        self.preparePasteboardTransaction = preparePasteboardTransaction
     }
 
     package func captureFocusedTarget() async -> AccessibilityTargetCapture {
@@ -181,88 +300,93 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         case let .failure(failure):
             return .unavailable(failure.pendingCopyReason)
         }
-        let element: AXUIElement
-        switch readElement(
-            from: application,
-            attribute: kAXFocusedUIElementAttribute
-        ) {
-        case let .success(value?):
-            element = value
-        case .success(nil):
-            return .unavailable(.missingTarget)
-        case let .failure(failure):
-            return .unavailable(failure.pendingCopyReason)
-        }
-        return await inspectTarget(
-            AccessibilityReleaseTarget(
-                reference: AccessibilityTargetReference(element: element),
-                processID: processIdentifier(of: application)
-            )
+        return await captureFocusedTarget(
+            in: application,
+            processID: processIdentifier(of: application)
         )
     }
 
-    /// Freezes the exact focused AX element inside the physical release
-    /// callback. The 80 ms IPC budget keeps the event tap responsive; failure
-    /// is intentionally represented by no exact target and later fails closed.
-    package func captureReleaseTarget() -> AccessibilityReleaseCapture {
-        let frontmostProcessID = NSWorkspace.shared.frontmostApplication?
-            .processIdentifier ?? 0
-        guard isProcessTrusted() else {
-            return .unavailable(
-                processID: frontmostProcessID,
-                reason: .accessibilityPermissionMissing
-            )
-        }
-        guard !IsSecureEventInputEnabled() else {
-            return .unavailable(
-                processID: frontmostProcessID,
-                reason: .secureTarget
-            )
-        }
-        let system = AXUIElementCreateSystemWide()
-        _ = AXUIElementSetMessagingTimeout(system, 0.08)
-        let application: AXUIElement
-        switch readElement(
-            from: system,
-            attribute: kAXFocusedApplicationAttribute
-        ) {
-        case let .success(value?):
-            application = value
-        case .success(nil):
+    /// Freezes only the frontmost process inside the physical release callback.
+    /// Target-App AX IPC must wait until the event tap has returned, otherwise
+    /// the callback can prevent that App from servicing the AX request.
+    package func captureReleaseProcess() -> AccessibilityReleaseCapture {
+        let frontmostProcessID = frontmostProcessIdentifier()
+        guard frontmostProcessID > 0 else {
             return .unavailable(
                 processID: frontmostProcessID,
                 reason: .missingTarget
             )
-        case let .failure(failure):
-            return .unavailable(
-                processID: frontmostProcessID,
-                reason: failure.pendingCopyReason
-            )
         }
-        let element: AXUIElement
+        return .process(processID: frontmostProcessID)
+    }
+
+    package func captureFocusedTarget(
+        in processID: pid_t
+    ) async -> AccessibilityTargetCapture {
+        guard isProcessTrusted() else {
+            return .unavailable(.accessibilityPermissionMissing)
+        }
+        guard !isSecureInputEnabled() else {
+            return .unavailable(.secureTarget)
+        }
+        guard frontmostProcessIdentifier() == processID else {
+            return .unavailable(.invalidatedTarget)
+        }
+        let application = AXUIElementCreateApplication(processID)
+        _ = AXUIElementSetMessagingTimeout(application, 1)
+        return await captureFocusedTarget(
+            in: application,
+            processID: processID
+        )
+    }
+
+    private func captureFocusedTarget(
+        in application: AXUIElement,
+        processID: pid_t
+    ) async -> AccessibilityTargetCapture {
+        let focusedElement: AccessibilityTargetReference?
         switch readElement(
             from: application,
             attribute: kAXFocusedUIElementAttribute
         ) {
         case let .success(value?):
-            element = value
-        case .success(nil):
-            return .unavailable(
-                processID: frontmostProcessID,
-                reason: .missingTarget
-            )
+            focusedElement = AccessibilityTargetReference(element: value)
+        case .success(nil), .failure(.attributeUnsupported),
+             .failure(.notImplemented):
+            focusedElement = nil
         case let .failure(failure):
-            return .unavailable(
-                processID: frontmostProcessID,
-                reason: failure.pendingCopyReason
-            )
+            return .unavailable(failure.pendingCopyReason)
         }
-        return .target(
-            AccessibilityReleaseTarget(
-                reference: AccessibilityTargetReference(element: element),
-                processID: processIdentifier(of: application)
-            )
-        )
+
+        let focusedWindow: AccessibilityTargetReference?
+        if focusedElement == nil {
+            switch readElement(
+                from: application,
+                attribute: kAXFocusedWindowAttribute
+            ) {
+            case let .success(value?):
+                focusedWindow = AccessibilityTargetReference(
+                    element: value,
+                    scope: .window
+                )
+            case .success(nil), .failure(.attributeUnsupported),
+                 .failure(.notImplemented):
+                focusedWindow = nil
+            case let .failure(failure):
+                return .unavailable(failure.pendingCopyReason)
+            }
+        } else {
+            focusedWindow = nil
+        }
+
+        guard let target = AccessibilityReleaseTargetSelection.select(
+            focusedElement: focusedElement,
+            focusedWindow: focusedWindow,
+            processID: processID
+        ) else {
+            return .unavailable(.missingTarget)
+        }
+        return await inspectTarget(target)
     }
 
     package func captureTarget(
@@ -279,9 +403,13 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         }
         let application = AXUIElementCreateApplication(target.processID)
         _ = AXUIElementSetMessagingTimeout(application, 1)
+        let focusedAttribute = switch target.reference.scope {
+        case .element: kAXFocusedUIElementAttribute
+        case .window: kAXFocusedWindowAttribute
+        }
         switch readElement(
             from: application,
-            attribute: kAXFocusedUIElementAttribute
+            attribute: focusedAttribute
         ) {
         case let .success(focused?) where CFEqual(focused, expected):
             break
@@ -297,9 +425,24 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         _ target: AccessibilityReleaseTarget
     ) async -> AccessibilityTargetCapture {
         guard let element = target.reference.element else {
+            captureDiagnosticBox.set("inspect.invalidReference")
             return .unavailable(.invalidatedTarget)
         }
         _ = AXUIElementSetMessagingTimeout(element, 1)
+
+        if target.reference.scope == .window {
+            let runningApplication = NSRunningApplication(
+                processIdentifier: target.processID
+            )
+            return .writable(.init(
+                reference: target.reference,
+                selection: nil,
+                originalValue: nil,
+                processID: target.processID,
+                applicationName: runningApplication?.localizedName
+                    ?? "未知应用"
+            ))
+        }
 
         switch readString(from: element, attribute: kAXSubroleAttribute) {
         case let .success(subrole?) where subrole == kAXSecureTextFieldSubrole:
@@ -308,34 +451,43 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
              .failure(.notImplemented):
             break
         case let .failure(failure):
+            captureDiagnosticBox.set(
+                "inspect.subrole.\(failure)"
+            )
             return .unavailable(failure.pendingCopyReason)
         }
 
-        let selection: NSRange
+        let selection: NSRange?
         switch readRange(
             from: element,
             attribute: kAXSelectedTextRangeAttribute
         ) {
         case let .success(value?):
             selection = value
-        case .success(nil):
-            return .unavailable(.unsupportedTarget)
+        case .success(nil), .failure(.attributeUnsupported),
+             .failure(.notImplemented):
+            selection = nil
         case let .failure(failure):
+            captureDiagnosticBox.set(
+                "inspect.selection.\(failure)"
+            )
             return .unavailable(failure.pendingCopyReason)
         }
 
-        let supportsDirectInsertion = await selectedTextIsSettable(element)
-
-        let originalValue: String
+        let originalValue: String?
         switch readString(
             from: element,
             attribute: kAXValueAttribute
         ) {
         case let .success(value?):
             originalValue = value
-        case .success(nil):
-            return .unavailable(.unsupportedTarget)
+        case .success(nil), .failure(.attributeUnsupported),
+             .failure(.notImplemented):
+            originalValue = nil
         case let .failure(failure):
+            captureDiagnosticBox.set(
+                "inspect.value.\(failure)"
+            )
             return .unavailable(failure.pendingCopyReason)
         }
 
@@ -347,9 +499,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             selection: selection,
             originalValue: originalValue,
             processID: target.processID,
-            applicationBundleIdentifier: runningApplication?.bundleIdentifier,
-            applicationName: runningApplication?.localizedName ?? "未知应用",
-            supportsDirectInsertion: supportsDirectInsertion
+            applicationName: runningApplication?.localizedName ?? "未知应用"
         ))
     }
 
@@ -384,41 +534,6 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         return readString(from: element, attribute: kAXValueAttribute)
     }
 
-    package func setSelection(
-        _ selection: NSRange,
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<Void> {
-        guard let element = target.element else {
-            return .failure(.invalidUIElement)
-        }
-        var range = CFRange(
-            location: selection.location,
-            length: selection.length
-        )
-        guard let value = AXValueCreate(.cfRange, &range) else {
-            return .failure(.other)
-        }
-        return map(AXUIElementSetAttributeValue(
-            element,
-            kAXSelectedTextRangeAttribute as CFString,
-            value
-        ))
-    }
-
-    package func setSelectedText(
-        _ text: String,
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<Void> {
-        guard let element = target.element else {
-            return .failure(.invalidUIElement)
-        }
-        return map(AXUIElementSetAttributeValue(
-            element,
-            kAXSelectedTextAttribute as CFString,
-            text as CFString
-        ))
-    }
-
     package func focusedState(
         _ target: AccessibilityTargetReference,
         in processID: pid_t
@@ -428,9 +543,13 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         }
         let application = AXUIElementCreateApplication(processID)
         _ = AXUIElementSetMessagingTimeout(application, 1)
+        let focusedAttribute = switch target.scope {
+        case .element: kAXFocusedUIElementAttribute
+        case .window: kAXFocusedWindowAttribute
+        }
         switch readElement(
             from: application,
-            attribute: kAXFocusedUIElementAttribute
+            attribute: focusedAttribute
         ) {
         case let .success(focused?):
             return .success(CFEqual(focused, expected))
@@ -457,35 +576,48 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         NSWorkspace.shared.frontmostApplication?.processIdentifier == processID
     }
 
-    package func postUnicode(_ text: String, to processID: pid_t) async -> Bool {
+    package func paste(
+        _ text: String,
+        to target: AccessibilityTargetReference,
+        in processID: pid_t
+    ) async -> AccessibilityPasteResult {
+        guard canPostEvents() else { return .eventFailed }
         guard !text.isEmpty,
-              let source = CGEventSource(stateID: .hidSystemState),
-              let keyDown = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: 0,
-                keyDown: true
-              ),
-              let keyUp = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: 0,
-                keyDown: false
-              )
-        else { return false }
-        let units = Array(text.utf16)
-        units.withUnsafeBufferPointer { buffer in
-            guard let baseAddress = buffer.baseAddress else { return }
-            keyDown.keyboardSetUnicodeString(
-                stringLength: buffer.count,
-                unicodeString: baseAddress
-            )
-            keyUp.keyboardSetUnicodeString(
-                stringLength: buffer.count,
-                unicodeString: baseAddress
-            )
+              let transaction = await preparePasteboardTransaction(text)
+        else { return .clipboardFailed }
+
+        try? await Task.sleep(for: .milliseconds(100))
+        guard !isSecureInputEnabled() else {
+            await transaction.restoreIfOwned()
+            return .secureTarget
         }
-        keyDown.postToPid(processID)
-        keyUp.postToPid(processID)
-        return true
+        guard frontmostProcessIdentifier() == processID else {
+            await transaction.restoreIfOwned()
+            return .targetChanged
+        }
+        switch await focusedState(target, in: processID) {
+        case .success(true):
+            break
+        case .success(false):
+            await transaction.restoreIfOwned()
+            return .targetChanged
+        case let .failure(failure):
+            await transaction.restoreIfOwned()
+            return .targetFailure(failure)
+        }
+        guard await transaction.stillOwnsPasteboard() else {
+            return .clipboardFailed
+        }
+        guard canPostEvents() else {
+            await transaction.restoreIfOwned()
+            return .eventFailed
+        }
+        guard await PasteboardDeliveryTransaction.postCommandV() else {
+            await transaction.restoreIfOwned()
+            return .eventFailed
+        }
+        transaction.scheduleConditionalRestore()
+        return .posted
     }
 
     private func readElement(
@@ -502,25 +634,6 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         case let .failure(error):
             return .failure(error)
         }
-    }
-
-    private func selectedTextIsSettable(_ element: AXUIElement) async -> Bool {
-        for attempt in 0..<2 {
-            var settable = DarwinBoolean(false)
-            let error = AXUIElementIsAttributeSettable(
-                element,
-                kAXSelectedTextAttribute as CFString,
-                &settable
-            )
-            if error == .success {
-                return settable.boolValue
-            }
-            guard error == .cannotComplete, attempt == 0 else {
-                return false
-            }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-        return false
     }
 
     private func readString(
@@ -541,22 +654,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     ) -> AccessibilityOperationResult<NSRange?> {
         switch readValue(from: element, attribute: attribute) {
         case let .success(value):
-            guard let value else { return .success(nil) }
-            guard CFGetTypeID(value) == AXValueGetTypeID() else {
-                return .failure(.other)
-            }
-            let axValue = unsafeDowncast(value, to: AXValue.self)
-            guard AXValueGetType(axValue) == .cfRange else {
-                return .failure(.other)
-            }
-            var range = CFRange()
-            guard AXValueGetValue(axValue, .cfRange, &range) else {
-                return .failure(.other)
-            }
-            return .success(NSRange(
-                location: range.location,
-                length: range.length
-            ))
+            return AccessibilityTextRangeDecoder.decode(value)
         case let .failure(error):
             return .failure(error)
         }
@@ -572,6 +670,9 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             attribute as CFString,
             &value
         )
+        if AccessibilityAttributeReadPolicy.isAbsent(error) {
+            return .success(nil)
+        }
         guard error == .success else {
             return .failure(map(error))
         }

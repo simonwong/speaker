@@ -33,16 +33,13 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         @Sendable () -> AccessibilityReleaseCapture
     private nonisolated let releaseCaptureCache =
         AccessibilityReleaseCaptureCache()
-    private let verifiedUnicodeDeliveryBundleIdentifiers: Set<String>
 
-    public init(
-        verifiedUnicodeDeliveryBundleIdentifiers: Set<String> = []
-    ) {
+    public init() {
         let system = LiveAccessibilityTargetSystem()
         self.system = system
-        releaseCapture = { system.captureReleaseTarget() }
-        self.verifiedUnicodeDeliveryBundleIdentifiers =
-            verifiedUnicodeDeliveryBundleIdentifiers
+        releaseCapture = {
+            system.captureReleaseProcess()
+        }
     }
 
     package init(
@@ -50,13 +47,10 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         releaseCapture:
             @escaping @Sendable () -> AccessibilityReleaseCapture = {
                 .unavailable(processID: 0, reason: .missingTarget)
-            },
-        verifiedUnicodeDeliveryBundleIdentifiers: Set<String> = []
+            }
     ) {
         self.system = system
         self.releaseCapture = releaseCapture
-        self.verifiedUnicodeDeliveryBundleIdentifiers =
-            verifiedUnicodeDeliveryBundleIdentifiers
     }
 
     public func capture() async -> InputTargetCaptureResult {
@@ -72,20 +66,46 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             return .unavailable(.invalidatedTarget)
         }
         switch releaseCapture {
+        case let .process(processID):
+            guard processID == hint.processID else {
+                return .unavailable(.invalidatedTarget)
+            }
+            let capture = await system.captureFocusedTarget(in: processID)
+            return store(capture, expectedProcessID: processID)
         case let .unavailable(_, reason):
             return .unavailable(reason)
         case let .target(target):
             guard target.processID == hint.processID else {
                 return .unavailable(.invalidatedTarget)
             }
-            let capture = await system.captureTarget(target)
-            return store(capture, expectedProcessID: hint.processID)
+            let exactCapture = await system.captureTarget(target)
+            switch exactCapture {
+            case .writable:
+                return store(
+                    exactCapture,
+                    expectedProcessID: hint.processID
+                )
+            case .unavailable(.invalidatedTarget),
+                 .unavailable(.missingTarget):
+                let currentCapture = await system.captureFocusedTarget(
+                    in: hint.processID
+                )
+                return store(
+                    currentCapture,
+                    expectedProcessID: hint.processID
+                )
+            case .unavailable:
+                return store(
+                    exactCapture,
+                    expectedProcessID: hint.processID
+                )
+            }
         }
     }
 
-    /// Freezes the exact focused AX element while the physical stop gesture is
-    /// still being handled. Selection/value inspection remains asynchronous,
-    /// but it can no longer follow the user to another field in the same App.
+    /// Freezes only the frontmost process while the physical stop gesture is
+    /// still being handled. The focused input is read immediately after the
+    /// callback returns, avoiding target-App AX IPC inside the event tap.
     public nonisolated func releaseCaptureHint() -> InputTargetCaptureHint? {
         let capture = releaseCapture()
         let token = releaseCaptureCache.store(capture)
@@ -93,6 +113,10 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             processID: capture.processID,
             targetToken: token
         )
+    }
+
+    package nonisolated var releaseCaptureDiagnostic: String? {
+        system.captureDiagnostic
     }
 
     /// Captures the focused target only when it belongs to the exact process
@@ -174,118 +198,28 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             )
         }
 
-        let currentValue: String
-        switch await system.value(of: evidence.reference) {
-        case let .success(value?):
-            currentValue = value
-        case .success(nil):
-            return .pendingCopy(.invalidatedTarget)
-        case let .failure(failure):
-            return Self.failedOperation(
-                stage: .valueRead,
-                failure: failure
-            )
-        }
-        guard currentValue == evidence.originalValue else {
-            return .pendingCopyDiagnosed(
-                .changedTarget,
-                .init(stage: .valueRead, cause: .changed)
-            )
-        }
-
-        guard let expectedValue = replacingSelection(
-            in: evidence,
-            with: text
-        ) else {
-            return .pendingCopy(.unsupportedTarget)
-        }
-
-        var directFailure: AccessibilityOperationFailure?
-        var directDiagnostic: DeliveryDiagnostic?
-        var committed = false
-        if evidence.supportsDirectInsertion {
-            switch await system.selection(of: evidence.reference) {
-            case let .success(selection?) where selection == evidence.selection:
-                break
-            case .success:
-                return .pendingCopy(.changedTarget)
-            case let .failure(failure):
-                return Self.failedOperation(
-                    stage: .directSelection,
-                    failure: failure
-                )
-            }
+        if let originalValue = evidence.originalValue {
             switch await system.value(of: evidence.reference) {
-            case let .success(value?) where value == evidence.originalValue:
+            case let .success(value?) where value == originalValue:
                 break
             case .success:
-                return .pendingCopy(.changedTarget)
+                return .pendingCopyDiagnosed(
+                    .changedTarget,
+                    .init(stage: .valueRead, cause: .changed)
+                )
             case let .failure(failure):
                 return Self.failedOperation(
                     stage: .valueRead,
                     failure: failure
                 )
             }
-            guard !(await system.secureInputEnabled()) else {
-                return .pendingCopy(.secureTarget)
-            }
-            guard await commitGate.commit() else {
-                return .pendingCopy(.deliveryFailed)
-            }
-            committed = true
-            guard !Task.isCancelled else {
-                return .pendingCopy(.deliveryFailed)
-            }
-            // The current selection was just verified. Writing the historical
-            // range back here would overwrite a cursor move that races after
-            // the check; AXSelectedText already targets the current selection.
-            switch await system.setSelectedText(
-                text,
-                of: evidence.reference
-            ) {
-            case .success, .failure(.cannotComplete):
-                return await verifyMutationReceipt(
-                    expectedValue,
-                    originalValue: evidence.originalValue,
-                    target: evidence.reference,
-                    diagnosticStage: .directReceipt
-                )
-            case let .failure(error):
-                directFailure = error
-                directDiagnostic = Self.diagnostic(
-                    stage: .directWrite,
-                    failure: error
-                )
-                switch await system.value(of: evidence.reference) {
-                case let .success(value?) where value == expectedValue:
-                    return .delivered
-                case let .success(value?) where value == evidence.originalValue:
-                    break
-                case .success:
-                    return .pendingCopy(.changedTarget)
-                case let .failure(failure):
-                    return Self.failedOperation(
-                        stage: .valueRead,
-                        failure: failure
-                    )
-                }
-            }
         }
+        let expectedValue = replacingSelection(in: evidence, with: text)
 
-        let isVerifiedApplication = Self.allowsUnicodeDelivery(
-            to: evidence.applicationBundleIdentifier,
-            verifiedBundleIdentifiers: verifiedUnicodeDeliveryBundleIdentifiers
-        )
         let isFrontmostExactTarget = await system.isFrontmost(
             processID: evidence.processID
         )
-        guard isVerifiedApplication || isFrontmostExactTarget else {
-            if let directFailure, let directDiagnostic {
-                return .pendingCopyDiagnosed(
-                    directFailure.pendingCopyReason,
-                    directDiagnostic
-                )
-            }
+        guard isFrontmostExactTarget else {
             return .pendingCopyDiagnosed(
                 .unsupportedTarget,
                 .init(
@@ -308,71 +242,80 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                 failure: failure
             )
         }
-        switch await system.value(of: evidence.reference) {
-        case let .success(value?) where value == evidence.originalValue:
-            break
-        case .success:
-            return .pendingCopy(.changedTarget)
-        case let .failure(failure):
-            return Self.failedOperation(
-                stage: .valueRead,
-                failure: failure
-            )
+        if let originalValue = evidence.originalValue {
+            switch await system.value(of: evidence.reference) {
+            case let .success(value?) where value == originalValue:
+                break
+            case .success:
+                return .pendingCopy(.changedTarget)
+            case let .failure(failure):
+                return Self.failedOperation(
+                    stage: .valueRead,
+                    failure: failure
+                )
+            }
         }
-        switch await system.selection(of: evidence.reference) {
-        case let .success(selection?) where selection == evidence.selection:
-            break
-        case .success:
-            return .pendingCopy(.changedTarget)
-        case let .failure(failure):
-            return Self.failedOperation(
-                stage: .fallbackSelection,
-                failure: failure
-            )
+        if let selection = evidence.selection {
+            switch await system.selection(of: evidence.reference) {
+            case let .success(current?) where current == selection:
+                break
+            case .success:
+                return .pendingCopy(.changedTarget)
+            case let .failure(failure):
+                return Self.failedOperation(
+                    stage: .fallbackSelection,
+                    failure: failure
+                )
+            }
         }
         guard !(await system.secureInputEnabled()) else {
             return .pendingCopy(.secureTarget)
         }
-        if !committed {
-            guard await commitGate.commit() else {
-                return .pendingCopy(.deliveryFailed)
-            }
+        guard await commitGate.commit() else {
+            return .pendingCopy(.deliveryFailed)
         }
         guard !Task.isCancelled else {
             return .pendingCopy(.deliveryFailed)
         }
-        guard await system.postUnicode(text, to: evidence.processID) else {
-            if let directFailure, let directDiagnostic {
-                return .pendingCopyDiagnosed(
-                    directFailure.pendingCopyReason,
-                    directDiagnostic
+        switch await system.paste(
+            text,
+            to: evidence.reference,
+            in: evidence.processID
+        ) {
+        case .posted:
+            if let expectedValue,
+               let originalValue = evidence.originalValue
+            {
+                return await verifyMutationReceipt(
+                    expectedValue,
+                    originalValue: originalValue,
+                    target: evidence.reference,
+                    diagnosticStage: .pasteReceipt
                 )
             }
+            return .pasteCommandPosted(.init(
+                stage: .pasteReceipt,
+                cause: .unconfirmed
+            ))
+        case .secureTarget:
+            return .pendingCopy(.secureTarget)
+        case .targetChanged:
+            return .pendingCopy(.invalidatedTarget)
+        case let .targetFailure(failure):
+            return Self.failedOperation(stage: .focusRead, failure: failure)
+        case .clipboardFailed, .eventFailed:
             return .pendingCopyDiagnosed(
                 .deliveryFailed,
                 .init(
-                    stage: .unicodePost,
+                    stage: .pastePost,
                     cause: .rejected
                 )
             )
         }
-        return await verifyPostedUnicode(
-            expectedValue,
-            originalValue: evidence.originalValue,
-            target: evidence.reference
-        )
     }
 
     public func discard(_ target: InputTargetSnapshot) async {
         targets[target.id] = nil
-    }
-
-    package static func allowsUnicodeDelivery(
-        to bundleIdentifier: String?,
-        verifiedBundleIdentifiers: Set<String>
-    ) -> Bool {
-        guard let bundleIdentifier else { return false }
-        return verifiedBundleIdentifiers.contains(bundleIdentifier)
     }
 
     private func verifyMutationReceipt(
@@ -392,24 +335,21 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             case .success(nil), .failure(.cannotComplete):
                 break
             case .failure(.invalidUIElement):
-                return .pendingCopyDiagnosed(
-                    .invalidatedTarget,
+                return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
                         cause: .invalidated
                     )
                 )
             case .failure(.attributeUnsupported), .failure(.notImplemented):
-                return .pendingCopyDiagnosed(
-                    .unsupportedTarget,
+                return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
                         cause: .unsupported
                     )
                 )
             case .failure(.other), .success(.some):
-                return .pendingCopyDiagnosed(
-                    .deliveryUnconfirmed,
+                return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
                         cause: .unconfirmed
@@ -417,8 +357,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                 )
             }
             guard clock.now < deadline else {
-                return .pendingCopyDiagnosed(
-                    .deliveryUnconfirmed,
+                return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
                         cause: .unconfirmed
@@ -427,8 +366,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             }
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled else {
-                return .pendingCopyDiagnosed(
-                    .deliveryFailed,
+                return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
                         cause: .cancelled
@@ -438,25 +376,14 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         }
     }
 
-    private func verifyPostedUnicode(
-        _ expectedValue: String,
-        originalValue: String,
-        target: AccessibilityTargetReference
-    ) async -> DeliveryOutcome {
-        await verifyMutationReceipt(
-            expectedValue,
-            originalValue: originalValue,
-            target: target,
-            diagnosticStage: .unicodeReceipt
-        )
-    }
-
     private func replacingSelection(
         in evidence: AccessibilityTargetEvidence,
         with text: String
     ) -> String? {
-        let original = evidence.originalValue as NSString
-        let range = evidence.selection
+        guard let originalValue = evidence.originalValue,
+              let range = evidence.selection
+        else { return nil }
+        let original = originalValue as NSString
         guard range.location >= 0, range.length >= 0,
               NSMaxRange(range) <= original.length
         else { return nil }

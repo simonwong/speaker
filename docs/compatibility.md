@@ -21,8 +21,10 @@ This matrix separates deterministic contract evidence from behavior that only a 
 | Definite silence or a sub-300 ms recording | Cancel provider work and deliver no text |
 | Doubao error followed by socket close | Preserve the explicit provider error rather than overwriting it with a secondary send/close error |
 | DeepSeek failure | Preserve and deliver the confirmed Doubao Stage Result |
-| AX receipt delay | Wait for the bounded expected-value receipt instead of reporting an instantaneous stale value as failure |
-| AX mutation cannot be confirmed | Keep the result recoverable and avoid a delivered claim that could cause duplicate manual insertion |
+| Paste receipt delay | Wait for the bounded expected-value receipt instead of reporting an instantaneous stale value as failure |
+| Posted paste cannot be confirmed | Record a posted-unconfirmed outcome; never expose retryable Pending Copy after the command may have inserted text |
+| Voice Input Session to an isolated native editor | Run the real press/release, release-time target capture, processing, and transactional paste path; the target process must read back the exact expected text |
+| Pasteboard changes after Speaker prepares delivery | Preserve the newer clipboard value instead of restoring Speaker's stale snapshot |
 | Target application does not complete AX IPC | Preserve the exact read/write stage in a content-free diagnostic |
 | Explicit copy | Verify the clipboard value after writing; retain the Pending Copy Result if verification fails |
 | Event tap disabled by the system | Reset gesture ownership, re-enable the tap, and surface recovery state |
@@ -34,6 +36,12 @@ This matrix separates deterministic contract evidence from behavior that only a 
 
 The deterministic suite remains the source of current case counts and implementation evidence; [production readiness](production-readiness.md) records the latest verified commands.
 
+On an unlocked development Mac, `./scripts/delivery-e2e-smoke` adds a narrow
+real-event check: it launches an isolated native editor, runs the installed
+Speaker through a complete Voice Input Session with fixed local text, and exits
+successfully only when the target process observes that exact text. It makes no
+provider request and does not replace the cross-application matrix.
+
 ## Real-machine cross-application matrix
 
 Run `./scripts/compatibility-smoke` on an unlocked Mac with Microphone and Accessibility permission. The report contains no transcript text, credentials, request bodies, or absolute application path. It binds the candidate version, signing mode, and executable SHA-256.
@@ -42,12 +50,13 @@ Run `./scripts/compatibility-smoke` on an unlocked Mac with Microphone and Acces
 | --- | --- | --- |
 | Built-in and external-keyboard `Fn` | Hold, speak, and release | Exactly one recording and submission; the system Fn/Globe action is not swallowed |
 | Custom shortcut | Register an available combination, then a conflicting one | The available shortcut works; the conflict is rejected with a recoverable fallback |
-| TextEdit plain text | Cursor insertion, selection replacement, undo | Delivery is confirmed and native undo remains usable |
+| TextEdit plain text | Cursor insertion, selection replacement, undo | The shared transactional paste path inserts once and native undo remains usable |
 | Safari editable controls | Text input, textarea, contenteditable, secure field | Supported controls deliver; secure or uncertain controls produce a Pending Copy Result |
-| Chrome or Electron editor | Plain input and rich editor | Confirmed controls deliver; every uncertain control falls back consistently |
+| Chrome or Electron editor | Plain input and rich editor | The same transactional paste path is used; readable controls may confirm insertion and other controls report posted-unconfirmed without retry |
+| App exposes focused window but no usable focused element | Capture the current window immediately after release as a paste-only target; reject a later window or process |
 | Rich-text editor | Emoji, multiline text, selection replacement, undo | Surrounding formatting remains intact or delivery falls back before mutation |
-| Terminal | Insert at the active command position | Deliver only with a confirmed receipt; never simulate paste |
-| Focus change | Change applications during recording and again after release | The first target captured at release remains the only target |
+| Terminal | Insert a harmless token at the active command position | Revalidate the exact target, post at most one transactional paste with no newline, and preserve clipboard ownership |
+| Focus change | Change windows during recording and change applications after release | Post-release capture follows the current window only inside the release-time process; later changes invalidate that target |
 | Target close or concurrent edit | Close the target or modify it while waiting | Preserve the result without overwriting the changed target |
 | Login launch | Enable, disable, and log in again | System state and settings agree; the default remains disabled |
 | Permission revoke and recovery | Revoke Accessibility or Microphone while running, then restore | Failure is explicit and recovery works without reinstalling |

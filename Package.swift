@@ -26,6 +26,10 @@ let package = Package(
             name: "SpeakerProviderEvidenceSpecs",
             targets: ["SpeakerProviderEvidenceSpecs"]
         ),
+        .executable(
+            name: "SpeakerDeliverySmokeTarget",
+            targets: ["SpeakerDeliverySmokeTarget"]
+        ),
     ],
     dependencies: [
         .package(
@@ -77,6 +81,10 @@ let package = Package(
             name: "SpeakerProviderEvidenceSpecs",
             dependencies: ["SpeakerProviderEvidence"],
             path: "Tests/SpeakerProviderEvidenceSpecs"
+        ),
+        .executableTarget(
+            name: "SpeakerDeliverySmokeTarget",
+            path: "Tools/SpeakerDeliverySmokeTarget"
         ),
     ]
 )

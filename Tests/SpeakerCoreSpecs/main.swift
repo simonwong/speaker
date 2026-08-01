@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import AVFoundation
+import ApplicationServices
 import SpeakerCore
 import SQLite3
 
@@ -37,21 +38,6 @@ struct SpeakerCoreSpecs {
                 received.append(chunk)
             }
             try expect(received.count == 3)
-        }
-
-        run("PID Unicode delivery is disabled unless the exact App was verified", failures: &failures) {
-            try expect(!AccessibilityInputTargets.allowsUnicodeDelivery(
-                to: "com.example.Editor",
-                verifiedBundleIdentifiers: []
-            ))
-            try expect(!AccessibilityInputTargets.allowsUnicodeDelivery(
-                to: nil,
-                verifiedBundleIdentifiers: ["com.example.Editor"]
-            ))
-            try expect(AccessibilityInputTargets.allowsUnicodeDelivery(
-                to: "com.example.Editor",
-                verifiedBundleIdentifiers: ["com.example.Editor"]
-            ))
         }
 
         await runAsync(
@@ -103,13 +89,104 @@ struct SpeakerCoreSpecs {
             )
         }
 
+        run(
+            "release callback freezes the frontmost process without AX target IPC",
+            failures: &failures
+        ) {
+            let system = LiveAccessibilityTargetSystem(
+                isProcessTrusted: { true },
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 }
+            )
+
+            let capture = system.captureReleaseProcess()
+
+            guard case let .process(processID) = capture else {
+                throw SpecFailure(
+                    message: "release callback did not preserve the frontmost process"
+                )
+            }
+            try expect(processID == 42)
+        }
+
+        run(
+            "release target selection falls back to the focused window when the app exposes no focused element",
+            failures: &failures
+        ) {
+            let focusedWindow = AccessibilityTargetReference(scope: .window)
+            let selected = AccessibilityReleaseTargetSelection.select(
+                focusedElement: nil,
+                focusedWindow: focusedWindow,
+                processID: 42
+            )
+
+            try expect(
+                selected?.reference == focusedWindow,
+                "a target with a stable focused window was discarded"
+            )
+        }
+
+        run(
+            "text-marker selection evidence is treated as a non-atomic capability",
+            failures: &failures
+        ) {
+            let decoded = AccessibilityTextRangeDecoder.decode(
+                "text-marker-range" as CFString
+            )
+            guard case .success(nil) = decoded else {
+                throw SpecFailure(
+                    message: "a non-CFRange selection rejected the whole target"
+                )
+            }
+        }
+
+        run(
+            "AX no-value is optional attribute absence rather than target failure",
+            failures: &failures
+        ) {
+            try expect(
+                AccessibilityAttributeReadPolicy.isAbsent(.noValue),
+                "kAXErrorNoValue was promoted to a delivery failure"
+            )
+        }
+
         await runAsync(
-            "release-time AX capture cannot follow focus to another field in the same process",
+            "every editable target commits through transactional paste",
+            failures: &failures
+        ) {
+            let system = AccessibilityTargetSystemFake(
+                valueResponses: [
+                    .success("Hello"),
+                    .success("Hello"),
+                    .success("Hello world"),
+                ]
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case let .writable(target) = await targets.capture() else {
+                throw SpecFailure(message: "fake target was not captured")
+            }
+
+            let outcome = await targets.deliver(
+                " world",
+                to: target,
+                commitGate: DeliveryCommitGate()
+            )
+            let pasteCount = await system.pasteCallCount
+
+            try expect(outcome == .delivered)
+            try expect(
+                pasteCount == 1,
+                "delivery did not commit through transactional paste"
+            )
+        }
+
+        await runAsync(
+            "stale release evidence cannot recover into another process",
             failures: &failures
         ) {
             let releasedField = AccessibilityTargetReference()
             let system = AccessibilityTargetSystemFake(
-                processID: 42,
+                processID: 84,
                 valueResponses: []
             )
             let targets = AccessibilityInputTargets(
@@ -131,10 +208,48 @@ struct SpeakerCoreSpecs {
 
             try expect(capture == .unavailable(.invalidatedTarget))
             try expect(
-                focusedCaptureCount == 0,
-                "capture followed the current focused element after release"
+                focusedCaptureCount == 1,
+                "capture did not enforce the release-time process fence"
             )
             try expect(exactCaptureCount == 1)
+        }
+
+        await runAsync(
+            "release capture recovers from stale same-process focus evidence",
+            failures: &failures
+        ) {
+            let staleField = AccessibilityTargetReference()
+            let system = AccessibilityTargetSystemFake(
+                processID: 42,
+                valueResponses: []
+            )
+            let targets = AccessibilityInputTargets(
+                system: system,
+                releaseCapture: {
+                    .target(.init(
+                        reference: staleField,
+                        processID: 42
+                    ))
+                }
+            )
+            guard let hint = targets.releaseCaptureHint() else {
+                throw SpecFailure(message: "release target hint was not frozen")
+            }
+
+            let capture = await targets.capture(matching: hint)
+            let focusedCaptureCount = await system.captureFocusedCallCount
+            let exactCaptureCount = await system.captureTargetCallCount
+
+            guard case .writable = capture else {
+                throw SpecFailure(
+                    message: "stale observer evidence blocked the currently focused input"
+                )
+            }
+            try expect(exactCaptureCount == 1)
+            try expect(
+                focusedCaptureCount == 1,
+                "capture did not recover with a fresh same-process focus read"
+            )
         }
 
         await runAsync("AX accepted insertion is not downgraded by stale immediate readback", failures: &failures) {
@@ -163,7 +278,7 @@ struct SpeakerCoreSpecs {
             )
         }
 
-        await runAsync("AX mutation without a receipt warns before manual copy", failures: &failures) {
+        await runAsync("paste without a receipt is committed without inviting manual duplication", failures: &failures) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -181,16 +296,15 @@ struct SpeakerCoreSpecs {
                 commitGate: DeliveryCommitGate()
             )
 
-            try expect(
-                outcome.pendingCopyReason == .deliveryUnconfirmed
-            )
-            try expect(
-                outcome.deliveryDiagnostic?.code
-                    == "directReceipt.unconfirmed"
-            )
+            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+                throw SpecFailure(
+                    message: "posted paste was exposed as retryable Pending Copy"
+                )
+            }
+            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
         }
 
-        await runAsync("normalized AX mutation remains unconfirmed instead of inviting duplicate copy", failures: &failures) {
+        await runAsync("normalized pasted text remains unconfirmed instead of inviting duplicate copy", failures: &failures) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -209,25 +323,20 @@ struct SpeakerCoreSpecs {
                 commitGate: DeliveryCommitGate()
             )
 
-            try expect(
-                outcome.pendingCopyReason == .deliveryUnconfirmed
-            )
-            try expect(
-                outcome.deliveryDiagnostic?.code
-                    == "directReceipt.unconfirmed"
-            )
+            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+                throw SpecFailure(
+                    message: "normalized paste invited duplicate delivery"
+                )
+            }
+            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
         }
 
-        await runAsync("uncertain AX text mutation waits for a receipt instead of duplicating fallback", failures: &failures) {
+        await runAsync("unchanged AX selection proceeds through transactional paste", failures: &failures) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
                     .success("Hello"),
-                    .success("Hello"),
                     .success("Hello world"),
-                ],
-                setSelectedTextResponses: [
-                    .failure(.cannotComplete),
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
@@ -240,79 +349,17 @@ struct SpeakerCoreSpecs {
                 to: target,
                 commitGate: DeliveryCommitGate()
             )
-            let unicodePosts = await system.postUnicodeCallCount
+            let pastePosts = await system.pasteCallCount
 
             try expect(outcome == .delivered)
             try expect(
-                unicodePosts == 0,
-                "an uncertain direct mutation triggered a duplicate fallback"
-            )
-        }
-
-        await runAsync("direct AX insertion never restores a stale release-time selection", failures: &failures) {
-            let system = AccessibilityTargetSystemFake(
-                valueResponses: [
-                    .success("Hello"),
-                    .success("Hello"),
-                    .success("Hello world"),
-                ],
-                setSelectionResponses: [
-                    .failure(.cannotComplete),
-                ]
-            )
-            let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
-                throw SpecFailure(message: "fake AX target was not captured")
-            }
-
-            let outcome = await targets.deliver(
-                " world",
-                to: target,
-                commitGate: DeliveryCommitGate()
-            )
-            let selectionAttempts = await system.setSelectionCallCount
-
-            try expect(outcome == .delivered)
-            try expect(
-                selectionAttempts == 0,
-                "delivery rewrote the user's current selection before inserting text"
-            )
-        }
-
-        await runAsync("unchanged AX selection can proceed when range setter is unsupported", failures: &failures) {
-            let system = AccessibilityTargetSystemFake(
-                valueResponses: [
-                    .success("Hello"),
-                    .success("Hello"),
-                    .success("Hello world"),
-                ],
-                setSelectionResponses: [
-                    .failure(.attributeUnsupported),
-                ]
-            )
-            let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
-                throw SpecFailure(message: "fake AX target was not captured")
-            }
-
-            let outcome = await targets.deliver(
-                " world",
-                to: target,
-                commitGate: DeliveryCommitGate()
-            )
-            let directInsertions = await system.setSelectedTextCallCount
-            let unicodePosts = await system.postUnicodeCallCount
-
-            try expect(outcome == .delivered)
-            try expect(directInsertions == 1)
-            try expect(
-                unicodePosts == 0,
-                "unchanged selection unnecessarily fell through to key events"
+                pastePosts == 1,
+                "unchanged selection did not reach transactional paste"
             )
         }
 
         await runAsync(
-            "moved AX selection fails closed before direct mutation",
+            "moved AX selection fails closed before transactional paste",
             failures: &failures
         ) {
             let system = AccessibilityTargetSystemFake(
@@ -333,14 +380,12 @@ struct SpeakerCoreSpecs {
                 to: target,
                 commitGate: DeliveryCommitGate()
             )
-            let selectionWrites = await system.setSelectionCallCount
-            let textWrites = await system.setSelectedTextCallCount
+            let pastePosts = await system.pasteCallCount
 
             try expect(outcome.pendingCopyReason == .changedTarget)
-            try expect(selectionWrites == 0)
             try expect(
-                textWrites == 0,
-                "delivery restored an old cursor after the user moved it"
+                pastePosts == 0,
+                "delivery pasted after the user moved the selection"
             )
         }
 
@@ -358,14 +403,14 @@ struct SpeakerCoreSpecs {
                 to: target,
                 commitGate: DeliveryCommitGate()
             )
-            let insertionAttempts = await system.setSelectedTextCallCount
+            let pastePosts = await system.pasteCallCount
 
             try expect(outcome.pendingCopyReason == .changedTarget)
             try expect(
                 outcome.deliveryDiagnostic?.code
                     == "valueRead.changed"
             )
-            try expect(insertionAttempts == 0)
+            try expect(pastePosts == 0)
         }
 
         await runAsync("AX value IPC failure is reported as an unresponsive target instead of a focus change", failures: &failures) {
@@ -382,13 +427,13 @@ struct SpeakerCoreSpecs {
                 to: target,
                 commitGate: DeliveryCommitGate()
             )
-            let insertionAttempts = await system.setSelectedTextCallCount
+            let pastePosts = await system.pasteCallCount
 
             try expect(
                 outcome.pendingCopyReason == .targetApplicationUnresponsive
             )
             try expect(outcome.deliveryDiagnostic?.code == "valueRead.cannotComplete")
-            try expect(insertionAttempts == 0)
+            try expect(pastePosts == 0)
         }
 
         await runAsync("AX role and security IPC failures preserve their exact diagnostic stage", failures: &failures) {
@@ -439,7 +484,7 @@ struct SpeakerCoreSpecs {
             )
         }
 
-        await runAsync("AX selection and fallback focus IPC failures are not called user edits", failures: &failures) {
+        await runAsync("AX selection and focus IPC failures are not called user edits", failures: &failures) {
             let selectionSystem = AccessibilityTargetSystemFake(
                 valueResponses: [.success("Hello")],
                 selectionResponses: [.failure(.cannotComplete)]
@@ -460,11 +505,10 @@ struct SpeakerCoreSpecs {
             )
             try expect(
                 selectionOutcome.deliveryDiagnostic?.code
-                    == "directSelection.cannotComplete"
+                    == "fallbackSelection.cannotComplete"
             )
 
             let focusSystem = AccessibilityTargetSystemFake(
-                supportsDirectInsertion: false,
                 valueResponses: [.success("Hello")],
                 focusResponses: [.failure(.cannotComplete)]
             )
@@ -488,9 +532,8 @@ struct SpeakerCoreSpecs {
             )
         }
 
-        await runAsync("frontmost exact AX target can use receipt-verified Unicode fallback", failures: &failures) {
+        await runAsync("frontmost exact AX target can use receipt-verified paste fallback", failures: &failures) {
             let system = AccessibilityTargetSystemFake(
-                supportsDirectInsertion: false,
                 valueResponses: [
                     .success("Hello"),
                     .success("Hello"),
@@ -507,18 +550,149 @@ struct SpeakerCoreSpecs {
                 to: target,
                 commitGate: DeliveryCommitGate()
             )
-            let unicodePosts = await system.postUnicodeCallCount
+            let pastePosts = await system.pasteCallCount
 
             try expect(outcome == .delivered)
             try expect(
-                unicodePosts == 1,
-                "standard focused target never reached Unicode fallback"
+                pastePosts == 1,
+                "standard focused target never reached paste fallback"
             )
         }
 
-        await runAsync("unverified background AX target never receives Unicode events", failures: &failures) {
+        await runAsync(
+            "contenteditable target without flat AX value uses paste fallback",
+            failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
-                supportsDirectInsertion: false,
+                originalValue: nil,
+                selection: nil,
+                valueResponses: [],
+                roleResponses: [.success("AXGroup")]
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case let .writable(target) = await targets.capture() else {
+                throw SpecFailure(
+                    message: "contenteditable-style target was rejected during capture"
+                )
+            }
+
+            let outcome = await targets.deliver(
+                "hello from Speaker",
+                to: target,
+                commitGate: DeliveryCommitGate()
+            )
+            let pastePosts = await system.pasteCallCount
+
+            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+                throw SpecFailure(
+                    message: "paste-only contenteditable claimed a target receipt"
+                )
+            }
+            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
+            try expect(
+                pastePosts == 1,
+                "contenteditable-style target never reached paste fallback"
+            )
+        }
+
+        await runAsync(
+            "window-scoped target can use paste when no focused AX element exists",
+            failures: &failures
+        ) {
+            let system = AccessibilityTargetSystemFake(
+                originalValue: nil,
+                selection: nil,
+                referenceScope: .window,
+                valueResponses: [],
+                roleResponses: [.success("AXWindow")]
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case let .writable(target) = await targets.capture() else {
+                throw SpecFailure(message: "window-scoped target was rejected")
+            }
+
+            let outcome = await targets.deliver(
+                "hello from Speaker",
+                to: target,
+                commitGate: DeliveryCommitGate()
+            )
+
+            let pasteCallCount = await system.pasteCallCount
+            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+                throw SpecFailure(
+                    message: "window-scoped paste claimed a target receipt"
+                )
+            }
+            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
+            try expect(pasteCallCount == 1)
+        }
+
+        run(
+            "paste transaction restores only while its ownership evidence matches",
+            failures: &failures
+        ) {
+            try expect(PasteboardDeliveryTransaction.ownsPasteboard(
+                currentChangeCount: 12,
+                currentMarker: "speaker-transaction",
+                ownedChangeCount: 12,
+                marker: "speaker-transaction"
+            ))
+            try expect(!PasteboardDeliveryTransaction.ownsPasteboard(
+                currentChangeCount: 13,
+                currentMarker: "speaker-transaction",
+                ownedChangeCount: 12,
+                marker: "speaker-transaction"
+            ))
+            try expect(!PasteboardDeliveryTransaction.ownsPasteboard(
+                currentChangeCount: 12,
+                currentMarker: "new-user-copy",
+                ownedChangeCount: 12,
+                marker: "speaker-transaction"
+            ))
+        }
+
+        run(
+            "paste command uses the login session and one complete physical sequence",
+            failures: &failures
+        ) {
+            let plan = PasteCommandEventPlan.standard
+            try expect(plan.sourceStateID == .combinedSessionState)
+            try expect(plan.transitions == [
+                .commandDown,
+                .vDown,
+                .vUp,
+                .commandUp,
+            ])
+        }
+
+        await runAsync(
+            "event-post denial is reported before the pasteboard transaction starts",
+            failures: &failures
+        ) {
+            let preparationCalls = LockedCounter()
+            let system = LiveAccessibilityTargetSystem(
+                canPostEvents: { false },
+                preparePasteboardTransaction: { _ in
+                    preparationCalls.increment()
+                    return nil
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+
+            try expect(result == .eventFailed)
+            try expect(
+                preparationCalls.value == 0,
+                "pasteboard was mutated before event-post authorization"
+            )
+        }
+
+        await runAsync("background AX target never receives paste events", failures: &failures) {
+            let system = AccessibilityTargetSystemFake(
                 isFrontmost: false,
                 valueResponses: [.success("Hello")]
             )
@@ -532,7 +706,7 @@ struct SpeakerCoreSpecs {
                 to: target,
                 commitGate: DeliveryCommitGate()
             )
-            let unicodePosts = await system.postUnicodeCallCount
+            let pastePosts = await system.pasteCallCount
 
             try expect(
                 outcome.pendingCopyReason == .unsupportedTarget
@@ -541,20 +715,16 @@ struct SpeakerCoreSpecs {
                 outcome.deliveryDiagnostic?.code
                     == "fallbackEligibility.notFrontmost"
             )
-            try expect(unicodePosts == 0)
+            try expect(pastePosts == 0)
         }
 
-        await runAsync("rejected direct AX insertion retains its exact delivery boundary", failures: &failures) {
+        await runAsync("rejected paste fallback retains its exact delivery boundary", failures: &failures) {
             let system = AccessibilityTargetSystemFake(
-                isFrontmost: false,
                 valueResponses: [
                     .success("Hello"),
                     .success("Hello"),
-                    .success("Hello"),
                 ],
-                setSelectedTextResponses: [
-                    .failure(.other),
-                ]
+                pasteResult: .eventFailed
             )
             let targets = AccessibilityInputTargets(system: system)
             guard case let .writable(target) = await targets.capture() else {
@@ -570,34 +740,7 @@ struct SpeakerCoreSpecs {
             try expect(outcome.pendingCopyReason == .deliveryFailed)
             try expect(
                 outcome.deliveryDiagnostic?.code
-                    == "directWrite.other"
-            )
-        }
-
-        await runAsync("rejected Unicode fallback retains its exact delivery boundary", failures: &failures) {
-            let system = AccessibilityTargetSystemFake(
-                supportsDirectInsertion: false,
-                valueResponses: [
-                    .success("Hello"),
-                    .success("Hello"),
-                ],
-                postUnicodeSucceeds: false
-            )
-            let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
-                throw SpecFailure(message: "fake AX target was not captured")
-            }
-
-            let outcome = await targets.deliver(
-                " world",
-                to: target,
-                commitGate: DeliveryCommitGate()
-            )
-
-            try expect(outcome.pendingCopyReason == .deliveryFailed)
-            try expect(
-                outcome.deliveryDiagnostic?.code
-                    == "unicodePost.rejected"
+                    == "pastePost.rejected"
             )
         }
 
@@ -1634,6 +1777,44 @@ struct SpeakerCoreSpecs {
             )
         }
 
+        await runAsync("posted paste finishes without exposing retryable manual copy", failures: &failures) {
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "Editor"))
+                ),
+                transcriber: SpeechTranscriberFake(text: "只粘贴一次。"),
+                delivery: TextDeliveryFake(
+                    result: .pasteCommandPosted(
+                        .init(
+                            stage: .pasteReceipt,
+                            cause: .unconfirmed
+                        )
+                    )
+                ),
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+
+            let result = await terminal.value
+            let persisted = await eventually(before: .milliseconds(300)) {
+                await history.records.first?.deliveryDiagnosticCode != nil
+            }
+            let record = await history.records.first
+            try expect(result?.activity.isDelivered == true)
+            try expect(result?.activity.pendingText == nil)
+            try expect(persisted)
+            try expect(
+                record?.deliveryDiagnosticCode
+                    == "pasteReceipt.unconfirmed"
+            )
+        }
+
         await runAsync("delivery failure keeps transcript pending copy", failures: &failures) {
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -1646,7 +1827,7 @@ struct SpeakerCoreSpecs {
                     result: .pendingCopyDiagnosed(
                         .deliveryUnconfirmed,
                         .init(
-                            stage: .directReceipt,
+                            stage: .pasteReceipt,
                             cause: .unconfirmed
                         )
                     )
@@ -1675,7 +1856,7 @@ struct SpeakerCoreSpecs {
             try expect(persisted)
             try expect(
                 record?.deliveryDiagnosticCode
-                    == "directReceipt.unconfirmed"
+                    == "pasteReceipt.unconfirmed"
             )
         }
 
@@ -1733,6 +1914,53 @@ struct SpeakerCoreSpecs {
                 deliveredApplicationNames == ["Focused at release"],
                 "focus changes after release replaced the captured delivery target"
             )
+        }
+
+        await runAsync(
+            "global release callback never performs target AX work inline",
+            failures: &failures
+        ) {
+            let audio = AudioCaptureFake()
+            let targetSystem = AccessibilityTargetSystemFake(
+                processID: 41,
+                valueResponses: []
+            )
+            let targets = AccessibilityInputTargets(
+                system: targetSystem,
+                releaseCapture: { .process(processID: 41) }
+            )
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: targets,
+                transcriber: SpeechTranscriberFake(text: "不会阻塞事件回调"),
+                delivery: targets,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let dispatcher = VoiceInputTriggerDispatcher(
+                sessions: sessions,
+                releaseCaptureHint: { targets.releaseCaptureHint() }
+            )
+
+            dispatcher.send(.pressed, at: 0)
+            while await audio.startCount == 0 { await Task.yield() }
+            let clock = ContinuousClock()
+            let started = clock.now
+            dispatcher.send(
+                .released,
+                at: VoiceShortcutGestureStateMachine
+                    .defaultLongPressNanoseconds
+            )
+            let callbackDuration = started.duration(to: clock.now)
+
+            try expect(
+                callbackDuration < .milliseconds(20),
+                "release callback blocked on target capture for \(callbackDuration)"
+            )
+            while await targetSystem.captureFocusedCallCount == 0 {
+                await Task.yield()
+            }
+            await dispatcher.shutdown()
         }
 
         await runAsync(
@@ -2014,7 +2242,7 @@ struct SpeakerCoreSpecs {
             let record = await history.records.last
             try expect(deliveredTexts.isEmpty)
             try expect(record?.outcome.isCancelled == true)
-            try expect(record?.applicationName == "TextEdit")
+            try expect(record?.applicationName == nil)
             try expect(record?.stageDurationsMilliseconds["doubao"] != nil)
         }
 
@@ -2150,7 +2378,7 @@ struct SpeakerCoreSpecs {
             let record = await history.records.last
             try expect(deliveredTexts.isEmpty)
             try expect(record?.outcome.isCancelled == true)
-            try expect(record?.applicationName == "TextEdit")
+            try expect(record?.applicationName == nil)
             try expect(record?.stageDurationsMilliseconds["delivery"] != nil)
             try expect(record?.cancelledAtStage == "delivery")
         }
@@ -3057,7 +3285,7 @@ struct SpeakerCoreSpecs {
                 "untrusted provider response text entered session history"
             )
             try expect(record?.transcriptionProvider == "doubao")
-            try expect(record?.applicationName == "TextEdit")
+            try expect(record?.applicationName == nil)
             let discardedCount = await target.discardedCount
             try expect(discardedCount == 1)
         }
@@ -3746,7 +3974,7 @@ struct SpeakerCoreSpecs {
                 providerRequestID: "request-log-1",
                 providerErrorCode: nil,
                 deliveryDiagnosticCode:
-                    "directReceipt.unconfirmed",
+                    "pasteReceipt.unconfirmed",
                 deepSeekText: "DeepSeek 结果 beta",
                 deepSeekRequestID: "deepseek-log-1",
                 refinementModeName: "精简清理",
@@ -3790,7 +4018,7 @@ struct SpeakerCoreSpecs {
             let transcriptMatches = await reloaded.search("ALPHA")
             let errorMatches = await reloaded.search("invalidcredential")
             let deliveryMatches = await reloaded.search(
-                "directreceipt.unconfirmed"
+                "pastereceipt.unconfirmed"
             )
             let encoded = try String(contentsOf: fileURL, encoding: .utf8)
             let historyAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
@@ -3806,7 +4034,7 @@ struct SpeakerCoreSpecs {
             try expect(allRecords.last?.transcriptionProvider == "doubao")
             try expect(
                 allRecords.last?.deliveryDiagnosticCode
-                    == "directReceipt.unconfirmed"
+                    == "pasteReceipt.unconfirmed"
             )
             try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")
             try expect(
@@ -3819,6 +4047,8 @@ struct SpeakerCoreSpecs {
             try expect(!encoded.contains("apiKey"))
             try expect(!encoded.contains("audio"))
             try expect(!encoded.contains("clipboard"))
+            try expect(!encoded.contains("TextEdit"))
+            try expect(!encoded.contains("Notes"))
 
             let deleted = await reloaded.delete(sessionID: firstID)
             try expect(deleted)
@@ -4089,6 +4319,7 @@ struct SpeakerCoreSpecs {
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             try expect(records.count == 1)
             try expect(records.first?.finalText == "最终增量结果")
+            try expect(records.first?.applicationName == nil)
             try expect(matches.map(\.sessionID) == [id])
             try expect(status.recordCount == 1)
             try expect(
@@ -6356,53 +6587,39 @@ private actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     private var valueResponses: [AccessibilityOperationResult<String?>]
     private var selectionResponses:
         [AccessibilityOperationResult<NSRange?>]
-    private var setSelectionResponses: [AccessibilityOperationResult<Void>]
-    private var setSelectedTextResponses: [AccessibilityOperationResult<Void>]
     private var subroleResponses: [AccessibilityOperationResult<String?>]
     private var roleResponses: [AccessibilityOperationResult<String?>]
     private var focusResponses: [AccessibilityOperationResult<Bool>]
     private let frontmost: Bool
-    private let postUnicodeSucceeds: Bool
-    private(set) var setSelectionCallCount = 0
-    private(set) var setSelectedTextCallCount = 0
-    private(set) var postUnicodeCallCount = 0
+    private let pasteResult: AccessibilityPasteResult
+    private(set) var pasteCallCount = 0
     private(set) var captureFocusedCallCount = 0
     private(set) var captureTargetCallCount = 0
 
     init(
-        originalValue: String = "Hello",
-        selection: NSRange = NSRange(location: 5, length: 0),
+        originalValue: String? = "Hello",
+        selection: NSRange? = NSRange(location: 5, length: 0),
         processID: pid_t = 42,
-        supportsDirectInsertion: Bool = true,
+        referenceScope: AccessibilityTargetScope = .element,
         isFrontmost: Bool = true,
         valueResponses: [AccessibilityOperationResult<String?>],
         selectionResponses: [AccessibilityOperationResult<NSRange?>] = [],
-        setSelectionResponses: [AccessibilityOperationResult<Void>] = [
-            .success(()),
-        ],
-        setSelectedTextResponses: [AccessibilityOperationResult<Void>] = [
-            .success(()),
-        ],
         subroleResponses: [AccessibilityOperationResult<String?>] = [],
         roleResponses: [AccessibilityOperationResult<String?>] = [],
         focusResponses: [AccessibilityOperationResult<Bool>] = [],
-        postUnicodeSucceeds: Bool = true
+        pasteResult: AccessibilityPasteResult = .posted
     ) {
         evidence = AccessibilityTargetEvidence(
-            reference: AccessibilityTargetReference(),
+            reference: AccessibilityTargetReference(scope: referenceScope),
             selection: selection,
             originalValue: originalValue,
             processID: processID,
-            applicationBundleIdentifier: "com.example.Editor",
-            applicationName: "Editor",
-            supportsDirectInsertion: supportsDirectInsertion
+            applicationName: "Editor"
         )
         frontmost = isFrontmost
-        self.postUnicodeSucceeds = postUnicodeSucceeds
+        self.pasteResult = pasteResult
         self.valueResponses = valueResponses
         self.selectionResponses = selectionResponses
-        self.setSelectionResponses = setSelectionResponses
-        self.setSelectedTextResponses = setSelectedTextResponses
         self.subroleResponses = subroleResponses
         self.roleResponses = roleResponses
         self.focusResponses = focusResponses
@@ -6450,24 +6667,6 @@ private actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
         return valueResponses.removeFirst()
     }
 
-    func setSelection(
-        _ selection: NSRange,
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<Void> {
-        setSelectionCallCount += 1
-        guard !setSelectionResponses.isEmpty else { return .success(()) }
-        return setSelectionResponses.removeFirst()
-    }
-
-    func setSelectedText(
-        _ text: String,
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<Void> {
-        setSelectedTextCallCount += 1
-        guard !setSelectedTextResponses.isEmpty else { return .success(()) }
-        return setSelectedTextResponses.removeFirst()
-    }
-
     func focusedState(
         _ target: AccessibilityTargetReference,
         in processID: pid_t
@@ -6489,9 +6688,13 @@ private actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
         return selectionResponses.removeFirst()
     }
 
-    func postUnicode(_ text: String, to processID: pid_t) async -> Bool {
-        postUnicodeCallCount += 1
-        return postUnicodeSucceeds
+    func paste(
+        _ text: String,
+        to target: AccessibilityTargetReference,
+        in processID: pid_t
+    ) async -> AccessibilityPasteResult {
+        pasteCallCount += 1
+        return pasteResult
     }
 }
 

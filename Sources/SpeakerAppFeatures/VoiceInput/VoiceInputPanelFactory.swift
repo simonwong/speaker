@@ -19,8 +19,8 @@ package enum VoiceInputPanelFactory {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        // The SwiftUI HUD draws a shape-aware shadow. A window shadow here
-        // would add a second, rectangular halo around the transparent panel.
+        // AppKit's window shadow follows the rectangular panel bounds rather
+        // than the capsule content, so the HUD intentionally draws no shadow.
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
@@ -28,6 +28,16 @@ package enum VoiceInputPanelFactory {
         panel.worksWhenModal = true
         panel.animationBehavior = .none
         return panel
+    }
+
+    /// Installs SwiftUI content without giving the transparent panel an
+    /// AppKit-sized rectangular backing surface around the shaped HUD.
+    @MainActor
+    package static func install(_ contentView: NSView, in panel: NSPanel) {
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        contentView.layer?.isOpaque = false
+        panel.contentView = contentView
     }
 
     /// Applies the complete content geometry for a presentation transition.

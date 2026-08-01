@@ -14,7 +14,7 @@ Speaker must make the entire Voice Input Session legible without turning an unce
 
 Speaker is a menu-bar macOS application. Holding or short-pressing the configured shortcut starts recording; releasing it freezes the Input Target. Audio streams to Doubao ASR while recording. Default Smoothing uses Doubao only. A Refinement Mode that explicitly requires DeepSeek sends the confirmed Doubao text, never the audio, for optional further refinement.
 
-Delivery mutates the frozen Input Target only after it remains safe, current, and verifiable. Every unsupported, secure, changed, closed, or otherwise uncertain target produces a Pending Copy Result. The user can copy that result explicitly without Speaker stealing focus or overwriting the clipboard in advance.
+Delivery mutates the frozen Input Target only after it remains safe and current. Every compatible nonsecure target uses the same target-revalidated transactional Command-V path, independent of application identity. Accessibility is used only for transient focus and security evidence. A secure, changed, closed, or otherwise uncertain target produces a Pending Copy Result only before delivery commits; an already posted paste command is never presented as safe to repeat manually.
 
 ## User Stories
 
@@ -42,7 +42,7 @@ Delivery mutates the frozen Input Target only after it remains safe, current, an
 22. As a user, I want content-free provider diagnostics and connection checks, so that configuration and transport problems are actionable without exposing audio or text.
 23. As a user, I want a local Personal Dictionary of names and specialist terms, so that those words are recognized more accurately.
 24. As a user, I want empty and duplicate Entries rejected and each session to use a stable dictionary snapshot, so that edits remain deterministic.
-25. As a user, I want Session Records with Stage Results, Refinement Mode, target application, timing, delivery status, and sanitized diagnostics, so that the pipeline is inspectable.
+25. As a user, I want Session Records with Stage Results, Refinement Mode, timing, delivery status, and sanitized diagnostics, so that the pipeline is inspectable without recording which application I used.
 26. As a user, I want to search, inspect, copy, redeliver, delete, and clear Session Records, so that local history remains useful and controllable.
 27. As a user, I want history retention to follow an explicit policy with a safety cap, so that storage behavior reflects my intent.
 28. As a user, I want raw audio, credentials, AX objects, captured source text, and clipboard contents excluded from persistence, so that local diagnostics remain minimal.
@@ -59,12 +59,12 @@ Delivery mutates the frozen Input Target only after it remains safe, current, an
 - Commands are serialized. Duplicate edges are idempotent, asynchronous work carries session identity, and late results from cancelled or superseded sessions are discarded.
 - Audio is converted to 16 kHz, 16-bit, mono PCM in memory and placed in a bounded stream. It is never persisted as a normal application artifact.
 - Audio streams over Doubao's bidirectional `bigmodel_async` WebSocket while recording. Release sends the final audio frame and begins final-result settlement; the selected resource must match the user's activated provider resource.
-- A press snapshots the Refinement Mode and Personal Dictionary. A release freezes the precise focused Accessibility element as the Input Target. Later capture and delivery must consume that same bounded target token.
+- A press snapshots the Refinement Mode and Personal Dictionary. Release freezes only the frontmost process without AX IPC; immediately after the event callback returns, Speaker reads that process's current focused element or focused window and creates the one-session Input Target token. Delivery later validates that exact target rather than maintaining an application focus cache.
 - The Personal Dictionary is local. Entries are sent as request-scoped Doubao direct hotwords; Speaker does not apply local alias replacement to the confirmed transcript.
 - Default Smoothing does not call DeepSeek. Other Refinement Modes send only the confirmed Doubao text and the selected rule through a non-thinking, non-streaming JSON request. Only a bounded, non-empty normal completion with the expected shape may replace the Doubao Stage Result.
 - Provider credentials live in Keychain. Settings, the Personal Dictionary, Session Records, and development credentials use owner-only persistence appropriate to their data type.
 - Session Records use versioned SQLite transactions. Secure targets never persist transcript text or provider request identifiers, including non-terminal and cancelled records.
-- Delivery is conservative. Direct Accessibility mutation and the receipt-verified PID Unicode fallback share one commit gate. Speaker does not restore focus, simulate paste, rewrite an entire rich document, or report an unconfirmed mutation as delivered.
+- Delivery is conservative and application-independent. Accessibility freezes and validates the transient Input Target but never writes its text. One paste transaction snapshots all readable pasteboard representations, carries a private ownership marker, preflights event-post access, posts exactly one physical Command-V from the combined login-session event state, and restores only while the pasteboard still belongs to Speaker. Target-confirmed insertion and posted-without-receipt are distinct outcomes; neither can be retried after commit. Speaker does not restore focus, rewrite an entire rich document, or overwrite a newer user clipboard value.
 - A Pending Copy Result is a successful recovery surface, not a generic failure. Its non-activating presentation exposes explicit copy, retry, and dismiss actions tied to the originating session.
 - User Cancellation is distinct from a Session Problem. Cancellation closes the user-facing session immediately; a mutation that already committed may finish its receipt and history settlement but cannot be rewritten as cancelled.
 - Application shutdown fences new shortcut intake, stops session dispatch, cancels external work, and waits for required local persistence in that order.
@@ -84,7 +84,7 @@ Delivery mutates the frozen Input Target only after it remains safe, current, an
 - Accounts, a hosted Speaker backend, cloud history, cloud settings, multi-device sync, subscriptions, teams, or shared dictionaries.
 - Offline transcription, additional ASR or refinement providers, translation, text-to-speech, meeting transcription, diarization, or long-form audio management.
 - Saving or replaying raw audio.
-- Automatic clipboard replacement, forced focus restoration, simulated paste, or guaranteed delivery into every macOS input control.
+- Persistent or unconditional clipboard replacement, forced focus restoration, or guaranteed delivery into every macOS input control.
 - Per-application Refinement Modes or Personal Dictionaries, dictionary synchronization, and cloud history backup.
 - iPhone or iPad application targets.
 

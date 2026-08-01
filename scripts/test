@@ -19,3 +19,6 @@ SCRIPT_DIR="${0:A:h}"
 /bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
     --product SpeakerProviderEvidenceVerifier \
     -Xswiftc -warnings-as-errors
+/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerDeliverySmokeTarget \
+    -Xswiftc -warnings-as-errors

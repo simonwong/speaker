@@ -54,7 +54,7 @@ _Avoid_: failed text, lost result
 
 **Session Record**
 
-The local history record for a Voice Input Session. It may contain Stage Results, the Refinement Mode, target application, status, timing, and content-free diagnostics, but never raw audio.
+The local history record for a Voice Input Session. It may contain Stage Results, the Refinement Mode, status, timing, and content-free diagnostics, but never raw audio or target-application identity.
 
 _Avoid_: recording history, chat record
 

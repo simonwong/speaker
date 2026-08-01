@@ -448,7 +448,7 @@ package struct HistoryRecordV1: Codable {
     init(_ record: VoiceInputHistoryRecord) {
         sessionID = record.sessionID.rawValue
         startedAt = record.startedAt
-        applicationName = record.applicationName
+        applicationName = nil
         transcription = record.transcription
         finalText = record.finalText
         transcriptionProvider = record.transcriptionProvider
@@ -540,18 +540,16 @@ package struct HistoryOutcomeV1: Codable {
             self.init(kind: .preparing, sessionID: id.rawValue)
         case let .recording(id):
             self.init(kind: .recording, sessionID: id.rawValue)
-        case let .processing(id, stage, applicationName):
+        case let .processing(id, stage, _):
             self.init(
                 kind: .processing,
                 sessionID: id.rawValue,
-                processingStage: Self.encode(stage),
-                applicationName: applicationName
+                processingStage: Self.encode(stage)
             )
-        case let .delivered(id, applicationName, text):
+        case let .delivered(id, _, text):
             self.init(
                 kind: .delivered,
                 sessionID: id.rawValue,
-                applicationName: applicationName,
                 text: text
             )
         case let .pendingCopy(id, text, reason):
@@ -609,15 +607,12 @@ package struct HistoryOutcomeV1: Codable {
                     applicationName: applicationName
                 )
             case .delivered:
-                guard let applicationName else {
-                    throw HistoryRecordDecodingError.missingField("applicationName")
-                }
                 guard let text else {
                     throw HistoryRecordDecodingError.missingField("text")
                 }
                 return .delivered(
                     try requiredSessionID(),
-                    applicationName: applicationName,
+                    applicationName: applicationName ?? "当前输入框",
                     text: text
                 )
             case .pendingCopy:
