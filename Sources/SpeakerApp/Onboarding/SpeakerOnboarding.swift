@@ -307,12 +307,7 @@ private struct SpeakerOnboardingView: View {
     }
 
     private var onboardingIcon: some View {
-        Image(systemName: "waveform")
-            .font(.system(size: 28, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 58, height: 58)
-            .background(.black, in: RoundedRectangle(cornerRadius: 15))
-            .accessibilityHidden(true)
+        SpeakerIdentityTile(size: 58, accessibility: .named)
     }
 
     private var onboardingTitle: some View {

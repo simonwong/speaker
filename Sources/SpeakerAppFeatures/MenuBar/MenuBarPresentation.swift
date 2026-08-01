@@ -1,15 +1,21 @@
 import SpeakerCore
 
+package enum MenuBarIconState: Equatable, Sendable {
+    case ready
+    case recording
+    case needsPermission
+}
+
 package enum MenuBarPresentation {
-    package static func systemImage(
+    package static func iconState(
         isRecording: Bool,
         permissions: PermissionSnapshot
-    ) -> String {
+    ) -> MenuBarIconState {
         if isRecording {
-            return "waveform.circle.fill"
+            return .recording
         }
         return permissions.allGranted
-            ? "waveform"
-            : "waveform.badge.exclamationmark"
+            ? .ready
+            : .needsPermission
     }
 }

@@ -1,0 +1,22 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-brand-assets-test.XXXXXX")"
+
+cleanup() {
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
+
+"$SCRIPT_DIR/generate-brand-assets" "$TEST_ROOT"
+cmp "$TEST_ROOT/AppIcon.png" "$ROOT/Resources/AppIcon.png"
+cmp "$TEST_ROOT/AppIcon.icns" "$ROOT/Resources/AppIcon.icns"
+iconutil -c iconset \
+    "$TEST_ROOT/AppIcon.icns" \
+    -o "$TEST_ROOT/Verified.iconset"
+[[ -s "$TEST_ROOT/Verified.iconset/icon_512x512@2x.png" ]]
+
+print "PASS: checked-in Speaker brand assets match the canonical vector"

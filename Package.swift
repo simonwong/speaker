@@ -17,6 +17,10 @@ let package = Package(
         .executable(name: "SpeakerCoreSpecs", targets: ["SpeakerCoreSpecs"]),
         .executable(name: "SpeakerAppScenarioSpecs", targets: ["SpeakerAppScenarioSpecs"]),
         .executable(name: "SpeakerAppUISpecs", targets: ["SpeakerAppUISpecs"]),
+        .executable(
+            name: "SpeakerBrandAssetGenerator",
+            targets: ["SpeakerBrandAssetGenerator"]
+        ),
         .executable(name: "SpeakerProviderSmoke", targets: ["SpeakerProviderSmoke"]),
         .executable(
             name: "SpeakerProviderEvidenceVerifier",
@@ -66,6 +70,11 @@ let package = Package(
             name: "SpeakerAppUISpecs",
             dependencies: ["SpeakerAppFeatures", "SpeakerCore"],
             path: "Tests/SpeakerAppUISpecs"
+        ),
+        .executableTarget(
+            name: "SpeakerBrandAssetGenerator",
+            dependencies: ["SpeakerAppFeatures"],
+            path: "Tools/SpeakerBrandAssetGenerator"
         ),
         .executableTarget(
             name: "SpeakerProviderSmoke",

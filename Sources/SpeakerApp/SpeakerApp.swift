@@ -17,7 +17,7 @@ struct SpeakerApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("Speaker", systemImage: menuBarIcon) {
+        MenuBarExtra {
             MenuBarContent(
                 permissions: runtime.permissions,
                 voiceInput: runtime.voiceInput,
@@ -29,6 +29,8 @@ struct SpeakerApp: App {
                 startRuntime: runtime.start,
                 refreshPermissions: runtime.refreshPermissions
             )
+        } label: {
+            SpeakerMenuBarLabel(state: menuBarIconState)
         }
         .menuBarExtraStyle(.menu)
 
@@ -56,8 +58,8 @@ struct SpeakerApp: App {
         )
     }
 
-    private var menuBarIcon: String {
-        MenuBarPresentation.systemImage(
+    private var menuBarIconState: MenuBarIconState {
+        MenuBarPresentation.iconState(
             isRecording: runtime.voiceInput.state.isRecording,
             permissions: runtime.permissions.snapshot
         )

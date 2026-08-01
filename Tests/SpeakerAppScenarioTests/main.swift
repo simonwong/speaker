@@ -1565,10 +1565,10 @@ struct SpeakerAppScenarioSpecs {
             )
 
             try expect(
-                MenuBarPresentation.systemImage(
+                MenuBarPresentation.iconState(
                     isRecording: activity.isRecording,
                     permissions: permissions
-                ) == "waveform.circle.fill"
+                ) == .recording
             )
         }
 
@@ -1583,16 +1583,16 @@ struct SpeakerAppScenarioSpecs {
             )
 
             try expect(
-                MenuBarPresentation.systemImage(
+                MenuBarPresentation.iconState(
                     isRecording: false,
                     permissions: granted
-                ) == "waveform"
+                ) == .ready
             )
             try expect(
-                MenuBarPresentation.systemImage(
+                MenuBarPresentation.iconState(
                     isRecording: false,
                     permissions: missing
-                ) == "waveform.badge.exclamationmark"
+                ) == .needsPermission
             )
         }
 
@@ -1608,10 +1608,10 @@ struct SpeakerAppScenarioSpecs {
             )
 
             try expect(
-                MenuBarPresentation.systemImage(
+                MenuBarPresentation.iconState(
                     isRecording: activity.isRecording,
                     permissions: granted
-                ) == "waveform"
+                ) == .ready
             )
         }
 
