@@ -11,6 +11,7 @@ package enum SpeakerDiagnosticReport {
     package struct Snapshot: Sendable {
         package let version: String
         package let build: String
+        package let sourceRevision: String
         package let bundleIdentifier: String
         package let signingMode: String
         package let operatingSystem: String
@@ -32,6 +33,7 @@ package enum SpeakerDiagnosticReport {
         package init(
             version: String,
             build: String,
+            sourceRevision: String,
             bundleIdentifier: String,
             signingMode: String,
             operatingSystem: String,
@@ -52,6 +54,7 @@ package enum SpeakerDiagnosticReport {
         ) {
             self.version = version
             self.build = build
+            self.sourceRevision = sourceRevision
             self.bundleIdentifier = bundleIdentifier
             self.signingMode = signingMode
             self.operatingSystem = operatingSystem
@@ -76,6 +79,7 @@ package enum SpeakerDiagnosticReport {
         var lines = [
             "Speaker diagnostics",
             "version: \(clean(snapshot.version)) (\(clean(snapshot.build)))",
+            "sourceRevision: \(clean(snapshot.sourceRevision))",
             "bundle: \(clean(snapshot.bundleIdentifier))",
             "signingMode: \(clean(snapshot.signingMode))",
             "macOS: \(clean(snapshot.operatingSystem))",

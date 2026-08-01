@@ -1,0 +1,52 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+ROOT_PATH="${1:-}"
+BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-}"
+SOURCE_REVISION="${SPEAKER_SOURCE_REVISION:-}"
+
+fail() {
+    print -u2 "development-build-identity: $1"
+    exit 1
+}
+
+[[ -n "$ROOT_PATH" ]] || fail "repository path is required."
+ROOT_PATH="${ROOT_PATH:A}"
+
+if [[ -z "$BUILD_NUMBER" || -z "$SOURCE_REVISION" ]]; then
+    git -C "$ROOT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+        fail "Cannot derive development metadata without committed Git history. Set SPEAKER_BUILD_NUMBER and SPEAKER_SOURCE_REVISION explicitly."
+    }
+    COMMIT="$(git -C "$ROOT_PATH" rev-parse --verify HEAD 2>/dev/null)" || {
+        fail "Cannot resolve HEAD. Commit the source or set SPEAKER_BUILD_NUMBER and SPEAKER_SOURCE_REVISION explicitly."
+    }
+
+    if [[ -z "$BUILD_NUMBER" ]]; then
+        BUILD_NUMBER="$(git -C "$ROOT_PATH" rev-list --count HEAD)" || {
+            fail "Cannot count committed history for the development build."
+        }
+    fi
+    if [[ -z "$SOURCE_REVISION" ]]; then
+        SOURCE_REVISION="$(
+            git -C "$ROOT_PATH" rev-parse --short=12 "$COMMIT"
+        )" || fail "Cannot resolve the development source revision."
+        DIRTY_STATUS="$(
+            git -C "$ROOT_PATH" status --porcelain --untracked-files=normal
+        )" || fail "Cannot inspect the development source state."
+        if [[ -n "$DIRTY_STATUS" ]]; then
+            SOURCE_REVISION="$SOURCE_REVISION-dirty"
+        fi
+    fi
+fi
+
+[[ "$BUILD_NUMBER" =~ '^[1-9][0-9]*$' ]] || {
+    fail "SPEAKER_BUILD_NUMBER must be a positive integer: $BUILD_NUMBER"
+}
+[[ "${#SOURCE_REVISION}" -le 80 \
+      && "$SOURCE_REVISION" =~ '^[A-Za-z0-9][A-Za-z0-9._+-]*$' ]] || {
+    fail "SPEAKER_SOURCE_REVISION must be a single safe identifier: $SOURCE_REVISION"
+}
+
+print -r -- "$BUILD_NUMBER"
+print -r -- "$SOURCE_REVISION"

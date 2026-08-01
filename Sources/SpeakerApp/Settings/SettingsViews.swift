@@ -820,12 +820,7 @@ private struct AboutSettingsPage: View {
     @State private var confirmsDataErasure = false
 
     private var versionText: String {
-        let version = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "—"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")
-            as? String ?? "—"
-        return "版本 \(version)（\(build)）"
+        SpeakerBuildIdentity.current.displayText
     }
 
     var body: some View {

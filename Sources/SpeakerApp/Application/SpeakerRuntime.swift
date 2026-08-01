@@ -527,11 +527,7 @@ final class SpeakerRuntime: ObservableObject {
         let latestRecord = await history.latestRecord()
         let activeProvider =
             await providerRuntimeDiagnostics.activeSnapshot()
-        let version = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "unknown"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")
-            as? String ?? "unknown"
+        let buildIdentity = SpeakerBuildIdentity.current
         let credentialStorage = Bundle.main.object(
             forInfoDictionaryKey: "SpeakerCredentialStorage"
         ) as? String ?? "unknown"
@@ -549,8 +545,9 @@ final class SpeakerRuntime: ObservableObject {
         case .writeFailed: "writeFailed"
         }
         let report = SpeakerDiagnosticReport.make(from: .init(
-            version: version,
-            build: build,
+            version: buildIdentity.version,
+            build: buildIdentity.build,
+            sourceRevision: buildIdentity.sourceRevision,
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "unknown",
             signingMode: signingMode.diagnosticValue,
             operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,

@@ -556,6 +556,19 @@ struct SpeakerAppScenarioSpecs {
             try expect(!unknown.permitsLocalDeliverySmoke)
         }
 
+        run("build identity presents version, numeric build and source revision", failures: &failures, executed: &executed) {
+            let identity = SpeakerBuildIdentity(
+                version: "1.2.3",
+                build: "45",
+                sourceRevision: "abc123def456-dirty"
+            )
+
+            try expect(
+                identity.displayText
+                    == "版本 1.2.3（45）· 源码 abc123def456-dirty"
+            )
+        }
+
         run(
             "software updates fail closed until the complete production identity exists",
             failures: &failures,
@@ -998,6 +1011,7 @@ struct SpeakerAppScenarioSpecs {
             let report = SpeakerDiagnosticReport.make(from: .init(
                 version: "1.2.3",
                 build: "45",
+                sourceRevision: "abc123def456-dirty",
                 bundleIdentifier: "com.example.speaker",
                 signingMode: "developer-id",
                 operatingSystem: "macOS test",
@@ -1025,6 +1039,9 @@ struct SpeakerAppScenarioSpecs {
             ))
 
             try expect(report.contains("activeProviderPhase: awaitingFinal"))
+            try expect(
+                report.contains("sourceRevision: abc123def456-dirty")
+            )
             try expect(report.contains("activeProviderRequestID: active-safe-id"))
             try expect(
                 report.contains(

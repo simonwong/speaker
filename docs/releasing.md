@@ -14,7 +14,7 @@ entitlements。仅 Bundle ID 相同但签名损坏或身份不同的包会被 fa
 - Git tag 使用 `v<SemVer>`。只有通过签名、公证、制品复验和人工验收的构建才能创建正式 tag。
 - 正式 Bundle ID 和 Apple Team ID 一经发布不得随版本改变，否则 macOS 会把新版本视作不同 App，Keychain 与 TCC 权限也无法稳定延续。
 
-仓库不会根据日期、Git 提交数或本地环境猜测 build number。CI 必须提供唯一值；缺失或格式错误时发布脚本会直接失败。
+Formal releases never derive a build number from dates, Git history, or the local environment. CI must provide the unique value; a missing or malformed value fails closed.
 
 ## 本机开发安装
 
@@ -23,6 +23,18 @@ entitlements。仅 Bundle ID 相同但签名损坏或身份不同的包会被 fa
 ```
 
 该入口使用 `com.local.speaker` 和 ad-hoc 签名，只用于本机开发验证。它不生成可分发制品，也不能作为 TCC 权限跨版本保持的证据。
+
+Without explicit development metadata, `CFBundleVersion` is the current
+`HEAD` commit count and `SpeakerSourceRevision` is the 12-character commit SHA.
+An uncommitted worktree appends `-dirty`. Each committed development install
+therefore gets a new numeric build, while About and redacted diagnostics can
+identify its source. This identity is for development traceability only; it
+does not participate in Sparkle ordering or formal release numbering.
+
+Specialized installs and black-box tests may set `SPEAKER_VERSION`,
+`SPEAKER_BUILD_NUMBER`, and `SPEAKER_SOURCE_REVISION` explicitly. Source outside
+resolvable Git history must provide at least the build and source revision;
+the scripts never silently fall back to build 1.
 
 ad-hoc 签名的 designated requirement 会绑定单次构建的代码哈希。重新构建后，macOS
 可能要求重新授予麦克风和辅助功能权限；这不是正式发布版本可接受的身份模型。

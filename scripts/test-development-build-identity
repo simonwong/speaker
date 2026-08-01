@@ -1,0 +1,58 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-development-identity.XXXXXX")"
+REPOSITORY="$TEST_ROOT/repository"
+NO_HISTORY="$TEST_ROOT/no-history"
+ERROR_OUTPUT="$TEST_ROOT/error.txt"
+
+cleanup() {
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
+
+git init -q "$REPOSITORY"
+git -C "$REPOSITORY" config user.name "Speaker Tests"
+git -C "$REPOSITORY" config user.email "speaker-tests@example.invalid"
+print "one" > "$REPOSITORY/source.txt"
+git -C "$REPOSITORY" add source.txt
+git -C "$REPOSITORY" commit -q -m "first"
+
+FIRST=("${(@f)$("$SCRIPT_DIR/development-build-identity" "$REPOSITORY")}")
+[[ "${#FIRST}" == "2" ]]
+[[ "$FIRST[1]" == "1" ]]
+[[ "$FIRST[2]" =~ '^[0-9a-f]{12}$' ]]
+
+print "two" >> "$REPOSITORY/source.txt"
+git -C "$REPOSITORY" add source.txt
+git -C "$REPOSITORY" commit -q -m "second"
+SECOND=("${(@f)$("$SCRIPT_DIR/development-build-identity" "$REPOSITORY")}")
+[[ "$SECOND[1]" == "2" ]]
+[[ "$SECOND[2]" =~ '^[0-9a-f]{12}$' ]]
+[[ "$SECOND[2]" != "$FIRST[2]" ]]
+
+print "dirty" >> "$REPOSITORY/source.txt"
+DIRTY=("${(@f)$("$SCRIPT_DIR/development-build-identity" "$REPOSITORY")}")
+[[ "$DIRTY[1]" == "2" ]]
+[[ "$DIRTY[2]" == "$SECOND[2]-dirty" ]]
+
+mkdir "$NO_HISTORY"
+if "$SCRIPT_DIR/development-build-identity" "$NO_HISTORY" \
+    > /dev/null 2> "$ERROR_OUTPUT"; then
+    print -u2 "Development identity unexpectedly succeeded without Git history."
+    exit 1
+fi
+grep -F "SPEAKER_BUILD_NUMBER and SPEAKER_SOURCE_REVISION" \
+    "$ERROR_OUTPUT" >/dev/null
+
+OVERRIDE=("${(@f)$(
+    SPEAKER_BUILD_NUMBER=77 \
+    SPEAKER_SOURCE_REVISION=fixture-revision \
+        "$SCRIPT_DIR/development-build-identity" "$NO_HISTORY"
+)}")
+[[ "$OVERRIDE[1]" == "77" ]]
+[[ "$OVERRIDE[2]" == "fixture-revision" ]]
+
+print "PASS: development build identity is traceable and deterministic"

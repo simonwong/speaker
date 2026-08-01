@@ -7,7 +7,8 @@ ROOT="${SCRIPT_DIR:h}"
 source "$SCRIPT_DIR/release-common"
 CONFIGURATION="${SPEAKER_CONFIGURATION:-debug}"
 VERSION="${SPEAKER_VERSION:-0.1.0}"
-BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-1}"
+BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-}"
+SOURCE_REVISION="${SPEAKER_SOURCE_REVISION:-}"
 REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
 REQUESTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
 BUNDLE_IDENTIFIER="${REQUESTED_BUNDLE_IDENTIFIER:-com.local.speaker}"
@@ -122,9 +123,6 @@ remove_build_machine_rpaths() {
     done
 }
 
-print -u2 "Validating Speaker bundle metadata..."
-validate_bundle_metadata "$VERSION" "$BUILD_NUMBER" "$BUNDLE_IDENTIFIER"
-print -u2 "Bundling Speaker $VERSION ($BUILD_NUMBER) [$CONFIGURATION]..."
 if [[ "$SIGNING_IDENTITY" != "-" && -n "$LOCAL_SIGNING_IDENTITY" ]]; then
     print -u2 "Use either SPEAKER_CODESIGN_IDENTITY or SPEAKER_LOCAL_CODESIGN_IDENTITY, not both."
     exit 1
@@ -155,12 +153,28 @@ if [[ "$SIGNING_IDENTITY" != "-" ]]; then
         print -u2 "Production bundles require complete reviewed build provenance."
         exit 1
     fi
+    SOURCE_REVISION="$RELEASE_SOURCE_COMMIT"
+    print -u2 "Validating Speaker bundle metadata..."
+    validate_bundle_metadata "$VERSION" "$BUILD_NUMBER" "$BUNDLE_IDENTIFIER"
     validate_production_metadata \
         "$VERSION" \
         "$BUILD_NUMBER" \
         "$BUNDLE_IDENTIFIER" \
         "$EXPECTED_TEAM_ID"
+else
+    DEVELOPMENT_IDENTITY=("${(@f)$(
+        "$SCRIPT_DIR/development-build-identity" "$ROOT"
+    )}")
+    if [[ "${#DEVELOPMENT_IDENTITY}" != "2" ]]; then
+        print -u2 "Development build identity returned incomplete metadata."
+        exit 1
+    fi
+    BUILD_NUMBER="$DEVELOPMENT_IDENTITY[1]"
+    SOURCE_REVISION="$DEVELOPMENT_IDENTITY[2]"
+    print -u2 "Validating Speaker bundle metadata..."
+    validate_bundle_metadata "$VERSION" "$BUILD_NUMBER" "$BUNDLE_IDENTIFIER"
 fi
+print -u2 "Bundling Speaker $VERSION ($BUILD_NUMBER) [$CONFIGURATION]..."
 
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
     # Formal artifacts are deterministic universal2 binaries regardless of
@@ -247,6 +261,7 @@ cp "$ROOT/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_IDENTIFIER" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :SpeakerSourceRevision string $SOURCE_REVISION" "$APP/Contents/Info.plist"
 
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
     BUILD_MANIFEST="$APP/Contents/Resources/BuildManifest.plist"
