@@ -1368,6 +1368,7 @@ verify_production_build_provenance() {
     local expected_version="$5"
     local expected_build_number="$6"
     local manifest="$app/Contents/Resources/BuildManifest.plist"
+    local info="$app/Contents/Info.plist"
     local key
     local expected
     local actual
@@ -1375,6 +1376,17 @@ verify_production_build_provenance() {
     if [[ ! -f "$manifest" || -L "$manifest" ]] \
           || ! plutil -lint "$manifest" >/dev/null; then
         release_error "Production app is missing a valid signed build manifest."
+        return 1
+    fi
+    actual="$(
+        /usr/libexec/PlistBuddy \
+            -c 'Print :SpeakerSourceRevision' "$info" 2>/dev/null
+    )" || {
+        release_error "Production app is missing its source revision."
+        return 1
+    }
+    if [[ "$actual" != "$expected_source_commit" ]]; then
+        release_error "Production app source revision differs from reviewed provenance."
         return 1
     fi
     local -a exact_values=(

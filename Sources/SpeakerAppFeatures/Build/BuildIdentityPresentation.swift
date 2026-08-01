@@ -1,5 +1,46 @@
 import Foundation
 
+package struct SpeakerBuildIdentity: Equatable, Sendable {
+    package let version: String
+    package let build: String
+    package let sourceRevision: String
+
+    package init(
+        version: String?,
+        build: String?,
+        sourceRevision: String?
+    ) {
+        self.version = Self.displayValue(version)
+        self.build = Self.displayValue(build)
+        self.sourceRevision = Self.displayValue(sourceRevision)
+    }
+
+    package static var current: SpeakerBuildIdentity {
+        SpeakerBuildIdentity(
+            version: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String,
+            build: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleVersion"
+            ) as? String,
+            sourceRevision: Bundle.main.object(
+                forInfoDictionaryKey: "SpeakerSourceRevision"
+            ) as? String
+        )
+    }
+
+    package var displayText: String {
+        "版本 \(version)（\(build)）· 源码 \(sourceRevision)"
+    }
+
+    private static func displayValue(_ value: String?) -> String {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else { return "—" }
+        return value
+    }
+}
+
 package enum SpeakerSigningMode: Equatable, Sendable {
     case developmentAdHoc
     case developmentSigned

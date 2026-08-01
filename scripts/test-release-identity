@@ -207,6 +207,9 @@ SOURCE_COMMIT="$(printf 'a%.0s' {1..40})"
 PACKAGE_HASH="$(printf 'b%.0s' {1..64})"
 NOTES_HASH="$(printf 'c%.0s' {1..64})"
 /usr/libexec/PlistBuddy \
+    -c "Add :SpeakerSourceRevision string $SOURCE_COMMIT" \
+    "$TEST_INFO"
+/usr/libexec/PlistBuddy \
     -c 'Clear dict' \
     -c 'Add :SchemaVersion integer 1' \
     -c "Add :SourceCommit string $SOURCE_COMMIT" \
@@ -223,6 +226,22 @@ verify_production_build_provenance \
     "1.2.3" \
     "42"
 verify_production_build_provenance_shape "$TEST_APP" "1.2.3" "42"
+/usr/libexec/PlistBuddy \
+    -c "Set :SpeakerSourceRevision $(printf 'd%.0s' {1..40})" \
+    "$TEST_INFO"
+if verify_production_build_provenance \
+    "$TEST_APP" \
+    "$SOURCE_COMMIT" \
+    "$PACKAGE_HASH" \
+    "$NOTES_HASH" \
+    "1.2.3" \
+    "42" 2>/dev/null; then
+    print -u2 "A production app with mismatched source revision was accepted."
+    exit 1
+fi
+/usr/libexec/PlistBuddy \
+    -c "Set :SpeakerSourceRevision $SOURCE_COMMIT" \
+    "$TEST_INFO"
 /usr/libexec/PlistBuddy \
     -c "Set :ReleaseNotesSHA256 $(printf 'd%.0s' {1..64})" \
     "$TEST_BUILD_MANIFEST"
