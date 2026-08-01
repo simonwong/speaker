@@ -28,10 +28,10 @@ package struct SpeakerBrandMarkShape: Shape {
         )
         path.addLine(to: point(0.92, 0.49))
 
-        path.move(to: point(0.45, 0.63))
+        path.move(to: point(0.61, 0.63))
         path.addLine(to: point(0.82, 0.63))
 
-        path.move(to: point(0.61, 0.75))
+        path.move(to: point(0.45, 0.75))
         path.addLine(to: point(0.82, 0.75))
         return path
     }
