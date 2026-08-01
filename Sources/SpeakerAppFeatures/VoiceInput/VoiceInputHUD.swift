@@ -7,6 +7,8 @@ package struct VoiceInputHUD: View {
         (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.voiceInputHUDIncreasedContrastOverride)
+    private var increasedContrastOverride
 
     package init(
         presentation: VoiceInputOverlayPresentation,
@@ -21,7 +23,8 @@ package struct VoiceInputHUD: View {
 
     private var palette: VoiceInputHUDContrastPalette {
         VoiceInputHUDContrastPalette(
-            increased: colorSchemeContrast == .increased
+            increased: increasedContrastOverride
+                ?? (colorSchemeContrast == .increased)
         )
     }
 
@@ -235,8 +238,8 @@ private struct ActivityWaveform: View {
         case .processing:
             LinearGradient(
                 colors: [
-                    Color.white.opacity(0.32),
-                    Color.white.opacity(0.68),
+                    Color.primary.opacity(0.32),
+                    Color.primary.opacity(0.68),
                 ],
                 startPoint: .bottom,
                 endPoint: .top
@@ -265,6 +268,11 @@ private struct ActivityHUDSurface<Content: View>: View {
     let cornerRadius: CGFloat
     let palette: VoiceInputHUDContrastPalette
     let content: Content
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
+    @Environment(\.adaptiveGlassSurfaceStyleOverride)
+    private var surfaceStyleOverride
+    @Environment(\.colorScheme) private var colorScheme
 
     init(
         width: CGFloat,
@@ -281,37 +289,16 @@ private struct ActivityHUDSurface<Content: View>: View {
     }
 
     var body: some View {
-        content
-            .frame(width: width, height: height)
-            .background {
-                ZStack {
-                    HUDVisualEffect(cornerRadius: cornerRadius)
-                    LinearGradient(
-                        colors: [
-                            .black.opacity(0.34),
-                            .black.opacity(0.48),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-                .clipShape(RoundedRectangle(
-                    cornerRadius: cornerRadius,
-                    style: .continuous
-                ))
-            }
+        surface
             .overlay {
-                RoundedRectangle(
-                    cornerRadius: cornerRadius,
-                    style: .continuous
-                )
+                surfaceShape
                 .stroke(
                     LinearGradient(
                         colors: [
-                            .white.opacity(
+                            .primary.opacity(
                                 palette.darkBorderOpacity + 0.03
                             ),
-                            .white.opacity(
+                            .primary.opacity(
                                 max(0.04, palette.darkBorderOpacity * 0.55)
                             ),
                         ],
@@ -321,6 +308,68 @@ private struct ActivityHUDSurface<Content: View>: View {
                     lineWidth: palette.darkBorderLineWidth
                 )
             }
+            .environment(
+                \.colorScheme,
+                surfaceStyle == .opaque ? colorScheme : .dark
+            )
+    }
+
+    @ViewBuilder
+    private var surface: some View {
+        switch surfaceStyle {
+        case .liquidGlass:
+            if #available(macOS 26.0, *) {
+                framedContent.glassEffect(
+                    .regular.tint(.black.opacity(palette.glassTintOpacity)),
+                    in: surfaceShape
+                )
+            } else {
+                systemMaterialSurface
+            }
+        case .systemMaterial:
+            systemMaterialSurface
+        case .opaque:
+            framedContent
+                .background(
+                    Color(nsColor: .windowBackgroundColor),
+                    in: surfaceShape
+                )
+        }
+    }
+
+    private var framedContent: some View {
+        content.frame(width: width, height: height)
+    }
+
+    private var systemMaterialSurface: some View {
+        framedContent.background {
+            ZStack {
+                HUDVisualEffect(cornerRadius: cornerRadius)
+                LinearGradient(
+                    colors: [
+                        .black.opacity(palette.fallbackTintTopOpacity),
+                        .black.opacity(palette.fallbackTintBottomOpacity),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+            .clipShape(surfaceShape)
+        }
+    }
+
+    private var surfaceShape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: cornerRadius,
+            style: .continuous
+        )
+    }
+
+    private var surfaceStyle: AdaptiveGlassSurfaceStyle {
+        if let surfaceStyleOverride { return surfaceStyleOverride }
+        return AdaptiveGlassSurfacePolicy.resolve(
+            reduceTransparency: reduceTransparency
+        )
     }
 }
 
@@ -374,7 +423,7 @@ private struct PendingCopyStrip: View {
 
                 Text(text)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.primary.opacity(0.85))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(text)
@@ -433,7 +482,7 @@ private struct ProblemStrip: View {
 
                 Text(title)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.primary.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(title + "\n" + guidance)
@@ -483,13 +532,13 @@ private struct HUDSecondaryButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(foregroundOpacity))
+                .foregroundStyle(.primary.opacity(foregroundOpacity))
                 .lineLimit(1)
                 .padding(.horizontal, 11)
                 .frame(height: 26)
-                .background(.white.opacity(backgroundOpacity), in: Capsule())
+                .background(.primary.opacity(backgroundOpacity), in: Capsule())
                 .overlay {
-                    Capsule().stroke(.white.opacity(borderOpacity))
+                    Capsule().stroke(.primary.opacity(borderOpacity))
                 }
                 .contentShape(Capsule())
         }
@@ -545,7 +594,7 @@ private struct ActivityHUDCloseButton: View {
             Image(systemName: "xmark")
                 .font(.system(size: 8.5, weight: .semibold))
                 .foregroundStyle(
-                    .white.opacity(
+                    .primary.opacity(
                         isHovered
                             ? max(
                                 0.92,
@@ -556,7 +605,7 @@ private struct ActivityHUDCloseButton: View {
                 )
                 .frame(width: 24, height: 24)
                 .background(
-                    .white.opacity(
+                    .primary.opacity(
                         isHovered
                             ? palette.darkControlBackgroundOpacity
                             : 0
