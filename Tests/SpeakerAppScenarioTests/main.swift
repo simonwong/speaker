@@ -1340,6 +1340,36 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 increased.errorIconOpacity > standard.errorIconOpacity
             )
+            try expect(standard.glassTintOpacity < 0.2)
+            try expect(standard.fallbackTintTopOpacity < 0.2)
+            try expect(standard.fallbackTintBottomOpacity < 0.25)
+        }
+
+        run("glass surfaces honor native availability and Reduce Transparency", failures: &failures, executed: &executed) {
+            try expect(
+                AdaptiveGlassSurfacePolicy.resolve(
+                    reduceTransparency: false,
+                    supportsLiquidGlass: true
+                ) == .liquidGlass
+            )
+            try expect(
+                AdaptiveGlassSurfacePolicy.resolve(
+                    reduceTransparency: false,
+                    supportsLiquidGlass: false
+                ) == .systemMaterial
+            )
+            try expect(
+                AdaptiveGlassSurfacePolicy.resolve(
+                    reduceTransparency: true,
+                    supportsLiquidGlass: true
+                ) == .opaque
+            )
+            try expect(
+                AdaptiveGlassSurfacePolicy.resolve(
+                    reduceTransparency: true,
+                    supportsLiquidGlass: false
+                ) == .opaque
+            )
         }
 
         run("onboarding remains ready after an unchanged credential refresh", failures: &failures, executed: &executed) {

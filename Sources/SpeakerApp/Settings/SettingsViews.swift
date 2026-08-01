@@ -19,22 +19,45 @@ private struct SettingsOverviewSectionFramePreference: PreferenceKey {
 private struct SettingsOverviewChipSurface: ViewModifier {
     let isActive: Bool
     var tint: Color = .accentColor
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
             content.glassEffect(
                 isActive
                     ? .regular.tint(tint).interactive()
                     : .regular.interactive(),
                 in: .capsule
             )
+            .overlay { contrastBorder }
         } else {
             content.background(
-                isActive
-                    ? tint.opacity(0.14)
-                    : Color.primary.opacity(0.04),
+                reduceTransparency
+                    ? Color(nsColor: .controlBackgroundColor)
+                    : isActive
+                        ? tint.opacity(0.14)
+                        : Color.primary.opacity(0.04),
                 in: Capsule()
+            )
+            .overlay { contrastBorder }
+        }
+    }
+
+    private var surfaceStyle: AdaptiveGlassSurfaceStyle {
+        AdaptiveGlassSurfacePolicy.resolve(
+            reduceTransparency: reduceTransparency
+        )
+    }
+
+    @ViewBuilder
+    private var contrastBorder: some View {
+        if contrast == .increased || (reduceTransparency && isActive) {
+            Capsule().stroke(
+                isActive ? tint.opacity(0.8) : Color.primary.opacity(0.5),
+                lineWidth: contrast == .increased ? 1.5 : 1
             )
         }
     }
@@ -205,6 +228,8 @@ private struct SettingsOverviewView: View {
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
     @State private var activeSection = SettingsOverviewSection.shortcut
     @Environment(\.mainWindowLayout) private var mainWindowLayout
+    @Environment(\.accessibilityReduceTransparency)
+    private var reduceTransparency
 
     init(
         workspace: SettingsWorkspace,
@@ -292,8 +317,13 @@ private struct SettingsOverviewView: View {
     }
 
     private var usesGlass: Bool {
-        if #available(macOS 26.0, *) { return true }
-        return false
+        navigationSurfaceStyle == .liquidGlass
+    }
+
+    private var navigationSurfaceStyle: AdaptiveGlassSurfaceStyle {
+        AdaptiveGlassSurfacePolicy.resolve(
+            reduceTransparency: reduceTransparency
+        )
     }
 
     private var hero: some View {
@@ -317,7 +347,7 @@ private struct SettingsOverviewView: View {
     private func pinnedBar(proxy: ScrollViewProxy) -> some View {
         let bar = responsivePinnedBar(proxy: proxy)
 
-        if #available(macOS 26.0, *) {
+        if #available(macOS 26.0, *), usesGlass {
             GlassEffectContainer(spacing: 6) { bar }
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
@@ -358,7 +388,13 @@ private struct SettingsOverviewView: View {
             bar
                 .padding(.horizontal, 20)
                 .padding(.vertical, 9)
-                .background(.bar)
+                .background {
+                    if reduceTransparency {
+                        Color(nsColor: .windowBackgroundColor)
+                    } else {
+                        Rectangle().fill(.bar)
+                    }
+                }
             Divider()
         }
     }

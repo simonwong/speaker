@@ -101,6 +101,98 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "Reduce Transparency makes only the shaped HUD surface opaque",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let presentation = VoiceInputHUDContractFixture.recording.presentation
+            let size = VoiceInputPanelLayout.recording.size
+            let hostingView = NSHostingView(rootView:
+                VoiceInputHUD(
+                    presentation: presentation,
+                    performAction: { _ in nil },
+                    routeEffect: { _ in }
+                )
+                .environment(\.adaptiveGlassSurfaceStyleOverride, .opaque)
+            )
+            hostingView.frame = NSRect(origin: .zero, size: size)
+            hostingView.layoutSubtreeIfNeeded()
+
+            guard let image = hostingView.bitmapImageRepForCachingDisplay(
+                in: hostingView.bounds
+            ) else {
+                throw SpecFailure(message: "could not render opaque HUD fallback")
+            }
+            hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+            let centerAlpha = image.colorAt(
+                x: image.pixelsWide / 2,
+                y: image.pixelsHigh / 2
+            )?.alphaComponent ?? 0
+            let cornerAlpha = image.colorAt(x: 0, y: 0)?.alphaComponent ?? 1
+
+            try expect(
+                centerAlpha > 0.99,
+                "Reduce Transparency left the HUD centre translucent: \(centerAlpha)"
+            )
+            try expect(
+                cornerAlpha < 0.01,
+                "opaque fallback added a rectangular backing: \(cornerAlpha)"
+            )
+        }
+
+        run(
+            "legacy HUD fallback keeps an active behind-window material",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let presentation = VoiceInputHUDContractFixture.recording.presentation
+            let size = VoiceInputPanelLayout.recording.size
+            let hostingView = NSHostingView(rootView:
+                VoiceInputHUD(
+                    presentation: presentation,
+                    performAction: { _ in nil },
+                    routeEffect: { _ in }
+                )
+                .environment(\.adaptiveGlassSurfaceStyleOverride, .systemMaterial)
+            )
+            hostingView.frame = NSRect(origin: .zero, size: size)
+            let window = NSWindow(
+                contentRect: hostingView.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = hostingView
+            window.orderFrontRegardless()
+            defer { window.close() }
+            hostingView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+
+            let effects = visualEffectViews(in: hostingView)
+            try expect(effects.count == 1, "found \(effects.count) material views")
+            guard let effect = effects.first else { return }
+            try expect(effect.material == .hudWindow)
+            try expect(effect.blendingMode == .behindWindow)
+            try expect(effect.state == .active)
+        }
+
+        run(
+            "Increase Contrast strengthens the rendered HUD boundary",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let standard = try renderedHUDBitmap(increasedContrast: false)
+            let increased = try renderedHUDBitmap(increasedContrast: true)
+            let standardLuminance = hudTopBorderLuminance(standard)
+            let increasedLuminance = hudTopBorderLuminance(increased)
+
+            try expect(
+                increasedLuminance > standardLuminance + 0.01,
+                "boundary luminance did not increase: \(standardLuminance) -> \(increasedLuminance)"
+            )
+        }
+
+        run(
             "Speaker menu bar mark stays legible and stateful at status-item size",
             failures: &failures,
             executed: &executed
@@ -1109,6 +1201,70 @@ private func accessibilityLabels(in root: NSView) -> [String] {
 
     visit(root)
     return labels
+}
+
+@MainActor
+private func visualEffectViews(in root: NSView) -> [NSVisualEffectView] {
+    var effects: [NSVisualEffectView] = []
+
+    func visit(_ view: NSView) {
+        if let effect = view as? NSVisualEffectView {
+            effects.append(effect)
+        }
+        view.subviews.forEach(visit)
+    }
+
+    visit(root)
+    return effects
+}
+
+@MainActor
+private func renderedHUDBitmap(
+    increasedContrast: Bool
+) throws -> NSBitmapImageRep {
+    let presentation = VoiceInputHUDContractFixture.recording.presentation
+    let size = VoiceInputPanelLayout.recording.size
+    let hostingView = NSHostingView(rootView:
+        VoiceInputHUD(
+            presentation: presentation,
+            performAction: { _ in nil },
+            routeEffect: { _ in }
+        )
+        .environment(\.adaptiveGlassSurfaceStyleOverride, .opaque)
+        .environment(
+            \.voiceInputHUDIncreasedContrastOverride,
+            increasedContrast
+        )
+        .environment(\.colorScheme, .dark)
+    )
+    hostingView.frame = NSRect(origin: .zero, size: size)
+    hostingView.layoutSubtreeIfNeeded()
+    guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(
+        in: hostingView.bounds
+    ) else {
+        throw SpecFailure(message: "could not render HUD contrast fixture")
+    }
+    hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+    return bitmap
+}
+
+private func hudTopBorderLuminance(_ bitmap: NSBitmapImageRep) -> Double {
+    let scale = Double(bitmap.pixelsHigh) / 44
+    let centerX = bitmap.pixelsWide / 2
+    let centerY = Int((39 * scale).rounded())
+    let samples = (-2...2).flatMap { yOffset in
+        (-2...2).compactMap { xOffset -> Double? in
+            guard let color = bitmap.colorAt(
+                x: centerX + xOffset,
+                y: centerY + yOffset
+            )?.usingColorSpace(.sRGB) else { return nil }
+            return 0.2126 * color.redComponent
+                + 0.7152 * color.greenComponent
+                + 0.0722 * color.blueComponent
+        }
+    }
+    guard !samples.isEmpty else { return 0 }
+    return samples.reduce(0, +) / Double(samples.count)
 }
 
 @MainActor
