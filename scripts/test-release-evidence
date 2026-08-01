@@ -112,6 +112,7 @@ sw_vers > "$WORK/macos-version.txt"
 print -r -- "$SDK_PATH" > "$WORK/sdk-path.txt"
 print -r -- "$SDK_CANONICAL_NAME" > "$WORK/sdk-version.txt"
 print -r -- "$SDK_SETTINGS_HASH" > "$WORK/sdk-settings-sha256.txt"
+xattr -w com.example.speaker.evidence fixture "$WORK/swift-version.txt"
 
 dsymutil "$EXECUTABLE" -o "$WORK/Speaker.app.dSYM"
 verify_dsym_matches_executable "$EXECUTABLE" "$WORK/Speaker.app.dSYM"
@@ -120,7 +121,7 @@ ditto -c -k --keepParent \
     "$WORK/Speaker.app.dSYM.zip"
 rm -rf "$WORK/Speaker.app.dSYM"
 chmod 600 "$WORK"/*
-ditto -c -k "$WORK" "$ARCHIVE"
+ditto -c -k --norsrc "$WORK" "$ARCHIVE"
 
 validate_release_evidence_archive \
     "$ARCHIVE" \
@@ -151,7 +152,7 @@ ditto -c -k --keepParent \
     "$CORRUPT_WORK/unpacked-dsym/Speaker.app.dSYM" \
     "$CORRUPT_WORK/Speaker.app.dSYM.zip"
 rm -rf "$CORRUPT_WORK/unpacked-dsym"
-ditto -c -k "$CORRUPT_WORK" "$CORRUPT_ARCHIVE"
+ditto -c -k --norsrc "$CORRUPT_WORK" "$CORRUPT_ARCHIVE"
 if validate_release_evidence_archive \
     "$CORRUPT_ARCHIVE" \
     "$VERSION" \
