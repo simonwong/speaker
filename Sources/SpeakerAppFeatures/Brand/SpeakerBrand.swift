@@ -15,8 +15,8 @@ package struct SpeakerBrandMarkShape: Shape {
         }
 
         var path = Path()
-        path.move(to: point(0.61, 0.24))
-        path.addLine(to: point(0.82, 0.24))
+        path.move(to: point(0.64, 0.31))
+        path.addLine(to: point(0.86, 0.31))
 
         path.move(to: point(0.10, 0.49))
         path.addCurve(
@@ -31,8 +31,8 @@ package struct SpeakerBrandMarkShape: Shape {
         )
         path.addLine(to: point(0.92, 0.49))
 
-        path.move(to: point(0.45, 0.63))
-        path.addLine(to: point(0.82, 0.63))
+        path.move(to: point(0.50, 0.67))
+        path.addLine(to: point(0.86, 0.67))
         return path
     }
 }
