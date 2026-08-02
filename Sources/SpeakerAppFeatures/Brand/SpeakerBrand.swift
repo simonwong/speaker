@@ -15,24 +15,34 @@ package struct SpeakerBrandMarkShape: Shape {
         }
 
         var path = Path()
-        path.move(to: point(0.64, 0.31))
-        path.addLine(to: point(0.86, 0.31))
+        path.move(to: point(0.68, 0.30))
+        path.addLine(to: point(0.90, 0.30))
 
-        path.move(to: point(0.10, 0.49))
+        path.move(to: point(0.10, 0.52))
         path.addCurve(
-            to: point(0.28, 0.37),
-            control1: point(0.16, 0.49),
-            control2: point(0.21, 0.37)
+            to: point(0.27, 0.36),
+            control1: point(0.16, 0.52),
+            control2: point(0.19, 0.36)
         )
         path.addCurve(
-            to: point(0.46, 0.49),
-            control1: point(0.35, 0.37),
-            control2: point(0.38, 0.49)
+            to: point(0.45, 0.49),
+            control1: point(0.35, 0.36),
+            control2: point(0.37, 0.49)
         )
-        path.addLine(to: point(0.92, 0.49))
+        path.addCurve(
+            to: point(0.61, 0.57),
+            control1: point(0.51, 0.49),
+            control2: point(0.53, 0.57)
+        )
+        path.addCurve(
+            to: point(0.73, 0.50),
+            control1: point(0.68, 0.57),
+            control2: point(0.66, 0.50)
+        )
+        path.addLine(to: point(0.90, 0.50))
 
-        path.move(to: point(0.50, 0.67))
-        path.addLine(to: point(0.86, 0.67))
+        path.move(to: point(0.52, 0.70))
+        path.addLine(to: point(0.90, 0.70))
         return path
     }
 }
