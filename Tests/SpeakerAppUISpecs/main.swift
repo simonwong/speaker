@@ -193,6 +193,48 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "Speaker menu bar artwork uses adaptive template rendering",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let fallback = SpeakerMenuBarIconArtwork.fallbackImage
+            try expect(
+                fallback.isTemplate,
+                "menu bar fallback was not a template image"
+            )
+            guard let fallbackData = fallback.tiffRepresentation,
+                  let fallbackBitmap = NSBitmapImageRep(data: fallbackData)
+            else {
+                throw SpecFailure(message: "could not render menu bar fallback")
+            }
+            let fallbackVisiblePixels = (0..<fallbackBitmap.pixelsHigh).reduce(0) { count, y in
+                count + (0..<fallbackBitmap.pixelsWide).filter { x in
+                    (fallbackBitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.08
+                }.count
+            }
+            try expect(
+                fallbackVisiblePixels >= 12,
+                "menu bar fallback rendered empty"
+            )
+
+            for state in [
+                MenuBarIconState.ready,
+                .recording,
+                .needsPermission,
+            ] {
+                let image = SpeakerMenuBarIconArtwork.image(for: state)
+                try expect(
+                    image.isTemplate,
+                    "\(state) menu bar artwork was not a template image"
+                )
+                try expect(
+                    image.size == NSSize(width: 20, height: 18),
+                    "\(state) menu bar artwork used size \(image.size)"
+                )
+            }
+        }
+
+        run(
             "Speaker menu bar mark stays legible and stateful at status-item size",
             failures: &failures,
             executed: &executed
