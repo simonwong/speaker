@@ -270,27 +270,28 @@ package struct SpeakerAppIconArtwork: View {
     }
 }
 
-package struct SpeakerMenuBarLabel: View {
-    package let state: MenuBarIconState
+private struct SpeakerMenuBarGlyph: View {
+    let state: MenuBarIconState
 
-    package init(state: MenuBarIconState) {
-        self.state = state
-    }
-
-    package var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            SpeakerBrandMark()
-                .frame(width: 15.6, height: 9)
-
-            stateBadge
-                .padding(.trailing, 1)
-                .padding(.bottom, 1)
+    var body: some View {
+        ZStack {
+            SpeakerBrandMarkShape()
+                .stroke(
+                    Color.black,
+                    style: StrokeStyle(
+                        lineWidth: 2,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
+                .frame(width: 15.2, height: 8.6)
+                .offset(y: 1.2)
         }
         .frame(width: 20, height: 18)
-        .foregroundStyle(.primary)
-        .accessibilityHidden(true)
-        .overlay {
-            SpeakerAccessibilityImageLabel(label: accessibilityLabel)
+        .overlay(alignment: .topTrailing) {
+            stateBadge
+                .padding(.top, 0.4)
+                .padding(.trailing, 0.8)
         }
     }
 
@@ -301,16 +302,82 @@ package struct SpeakerMenuBarLabel: View {
             EmptyView()
         case .recording:
             Circle()
-                .fill(.primary)
-                .frame(width: 4.5, height: 4.5)
-                .overlay(Circle().stroke(.background, lineWidth: 1))
+                .fill(Color.black)
+                .frame(width: 3.5, height: 3.5)
         case .needsPermission:
-            Text("!")
-                .font(.system(size: 6, weight: .heavy, design: .rounded))
-                .foregroundStyle(.background)
-                .frame(width: 8, height: 8)
-                .background(.primary, in: Circle())
+            VStack(spacing: 0.5) {
+                Capsule()
+                    .fill(Color.black)
+                    .frame(width: 1.4, height: 3)
+                Circle()
+                    .fill(Color.black)
+                    .frame(width: 1.4, height: 1.4)
+            }
+            .frame(width: 4, height: 5)
         }
+    }
+}
+
+package enum SpeakerMenuBarIconArtwork {
+    @MainActor private static let readyImage = render(.ready)
+    @MainActor private static let recordingImage = render(.recording)
+    @MainActor private static let needsPermissionImage = render(.needsPermission)
+
+    @MainActor
+    package static func image(for state: MenuBarIconState) -> NSImage {
+        switch state {
+        case .ready:
+            readyImage
+        case .recording:
+            recordingImage
+        case .needsPermission:
+            needsPermissionImage
+        }
+    }
+
+    @MainActor
+    package static var fallbackImage: NSImage {
+        let configuration = NSImage.SymbolConfiguration(
+            pointSize: 12,
+            weight: .medium
+        )
+        let image = NSImage(
+            systemSymbolName: "waveform",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(configuration)
+            ?? NSImage(size: NSSize(width: 20, height: 18))
+        image.size = NSSize(width: 20, height: 18)
+        image.isTemplate = true
+        return image
+    }
+
+    @MainActor
+    private static func render(_ state: MenuBarIconState) -> NSImage {
+        let renderer = ImageRenderer(content: SpeakerMenuBarGlyph(state: state))
+        renderer.scale = 2
+        guard let image = renderer.nsImage else { return fallbackImage }
+        image.size = NSSize(width: 20, height: 18)
+        image.isTemplate = true
+        return image
+    }
+}
+
+package struct SpeakerMenuBarLabel: View {
+    package let state: MenuBarIconState
+
+    package init(state: MenuBarIconState) {
+        self.state = state
+    }
+
+    package var body: some View {
+        Image(nsImage: SpeakerMenuBarIconArtwork.image(for: state))
+            .renderingMode(.template)
+            .frame(width: 20, height: 18)
+            .foregroundStyle(.primary)
+            .accessibilityHidden(true)
+            .overlay {
+                SpeakerAccessibilityImageLabel(label: accessibilityLabel)
+            }
     }
 
     private var accessibilityLabel: String {
