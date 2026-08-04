@@ -18,5 +18,7 @@ iconutil -c iconset \
     "$TEST_ROOT/AppIcon.icns" \
     -o "$TEST_ROOT/Verified.iconset"
 [[ -s "$TEST_ROOT/Verified.iconset/icon_512x512@2x.png" ]]
+[[ -s "$TEST_ROOT/Verified.iconset/icon_16x16.png" ]]
+[[ -s "$TEST_ROOT/Verified.iconset/icon_32x32.png" ]]
 
 print "PASS: checked-in Speaker brand assets match the canonical vector"

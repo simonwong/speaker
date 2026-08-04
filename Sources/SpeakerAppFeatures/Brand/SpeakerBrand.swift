@@ -15,34 +15,50 @@ package struct SpeakerBrandMarkShape: Shape {
         }
 
         var path = Path()
-        path.move(to: point(0.68, 0.30))
-        path.addLine(to: point(0.90, 0.30))
+        path.move(to: point(0.08, 0.68))
+        path.addCurve(
+            to: point(0.30, 0.22),
+            control1: point(0.18, 0.68),
+            control2: point(0.20, 0.22)
+        )
+        path.addCurve(
+            to: point(0.60, 0.60),
+            control1: point(0.42, 0.22),
+            control2: point(0.45, 0.60)
+        )
+        path.addLine(to: point(0.92, 0.60))
+        return path
+    }
+}
 
-        path.move(to: point(0.10, 0.52))
-        path.addCurve(
-            to: point(0.27, 0.36),
-            control1: point(0.16, 0.52),
-            control2: point(0.19, 0.36)
-        )
-        path.addCurve(
-            to: point(0.45, 0.49),
-            control1: point(0.35, 0.36),
-            control2: point(0.37, 0.49)
-        )
-        path.addCurve(
-            to: point(0.61, 0.57),
-            control1: point(0.51, 0.49),
-            control2: point(0.53, 0.57)
-        )
-        path.addCurve(
-            to: point(0.73, 0.50),
-            control1: point(0.68, 0.57),
-            control2: point(0.66, 0.50)
-        )
-        path.addLine(to: point(0.90, 0.50))
+private struct SpeakerLayeredBrandStrokeShape: Shape {
+    let lineWidth: CGFloat
 
-        path.move(to: point(0.52, 0.70))
-        path.addLine(to: point(0.90, 0.70))
+    func path(in rect: CGRect) -> Path {
+        let centreLine = SpeakerBrandMarkShape().path(in: rect)
+        let rear = centreLine.strokedPath(
+            StrokeStyle(
+                lineWidth: lineWidth * 0.92,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
+        let front = centreLine.strokedPath(
+            StrokeStyle(
+                lineWidth: lineWidth * 0.83,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
+        var path = Path()
+        path.addPath(
+            rear,
+            transform: CGAffineTransform(
+                translationX: 0,
+                y: rect.height * 0.022
+            )
+        )
+        path.addPath(front)
         return path
     }
 }
@@ -52,19 +68,88 @@ package struct SpeakerBrandMark: View {
 
     package var body: some View {
         GeometryReader { proxy in
-            SpeakerBrandMarkShape()
-                .stroke(
-                    style: StrokeStyle(
-                        lineWidth: max(
-                            1,
-                            min(proxy.size.width, proxy.size.height) * 0.055
-                        ),
-                        lineCap: .round,
-                        lineJoin: .round
-                    )
-                )
+            let lineWidth = max(1, proxy.size.height * 0.29 * 1.14)
+            SpeakerLayeredBrandStrokeShape(lineWidth: lineWidth)
+                .fill()
         }
         .accessibilityHidden(true)
+    }
+}
+
+private struct SpeakerFacetedBrandMark: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let lineWidth = proxy.size.height * 0.18 * 1.14 * 1.14
+            let gradient = LinearGradient(
+                stops: [
+                    .init(color: Color(red: 0.953, green: 0.847, blue: 0.682), location: 0),
+                    .init(color: Color(red: 1.000, green: 0.910, blue: 0.773), location: 0.32),
+                    .init(color: Color(red: 0.949, green: 0.804, blue: 0.588), location: 0.62),
+                    .init(color: Color(red: 0.910, green: 0.710, blue: 0.435), location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            ZStack {
+                SpeakerLayeredBrandStrokeShape(lineWidth: lineWidth)
+                    .fill(gradient)
+
+                ZStack {
+                    NormalizedPolygon(points: [
+                        CGPoint(x: 0.05, y: 0.88),
+                        CGPoint(x: 0.28, y: 0.08),
+                        CGPoint(x: 0.43, y: 0.18),
+                        CGPoint(x: 0.52, y: 0.60),
+                        CGPoint(x: 0.38, y: 0.56),
+                        CGPoint(x: 0.22, y: 0.92),
+                    ])
+                    .fill(.white.opacity(0.18))
+
+                    NormalizedPolygon(points: [
+                        CGPoint(x: 0.43, y: 0.18),
+                        CGPoint(x: 0.55, y: 0.43),
+                        CGPoint(x: 0.61, y: 0.66),
+                        CGPoint(x: 0.52, y: 0.60),
+                    ])
+                    .fill(Color(red: 0.651, green: 0.420, blue: 0.239).opacity(0.125))
+
+                    NormalizedPolygon(points: [
+                        CGPoint(x: 0.36, y: 0.20),
+                        CGPoint(x: 0.43, y: 0.18),
+                        CGPoint(x: 0.52, y: 0.60),
+                        CGPoint(x: 0.46, y: 0.54),
+                    ])
+                    .fill(Color(red: 1.000, green: 0.945, blue: 0.827).opacity(0.04))
+                }
+                .mask {
+                    SpeakerLayeredBrandStrokeShape(lineWidth: lineWidth)
+                        .fill(.white)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct NormalizedPolygon: Shape {
+    let points: [CGPoint]
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard let first = points.first else { return path }
+        path.move(to: CGPoint(
+            x: rect.minX + first.x * rect.width,
+            y: rect.minY + first.y * rect.height
+        ))
+        for point in points.dropFirst() {
+            path.addLine(to: CGPoint(
+                x: rect.minX + point.x * rect.width,
+                y: rect.minY + point.y * rect.height
+            ))
+        }
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -87,28 +172,79 @@ package struct SpeakerIdentityTile: View {
     }
 
     package var body: some View {
-        SpeakerBrandMark()
-            .foregroundStyle(SpeakerVisualIdentity.warmAccent)
-            .padding(size * 0.08)
-            .frame(width: size, height: size)
-            .background(
-                LinearGradient(
-                    colors: [
-                        SpeakerVisualIdentity.iconSurfaceTop,
-                        SpeakerVisualIdentity.iconSurfaceBottom,
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(
-                    cornerRadius: size * 0.20,
-                    style: .continuous
-                )
+        ZStack {
+            LinearGradient(
+                colors: [
+                    SpeakerVisualIdentity.iconSurfaceTop,
+                    SpeakerVisualIdentity.iconSurfaceBottom,
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
-            .accessibilityHidden(true)
-            .overlay {
-                accessibilityOverlay
-            }
+
+            RadialGradient(
+                colors: [
+                    Color.white.opacity(size <= 32 ? 0.05 : 0.09),
+                    .clear,
+                ],
+                center: UnitPoint(x: 0.28, y: 0.22),
+                startRadius: 0,
+                endRadius: size * 0.48
+            )
+
+            mark
+        }
+        .frame(width: size, height: size)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: size * 0.215,
+                style: .continuous
+            )
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: size * 0.207,
+                style: .continuous
+            )
+            .inset(by: max(0.5, size * 0.008))
+            .stroke(
+                Color.white.opacity(size <= 32 ? 0.064 : 0.128),
+                lineWidth: max(0.6, size * 0.0045)
+            )
+        }
+        .accessibilityHidden(true)
+        .overlay {
+            accessibilityOverlay
+        }
+    }
+
+    @ViewBuilder
+    private var mark: some View {
+        let layout = markLayout
+        if size * layout.width > 24 {
+            SpeakerFacetedBrandMark()
+                .frame(
+                    width: size * layout.width,
+                    height: size * layout.height
+                )
+        } else {
+            SpeakerBrandMark()
+                .foregroundStyle(SpeakerVisualIdentity.warmAccent)
+                .frame(
+                    width: size * layout.width,
+                    height: size * layout.height
+                )
+        }
+    }
+
+    private var markLayout: (width: CGFloat, height: CGFloat) {
+        if size <= 16 {
+            (0.68, 0.42)
+        } else if size <= 32 {
+            (0.714, 0.44)
+        } else {
+            (0.68, 0.41)
+        }
     }
 
     @ViewBuilder
@@ -144,8 +280,7 @@ package struct SpeakerMenuBarLabel: View {
     package var body: some View {
         ZStack(alignment: .bottomTrailing) {
             SpeakerBrandMark()
-                .padding(.horizontal, 1)
-                .padding(.vertical, 2)
+                .frame(width: 15.6, height: 9)
 
             stateBadge
                 .padding(.trailing, 1)
