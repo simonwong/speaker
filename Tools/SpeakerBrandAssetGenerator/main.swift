@@ -58,6 +58,8 @@ struct SpeakerBrandAssetGenerator {
             options: .atomic
         )
         let icnsChunks: [(type: String, data: Data)] = try [
+            ("icp4", render(pixels: 16)),
+            ("icp5", render(pixels: 32)),
             ("ic07", render(pixels: 128)),
             ("ic08", render(pixels: 256)),
             ("ic09", render(pixels: 512)),
