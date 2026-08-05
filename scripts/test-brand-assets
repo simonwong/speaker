@@ -12,13 +12,35 @@ cleanup() {
 trap cleanup EXIT
 
 "$SCRIPT_DIR/generate-brand-assets" "$TEST_ROOT"
-cmp "$TEST_ROOT/AppIcon.png" "$ROOT/Resources/AppIcon.png"
-cmp "$TEST_ROOT/AppIcon.icns" "$ROOT/Resources/AppIcon.icns"
+
+compare_pixels() {
+    local actual="$1"
+    local expected="$2"
+    local name="$3"
+    local actual_bitmap="$TEST_ROOT/${name}-actual.bmp"
+    local expected_bitmap="$TEST_ROOT/${name}-expected.bmp"
+
+    sips -s format bmp "$actual" --out "$actual_bitmap" >/dev/null
+    sips -s format bmp "$expected" --out "$expected_bitmap" >/dev/null
+    cmp "$actual_bitmap" "$expected_bitmap"
+}
+
+compare_pixels \
+    "$TEST_ROOT/AppIcon.png" \
+    "$ROOT/Resources/AppIcon.png" \
+    "AppIcon"
 iconutil -c iconset \
     "$TEST_ROOT/AppIcon.icns" \
-    -o "$TEST_ROOT/Verified.iconset"
-[[ -s "$TEST_ROOT/Verified.iconset/icon_512x512@2x.png" ]]
-[[ -s "$TEST_ROOT/Verified.iconset/icon_16x16.png" ]]
-[[ -s "$TEST_ROOT/Verified.iconset/icon_32x32.png" ]]
+    -o "$TEST_ROOT/Generated.iconset"
+iconutil -c iconset \
+    "$ROOT/Resources/AppIcon.icns" \
+    -o "$TEST_ROOT/CheckedIn.iconset"
+for generated_icon in "$TEST_ROOT/Generated.iconset"/*.png; do
+    icon_name="${generated_icon:t}"
+    compare_pixels \
+        "$generated_icon" \
+        "$TEST_ROOT/CheckedIn.iconset/$icon_name" \
+        "$icon_name"
+done
 
 print "PASS: checked-in Speaker brand assets match the canonical vector"
