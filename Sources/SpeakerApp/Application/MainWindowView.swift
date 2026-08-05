@@ -59,6 +59,7 @@ struct MainWindowView: View {
                         }
                         .tag(MainWindowTab.about)
                 }
+                .background(MainWindowTabSeparatorHider())
             case .erasing:
                 DataErasureInProgressView()
             case .aboutRecovery:
