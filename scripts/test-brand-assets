@@ -13,22 +13,32 @@ trap cleanup EXIT
 
 "$SCRIPT_DIR/generate-brand-assets" "$TEST_ROOT"
 
-compare_pixels() {
+verify_pixels() {
     local actual="$1"
     local expected="$2"
-    local name="$3"
-    local actual_bitmap="$TEST_ROOT/${name}-actual.bmp"
-    local expected_bitmap="$TEST_ROOT/${name}-expected.bmp"
 
-    sips -s format bmp "$actual" --out "$actual_bitmap" >/dev/null
-    sips -s format bmp "$expected" --out "$expected_bitmap" >/dev/null
-    cmp "$actual_bitmap" "$expected_bitmap"
+    "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+        SpeakerBrandAssetGenerator \
+        --verify-pixels \
+        "$actual" \
+        "$expected"
 }
 
-compare_pixels \
+verify_pixels \
     "$TEST_ROOT/AppIcon.png" \
+    "$ROOT/Resources/AppIcon.png"
+
+MUTATED_ICON="$TEST_ROOT/AppIcon-mutated.png"
+sips --flip horizontal \
     "$ROOT/Resources/AppIcon.png" \
-    "AppIcon"
+    --out "$MUTATED_ICON" >/dev/null
+if verify_pixels \
+    "$ROOT/Resources/AppIcon.png" \
+    "$MUTATED_ICON" >/dev/null 2>&1; then
+    print -u2 "A meaningful brand artwork change passed pixel verification."
+    exit 1
+fi
+
 iconutil -c iconset \
     "$TEST_ROOT/AppIcon.icns" \
     -o "$TEST_ROOT/Generated.iconset"
@@ -37,10 +47,17 @@ iconutil -c iconset \
     -o "$TEST_ROOT/CheckedIn.iconset"
 for generated_icon in "$TEST_ROOT/Generated.iconset"/*.png; do
     icon_name="${generated_icon:t}"
-    compare_pixels \
-        "$generated_icon" \
-        "$TEST_ROOT/CheckedIn.iconset/$icon_name" \
-        "$icon_name"
+    [[ -s "$TEST_ROOT/CheckedIn.iconset/$icon_name" ]]
 done
+for checked_in_icon in "$TEST_ROOT/CheckedIn.iconset"/*.png; do
+    icon_name="${checked_in_icon:t}"
+    [[ -s "$TEST_ROOT/Generated.iconset/$icon_name" ]]
+done
+cmp \
+    "$TEST_ROOT/AppIcon.png" \
+    "$TEST_ROOT/Generated.iconset/icon_512x512@2x.png"
+cmp \
+    "$ROOT/Resources/AppIcon.png" \
+    "$TEST_ROOT/CheckedIn.iconset/icon_512x512@2x.png"
 
 print "PASS: checked-in Speaker brand assets match the canonical vector"
