@@ -1,14 +1,24 @@
 import AppKit
 import Foundation
+import ImageIO
 import SpeakerAppFeatures
 import SwiftUI
 
 @main
 struct SpeakerBrandAssetGenerator {
     static func main() throws {
+        if CommandLine.arguments.count == 4,
+           CommandLine.arguments[1] == "--verify-pixels"
+        {
+            try verifyPixels(
+                actualPath: CommandLine.arguments[2],
+                expectedPath: CommandLine.arguments[3]
+            )
+            return
+        }
         guard CommandLine.arguments.count == 2 else {
             throw GeneratorError(
-                message: "usage: SpeakerBrandAssetGenerator <absolute-output-directory>"
+                message: "usage: SpeakerBrandAssetGenerator <absolute-output-directory> | --verify-pixels <actual.png> <expected.png>"
             )
         }
         let outputPath = CommandLine.arguments[1]
@@ -73,6 +83,109 @@ struct SpeakerBrandAssetGenerator {
             to: outputDirectory.appendingPathComponent("AppIcon.icns"),
             options: .atomic
         )
+    }
+
+    private static func verifyPixels(
+        actualPath: String,
+        expectedPath: String
+    ) throws {
+        let actual = try loadPixels(path: actualPath)
+        let expected = try loadPixels(path: expectedPath)
+        guard actual.width == expected.width,
+              actual.height == expected.height
+        else {
+            throw GeneratorError(message: "brand image dimensions differ")
+        }
+
+        var absoluteDifference: UInt64 = 0
+        var maximumDifference = 0
+        var strongPixelDifferenceCount = 0
+        for pixelOffset in stride(from: 0, to: actual.bytes.count, by: 4) {
+            var pixelMaximum = 0
+            for channelOffset in 0 ..< 4 {
+                let difference = abs(
+                    Int(actual.bytes[pixelOffset + channelOffset])
+                        - Int(expected.bytes[pixelOffset + channelOffset])
+                )
+                absoluteDifference += UInt64(difference)
+                pixelMaximum = max(pixelMaximum, difference)
+                maximumDifference = max(maximumDifference, difference)
+            }
+            if pixelMaximum > 16 {
+                strongPixelDifferenceCount += 1
+            }
+        }
+
+        let pixelCount = actual.width * actual.height
+        let meanDifference = Double(absoluteDifference)
+            / Double(actual.bytes.count)
+        let strongPixelRatio = Double(strongPixelDifferenceCount)
+            / Double(pixelCount)
+        // SwiftUI patch releases can round antialiased edges differently.
+        // Bound both global drift and concentrated changes so geometry still
+        // fails verification.
+        guard meanDifference <= 0.6,
+              strongPixelRatio <= 0.005,
+              maximumDifference <= 128
+        else {
+            throw GeneratorError(
+                message: String(
+                    format: "brand pixels differ: mean=%.4f strong=%.4f max=%d",
+                    meanDifference,
+                    strongPixelRatio,
+                    maximumDifference
+                )
+            )
+        }
+        print(
+            String(
+                format: "PASS: brand pixels match within renderer tolerance (mean=%.4f strong=%.4f max=%d)",
+                meanDifference,
+                strongPixelRatio,
+                maximumDifference
+            )
+        )
+    }
+
+    private static func loadPixels(
+        path: String
+    ) throws -> (width: Int, height: Int, bytes: [UInt8]) {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        else {
+            throw GeneratorError(message: "could not decode brand image: \(path)")
+        }
+
+        let width = image.width
+        let height = image.height
+        let bytesPerRow = width * 4
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * height)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue
+            | CGImageAlphaInfo.premultipliedLast.rawValue
+        let rendered = bytes.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: bitmapInfo
+            ) else {
+                return false
+            }
+            context.draw(
+                image,
+                in: CGRect(x: 0, y: 0, width: width, height: height)
+            )
+            return true
+        }
+        guard rendered else {
+            throw GeneratorError(message: "could not normalize brand image: \(path)")
+        }
+        return (width, height, bytes)
     }
 
     @MainActor
