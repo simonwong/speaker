@@ -123,10 +123,11 @@ private struct ActivityPill: View {
         count: ActivityWaveform.barCount
     )
     @State private var isHovered = false
+    @State private var isRevealed = false
 
     var body: some View {
         ActivityHUDSurface(
-            width: 118,
+            width: isRevealed ? 118 : 10,
             height: 34,
             palette: palette
         ) {
@@ -136,6 +137,11 @@ private struct ActivityPill: View {
                     levels: levels,
                     reduceMotion: reduceMotion
                 )
+                .frame(width: 96, height: 34)
+                .mask {
+                    Capsule()
+                        .frame(width: isRevealed ? 96 : 2, height: 34)
+                }
                 .opacity(isHovered ? 0.3 : 1)
                 .animation(
                     .easeInOut(duration: 0.35),
@@ -156,8 +162,20 @@ private struct ActivityPill: View {
                 .opacity(isHovered ? 1 : 0)
             }
         }
+        .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
         .padding(5)
         .accessibilityElement(children: .contain)
+        .task {
+            guard !isRevealed else { return }
+            guard !reduceMotion else {
+                isRevealed = true
+                return
+            }
+            await Task.yield()
+            withAnimation(.smooth(duration: 0.42, extraBounce: 0.06)) {
+                isRevealed = true
+            }
+        }
         .onHover { hovered in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovered
@@ -319,10 +337,15 @@ private struct ActivityHUDSurface<Content: View>: View {
         switch surfaceStyle {
         case .liquidGlass:
             if #available(macOS 26.0, *) {
-                framedContent.glassEffect(
-                    .regular.tint(.black.opacity(palette.glassTintOpacity)),
-                    in: surfaceShape
-                )
+                ZStack {
+                    systemMaterialBackdrop
+                    framedContent.glassEffect(
+                        .regular.tint(
+                            .black.opacity(palette.glassTintOpacity)
+                        ),
+                        in: surfaceShape
+                    )
+                }
             } else {
                 systemMaterialSurface
             }
@@ -338,24 +361,29 @@ private struct ActivityHUDSurface<Content: View>: View {
     }
 
     private var framedContent: some View {
-        content.frame(width: width, height: height)
+        content
+            .frame(width: width, height: height)
+            .clipShape(surfaceShape)
     }
 
     private var systemMaterialSurface: some View {
-        framedContent.background {
-            ZStack {
-                HUDVisualEffect(cornerRadius: cornerRadius)
-                LinearGradient(
-                    colors: [
-                        .black.opacity(palette.fallbackTintTopOpacity),
-                        .black.opacity(palette.fallbackTintBottomOpacity),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-            .clipShape(surfaceShape)
+        framedContent.background { systemMaterialBackdrop }
+    }
+
+    private var systemMaterialBackdrop: some View {
+        ZStack {
+            HUDVisualEffect(cornerRadius: cornerRadius)
+            LinearGradient(
+                colors: [
+                    .black.opacity(palette.fallbackTintTopOpacity),
+                    .black.opacity(palette.fallbackTintBottomOpacity),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
+        .frame(width: width, height: height)
+        .clipShape(surfaceShape)
     }
 
     private var surfaceShape: RoundedRectangle {

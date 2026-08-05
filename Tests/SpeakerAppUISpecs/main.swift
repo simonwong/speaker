@@ -177,6 +177,42 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "Liquid Glass HUD keeps an adaptive behind-window backing",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let presentation = VoiceInputHUDContractFixture.recording.presentation
+            let size = VoiceInputPanelLayout.recording.size
+            let hostingView = NSHostingView(rootView:
+                VoiceInputHUD(
+                    presentation: presentation,
+                    performAction: { _ in nil },
+                    routeEffect: { _ in }
+                )
+                .environment(\.adaptiveGlassSurfaceStyleOverride, .liquidGlass)
+            )
+            hostingView.frame = NSRect(origin: .zero, size: size)
+            let window = NSWindow(
+                contentRect: hostingView.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = hostingView
+            window.orderFrontRegardless()
+            defer { window.close() }
+            hostingView.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+
+            let effects = visualEffectViews(in: hostingView)
+            try expect(effects.count == 1, "found \(effects.count) material views")
+            guard let effect = effects.first else { return }
+            try expect(effect.material == .hudWindow)
+            try expect(effect.blendingMode == .behindWindow)
+            try expect(effect.state == .active)
+        }
+
+        run(
             "Increase Contrast strengthens the rendered HUD boundary",
             failures: &failures,
             executed: &executed
