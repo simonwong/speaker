@@ -101,9 +101,9 @@ jobs:
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
             "${{ runner.temp }}/speaker-release-pending/Speaker.app" \
             "${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip"
-          /usr/bin/shasum -a 256 \
-            "${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip" \
-            > "${{ runner.temp }}/Speaker-ci-${{ github.sha }}.zip.sha256"
+          (cd "${{ runner.temp }}" && /usr/bin/shasum -a 256 \
+            "Speaker-ci-${{ github.sha }}.zip" \
+            > "Speaker-ci-${{ github.sha }}.zip.sha256")
 
       - name: Retain validated release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
