@@ -138,6 +138,17 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         let existingIndex = storedRecords.firstIndex(where: {
             $0.sessionID == record.sessionID
         })
+        guard SessionHistoryRecordPolicy.hasRetainedContent(record) else {
+            guard let existingIndex else { return }
+            storedRecords.remove(at: existingIndex)
+            if persistCurrentRecords() {
+                NotificationCenter.default.post(
+                    name: .speakerHistoryDidChange,
+                    object: nil
+                )
+            }
+            return
+        }
         guard retentionPolicy.savesNewRecords || existingIndex != nil else {
             return
         }

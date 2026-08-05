@@ -1739,18 +1739,11 @@ struct SpeakerCoreSpecs {
             await sessions.send(.pressed)
             let release = Task { await sessions.send(.released) }
             while await refiner.callCount == 0 { await Task.yield() }
-            while await history.allRecords().last?.outcome.stage != .refining {
-                await Task.yield()
-            }
 
-            let inFlightRecord = await history.allRecords().last
+            let inFlightRecords = await history.allRecords()
             try expect(
-                inFlightRecord?.transcription == nil,
-                "confirmed secure transcript reached non-terminal history"
-            )
-            try expect(
-                inFlightRecord?.providerRequestID == nil,
-                "secure request identity reached non-terminal history"
+                inFlightRecords.isEmpty,
+                "textless in-flight session reached history"
             )
             try expect(
                 !sqliteFilesContain(Data(secret.utf8), at: fileURL),
@@ -1759,17 +1752,11 @@ struct SpeakerCoreSpecs {
 
             await sessions.send(.cancel)
             await release.value
-            while await history.allRecords().last?.outcome.isCancelled != true {
-                await Task.yield()
-            }
-            let cancelledRecord = await history.allRecords().last
+            await sessions.shutdown()
+            let cancelledRecords = await history.allRecords()
             try expect(
-                cancelledRecord?.transcription == nil,
-                "cancelling refinement persisted the secure transcript"
-            )
-            try expect(
-                cancelledRecord?.providerRequestID == nil,
-                "cancelling refinement persisted the secure request identity"
+                cancelledRecords.isEmpty,
+                "textless cancelled session reached history"
             )
             try expect(
                 !sqliteFilesContain(Data(secret.utf8), at: fileURL),
@@ -3954,7 +3941,7 @@ struct SpeakerCoreSpecs {
             try expect(plaintextValue == "readable-key")
         }
 
-        await runAsync("versioned local history persists searches deletes and excludes sensitive fields", failures: &failures) {
+        await runAsync("versioned local history omits empty records and excludes sensitive fields", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-history-spec-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -4006,8 +3993,8 @@ struct SpeakerCoreSpecs {
                 sessionID: secondID,
                 startedAt: Date(timeIntervalSince1970: 200),
                 applicationName: "Notes",
-                transcription: nil,
-                finalText: nil,
+                transcription: " \n ",
+                finalText: "\t",
                 providerRequestID: "request-log-2",
                 providerErrorCode: "invalidCredential",
                 outcome: .failed(secondID, .providerNotConfigured)
@@ -4026,9 +4013,9 @@ struct SpeakerCoreSpecs {
                 (historyAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
                 "history file is not owner-only"
             )
-            try expect(allRecords.map(\.sessionID) == [secondID, firstID])
+            try expect(allRecords.map(\.sessionID) == [firstID])
             try expect(transcriptMatches.map(\.sessionID) == [firstID])
-            try expect(errorMatches.map(\.sessionID) == [secondID])
+            try expect(errorMatches.isEmpty)
             try expect(deliveryMatches.map(\.sessionID) == [firstID])
             try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
             try expect(allRecords.last?.transcriptionProvider == "doubao")
@@ -4143,7 +4130,7 @@ struct SpeakerCoreSpecs {
                 sessionID: id,
                 startedAt: Date(),
                 applicationName: "TextEdit",
-                transcription: nil,
+                transcription: "诊断记录",
                 finalText: nil,
                 providerErrorCode: "authentication",
                 providerMessage: "future-api-key-secret",
@@ -4207,7 +4194,7 @@ struct SpeakerCoreSpecs {
                 sessionID: id,
                 startedAt: Date(),
                 applicationName: "TextEdit",
-                transcription: nil,
+                transcription: "诊断记录",
                 finalText: nil,
                 outcome: .failed(id, .providerAuthenticationFailed)
             ))
@@ -4291,6 +4278,18 @@ struct SpeakerCoreSpecs {
                 fileURL: fileURL,
                 maximumRecordCount: 3
             )
+            let emptyID = VoiceInputSessionID()
+            await store.save(.init(
+                sessionID: emptyID,
+                startedAt: Date().addingTimeInterval(1),
+                applicationName: nil,
+                transcription: " \n",
+                finalText: nil,
+                outcome: .failed(emptyID, .providerReturnedNoText)
+            ))
+            let recordsAfterEmptySave = await store.allRecords()
+            try expect(recordsAfterEmptySave.isEmpty)
+
             let id = VoiceInputSessionID()
             await store.save(.init(
                 sessionID: id,
