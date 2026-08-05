@@ -635,10 +635,16 @@ struct SpeakerAppUISpecs {
                 window.close()
             }
 
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let expectedMinimum = CGSize(width: 720, height: 560)
+            let deadline = Date().addingTimeInterval(1)
+            while window.contentMinSize != expectedMinimum, Date() < deadline {
+                RunLoop.current.run(
+                    until: min(deadline, Date().addingTimeInterval(0.01))
+                )
+            }
 
             try expect(
-                window.contentMinSize == CGSize(width: 720, height: 560),
+                window.contentMinSize == expectedMinimum,
                 "SwiftUI bridge left content minimum at \(window.contentMinSize)"
             )
         }
