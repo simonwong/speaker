@@ -83,13 +83,15 @@ struct SpeakerBrandAssetGenerator {
                 .frame(width: size, height: size)
         )
         renderer.scale = 1
-        guard let image = renderer.nsImage,
-              let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:])
-        else {
+        guard let image = renderer.cgImage else {
             throw GeneratorError(
                 message: "could not render the \(pixels)-pixel Speaker icon"
+            )
+        }
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw GeneratorError(
+                message: "could not encode the \(pixels)-pixel Speaker icon"
             )
         }
         return png
