@@ -66,6 +66,19 @@ Apple Development identity 时必须显式指定，避免构建在不同证书�
 脚本会拒绝 ad-hoc 结果或仍然绑定单次 CDHash 的 identity。可用 identity 可通过
 `security find-identity -v -p codesigning` 查看。
 
+## GitHub development prereleases
+
+After CI succeeds for a push to `main`, it reads the explicit SemVer from
+`Resources/Info.plist`. If `v<SemVer>-dev` does not exist, CI creates a GitHub
+Prerelease containing the already validated ad-hoc ZIP and its SHA-256 file.
+Later commits using the same SemVer do not replace or republish that release;
+creating another development release requires a reviewed version change.
+
+Development prereleases use `com.local.speaker`, are not notarized, and are not
+part of the Sparkle update channel. They may require renewed Microphone and
+Accessibility permissions after installation. This path remains separate from
+the protected production workflow below.
+
 ## 正式候选构建
 
 首次正式发布前，必须把经过审查且后续保持不变的身份写入：
