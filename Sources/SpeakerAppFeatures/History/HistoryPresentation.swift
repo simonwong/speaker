@@ -40,12 +40,15 @@ package enum HistoryPresentation {
         _ records: [VoiceInputHistoryRecord],
         query: String
     ) -> [VoiceInputHistoryRecord] {
+        let recordsWithContent = records.filter(
+            SessionHistoryRecordPolicy.hasRetainedContent
+        )
         let normalizedQuery = query.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
-        guard !normalizedQuery.isEmpty else { return records }
+        guard !normalizedQuery.isEmpty else { return recordsWithContent }
 
-        return records.filter { record in
+        return recordsWithContent.filter { record in
             retainedText(for: record)?.range(
                 of: normalizedQuery,
                 options: [.caseInsensitive, .diacriticInsensitive],
@@ -57,11 +60,7 @@ package enum HistoryPresentation {
     package static func retainedText(
         for record: VoiceInputHistoryRecord
     ) -> String? {
-        [record.finalText, record.transcription]
-            .compactMap { $0 }
-            .first {
-                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
+        SessionHistoryRecordPolicy.retainedText(record)
     }
 
     package static func row(

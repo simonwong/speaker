@@ -4,6 +4,22 @@ import Foundation
 /// importer and production SQLite store must search, sort and retain exactly
 /// the same fields or migrations can silently change user-visible behavior.
 package enum SessionHistoryRecordPolicy {
+    package static func retainedText(
+        _ record: VoiceInputHistoryRecord
+    ) -> String? {
+        [record.finalText, record.transcription]
+            .compactMap { $0 }
+            .first {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+    }
+
+    package static func hasRetainedContent(
+        _ record: VoiceInputHistoryRecord
+    ) -> Bool {
+        retainedText(record) != nil
+    }
+
     package static func searchableValues(
         _ record: VoiceInputHistoryRecord
     ) -> [String] {
@@ -55,9 +71,10 @@ package enum SessionHistoryRecordPolicy {
                 to: now
             )
         }
+        let recordsWithContent = records.filter(hasRetainedContent)
         let ageFiltered = cutoff.map { cutoff in
-            records.filter { $0.startedAt >= cutoff }
-        } ?? records
+            recordsWithContent.filter { $0.startedAt >= cutoff }
+        } ?? recordsWithContent
         return Array(sort(ageFiltered).prefix(max(1, maximumCount)))
     }
 }

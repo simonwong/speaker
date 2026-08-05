@@ -989,7 +989,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "history row presentation keeps textless records safe and uncopyable",
+            "history presentation hides textless records and keeps fallback rows safe",
             failures: &failures,
             executed: &executed
         ) {
@@ -1028,10 +1028,15 @@ struct SpeakerAppUISpecs {
                 for: secureRecord,
                 calendar: calendar
             )
+            let filtered = HistoryPresentation.filteredRecords(
+                [textRecord, secureRecord],
+                query: ""
+            )
 
             try expect(visible.text == "最终正文")
             try expect(visible.time == "09:05")
             try expect(visible.canCopy)
+            try expect(filtered.map(\.sessionID) == [textID])
             try expect(redacted.text == "此会话未保留正文")
             try expect(!redacted.canCopy)
         }

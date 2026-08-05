@@ -289,6 +289,15 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     public func save(_ record: VoiceInputHistoryRecord) async {
         guard let db = connection?.raw else { return }
+        guard SessionHistoryRecordPolicy.hasRetainedContent(record) else {
+            if !loadRecords(
+                whereClause: "WHERE session_id = ?",
+                binding: record.sessionID.rawValue.uuidString
+            ).isEmpty {
+                _ = await delete(sessionID: record.sessionID)
+            }
+            return
+        }
         guard retentionPolicy.savesNewRecords
                 || !loadRecords(
                     whereClause: "WHERE session_id = ?",
@@ -349,6 +358,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     HistoryRecordV1.self,
                     from: data
                 ), let record = try? stored.domainRecord else { continue }
+                guard SessionHistoryRecordPolicy.hasRetainedContent(record)
+                else { continue }
                 accumulator.add(record)
             }
             return accumulator.summary()
@@ -501,9 +512,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             try verifyPrivacyScrub(db: db)
             try protectSQLiteFiles()
             privacyMigrationFailureReason = nil
-            if !plan.deletions.isEmpty {
+            if plan.corruptedDeletionCount > 0 {
                 notice = .corruptedRecordsSkipped(
-                    count: plan.deletions.count
+                    count: plan.corruptedDeletionCount
                 )
             } else {
                 clearOperationalNotice()
@@ -812,6 +823,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
         var rewrites: [Rewrite] = []
         var deletions: [String] = []
+        var corruptedDeletionCount = 0
 
         var hasChanges: Bool {
             !rewrites.isEmpty || !deletions.isEmpty
@@ -854,6 +866,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                   let payloadBytes = sqlite3_column_blob(statement, 1)
             else {
                 plan.deletions.append(sessionID)
+                plan.corruptedDeletionCount += 1
                 stepStatus = sqlite3_step(statement)
                 continue
             }
@@ -866,6 +879,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 with: payload
             ) as? [String: Any] else {
                 plan.deletions.append(sessionID)
+                plan.corruptedDeletionCount += 1
                 stepStatus = sqlite3_step(statement)
                 continue
             }
@@ -882,7 +896,14 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             ), let stored = try? Self.decoder.decode(
                 HistoryRecordV1.self,
                 from: sanitizedPayload
-            ), (try? stored.domainRecord) != nil else {
+            ), let record = try? stored.domainRecord else {
+                plan.deletions.append(sessionID)
+                plan.corruptedDeletionCount += 1
+                stepStatus = sqlite3_step(statement)
+                continue
+            }
+
+            guard SessionHistoryRecordPolicy.hasRetainedContent(record) else {
                 plan.deletions.append(sessionID)
                 stepStatus = sqlite3_step(statement)
                 continue
