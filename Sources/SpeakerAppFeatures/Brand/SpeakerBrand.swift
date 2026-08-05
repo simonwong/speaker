@@ -284,7 +284,7 @@ private struct SpeakerMenuBarGlyph: View {
                         lineJoin: .round
                     )
                 )
-                .frame(width: 15.2, height: 8.6)
+                .frame(width: 15.2, height: 10.6)
                 .offset(y: 1.2)
         }
         .frame(width: 20, height: 18)
