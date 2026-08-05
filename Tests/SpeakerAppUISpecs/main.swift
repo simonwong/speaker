@@ -691,6 +691,61 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "main window tabs keep the native style without separators",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let selection = MainWindowSelectionFixture()
+            let window = NSWindow(
+                contentRect: NSRect(
+                    x: -10_000,
+                    y: -10_000,
+                    width: 900,
+                    height: 640
+                ),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = NSHostingView(
+                rootView: MainWindowGeometryFixture(selection: selection)
+            )
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+            guard let frameView = window.contentView?.superview,
+                  let tabs = segmentedControls(in: frameView).first(where: {
+                      $0.segmentCount == MainWindowTab.allCases.count
+                  }) else {
+                throw SpecFailure(
+                    message: "top tabs were replaced with a custom control"
+                )
+            }
+            try expect(
+                tabs.segmentStyle == .automatic,
+                "top tabs changed the native automatic style"
+            )
+            guard let mask = tabs.superview?.layer?.mask as? CAShapeLayer,
+                  let path = mask.path else {
+                throw SpecFailure(message: "top tab separators were still visible")
+            }
+            let segmentWidth = tabs.superview!.bounds.width
+                / CGFloat(tabs.segmentCount)
+            try expect(
+                path.contains(CGPoint(x: segmentWidth / 2, y: 10)),
+                "separator mask hid tab content"
+            )
+            try expect(
+                !path.contains(CGPoint(x: segmentWidth, y: 10)),
+                "separator mask kept an internal divider"
+            )
+        }
+
+        run(
             "contribution heatmap lays out 52 Monday-first weeks with today in the final column",
             failures: &failures,
             executed: &executed
@@ -1302,6 +1357,21 @@ private func visualEffectViews(in root: NSView) -> [NSVisualEffectView] {
 }
 
 @MainActor
+private func segmentedControls(in root: NSView) -> [NSSegmentedControl] {
+    var controls: [NSSegmentedControl] = []
+
+    func visit(_ view: NSView) {
+        if let control = view as? NSSegmentedControl {
+            controls.append(control)
+        }
+        view.subviews.forEach(visit)
+    }
+
+    visit(root)
+    return controls
+}
+
+@MainActor
 private func renderedHUDBitmap(
     increasedContrast: Bool
 ) throws -> NSBitmapImageRep {
@@ -1373,6 +1443,7 @@ private struct MainWindowGeometryFixture: View {
                         .tag(tab)
                 }
             }
+            .background(MainWindowTabSeparatorHider())
         }
     }
 }

@@ -5,64 +5,6 @@ import SwiftUI
 
 private typealias SettingsOverviewSection = SettingsPage
 
-private struct SettingsOverviewSectionFramePreference: PreferenceKey {
-    static let defaultValue: [SettingsOverviewSection: CGFloat] = [:]
-
-    static func reduce(
-        value: inout [SettingsOverviewSection: CGFloat],
-        nextValue: () -> [SettingsOverviewSection: CGFloat]
-    ) {
-        value.merge(nextValue()) { $1 }
-    }
-}
-
-private struct SettingsOverviewChipSurface: ViewModifier {
-    let isActive: Bool
-    var tint: Color = .accentColor
-    @Environment(\.accessibilityReduceTransparency)
-    private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.glassEffect(
-                isActive
-                    ? .regular.tint(tint).interactive()
-                    : .regular.interactive(),
-                in: .capsule
-            )
-            .overlay { contrastBorder }
-        } else {
-            content.background(
-                reduceTransparency
-                    ? Color(nsColor: .controlBackgroundColor)
-                    : isActive
-                        ? tint.opacity(0.14)
-                        : Color.primary.opacity(0.04),
-                in: Capsule()
-            )
-            .overlay { contrastBorder }
-        }
-    }
-
-    private var surfaceStyle: AdaptiveGlassSurfaceStyle {
-        AdaptiveGlassSurfacePolicy.resolve(
-            reduceTransparency: reduceTransparency
-        )
-    }
-
-    @ViewBuilder
-    private var contrastBorder: some View {
-        if contrast == .increased || (reduceTransparency && isActive) {
-            Capsule().stroke(
-                isActive ? tint.opacity(0.8) : Color.primary.opacity(0.5),
-                lineWidth: contrast == .increased ? 1.5 : 1
-            )
-        }
-    }
-}
-
 private struct SettingsCard<Content: View>: View {
     let title: String
     let subtitle: String?
@@ -221,15 +163,9 @@ struct DataErasureInProgressView: View {
 private struct SettingsOverviewView: View {
     let workspace: SettingsWorkspace
     @ObservedObject private var navigation: SettingsNavigationModel
-    @ObservedObject private var permissions: PermissionModel
     @ObservedObject private var shortcut: VoiceShortcutFeature
-    @ObservedObject private var doubao: DoubaoSettingsModel
-    @ObservedObject private var refinement: RefinementSettingsModel
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
-    @State private var activeSection = SettingsOverviewSection.shortcut
     @Environment(\.mainWindowLayout) private var mainWindowLayout
-    @Environment(\.accessibilityReduceTransparency)
-    private var reduceTransparency
 
     init(
         workspace: SettingsWorkspace,
@@ -237,10 +173,7 @@ private struct SettingsOverviewView: View {
     ) {
         self.workspace = workspace
         navigation = workspace.navigation
-        permissions = workspace.permissions
         shortcut = workspace.shortcut
-        doubao = workspace.doubao
-        refinement = workspace.refinement
         self.shortcutRecorder = shortcutRecorder
     }
 
@@ -250,7 +183,7 @@ private struct SettingsOverviewView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     hero
 
-                    ForEach(visibleSections) { section in
+                    ForEach(SettingsOverviewSection.allCases) { section in
                         sectionGroup(section) {
                             sectionContent(section, proxy: proxy)
                         }
@@ -263,18 +196,6 @@ private struct SettingsOverviewView: View {
                     mainWindowLayout.pageHorizontalPadding
                 )
                 .padding(.bottom, 28)
-            }
-            .coordinateSpace(name: "settingsOverviewScroll")
-            .onPreferenceChange(
-                SettingsOverviewSectionFramePreference.self
-            ) { frames in
-                let passed = visibleSections.filter {
-                    (frames[$0] ?? .infinity) <= 70
-                }
-                activeSection = passed.last ?? visibleSections.first ?? .shortcut
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                pinnedBar(proxy: proxy)
             }
             .onChange(of: navigation.page) { _, page in
                 navigate(to: page, proxy: proxy)
@@ -291,39 +212,6 @@ private struct SettingsOverviewView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private static let tabSections = SettingsOverviewSection.allCases
-
-    private var visibleSections: [SettingsOverviewSection] {
-        Self.tabSections
-    }
-
-    private var pendingSections: [SettingsOverviewSection] {
-        var pending: [SettingsOverviewSection] = []
-        if !doubao.hasConfiguredKey {
-            pending.append(.apiKeys)
-        }
-        if refinement.choice != .defaultSmooth,
-           !refinement.hasStoredKey {
-            if !pending.contains(.apiKeys) {
-                pending.append(.apiKeys)
-            }
-        }
-        if !permissions.snapshot.allGranted {
-            pending.append(.permissions)
-        }
-        return pending
-    }
-
-    private var usesGlass: Bool {
-        navigationSurfaceStyle == .liquidGlass
-    }
-
-    private var navigationSurfaceStyle: AdaptiveGlassSurfaceStyle {
-        AdaptiveGlassSurfacePolicy.resolve(
-            reduceTransparency: reduceTransparency
-        )
     }
 
     private var hero: some View {
@@ -343,125 +231,6 @@ private struct SettingsOverviewView: View {
         .padding(.top, 16)
     }
 
-    @ViewBuilder
-    private func pinnedBar(proxy: ScrollViewProxy) -> some View {
-        let bar = responsivePinnedBar(proxy: proxy)
-
-        if #available(macOS 26.0, *), usesGlass {
-            GlassEffectContainer(spacing: 6) { bar }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-        } else {
-            solidPinnedBar(bar)
-        }
-    }
-
-    @ViewBuilder
-    private func responsivePinnedBar(
-        proxy: ScrollViewProxy
-    ) -> some View {
-        if mainWindowLayout.usesScrollableSettingsNavigation {
-            ScrollView(.horizontal, showsIndicators: false) {
-                pinnedBarContent(proxy: proxy)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-        } else {
-            pinnedBarContent(proxy: proxy)
-        }
-    }
-
-    private func pinnedBarContent(
-        proxy: ScrollViewProxy
-    ) -> some View {
-        HStack(spacing: 6) {
-            ForEach(visibleSections) { section in
-                anchorChip(section, proxy: proxy)
-            }
-            Spacer()
-            readinessChip(proxy: proxy)
-        }
-    }
-
-    private func solidPinnedBar(_ bar: some View) -> some View {
-        VStack(spacing: 0) {
-            bar
-                .padding(.horizontal, 20)
-                .padding(.vertical, 9)
-                .background {
-                    if reduceTransparency {
-                        Color(nsColor: .windowBackgroundColor)
-                    } else {
-                        Rectangle().fill(.bar)
-                    }
-                }
-            Divider()
-        }
-    }
-
-    private func anchorChip(
-        _ section: SettingsOverviewSection,
-        proxy: ScrollViewProxy
-    ) -> some View {
-        Button {
-            open(section, proxy: proxy)
-        } label: {
-            HStack(spacing: 5) {
-                if let color = statusColor(for: section) {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 6, height: 6)
-                }
-                Text(section.title)
-                    .font(.caption.weight(
-                        activeSection == section ? .semibold : .regular
-                    ))
-            }
-            .foregroundStyle(
-                activeSection == section
-                    ? (usesGlass ? Color.white : Color.accentColor)
-                    : Color.secondary
-            )
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .modifier(SettingsOverviewChipSurface(
-                isActive: activeSection == section
-            ))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func readinessChip(proxy: ScrollViewProxy) -> some View {
-        let isReady = pendingSections.isEmpty
-        return Button {
-            if let target = pendingSections.first {
-                open(target, proxy: proxy)
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: isReady
-                    ? "checkmark.circle.fill"
-                    : "arrow.down.circle.fill")
-                Text(isReady ? "已就绪" : "\(pendingSections.count) 项待配置")
-                    .font(.caption.weight(.semibold))
-            }
-            .foregroundStyle(
-                usesGlass ? Color.white : (isReady ? Color.green : Color.orange)
-            )
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .modifier(SettingsOverviewChipSurface(
-                isActive: true,
-                tint: isReady ? .green : .orange
-            ))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(isReady)
-        .help(isReady ? "所有必需配置均已完成" : "点击跳到第一个待配置项")
-    }
-
     private func sectionGroup<Content: View>(
         _ section: SettingsOverviewSection,
         @ViewBuilder content: () -> Content
@@ -472,18 +241,6 @@ private struct SettingsOverviewView: View {
                 .foregroundStyle(.secondary)
                 .padding(.leading, 6)
             content()
-        }
-        .background {
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: SettingsOverviewSectionFramePreference.self,
-                    value: [
-                        section: geometry.frame(
-                            in: .named("settingsOverviewScroll")
-                        ).minY,
-                    ]
-                )
-            }
         }
         .id(section)
     }
@@ -539,39 +296,13 @@ private struct SettingsOverviewView: View {
         proxy: ScrollViewProxy,
         animated: Bool = true
     ) {
-        guard visibleSections.contains(section) else { return }
-        activeSection = section
+        guard SettingsOverviewSection.allCases.contains(section) else { return }
         if animated {
             withAnimation(.easeInOut(duration: 0.25)) {
                 proxy.scrollTo(section, anchor: .top)
             }
         } else {
             proxy.scrollTo(section, anchor: .top)
-        }
-    }
-
-    private func statusColor(
-        for section: SettingsOverviewSection
-    ) -> Color? {
-        switch section {
-        case .shortcut, .refinement, .general:
-            return nil
-        case .apiKeys:
-            if case .failure = doubao.status { return .red }
-            if case .checking = doubao.status { return .blue }
-            if refinement.connectionFailure != nil { return .red }
-            if !doubao.hasConfiguredKey { return .orange }
-            if refinement.choice != .defaultSmooth,
-               !refinement.hasStoredKey {
-                return .orange
-            }
-            return .green
-        case .permissions:
-            if permissions.snapshot.microphone == .restricted
-                || permissions.snapshot.accessibility == .restricted {
-                return .red
-            }
-            return permissions.snapshot.allGranted ? .green : .orange
         }
     }
 }
