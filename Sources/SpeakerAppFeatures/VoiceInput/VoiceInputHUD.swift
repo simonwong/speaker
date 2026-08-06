@@ -6,6 +6,7 @@ package struct VoiceInputHUD: View {
     let performAction:
         (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
+    let activityDismissal: VoiceInputPanelDismissal?
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.voiceInputHUDIncreasedContrastOverride)
     private var increasedContrastOverride
@@ -14,11 +15,13 @@ package struct VoiceInputHUD: View {
         presentation: VoiceInputOverlayPresentation,
         performAction:
             @escaping (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?,
-        routeEffect: @escaping (VoiceInputExperienceEffect) -> Void
+        routeEffect: @escaping (VoiceInputExperienceEffect) -> Void,
+        activityDismissal: VoiceInputPanelDismissal? = nil
     ) {
         self.presentation = presentation
         self.performAction = performAction
         self.routeEffect = routeEffect
+        self.activityDismissal = activityDismissal
     }
 
     private var palette: VoiceInputHUDContrastPalette {
@@ -34,6 +37,7 @@ package struct VoiceInputHUD: View {
                 ActivityPill(
                     model: activity,
                     palette: palette,
+                    dismissal: activityDismissal,
                     cancel: { _ = performAction(activity.cancelAction) }
                 )
             } else {
@@ -115,6 +119,7 @@ private struct ActivityPillModel: Equatable {
 private struct ActivityPill: View {
     let model: ActivityPillModel
     let palette: VoiceInputHUDContrastPalette
+    let dismissal: VoiceInputPanelDismissal?
     let cancel: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -166,6 +171,7 @@ private struct ActivityPill: View {
         .padding(5)
         .accessibilityElement(children: .contain)
         .task {
+            guard dismissal == nil else { return }
             guard !isRevealed else { return }
             guard !reduceMotion else {
                 isRevealed = true
@@ -174,6 +180,18 @@ private struct ActivityPill: View {
             await Task.yield()
             withAnimation(.smooth(duration: 0.42, extraBounce: 0.06)) {
                 isRevealed = true
+            }
+        }
+        .onChange(of: dismissal) { _, dismissal in
+            let animation: Animation? = if reduceMotion {
+                nil
+            } else if let dismissal {
+                .easeIn(duration: dismissal.fadeDuration)
+            } else {
+                .smooth(duration: 0.3, extraBounce: 0.03)
+            }
+            withAnimation(animation) {
+                isRevealed = dismissal == nil
             }
         }
         .onHover { hovered in

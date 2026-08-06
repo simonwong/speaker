@@ -472,6 +472,57 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "voice HUD dismissal policy covers live phases and Reduce Motion",
+            failures: &failures,
+            executed: &executed
+        ) {
+            for layout in [
+                VoiceInputPanelLayout.recording,
+                .processing,
+            ] {
+                var transitions = VoiceInputPanelTransitionState()
+                transitions.present(layout)
+                let animated = transitions.dismiss(reduceMotion: false)
+                try expect(animated.collapsesActivity)
+                try expect(animated.fadeDuration == 0.2)
+                try expect(
+                    animated.completionDelay == .milliseconds(220)
+                )
+                try expect(transitions.canComplete(animated))
+
+                transitions.present(layout)
+                let reduced = transitions.dismiss(reduceMotion: true)
+                try expect(!reduced.collapsesActivity)
+                try expect(reduced.fadeDuration == 0.12)
+                try expect(
+                    reduced.completionDelay == .milliseconds(140)
+                )
+                try expect(transitions.canComplete(reduced))
+            }
+        }
+
+        run(
+            "showing a voice HUD fences stale dismissal completion",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var transitions = VoiceInputPanelTransitionState()
+            transitions.present(.recording)
+            let stale = transitions.dismiss(reduceMotion: false)
+            try expect(transitions.canComplete(stale))
+
+            transitions.present(.processing)
+            try expect(
+                !transitions.canComplete(stale),
+                "a re-shown HUD accepted stale teardown work"
+            )
+            try expect(transitions.presentedLayout == .processing)
+
+            let current = transitions.dismiss(reduceMotion: false)
+            try expect(transitions.canComplete(current))
+        }
+
+        run(
             "production voice HUD exposes labelled actionable controls",
             failures: &failures,
             executed: &executed

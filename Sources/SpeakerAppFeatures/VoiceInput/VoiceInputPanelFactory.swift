@@ -19,8 +19,8 @@ package enum VoiceInputPanelFactory {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        // AppKit's window shadow follows the rectangular panel bounds rather
-        // than the capsule content, so the HUD intentionally draws no shadow.
+        // AppKit's shadow follows the rectangular panel bounds; shaped HUD
+        // content owns its restrained SwiftUI shadow instead.
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true

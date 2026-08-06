@@ -14,12 +14,10 @@ final class VoiceInputPanelController {
     private let performAction:
         (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     private let routeEffect: (VoiceInputExperienceEffect) -> Void
+    private let animationState: VoiceInputOverlayAnimationState
     private var stateCancellable: AnyCancellable?
     private var placementCancellables: Set<AnyCancellable> = []
-    private var presentedLayout: VoiceInputPanelLayout?
-    /// Bumped on every show/hide request so a pending fade-out completion
-    /// never tears down a panel that was re-shown while it was still fading.
-    private var hideGeneration = 0
+    private var transitionState = VoiceInputPanelTransitionState()
 
     init(
         experience: VoiceInputExperience,
@@ -32,10 +30,13 @@ final class VoiceInputPanelController {
         }
         self.performAction = performAction
         self.routeEffect = routeEffect
+        let animationState = VoiceInputOverlayAnimationState()
+        self.animationState = animationState
         hostingView = NSHostingView(rootView: VoiceInputOverlay(
             presentation: .hidden,
             performAction: performAction,
-            routeEffect: routeEffect
+            routeEffect: routeEffect,
+            animationState: animationState
         ))
         let initialSize = VoiceInputPanelLayout.processing.size
         panel = VoiceInputPanelFactory.make(
@@ -56,7 +57,8 @@ final class VoiceInputPanelController {
         VoiceInputOverlay(
             presentation: presentation,
             performAction: performAction,
-            routeEffect: routeEffect
+            routeEffect: routeEffect,
+            animationState: animationState
         )
     }
 
@@ -87,6 +89,7 @@ final class VoiceInputPanelController {
             // Otherwise a visible result card can render one frame of the next
             // compact activity state using its previous 320 pt footprint.
             VoiceInputPanelFactory.apply(layout, to: panel)
+            animationState.activityDismissal = nil
             hostingView.rootView = rootView(for: overlay)
             showPanel(for: overlay)
         }
@@ -94,9 +97,10 @@ final class VoiceInputPanelController {
 
     private func showPanel(for overlay: VoiceInputOverlayPresentation) {
         guard let layout = VoiceInputPanelLayout(overlay) else { return }
-        hideGeneration += 1
+        let previousLayout = transitionState.presentedLayout
+        transitionState.present(layout)
         let wasVisible = panel.isVisible
-        let needsPlacement = presentedLayout != layout || !wasVisible
+        let needsPlacement = previousLayout != layout || !wasVisible
         VoiceInputPanelFactory.apply(layout, to: panel)
         if needsPlacement {
             repositionVisiblePanel()
@@ -123,7 +127,6 @@ final class VoiceInputPanelController {
             }
         }
         panel.displayIfNeeded()
-        presentedLayout = layout
 #if DEBUG
         NSLog(
             "Speaker visual panel shown: layout=\(String(describing: layout)) "
@@ -135,10 +138,12 @@ final class VoiceInputPanelController {
     }
 
     private func hidePanel() {
-        hideGeneration += 1
-        let generation = hideGeneration
-        presentedLayout = nil
+        let dismissal = transitionState.dismiss(
+            reduceMotion:
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        )
         guard panel.isVisible else {
+            animationState.activityDismissal = nil
             hostingView.rootView = rootView(for: .hidden)
             panel.orderOut(nil)
             panel.alphaValue = 1
@@ -147,16 +152,22 @@ final class VoiceInputPanelController {
         // Keep the last presentation on screen while it fades; swapping the
         // SwiftUI tree to `.hidden` first would blank the panel instantly and
         // make the fade invisible.
+        animationState.activityDismissal = dismissal.collapsesActivity
+            ? dismissal
+            : nil
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = dismissal.fadeDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(140))
-            guard let self, self.hideGeneration == generation else { return }
+            try? await Task.sleep(for: dismissal.completionDelay)
+            guard let self,
+                  self.transitionState.canComplete(dismissal)
+            else { return }
             self.panel.orderOut(nil)
             self.hostingView.rootView = self.rootView(for: .hidden)
+            self.animationState.activityDismissal = nil
             self.panel.alphaValue = 1
         }
     }
@@ -273,6 +284,11 @@ final class VoiceInputPanelController {
 #endif
 }
 
+@MainActor
+private final class VoiceInputOverlayAnimationState: ObservableObject {
+    @Published var activityDismissal: VoiceInputPanelDismissal?
+}
+
 #if DEBUG
 private enum VoiceInputHUDSnapshotError: Error {
     case bitmapUnavailable
@@ -288,6 +304,7 @@ private struct VoiceInputOverlay: View {
     let performAction:
         (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
+    @ObservedObject var animationState: VoiceInputOverlayAnimationState
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
@@ -298,7 +315,8 @@ private struct VoiceInputOverlay: View {
                 routeEffect(effect)
                 openSettings()
                 NSApp.activate(ignoringOtherApps: true)
-            }
+            },
+            activityDismissal: animationState.activityDismissal
         )
     }
 }
