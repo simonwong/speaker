@@ -10,6 +10,7 @@
     <a href="https://github.com/simonwong/speaker/releases"><img src="https://img.shields.io/badge/Download-development%20build-2F81F7?logo=github" alt="Download the latest development build"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14 or later">
     <img src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
   </p>
 </div>
 
@@ -122,4 +123,4 @@ Focused issues and pull requests are welcome. For substantial behavior or archit
 
 ## License
 
-Speaker does not currently include an open-source license. Until a license is published, the source is available for inspection, but permission to copy, modify, or redistribute it has not been granted.
+Speaker is available under the [MIT License](LICENSE).
