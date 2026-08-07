@@ -10,6 +10,7 @@
     <a href="https://github.com/simonwong/speaker/releases"><img src="https://img.shields.io/badge/下载-开发版本-2F81F7?logo=github" alt="下载最新开发版本"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="需要 macOS 14 或更高版本">
     <img src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT 许可证"></a>
   </p>
 </div>
 
@@ -122,4 +123,4 @@ Speaker 没有托管账号服务，也不提供共享的服务商凭据。你需
 
 ## 许可证
 
-Speaker 当前尚未包含开源许可证。在许可证发布之前，源码可供查看，但尚未授予复制、修改或再分发的许可。
+Speaker 采用 [MIT 许可证](LICENSE)发布。
