@@ -577,6 +577,27 @@ public actor VoiceInputSessions {
     package init(
         audioCapture: any AudioCapturing,
         targetCapture: any InputTargetCapturing,
+        transcriber: any SpeechTranscribing,
+        delivery: any TextDelivering,
+        clipboard: any ClipboardWriting,
+        history: any SessionHistoryRecording,
+        maximumRecordingDuration: Duration,
+        sleepUntilRecordingLimit:
+            @escaping @Sendable (Duration) async throws -> Void
+    ) {
+        self.audioCapture = audioCapture
+        self.targetCapture = targetCapture
+        textProcessor = BasicVoiceTextProcessor(transcriber: transcriber)
+        self.delivery = delivery
+        self.clipboard = clipboard
+        self.history = history
+        self.maximumRecordingDuration = maximumRecordingDuration
+        self.sleepUntilRecordingLimit = sleepUntilRecordingLimit
+    }
+
+    package init(
+        audioCapture: any AudioCapturing,
+        targetCapture: any InputTargetCapturing,
         textProcessor: any VoiceTextProcessing,
         delivery: any TextDelivering,
         clipboard: any ClipboardWriting,
