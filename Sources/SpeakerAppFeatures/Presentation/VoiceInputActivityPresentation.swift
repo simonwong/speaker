@@ -10,7 +10,7 @@ package extension VoiceInputActivity {
         case .delivered: "已自动送达"
         case .pendingCopy: "等待复制"
         case .cancelled: "已取消"
-        case .failed: "失败"
+        case let .failed(_, failure): failure.userTitle
         }
     }
 

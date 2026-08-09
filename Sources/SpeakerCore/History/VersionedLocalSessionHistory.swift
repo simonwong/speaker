@@ -138,7 +138,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         let existingIndex = storedRecords.firstIndex(where: {
             $0.sessionID == record.sessionID
         })
-        guard SessionHistoryRecordPolicy.hasRetainedContent(record) else {
+        guard SessionHistoryRecordPolicy.shouldRetain(record) else {
             guard let existingIndex else { return }
             storedRecords.remove(at: existingIndex)
             if persistCurrentRecords() {

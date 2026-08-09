@@ -40,16 +40,16 @@ package enum HistoryPresentation {
         _ records: [VoiceInputHistoryRecord],
         query: String
     ) -> [VoiceInputHistoryRecord] {
-        let recordsWithContent = records.filter(
-            SessionHistoryRecordPolicy.hasRetainedContent
+        let visibleRecords = records.filter(
+            SessionHistoryRecordPolicy.shouldRetain
         )
         let normalizedQuery = query.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
-        guard !normalizedQuery.isEmpty else { return recordsWithContent }
+        guard !normalizedQuery.isEmpty else { return visibleRecords }
 
-        return recordsWithContent.filter { record in
-            retainedText(for: record)?.range(
+        return visibleRecords.filter { record in
+            rowText(for: record).range(
                 of: normalizedQuery,
                 options: [.caseInsensitive, .diacriticInsensitive],
                 locale: .current
@@ -76,9 +76,18 @@ package enum HistoryPresentation {
 
         return HistoryRecordRowPresentation(
             time: formatter.string(from: record.startedAt),
-            text: retainedText ?? "此会话未保留正文",
+            text: retainedText ?? rowText(for: record),
             canCopy: retainedText != nil
         )
+    }
+
+    private static func rowText(for record: VoiceInputHistoryRecord) -> String {
+        if case let .failed(_, failure) = record.outcome,
+           failure == .recordingLimitReached
+        {
+            return "\(failure.userTitle)：\(failure.userGuidance)"
+        }
+        return retainedText(for: record) ?? "此会话未保留正文"
     }
 
     package static func sections(

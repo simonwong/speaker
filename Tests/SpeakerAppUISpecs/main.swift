@@ -1091,6 +1091,7 @@ struct SpeakerAppUISpecs {
             ))!
             let textID = VoiceInputSessionID()
             let secureID = VoiceInputSessionID()
+            let recordingLimitID = VoiceInputSessionID()
             let textRecord = makeHistoryRecord(
                 id: textID,
                 startedAt: startedAt,
@@ -1110,6 +1111,19 @@ struct SpeakerAppUISpecs {
                     reason: .secureTarget
                 )
             )
+            let recordingLimitRecord = VoiceInputHistoryRecord(
+                sessionID: recordingLimitID,
+                startedAt: startedAt,
+                applicationName: nil,
+                transcription: nil,
+                finalText: nil,
+                transcriptionProvider: "local",
+                providerErrorCode: "recording.limit_reached",
+                outcome: .failed(
+                    recordingLimitID,
+                    .recordingLimitReached
+                )
+            )
 
             let visible = HistoryPresentation.row(
                 for: textRecord,
@@ -1119,17 +1133,32 @@ struct SpeakerAppUISpecs {
                 for: secureRecord,
                 calendar: calendar
             )
+            let recordingLimit = HistoryPresentation.row(
+                for: recordingLimitRecord,
+                calendar: calendar
+            )
             let filtered = HistoryPresentation.filteredRecords(
-                [textRecord, secureRecord],
+                [textRecord, secureRecord, recordingLimitRecord],
                 query: ""
             )
 
             try expect(visible.text == "最终正文")
             try expect(visible.time == "09:05")
             try expect(visible.canCopy)
-            try expect(filtered.map(\.sessionID) == [textID])
+            try expect(
+                filtered.map(\.sessionID) == [textID, recordingLimitID]
+            )
             try expect(redacted.text == "此会话未保留正文")
             try expect(!redacted.canCopy)
+            try expect(
+                recordingLimit.text
+                    == "录音已达到 10 分钟上限：为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+            )
+            try expect(!recordingLimit.canCopy)
+            try expect(
+                recordingLimitRecord.outcome.historyLabel
+                    == "录音已达到 10 分钟上限"
+            )
         }
 
         run(

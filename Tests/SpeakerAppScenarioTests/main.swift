@@ -2409,6 +2409,64 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
+        await runAsync(
+            "recording limit guidance reaches the production HUD and menu state",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let deadline = ScenarioRecordingDeadline()
+            let sessions = VoiceInputSessions(
+                audioCapture: ExperienceAudioCaptureFake(),
+                targetCapture: ExperienceTargetCaptureFake(),
+                transcriber: ExperienceTranscriberFake(),
+                delivery: ExperienceDeliveryFake(),
+                clipboard: ExperienceClipboardFake(),
+                history: ExperienceHistoryFake(),
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+            let experience = VoiceInputExperience(
+                sessions: sessions,
+                announce: { _ in }
+            )
+            experience.start()
+
+            experience.shortcutTarget.receive(.pressed)
+            _ = await waitUntil { experience.state.isRecording }
+            await deadline.waitUntilStarted()
+            await deadline.fire()
+            let presented = await waitUntil {
+                experience.state.diagnosticCode
+                    == "failed.recordingLimitReached"
+            }
+
+            try expect(presented)
+            try expect(
+                experience.state.menu.status?.title
+                    == "录音已达到 10 分钟上限"
+            )
+            try expect(
+                experience.state.menu.notice
+                    == "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+            )
+            if case let .problem(icon, title, guidance, recovery, _) =
+                experience.state.overlay
+            {
+                try expect(icon == "timer")
+                try expect(title == "录音已达到 10 分钟上限")
+                try expect(
+                    guidance
+                        == "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+                )
+                try expect(recovery == nil)
+            } else {
+                throw SpecFailure(message: "recording limit did not reach the HUD")
+            }
+            await experience.shutdown()
+        }
+
         await runAsync("recovery action routes to speech settings and dismisses the failure", failures: &failures, executed: &executed) {
             let sessions = VoiceInputSessions(
                 audioCapture: ExperienceAudioCaptureFake(),
@@ -2630,6 +2688,27 @@ private actor ExperienceHistoryFake: SessionHistoryRecording {
             try? await Task.sleep(for: failureDelay)
         }
         return failureNotice
+    }
+}
+
+private actor ScenarioRecordingDeadline {
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var started = false
+
+    func sleep(for duration: Duration) async throws {
+        started = true
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while !started { await Task.yield() }
+    }
+
+    func fire() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

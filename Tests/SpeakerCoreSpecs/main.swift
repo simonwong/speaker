@@ -2614,6 +2614,39 @@ struct SpeakerCoreSpecs {
         }
 
         await runAsync(
+            "recording deadline starts only after audio capture succeeds",
+            failures: &failures
+        ) {
+            let deadline = ControlledRecordingDeadline()
+            let audio = AudioCaptureFake(delaysStart: true)
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake(),
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+
+            let press = Task { await sessions.send(.pressed) }
+            while await audio.startCount == 0 { await Task.yield() }
+            for _ in 0..<10 { await Task.yield() }
+            let preparingRequestCount = await deadline.requestCount
+            try expect(preparingRequestCount == 0)
+
+            await audio.resumeStart()
+            await press.value
+            await deadline.waitUntilStarted()
+            let recordingRequestCount = await deadline.requestCount
+            try expect(recordingRequestCount == 1)
+            await sessions.shutdown()
+        }
+
+        await runAsync(
             "recording safety limit stops capture and provider without delivery",
             failures: &failures
         ) {
@@ -2660,6 +2693,7 @@ struct SpeakerCoreSpecs {
                     == .recordingLimitReached
             }
             let finalRecord = await history.records.last
+            let recordCount = await history.records.count
             let audioCancelCount = await audio.cancelCount
             let targetCaptureCount = await target.captureCount
             let deliveredTexts = await delivery.deliveredTexts
@@ -2673,10 +2707,33 @@ struct SpeakerCoreSpecs {
             try expect(targetCaptureCount == 0)
             try expect(deliveredTexts.isEmpty)
             try expect(finalRecordReady)
+            try expect(recordCount == 1)
             try expect(finalRecord?.transcription == nil)
             try expect(finalRecord?.finalText == nil)
             try expect(finalRecord?.applicationName == nil)
             try expect(finalRecord?.providerMessage == nil)
+            try expect(finalRecord?.transcriptionProvider == "local")
+            try expect(finalRecord?.providerErrorCode == "recording.limit_reached")
+            try expect((finalRecord?.durationMilliseconds ?? 0) >= 0)
+            try expect(finalRecord?.stageDurationsMilliseconds["recording"] != nil)
+
+            guard let finalRecord else {
+                throw SpecFailure(message: "recording-limit record was not queued")
+            }
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-recording-limit-history-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let durableHistory = SQLiteSessionHistory(
+                fileURL: directory.appendingPathComponent("history.sqlite3")
+            )
+            await durableHistory.save(finalRecord)
+            let persistedRecords = await durableHistory.allRecords()
+            try expect(persistedRecords.map(\.sessionID) == [finalRecord.sessionID])
+            try expect(persistedRecords.first?.transcription == nil)
+            try expect(persistedRecords.first?.finalText == nil)
         }
 
         await runAsync(
@@ -2776,6 +2833,233 @@ struct SpeakerCoreSpecs {
         }
 
         await runAsync(
+            "user cancellation and provider failure invalidate recording deadlines",
+            failures: &failures
+        ) {
+            let cancellationDeadline = ControlledRecordingDeadline()
+            let cancellationHistory = SessionHistoryFake()
+            let cancellationSessions = VoiceInputSessions(
+                audioCapture: StreamingAudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                textProcessor: StreamingVoiceTextProcessorFake(),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: cancellationHistory,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await cancellationDeadline.sleep(for: duration)
+                }
+            )
+            let cancelledTerminal = terminalPresentation(
+                from: await cancellationSessions.observe()
+            )
+
+            await cancellationSessions.send(.pressed)
+            await cancellationDeadline.waitUntilStarted()
+            await cancellationSessions.send(.cancel)
+            let cancelledPresentation = await cancelledTerminal.value
+            await cancellationDeadline.waitUntilCancelled()
+            await cancellationDeadline.fire()
+            let cancellationRecordReady = await eventually(
+                before: .milliseconds(300)
+            ) {
+                await cancellationHistory.records.count == 1
+            }
+            let cancellationRecords = await cancellationHistory.records
+
+            try expect(cancelledPresentation?.activity.isCancelled == true)
+            try expect(cancellationRecordReady)
+            try expect(cancellationRecords.count == 1)
+            try expect(
+                cancellationRecords.first?.outcome.failure
+                    != .recordingLimitReached
+            )
+
+            let providerDeadline = ControlledRecordingDeadline()
+            let provider = ManuallyFailingStreamingProcessor()
+            let providerHistory = SessionHistoryFake()
+            let providerSessions = VoiceInputSessions(
+                audioCapture: StreamingAudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                textProcessor: provider,
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: providerHistory,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await providerDeadline.sleep(for: duration)
+                }
+            )
+            let providerTerminal = terminalPresentation(
+                from: await providerSessions.observe()
+            )
+
+            await providerSessions.send(.pressed)
+            await providerDeadline.waitUntilStarted()
+            await provider.waitUntilStarted()
+            await provider.fail()
+            let providerPresentation = await providerTerminal.value
+            await providerDeadline.waitUntilCancelled()
+            await providerDeadline.fire()
+            let providerRecordReady = await eventually(before: .milliseconds(300)) {
+                await providerHistory.records.count == 1
+            }
+            let providerRecords = await providerHistory.records
+
+            try expect(
+                providerPresentation?.activity.failure
+                    == .providerAuthenticationFailed
+            )
+            try expect(providerRecordReady)
+            try expect(providerRecords.count == 1)
+            try expect(
+                providerRecords.first?.outcome.failure
+                    == .providerAuthenticationFailed
+            )
+        }
+
+        await runAsync(
+            "a cancelled old deadline cannot affect a newer recording",
+            failures: &failures
+        ) {
+            let deadline = StubbornRecordingDeadline()
+            let audio = StreamingAudioCaptureFake()
+            let target = TargetCaptureFake(
+                result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+            )
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: target,
+                textProcessor: StreamingVoiceTextProcessorFake(),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+
+            await sessions.send(.pressed)
+            await deadline.waitUntilRequestCount(1)
+            await sessions.send(.released)
+            let firstRecordReady = await eventually(before: .milliseconds(300)) {
+                await history.records.count == 1
+            }
+            try expect(firstRecordReady, "first session did not finish normally")
+
+            await sessions.send(.pressed)
+            await deadline.waitUntilRequestCount(2)
+            let secondTerminal = terminalPresentation(from: await sessions.observe())
+            await deadline.fire(requestID: 0)
+            for _ in 0..<20 { await Task.yield() }
+
+            let cancelCountBeforeCurrentDeadline = await audio.cancelCount
+            let captureCountBeforeCurrentDeadline = await target.captureCount
+            let recordsBeforeCurrentDeadline = await history.records
+            try expect(
+                cancelCountBeforeCurrentDeadline == 0,
+                "stale deadline cancelled audio \(cancelCountBeforeCurrentDeadline) times"
+            )
+            try expect(
+                captureCountBeforeCurrentDeadline == 1,
+                "stale deadline changed target captures to \(captureCountBeforeCurrentDeadline)"
+            )
+            try expect(
+                recordsBeforeCurrentDeadline.count == 2,
+                "stale deadline changed history count to \(recordsBeforeCurrentDeadline.count)"
+            )
+            try expect(
+                recordsBeforeCurrentDeadline.last?.outcome.isRecording == true,
+                "stale deadline replaced the newer Recording outcome"
+            )
+
+            await deadline.fire(requestID: 1)
+            let secondPresentation = await secondTerminal.value
+            let secondRecordReady = await eventually(before: .milliseconds(300)) {
+                await history.records.count == 2
+            }
+            let finalRecords = await history.records
+            try expect(
+                secondPresentation?.activity.failure == .recordingLimitReached,
+                "current deadline produced \(String(describing: secondPresentation?.activity))"
+            )
+            try expect(secondRecordReady, "current deadline did not queue history")
+            try expect(
+                finalRecords.count == 2,
+                "current deadline produced \(finalRecords.count) total records"
+            )
+            try expect(
+                finalRecords.last?.outcome.failure == .recordingLimitReached,
+                "current deadline history was \(String(describing: finalRecords.last?.outcome))"
+            )
+        }
+
+        await runAsync(
+            "shutdown does not wait for a cancelled provider after the limit",
+            failures: &failures
+        ) {
+            let deadline = ControlledRecordingDeadline()
+            let provider = LateCompletingStreamingProcessor()
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: StreamingAudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                textProcessor: provider,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            let shutdownCompletion = CompletionFlag()
+
+            await sessions.send(.pressed)
+            await provider.waitUntilStarted()
+            await deadline.waitUntilStarted()
+            await deadline.fire()
+            let limitPresentation = await terminal.value
+            let recordReady = await eventually(before: .milliseconds(300)) {
+                await history.records.last?.outcome.failure
+                    == .recordingLimitReached
+            }
+
+            let shutdown = Task {
+                await sessions.shutdown()
+                await shutdownCompletion.markComplete()
+            }
+            let shutdownFinished = await eventually(before: .milliseconds(300)) {
+                await shutdownCompletion.isComplete
+            }
+            if !shutdownFinished {
+                await provider.complete()
+            }
+            await shutdown.value
+            await provider.complete()
+            for _ in 0..<20 { await Task.yield() }
+
+            let records = await history.records
+            let deliveredTexts = await delivery.deliveredTexts
+            try expect(
+                limitPresentation?.activity.failure == .recordingLimitReached
+            )
+            try expect(recordReady)
+            try expect(
+                shutdownFinished,
+                "shutdown waited for a provider that ignored cancellation"
+            )
+            try expect(records.count == 1)
+            try expect(records.first?.outcome.failure == .recordingLimitReached)
+            try expect(deliveredTexts.isEmpty)
+        }
+
+        await runAsync(
             "deadline termination resets the global tap gesture for another session",
             failures: &failures
         ) {
@@ -2867,6 +3151,101 @@ struct SpeakerCoreSpecs {
 
             try expect(failurePresentation?.activity.failure == .audioDeviceChanged)
             try expect(failureDeadlineCancellationCount == 1)
+        }
+
+        await runAsync(
+            "shutdown awaits recording-limit cleanup and durable history queueing",
+            failures: &failures
+        ) {
+            let deadline = ControlledRecordingDeadline()
+            let audio = BlockingCancelAudioCapture()
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+            let shutdownCompletion = CompletionFlag()
+
+            await sessions.send(.pressed)
+            await deadline.waitUntilStarted()
+            await deadline.fire()
+            await audio.waitUntilCancelStarted()
+            let shutdown = Task {
+                await sessions.shutdown()
+                await shutdownCompletion.markComplete()
+            }
+            for _ in 0..<20 { await Task.yield() }
+            let completedBeforeCancelFinished = await shutdownCompletion.isComplete
+            try expect(!completedBeforeCancelFinished)
+
+            await audio.finishCancel()
+            await shutdown.value
+            let records = await history.records
+            let completedAfterCancelFinished = await shutdownCompletion.isComplete
+            try expect(completedAfterCancelFinished)
+            try expect(records.count == 1)
+            try expect(records.first?.outcome.failure == .recordingLimitReached)
+        }
+
+        await runAsync(
+            "shutdown awaits provider-failure cleanup and durable history queueing",
+            failures: &failures
+        ) {
+            let deadline = ControlledRecordingDeadline()
+            let audio = BlockingCancelAudioCapture()
+            let provider = ManuallyFailingStreamingProcessor()
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                textProcessor: provider,
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            let shutdownCompletion = CompletionFlag()
+
+            await sessions.send(.pressed)
+            await deadline.waitUntilStarted()
+            await provider.waitUntilStarted()
+            await provider.fail()
+            let providerFailure = await terminal.value
+            await audio.waitUntilCancelStarted()
+            let shutdown = Task {
+                await sessions.shutdown()
+                await shutdownCompletion.markComplete()
+            }
+            for _ in 0..<20 { await Task.yield() }
+            let completedBeforeCancelFinished = await shutdownCompletion.isComplete
+            try expect(!completedBeforeCancelFinished)
+
+            await audio.finishCancel()
+            await shutdown.value
+            let completedAfterCancelFinished = await shutdownCompletion.isComplete
+            let records = await history.records
+            try expect(completedAfterCancelFinished)
+            try expect(
+                providerFailure?.activity.failure
+                    == .providerAuthenticationFailed
+            )
+            try expect(records.count == 1)
+            try expect(
+                records.first?.outcome.failure
+                    == .providerAuthenticationFailed
+            )
         }
 
         await runAsync("pending-copy trigger rejection resets the next shortcut gesture", failures: &failures) {
@@ -7438,6 +7817,50 @@ private actor LateCompletingStreamingProcessor: VoiceTextProcessing,
     }
 }
 
+private actor ManuallyFailingStreamingProcessor: VoiceTextProcessing,
+    StreamingVoiceTextProcessing {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var started = false
+
+    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    func process(
+        _ audio: CapturedAudio,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        throw SpecFailure(message: "manual streaming fake used buffered processing")
+    }
+
+    func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        started = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        throw VoiceTextProcessingFailure(
+            userFailure: .providerAuthenticationFailed,
+            providerDiagnostic: .init(
+                provider: "doubao",
+                requestID: "manual-provider-failure",
+                code: "invalidCredential"
+            )
+        )
+    }
+
+    func waitUntilStarted() async {
+        while !started { await Task.yield() }
+    }
+
+    func fail() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 private actor DelayedFailingStopAudioCapture: AudioCapturing {
     private(set) var stopCount = 0
     private var stopContinuation: CheckedContinuation<CapturedAudio, Error>?
@@ -7470,6 +7893,48 @@ private actor DelayedFailingStartAudioCapture: AudioCapturing {
     func cancel() async {}
 }
 
+private actor BlockingCancelAudioCapture: AudioCapturing, AudioChunkStreaming {
+    private var cancelStarted = false
+    private var cancelContinuation: CheckedContinuation<Void, Never>?
+    private var audioContinuation: AsyncStream<Data>.Continuation?
+
+    func audioChunks() -> AsyncStream<Data> {
+        let (stream, continuation) = AsyncStream<Data>.makeStream()
+        audioContinuation = continuation
+        return stream
+    }
+
+    func start() async throws {}
+
+    func stop() async throws -> CapturedAudio {
+        audioContinuation?.finish()
+        audioContinuation = nil
+        return CapturedAudio(
+            data: Data([0x52, 0x49, 0x46, 0x46]),
+            duration: .seconds(1),
+            peakPower: -12
+        )
+    }
+
+    func cancel() async {
+        cancelStarted = true
+        audioContinuation?.finish()
+        audioContinuation = nil
+        await withCheckedContinuation { continuation in
+            cancelContinuation = continuation
+        }
+    }
+
+    func waitUntilCancelStarted() async {
+        while !cancelStarted { await Task.yield() }
+    }
+
+    func finishCancel() {
+        cancelContinuation?.resume()
+        cancelContinuation = nil
+    }
+}
+
 private actor TargetCaptureFake: InputTargetCapturing {
     let result: InputTargetCaptureResult
     private(set) var captureCount = 0
@@ -7486,25 +7951,26 @@ private actor TargetCaptureFake: InputTargetCapturing {
 
 private actor ControlledRecordingDeadline {
     private(set) var requestedDuration: Duration?
-    private var continuation: CheckedContinuation<Void, Error>?
-    private var cancellationRequested = false
     private(set) var requestCount = 0
     private(set) var cancellationCount = 0
+    private var continuations: [Int: CheckedContinuation<Void, Error>] = [:]
+    private var cancelledRequests: Set<Int> = []
 
     func sleep(for duration: Duration) async throws {
+        let requestID = requestCount
         requestCount += 1
         requestedDuration = duration
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<Void, Error>) in
-                if cancellationRequested {
+                if cancelledRequests.contains(requestID) {
                     continuation.resume(throwing: CancellationError())
                 } else {
-                    self.continuation = continuation
+                    continuations[requestID] = continuation
                 }
             }
         } onCancel: {
-            Task { await self.cancel() }
+            Task { await self.cancel(requestID: requestID) }
         }
     }
 
@@ -7527,15 +7993,38 @@ private actor ControlledRecordingDeadline {
     }
 
     func fire() {
-        continuation?.resume()
-        continuation = nil
+        guard let requestID = continuations.keys.min(),
+              let continuation = continuations.removeValue(forKey: requestID)
+        else { return }
+        continuation.resume()
     }
 
-    func cancel() {
-        cancellationRequested = true
+    private func cancel(requestID: Int) {
+        guard cancelledRequests.insert(requestID).inserted else { return }
         cancellationCount += 1
-        continuation?.resume(throwing: CancellationError())
-        continuation = nil
+        continuations.removeValue(forKey: requestID)?
+            .resume(throwing: CancellationError())
+    }
+}
+
+private actor StubbornRecordingDeadline {
+    private(set) var requestCount = 0
+    private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
+
+    func sleep(for duration: Duration) async throws {
+        let requestID = requestCount
+        requestCount += 1
+        await withCheckedContinuation { continuation in
+            continuations[requestID] = continuation
+        }
+    }
+
+    func waitUntilRequestCount(_ expectedCount: Int) async {
+        while requestCount < expectedCount { await Task.yield() }
+    }
+
+    func fire(requestID: Int) {
+        continuations.removeValue(forKey: requestID)?.resume()
     }
 }
 

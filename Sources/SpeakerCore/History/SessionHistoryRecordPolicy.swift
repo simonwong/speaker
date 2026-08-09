@@ -20,6 +20,18 @@ package enum SessionHistoryRecordPolicy {
         retainedText(record) != nil
     }
 
+    package static func shouldRetain(
+        _ record: VoiceInputHistoryRecord
+    ) -> Bool {
+        if hasRetainedContent(record) {
+            return true
+        }
+        if case .failed(_, .recordingLimitReached) = record.outcome {
+            return true
+        }
+        return false
+    }
+
     package static func searchableValues(
         _ record: VoiceInputHistoryRecord
     ) -> [String] {
@@ -71,10 +83,10 @@ package enum SessionHistoryRecordPolicy {
                 to: now
             )
         }
-        let recordsWithContent = records.filter(hasRetainedContent)
+        let retainedRecords = records.filter(shouldRetain)
         let ageFiltered = cutoff.map { cutoff in
-            recordsWithContent.filter { $0.startedAt >= cutoff }
-        } ?? recordsWithContent
+            retainedRecords.filter { $0.startedAt >= cutoff }
+        } ?? retainedRecords
         return Array(sort(ageFiltered).prefix(max(1, maximumCount)))
     }
 }
