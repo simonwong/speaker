@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 import AVFoundation
 import ApplicationServices
+@preconcurrency import Carbon
 import SpeakerCore
 import SQLite3
 
@@ -1111,6 +1112,40 @@ struct SpeakerCoreSpecs {
             )
             let persistedPreferences = await persistence.values
             try expect(persistedPreferences == [.functionKey])
+        }
+
+        run("Fn trigger ignores secondary-function flags from navigation keys", failures: &failures) {
+            var policy = FunctionKeyFlagEventPolicy()
+
+            for modifier in [CGEventFlags.maskCommand, .maskAlternate] {
+                for keyCode in [kVK_LeftArrow, kVK_RightArrow, kVK_DownArrow, kVK_UpArrow] {
+                    try expect(
+                        policy.handle(
+                            keyCode: Int64(keyCode),
+                            flags: modifier.union(.maskSecondaryFn)
+                        ) == nil
+                    )
+                    try expect(
+                        policy.handle(
+                            keyCode: Int64(keyCode),
+                            flags: modifier
+                        ) == nil
+                    )
+                }
+            }
+
+            try expect(
+                policy.handle(
+                    keyCode: Int64(kVK_Function),
+                    flags: .maskSecondaryFn
+                ) == .pressed
+            )
+            try expect(
+                policy.handle(
+                    keyCode: Int64(kVK_Function),
+                    flags: []
+                ) == .released
+            )
         }
 
         run("Escape is consumed only during an active Speaker interaction", failures: &failures) {

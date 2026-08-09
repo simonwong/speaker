@@ -86,6 +86,35 @@ package enum FunctionKeyMonitorStartResult: Equatable, Sendable {
     case runLoopSourceUnavailable
 }
 
+package enum FunctionKeyFlagEventDecision: Equatable, Sendable {
+    case pressed
+    case released
+}
+
+/// Accepts modifier edges only when macOS identifies the physical Fn key as
+/// their source. Navigation keys can carry `maskSecondaryFn` without Fn being
+/// pressed, so the flag alone is not a sufficient trigger signal.
+package struct FunctionKeyFlagEventPolicy: Sendable {
+    private(set) var isDown = false
+
+    package init() {}
+
+    package mutating func handle(
+        keyCode: Int64,
+        flags: CGEventFlags
+    ) -> FunctionKeyFlagEventDecision? {
+        guard keyCode == Int64(kVK_Function) else { return nil }
+        let functionFlagIsSet = flags.contains(.maskSecondaryFn)
+        guard functionFlagIsSet != isDown else { return nil }
+        isDown = functionFlagIsSet
+        return functionFlagIsSet ? .pressed : .released
+    }
+
+    package mutating func reset() {
+        isDown = false
+    }
+}
+
 @MainActor
 package final class FnEventMonitor {
     private let target: VoiceTriggerTarget
@@ -162,7 +191,7 @@ package final class FnEventMonitor {
 private final class FnEventTapBox: @unchecked Sendable {
     let target: VoiceTriggerTarget
     var tap: CFMachPort?
-    var fnIsDown = false
+    var functionKeyPolicy = FunctionKeyFlagEventPolicy()
     var didEmitPress = false
     var secureInputTimer: DispatchSourceTimer?
     var escapePolicy = EscapeKeyEventPolicy()
@@ -174,7 +203,7 @@ private final class FnEventTapBox: @unchecked Sendable {
     func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            fnIsDown = false
+            functionKeyPolicy.reset()
             didEmitPress = false
             escapePolicy.reset()
             stopSecureInputMonitoring()
@@ -185,18 +214,20 @@ private final class FnEventTapBox: @unchecked Sendable {
             }
             return false
         case .flagsChanged:
-            let isDown = event.flags.contains(.maskSecondaryFn)
-            guard isDown != fnIsDown else { return false }
-            fnIsDown = isDown
-            if isDown {
+            guard let trigger = functionKeyPolicy.handle(
+                keyCode: event.getIntegerValueField(.keyboardEventKeycode),
+                flags: event.flags
+            ) else { return false }
+            switch trigger {
+            case .pressed:
                 guard !IsSecureEventInputEnabled() else {
-                    fnIsDown = false
+                    functionKeyPolicy.reset()
                     return false
                 }
                 didEmitPress = true
                 target.receive(.pressed)
                 startSecureInputMonitoring()
-            } else {
+            case .released:
                 stopSecureInputMonitoring()
                 if didEmitPress {
                     didEmitPress = false
@@ -231,7 +262,10 @@ private final class FnEventTapBox: @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
         timer.setEventHandler { [weak self] in
-            guard let self, self.fnIsDown, self.didEmitPress else { return }
+            guard let self,
+                  self.functionKeyPolicy.isDown,
+                  self.didEmitPress
+            else { return }
             guard IsSecureEventInputEnabled() else { return }
             self.didEmitPress = false
             self.stopSecureInputMonitoring()
@@ -248,7 +282,7 @@ private final class FnEventTapBox: @unchecked Sendable {
 
     func stop() {
         let hadActivePress = didEmitPress
-        fnIsDown = false
+        functionKeyPolicy.reset()
         didEmitPress = false
         escapePolicy.reset()
         stopSecureInputMonitoring()
