@@ -1649,26 +1649,172 @@ struct SpeakerCoreSpecs {
             try expect(presentation?.activity.pendingText == "必须保留。")
         }
 
+        await runAsync("failed system copy restores every prior pasteboard representation", failures: &failures) {
+            let originalItems = [
+                [
+                    "public.utf8-plain-text": Data("original text".utf8),
+                    "public.rtf": Data([0x7B, 0x5C, 0x72, 0x74, 0x66, 0x31, 0x7D]),
+                ],
+                ["public.png": Data([0x89, 0x50, 0x4E, 0x47])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(
+                items: originalItems,
+                replacementWriteSucceeds: false
+            )
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+
+            let copied = await writer.copy("replacement")
+
+            try expect(!copied)
+            try expect(pasteboard.items == originalItems)
+
+            let emptyPasteboard = ClipboardPasteboardFake(
+                items: [],
+                replacementWriteSucceeds: false
+            )
+            let emptyWriter = SystemClipboardWriter(
+                pasteboard: emptyPasteboard.access
+            )
+            let copiedOverEmpty = await emptyWriter.copy("replacement")
+            try expect(!copiedOverEmpty)
+            try expect(emptyPasteboard.items.isEmpty)
+        }
+
         await runAsync("system clipboard reports success only after exact readback", failures: &failures) {
+            let originalItems = [
+                ["public.utf8-plain-text": Data("original".utf8)],
+            ]
+            let stalePasteboard = ClipboardPasteboardFake(
+                items: originalItems,
+                replacementReadback: "previous clipboard value"
+            )
+            let confirmedPasteboard = ClipboardPasteboardFake(items: [])
             let staleWriter = SystemClipboardWriter(
-                pasteboard: ClipboardPasteboardAccess(
-                    clearContents: {},
-                    setString: { _ in true },
-                    readString: { "previous clipboard value" }
-                )
+                pasteboard: stalePasteboard.access
             )
             let confirmedWriter = SystemClipboardWriter(
-                pasteboard: ClipboardPasteboardAccess(
-                    clearContents: {},
-                    setString: { _ in true },
-                    readString: { "expected value" }
-                )
+                pasteboard: confirmedPasteboard.access
             )
 
             let staleResult = await staleWriter.copy("expected value")
             let confirmedResult = await confirmedWriter.copy("expected value")
             try expect(!staleResult)
+            try expect(stalePasteboard.items == originalItems)
             try expect(confirmedResult)
+            try expect(
+                confirmedPasteboard.items
+                    == [["public.utf8-plain-text": Data("expected value".utf8)]]
+            )
+        }
+
+        await runAsync("system copy preserves a newer external clipboard owner", failures: &failures) {
+            let externalItems = [
+                ["public.utf8-plain-text": Data("new external copy".utf8)],
+            ]
+            let pasteboard = ClipboardPasteboardFake(
+                items: [["public.png": Data([0x89, 0x50])]],
+                externalItemsAfterReplacement: externalItems
+            )
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+
+            let copied = await writer.copy("Speaker text")
+
+            try expect(!copied)
+            try expect(pasteboard.items == externalItems)
+        }
+
+        await runAsync("unsafe system clipboard snapshots fail before mutation", failures: &failures) {
+            let oneItem = [["type.a": Data([1, 2, 3, 4])]]
+            let cases: [(
+                items: [[String: Data]],
+                unreadableTypes: Set<String>,
+                budget: PasteboardSnapshotBudget
+            )] = [
+                (
+                    oneItem,
+                    [],
+                    .init(
+                        maximumItemCount: 0,
+                        maximumRepresentationCount: 1,
+                        maximumBytesPerRepresentation: 4,
+                        maximumTotalBytes: 4
+                    )
+                ),
+                (
+                    oneItem,
+                    [],
+                    .init(
+                        maximumItemCount: 1,
+                        maximumRepresentationCount: 0,
+                        maximumBytesPerRepresentation: 4,
+                        maximumTotalBytes: 4
+                    )
+                ),
+                (
+                    oneItem,
+                    [],
+                    .init(
+                        maximumItemCount: 1,
+                        maximumRepresentationCount: 1,
+                        maximumBytesPerRepresentation: 3,
+                        maximumTotalBytes: 4
+                    )
+                ),
+                (
+                    oneItem,
+                    [],
+                    .init(
+                        maximumItemCount: 1,
+                        maximumRepresentationCount: 1,
+                        maximumBytesPerRepresentation: 4,
+                        maximumTotalBytes: 3
+                    )
+                ),
+                (
+                    oneItem,
+                    ["type.a"],
+                    .init(
+                        maximumItemCount: 1,
+                        maximumRepresentationCount: 1,
+                        maximumBytesPerRepresentation: 4,
+                        maximumTotalBytes: 4
+                    )
+                ),
+            ]
+
+            for testCase in cases {
+                let pasteboard = ClipboardPasteboardFake(
+                    items: testCase.items,
+                    unreadableTypes: testCase.unreadableTypes
+                )
+                let writer = SystemClipboardWriter(
+                    pasteboard: pasteboard.access,
+                    snapshotBudget: testCase.budget
+                )
+
+                let copied = await writer.copy("replacement")
+                try expect(!copied)
+                try expect(pasteboard.clearCount == 0)
+                try expect(pasteboard.items == testCase.items)
+            }
+        }
+
+        await runAsync("system clipboard snapshot accepts exact resource limits", failures: &failures) {
+            let pasteboard = ClipboardPasteboardFake(
+                items: [["type.a": Data([1, 2, 3, 4])]]
+            )
+            let writer = SystemClipboardWriter(
+                pasteboard: pasteboard.access,
+                snapshotBudget: .init(
+                    maximumItemCount: 1,
+                    maximumRepresentationCount: 1,
+                    maximumBytesPerRepresentation: 4,
+                    maximumTotalBytes: 4
+                )
+            )
+
+            let copied = await writer.copy("replacement")
+            try expect(copied)
         }
 
         await runAsync("secure target never receives automatic text", failures: &failures) {
@@ -5898,6 +6044,75 @@ private final class AccessibilityStateFake {
 
     init(granted: Bool) {
         self.granted = granted
+    }
+}
+
+@MainActor
+private final class ClipboardPasteboardFake {
+    private(set) var items: [[String: Data]]
+    private(set) var changeCount = 0
+    private(set) var clearCount = 0
+    private var currentString: String?
+    private var currentMarker: String?
+    private let replacementWriteSucceeds: Bool
+    private let replacementReadback: String?
+    private let externalItemsAfterReplacement: [[String: Data]]?
+    private let unreadableTypes: Set<String>
+
+    init(
+        items: [[String: Data]],
+        replacementWriteSucceeds: Bool = true,
+        replacementReadback: String? = nil,
+        externalItemsAfterReplacement: [[String: Data]]? = nil,
+        unreadableTypes: Set<String> = []
+    ) {
+        self.items = items
+        self.replacementWriteSucceeds = replacementWriteSucceeds
+        self.replacementReadback = replacementReadback
+        self.externalItemsAfterReplacement = externalItemsAfterReplacement
+        self.unreadableTypes = unreadableTypes
+    }
+
+    var access: ClipboardPasteboardAccess {
+        ClipboardPasteboardAccess(
+            changeCount: { self.changeCount },
+            itemTypes: { self.items.map { Array($0.keys) } },
+            data: { itemIndex, type in
+                guard !self.unreadableTypes.contains(type) else { return nil }
+                return self.items[itemIndex][type]
+            },
+            clearContents: {
+                self.items = []
+                self.currentString = nil
+                self.currentMarker = nil
+                self.changeCount += 1
+                self.clearCount += 1
+                return self.changeCount
+            },
+            writeText: { text, marker in
+                guard self.replacementWriteSucceeds else { return false }
+                self.currentString = self.replacementReadback ?? text
+                self.currentMarker = marker
+                self.items = [["public.utf8-plain-text": Data(text.utf8)]]
+                self.changeCount += 1
+                if let externalItems = self.externalItemsAfterReplacement {
+                    self.items = externalItems
+                    self.currentString = "new external copy"
+                    self.currentMarker = nil
+                    self.changeCount += 1
+                }
+                return true
+            },
+            readString: { self.currentString },
+            readMarker: { self.currentMarker },
+            writeItems: { items in
+                self.items = items
+                self.currentString = nil
+                self.currentMarker = nil
+                self.changeCount += 1
+                return true
+            }
+        )
     }
 }
 

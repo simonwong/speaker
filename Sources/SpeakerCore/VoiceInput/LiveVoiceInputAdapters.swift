@@ -545,49 +545,105 @@ public struct LocalPreviewTranscriber: SpeechTranscribing {
 }
 
 package struct ClipboardPasteboardAccess: Sendable {
-    let clearContents: @MainActor @Sendable () -> Void
-    let setString: @MainActor @Sendable (String) -> Bool
+    let changeCount: @MainActor @Sendable () -> Int
+    let itemTypes: @MainActor @Sendable () -> [[String]]
+    let data: @MainActor @Sendable (Int, String) -> Data?
+    let clearContents: @MainActor @Sendable () -> Int
+    let writeText: @MainActor @Sendable (String, String) -> Bool
     let readString: @MainActor @Sendable () -> String?
+    let readMarker: @MainActor @Sendable () -> String?
+    let writeItems: @MainActor @Sendable ([[String: Data]]) -> Bool
 
     package init(
-        clearContents: @escaping @MainActor @Sendable () -> Void,
-        setString: @escaping @MainActor @Sendable (String) -> Bool,
-        readString: @escaping @MainActor @Sendable () -> String?
+        changeCount: @escaping @MainActor @Sendable () -> Int,
+        itemTypes: @escaping @MainActor @Sendable () -> [[String]],
+        data: @escaping @MainActor @Sendable (Int, String) -> Data?,
+        clearContents: @escaping @MainActor @Sendable () -> Int,
+        writeText: @escaping @MainActor @Sendable (String, String) -> Bool,
+        readString: @escaping @MainActor @Sendable () -> String?,
+        readMarker: @escaping @MainActor @Sendable () -> String?,
+        writeItems: @escaping @MainActor @Sendable ([[String: Data]]) -> Bool
     ) {
+        self.changeCount = changeCount
+        self.itemTypes = itemTypes
+        self.data = data
         self.clearContents = clearContents
-        self.setString = setString
+        self.writeText = writeText
         self.readString = readString
+        self.readMarker = readMarker
+        self.writeItems = writeItems
     }
 
     static let live = ClipboardPasteboardAccess(
+        changeCount: { NSPasteboard.general.changeCount },
+        itemTypes: {
+            (NSPasteboard.general.pasteboardItems ?? []).map { item in
+                item.types.map(\.rawValue)
+            }
+        },
+        data: { itemIndex, type in
+            let items = NSPasteboard.general.pasteboardItems ?? []
+            guard items.indices.contains(itemIndex) else { return nil }
+            return items[itemIndex].data(forType: .init(type))
+        },
         clearContents: {
             NSPasteboard.general.clearContents()
         },
-        setString: {
-            NSPasteboard.general.setString($0, forType: .string)
+        writeText: { text, marker in
+            let item = NSPasteboardItem()
+            guard item.setString(text, forType: .string),
+                  item.setString(marker, forType: PasteboardTransactionMarker.type)
+            else { return false }
+            return NSPasteboard.general.writeObjects([item])
         },
         readString: {
             NSPasteboard.general.string(forType: .string)
+        },
+        readMarker: {
+            NSPasteboard.general.string(forType: PasteboardTransactionMarker.type)
+        },
+        writeItems: { snapshots in
+            let items = snapshots.map { representations in
+                let item = NSPasteboardItem()
+                for (type, data) in representations {
+                    item.setData(data, forType: .init(type))
+                }
+                return item
+            }
+            return NSPasteboard.general.writeObjects(items)
         }
     )
 }
 
 public struct SystemClipboardWriter: ClipboardWriting {
     private let pasteboard: ClipboardPasteboardAccess
+    private let snapshotBudget: PasteboardSnapshotBudget
 
     public init() {
         pasteboard = .live
+        snapshotBudget = .standard
     }
 
-    package init(pasteboard: ClipboardPasteboardAccess) {
+    package init(
+        pasteboard: ClipboardPasteboardAccess,
+        snapshotBudget: PasteboardSnapshotBudget = .standard
+    ) {
         self.pasteboard = pasteboard
+        self.snapshotBudget = snapshotBudget
     }
 
     public func copy(_ text: String) async -> Bool {
         await MainActor.run {
-            pasteboard.clearContents()
-            guard pasteboard.setString(text) else { return false }
-            return pasteboard.readString() == text
+            guard let transaction = PasteboardReplacementTransaction.prepare(
+                text: text,
+                pasteboard: pasteboard,
+                budget: snapshotBudget
+            ) else { return false }
+            guard transaction.verifies(text) else {
+                transaction.restoreIfOwned()
+                return false
+            }
+            return true
         }
     }
 }
