@@ -932,6 +932,15 @@ struct SpeakerAppScenarioSpecs {
             try expect(!deviceFailure.userGuidance.contains("权限"))
             try expect(deviceFailure.userIcon == "mic.slash.fill")
             try expect(!deviceFailure.needsSettings)
+
+            let recordingLimit = VoiceInputFailure.recordingLimitReached
+            try expect(recordingLimit.userTitle == "录音已达到 10 分钟上限")
+            try expect(
+                recordingLimit.userGuidance
+                    == "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+            )
+            try expect(recordingLimit.userIcon == "timer")
+            try expect(!recordingLimit.needsSettings)
         }
 
         run(

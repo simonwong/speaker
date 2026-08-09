@@ -3,6 +3,7 @@ import Foundation
 public enum VoiceInputFailure: String, Equatable, Sendable {
     case sessionInterrupted
     case recordingFailed
+    case recordingLimitReached
     case microphonePermissionDenied
     case transcriptionFailed
     case providerNotConfigured

@@ -2613,6 +2613,72 @@ struct SpeakerCoreSpecs {
             try expect(cancellationCount == 1)
         }
 
+        await runAsync(
+            "recording safety limit stops capture and provider without delivery",
+            failures: &failures
+        ) {
+            let deadline = ControlledRecordingDeadline()
+            let audio = StreamingAudioCaptureFake()
+            let processor = StreamingVoiceTextProcessorFake()
+            let target = TargetCaptureFake(
+                result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+            )
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: target,
+                textProcessor: processor,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                sleepUntilRecordingLimit: { duration in
+                    try await deadline.sleep(for: duration)
+                }
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            let triggerTerminations = await sessions.observeTriggerTerminations()
+            let triggerTermination = Task {
+                var iterator = triggerTerminations.makeAsyncIterator()
+                return await iterator.next()
+            }
+
+            await sessions.send(.pressed, triggerSequence: 41)
+            await deadline.waitUntilStarted()
+            let requestedDuration = await deadline.requestedDuration
+            try expect(requestedDuration == .seconds(600))
+
+            await deadline.fire()
+            let presentation = await terminal.value
+            let terminatedSequence = await triggerTermination.value
+            let providerCancelled = await eventually(before: .milliseconds(300)) {
+                await processor.cancellationCount == 1
+            }
+            let finalRecordReady = await eventually(before: .milliseconds(300)) {
+                await history.records.last?.outcome.failure
+                    == .recordingLimitReached
+            }
+            let finalRecord = await history.records.last
+            let audioCancelCount = await audio.cancelCount
+            let targetCaptureCount = await target.captureCount
+            let deliveredTexts = await delivery.deliveredTexts
+
+            try expect(
+                presentation?.activity.failure == .recordingLimitReached
+            )
+            try expect(terminatedSequence == 41)
+            try expect(audioCancelCount == 1)
+            try expect(providerCancelled)
+            try expect(targetCaptureCount == 0)
+            try expect(deliveredTexts.isEmpty)
+            try expect(finalRecordReady)
+            try expect(finalRecord?.transcription == nil)
+            try expect(finalRecord?.finalText == nil)
+            try expect(finalRecord?.applicationName == nil)
+            try expect(finalRecord?.providerMessage == nil)
+        }
+
         await runAsync("pending-copy trigger rejection resets the next shortcut gesture", failures: &failures) {
             let audio = AudioCaptureFake()
             let sessions = VoiceInputSessions(
@@ -7090,6 +7156,7 @@ private actor EarlyFailingStreamingProcessor: VoiceTextProcessing, StreamingVoic
 
 private actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextProcessing {
     private(set) var receivedChunkCount = 0
+    private(set) var cancellationCount = 0
 
     func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
@@ -7108,6 +7175,10 @@ private actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoi
     ) async throws -> VoiceTextProcessingResult {
         for await chunk in audioChunks where !chunk.isEmpty {
             receivedChunkCount += 1
+        }
+        if Task.isCancelled {
+            cancellationCount += 1
+            throw CancellationError()
         }
         return VoiceTextProcessingResult(
             doubaoText: "流式结果",
@@ -7156,13 +7227,54 @@ private actor DelayedFailingStartAudioCapture: AudioCapturing {
 
 private actor TargetCaptureFake: InputTargetCapturing {
     let result: InputTargetCaptureResult
+    private(set) var captureCount = 0
 
     init(result: InputTargetCaptureResult) {
         self.result = result
     }
 
     func capture() async -> InputTargetCaptureResult {
-        result
+        captureCount += 1
+        return result
+    }
+}
+
+private actor ControlledRecordingDeadline {
+    private(set) var requestedDuration: Duration?
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var cancellationRequested = false
+
+    func sleep(for duration: Duration) async throws {
+        requestedDuration = duration
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, Error>) in
+                if cancellationRequested {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    self.continuation = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.cancel() }
+        }
+    }
+
+    func waitUntilStarted() async {
+        while requestedDuration == nil {
+            await Task.yield()
+        }
+    }
+
+    func fire() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func cancel() {
+        cancellationRequested = true
+        continuation?.resume(throwing: CancellationError())
+        continuation = nil
     }
 }
 
@@ -7670,6 +7782,10 @@ private enum SpecExecutionCounter {
 }
 
 private extension VoiceInputActivity {
+    var failure: VoiceInputFailure? {
+        if case let .failed(_, failure) = self { failure } else { nil }
+    }
+
     var isCancelled: Bool {
         if case .cancelled = self { true } else { false }
     }
