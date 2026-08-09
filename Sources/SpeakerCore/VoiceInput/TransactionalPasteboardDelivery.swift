@@ -250,16 +250,14 @@ package struct PasteboardDeliveryTransaction: Sendable {
         }
     }
 
-    package func scheduleConditionalRestore() {
-        Task { @MainActor in
-            do {
-                try await sleepBeforeRestore(conditionalRestoreDelay)
-            } catch {
-                return
-            }
-            replacement.restoreIfOwned()
-            await conditionalRestoreDidFinish()
+    package func restoreAfterDelay() async {
+        do {
+            try await sleepBeforeRestore(conditionalRestoreDelay)
+        } catch {
+            return
         }
+        await restoreIfOwned()
+        await conditionalRestoreDidFinish()
     }
 
     package static func postCommandV() async -> Bool {
@@ -296,5 +294,59 @@ package struct PasteboardDeliveryTransaction: Sendable {
             }
         }
         return true
+    }
+}
+
+package actor PasteboardRestoreCoordinator {
+    private var acceptsTransactions = true
+    private var active: Set<UUID> = []
+    private var pending: [UUID: Task<Void, Never>] = [:]
+    private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
+
+    package init() {}
+
+    package func reserve() -> UUID? {
+        guard acceptsTransactions else { return nil }
+        let id = UUID()
+        active.insert(id)
+        return id
+    }
+
+    package func schedule(
+        _ transaction: PasteboardDeliveryTransaction,
+        reservation id: UUID
+    ) {
+        precondition(active.contains(id))
+        pending[id] = Task { [weak self] in
+            await transaction.restoreAfterDelay()
+            await self?.didFinish(id)
+        }
+    }
+
+    package func abandon(_ id: UUID) {
+        didFinish(id)
+    }
+
+    package func shutdown() async {
+        acceptsTransactions = false
+        guard !active.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            if active.isEmpty {
+                continuation.resume()
+            } else {
+                shutdownWaiters.append(continuation)
+            }
+        }
+    }
+
+    private func didFinish(_ id: UUID) {
+        pending[id] = nil
+        active.remove(id)
+        guard active.isEmpty else { return }
+        let waiters = shutdownWaiters
+        shutdownWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 }

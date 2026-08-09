@@ -852,7 +852,6 @@ struct SpeakerCoreSpecs {
                     await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        conditionalRestoreDelay: .milliseconds(500),
                         sleepBeforeRestore: { duration in
                             try await sleeper.sleep(for: duration)
                         },
@@ -932,6 +931,215 @@ struct SpeakerCoreSpecs {
 
             try expect(result == .posted)
             try expect(pasteboard.items == externalItems)
+        }
+
+        await runAsync(
+            "clipboard restore shutdown converges and preserves external ownership",
+            failures: &failures
+        ) {
+            let originalItems = [
+                ["public.png": Data([1, 2, 3])],
+            ]
+            let externalItems = [
+                ["public.utf8-plain-text": Data("external".utf8)],
+            ]
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let sleeper = ControlledPasteboardRestoreSleep()
+            let pastePosts = LockedCounter()
+            let system = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        sleepBeforeRestore: { duration in
+                            try await sleeper.sleep(for: duration)
+                        },
+                        conditionalRestoreDidFinish: {
+                            await sleeper.markRestoreCompleted()
+                        }
+                    )
+                },
+                focusedTargetState: { _, _ in .success(true) },
+                postPasteCommand: {
+                    pastePosts.increment()
+                    return true
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+            await sleeper.waitUntilStarted()
+            pasteboard.replaceExternally(with: externalItems)
+
+            let firstCompletion = CompletionFlag()
+            let secondCompletion = CompletionFlag()
+            let firstShutdown = Task {
+                await system.shutdown()
+                await firstCompletion.markComplete()
+            }
+            let secondShutdown = Task {
+                await system.shutdown()
+                await secondCompletion.markComplete()
+            }
+            for _ in 0..<20 { await Task.yield() }
+            let firstCompletedEarly = await firstCompletion.isComplete
+            let secondCompletedEarly = await secondCompletion.isComplete
+
+            try expect(result == .posted)
+            try expect(!firstCompletedEarly && !secondCompletedEarly)
+            try expect(pastePosts.value == 1)
+
+            await sleeper.resume()
+            await firstShutdown.value
+            await secondShutdown.value
+            try expect(pasteboard.items == externalItems)
+
+            await system.shutdown()
+            let lateResult = await system.paste(
+                "late text",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+            try expect(lateResult == .eventFailed)
+            try expect(pastePosts.value == 1)
+            try expect(pasteboard.items == externalItems)
+        }
+
+        await runAsync(
+            "shutdown owns a restore reserved before pasteboard preparation",
+            failures: &failures
+        ) {
+            let originalItems = [
+                ["public.png": Data([1, 2, 3])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let preparation = ControlledPasteboardPreparation()
+            let sleeper = ControlledPasteboardRestoreSleep()
+            let pastePosts = LockedCounter()
+            let system = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await preparation.block()
+                    return await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        sleepBeforeRestore: { duration in
+                            try await sleeper.sleep(for: duration)
+                        },
+                        conditionalRestoreDidFinish: {
+                            await sleeper.markRestoreCompleted()
+                        }
+                    )
+                },
+                focusedTargetState: { _, _ in .success(true) },
+                postPasteCommand: {
+                    pastePosts.increment()
+                    return true
+                }
+            )
+            let paste = Task {
+                await system.paste(
+                    "hello",
+                    to: AccessibilityTargetReference(),
+                    in: 42
+                )
+            }
+            await preparation.waitUntilBlocked()
+
+            let completion = CompletionFlag()
+            let shutdown = Task {
+                await system.shutdown()
+                await completion.markComplete()
+            }
+            for _ in 0..<20 { await Task.yield() }
+            let completedDuringPreparation = await completion.isComplete
+            try expect(!completedDuringPreparation)
+
+            await preparation.resume()
+            await sleeper.waitUntilStarted()
+            let completedBeforeRestore = await completion.isComplete
+            try expect(!completedBeforeRestore)
+
+            await sleeper.resume()
+            let result = await paste.value
+            await shutdown.value
+            try expect(result == .posted)
+            try expect(pastePosts.value == 1)
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "voice shutdown is immediate after automatic restore completed",
+            failures: &failures
+        ) {
+            let originalItems = [
+                ["public.rtf": Data([1, 2, 3])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let sleeper = ControlledPasteboardRestoreSleep()
+            let liveSystem = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        sleepBeforeRestore: { duration in
+                            try await sleeper.sleep(for: duration)
+                        },
+                        conditionalRestoreDidFinish: {
+                            await sleeper.markRestoreCompleted()
+                        }
+                    )
+                },
+                focusedTargetState: { _, _ in .success(true) },
+                postPasteCommand: { true }
+            )
+            let result = await liveSystem.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+            await sleeper.waitUntilStarted()
+            await sleeper.resume()
+            await sleeper.waitUntilRestoreCompleted()
+
+            let targets = AccessibilityInputTargets(
+                system: LifecycleAccessibilityTargetSystem(live: liveSystem)
+            )
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: targets,
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: targets,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let completion = CompletionFlag()
+            let shutdown = Task {
+                await sessions.shutdown()
+                await completion.markComplete()
+            }
+            let completed = await eventually(before: .milliseconds(300)) {
+                await completion.isComplete
+            }
+            await shutdown.value
+
+            try expect(result == .posted)
+            try expect(pasteboard.items == originalItems)
+            try expect(
+                completed,
+                "completed restore remained owned by delivery shutdown"
+            )
         }
 
         await runAsync("background AX target never receives paste events", failures: &failures) {
@@ -3246,6 +3454,115 @@ struct SpeakerCoreSpecs {
                 records.first?.outcome.failure
                     == .providerAuthenticationFailed
             )
+        }
+
+        await runAsync(
+            "voice shutdown completes through a live delivery with no restore work",
+            failures: &failures
+        ) {
+            let targets = AccessibilityInputTargets(
+                system: LifecycleAccessibilityTargetSystem(
+                    live: LiveAccessibilityTargetSystem()
+                )
+            )
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: targets,
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: targets,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let completion = CompletionFlag()
+            let shutdown = Task {
+                await sessions.shutdown()
+                await completion.markComplete()
+            }
+
+            let completed = await eventually(before: .milliseconds(300)) {
+                await completion.isComplete
+            }
+            await shutdown.value
+
+            try expect(
+                completed,
+                "live delivery shutdown waited without restore work"
+            )
+        }
+
+        await runAsync(
+            "voice shutdown waits for the full automatic clipboard restore",
+            failures: &failures
+        ) {
+            let originalItems = [
+                [
+                    "public.utf8-plain-text": Data("original".utf8),
+                    "public.rtf": Data([1, 2, 3]),
+                ],
+                ["public.png": Data([4, 5, 6])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let sleeper = ControlledPasteboardRestoreSleep()
+            let pastePosts = LockedCounter()
+            let liveSystem = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        sleepBeforeRestore: { duration in
+                            try await sleeper.sleep(for: duration)
+                        },
+                        conditionalRestoreDidFinish: {
+                            await sleeper.markRestoreCompleted()
+                        }
+                    )
+                },
+                focusedTargetState: { _, _ in .success(true) },
+                postPasteCommand: {
+                    pastePosts.increment()
+                    return true
+                }
+            )
+            let targets = AccessibilityInputTargets(
+                system: LifecycleAccessibilityTargetSystem(live: liveSystem)
+            )
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: targets,
+                transcriber: SpeechTranscriberFake(text: "hello"),
+                delivery: targets,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            await sleeper.waitUntilStarted()
+            let requestedDuration = await sleeper.requestedDuration
+            let shutdownCompletion = CompletionFlag()
+            let shutdown = Task {
+                await sessions.shutdown()
+                await shutdownCompletion.markComplete()
+            }
+            for _ in 0..<20 { await Task.yield() }
+            let completedBeforeRestore = await shutdownCompletion.isComplete
+
+            try expect(requestedDuration == .milliseconds(500))
+            try expect(!completedBeforeRestore)
+            try expect(pastePosts.value == 1)
+            try expect(
+                pasteboard.items
+                    == [["public.utf8-plain-text": Data("hello".utf8)]]
+            )
+
+            await sleeper.resume()
+            await shutdown.value
+            let completedAfterRestore = await shutdownCompletion.isComplete
+            try expect(completedAfterRestore)
+            try expect(pasteboard.items == originalItems)
         }
 
         await runAsync("pending-copy trigger rejection resets the next shortcut gesture", failures: &failures) {
@@ -7086,6 +7403,27 @@ private actor ControlledPasteboardRestoreSleep {
     }
 }
 
+private actor ControlledPasteboardPreparation {
+    private var isBlocked = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func block() async {
+        isBlocked = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilBlocked() async {
+        while !isBlocked { await Task.yield() }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 @MainActor
 private final class FunctionKeyMonitorFake: FunctionKeyMonitoring {
     private let startResult: FunctionKeyMonitorStartResult
@@ -8025,6 +8363,77 @@ private actor StubbornRecordingDeadline {
 
     func fire(requestID: Int) {
         continuations.removeValue(forKey: requestID)?.resume()
+    }
+}
+
+private struct LifecycleAccessibilityTargetSystem: AccessibilityTargetSystem {
+    let live: LiveAccessibilityTargetSystem
+    private let evidence = AccessibilityTargetEvidence(
+        reference: AccessibilityTargetReference(),
+        selection: nil,
+        originalValue: nil,
+        processID: 42,
+        applicationName: "Editor"
+    )
+
+    func captureFocusedTarget() async -> AccessibilityTargetCapture {
+        .writable(evidence)
+    }
+
+    func captureTarget(
+        _ target: AccessibilityReleaseTarget
+    ) async -> AccessibilityTargetCapture {
+        guard target.processID == evidence.processID else {
+            return .unavailable(.invalidatedTarget)
+        }
+        return .writable(evidence)
+    }
+
+    func secureInputEnabled() async -> Bool { false }
+
+    func subrole(
+        of target: AccessibilityTargetReference
+    ) async -> AccessibilityOperationResult<String?> {
+        .success(nil)
+    }
+
+    func role(
+        of target: AccessibilityTargetReference
+    ) async -> AccessibilityOperationResult<String?> {
+        .success("AXTextArea")
+    }
+
+    func value(
+        of target: AccessibilityTargetReference
+    ) async -> AccessibilityOperationResult<String?> {
+        .success(nil)
+    }
+
+    func focusedState(
+        _ target: AccessibilityTargetReference,
+        in processID: pid_t
+    ) async -> AccessibilityOperationResult<Bool> {
+        .success(true)
+    }
+
+    func isFrontmost(processID: pid_t) async -> Bool { true }
+
+    func selection(
+        of target: AccessibilityTargetReference
+    ) async -> AccessibilityOperationResult<NSRange?> {
+        .success(nil)
+    }
+
+    func paste(
+        _ text: String,
+        to target: AccessibilityTargetReference,
+        in processID: pid_t
+    ) async -> AccessibilityPasteResult {
+        await live.paste(text, to: target, in: processID)
+    }
+
+    func shutdown() async {
+        await live.shutdown()
     }
 }
 
