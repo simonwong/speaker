@@ -29,6 +29,13 @@ package extension VoiceInputFailure {
                 icon: "mic.slash.fill",
                 needsSettings: false
             )
+        case .recordingLimitReached:
+            .init(
+                title: "录音已达到 10 分钟上限",
+                guidance: "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。",
+                icon: "timer",
+                needsSettings: false
+            )
         case .microphonePermissionDenied:
             .init(
                 title: "麦克风权限未开启",

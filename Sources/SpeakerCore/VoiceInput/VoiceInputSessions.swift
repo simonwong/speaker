@@ -460,6 +460,8 @@ public extension SessionHistoryRecording {
 }
 
 public actor VoiceInputSessions {
+    package static let standardMaximumRecordingDuration: Duration = .seconds(600)
+
     private struct TerminalHistoryPresentation: Sendable {
         let activity: VoiceInputActivity
         let notice: VoiceInputNotice?
@@ -496,6 +498,9 @@ public actor VoiceInputSessions {
     private let delivery: any TextDelivering
     private let clipboard: any ClipboardWriting
     private let history: any SessionHistoryRecording
+    private let maximumRecordingDuration: Duration
+    private let sleepUntilRecordingLimit:
+        @Sendable (Duration) async throws -> Void
 
     private var phase: Phase = .idle
     private var releasePending = false
@@ -504,6 +509,7 @@ public actor VoiceInputSessions {
     private var streamingCompletionTask: Task<Void, Never>?
     private var telemetryTask: Task<Void, Never>?
     private var captureFailureTask: Task<Void, Never>?
+    private var recordingLimitTask: Task<Void, Never>?
     private var deliveryCommitGate: DeliveryCommitGate?
     private var deliveryTask: Task<DeliveryOutcome, Never>?
     private var deliveryResolution: DeliveryResolution?
@@ -542,6 +548,10 @@ public actor VoiceInputSessions {
         self.delivery = delivery
         self.clipboard = clipboard
         self.history = history
+        maximumRecordingDuration = Self.standardMaximumRecordingDuration
+        sleepUntilRecordingLimit = { duration in
+            try await Task.sleep(for: duration)
+        }
     }
 
     public init(
@@ -558,6 +568,31 @@ public actor VoiceInputSessions {
         self.delivery = delivery
         self.clipboard = clipboard
         self.history = history
+        maximumRecordingDuration = Self.standardMaximumRecordingDuration
+        sleepUntilRecordingLimit = { duration in
+            try await Task.sleep(for: duration)
+        }
+    }
+
+    package init(
+        audioCapture: any AudioCapturing,
+        targetCapture: any InputTargetCapturing,
+        textProcessor: any VoiceTextProcessing,
+        delivery: any TextDelivering,
+        clipboard: any ClipboardWriting,
+        history: any SessionHistoryRecording,
+        maximumRecordingDuration: Duration,
+        sleepUntilRecordingLimit:
+            @escaping @Sendable (Duration) async throws -> Void
+    ) {
+        self.audioCapture = audioCapture
+        self.targetCapture = targetCapture
+        self.textProcessor = textProcessor
+        self.delivery = delivery
+        self.clipboard = clipboard
+        self.history = history
+        self.maximumRecordingDuration = maximumRecordingDuration
+        self.sleepUntilRecordingLimit = sleepUntilRecordingLimit
     }
 
     public func observe() -> AsyncStream<VoiceInputPresentation> {
@@ -663,7 +698,9 @@ public actor VoiceInputSessions {
     /// sending `.cancel`, otherwise the final cancellation record can be lost.
     public func shutdown() async {
         isShutDown = true
+        let limitTask = cancelRecordingLimit()
         await cancelSession()
+        await limitTask?.value
         await finishingTask?.value
         let pending = Array(historyWriteTasks.values)
         for task in pending {
@@ -778,6 +815,11 @@ public actor VoiceInputSessions {
             phase = .recording(id, startedAt: startedAt, snapshot: snapshot)
             advanceAudit(id: id, stage: "recording")
             publish(.recording(id))
+            startRecordingLimit(
+                for: id,
+                startedAt: startedAt,
+                snapshot: snapshot
+            )
             if let liveStream, let streamingProcessor {
                 let sessions = self
                 transcriptionTask = Task {
@@ -864,6 +906,7 @@ public actor VoiceInputSessions {
         captureHint: InputTargetCaptureHint?
     ) {
         guard case let .recording(id, startedAt, snapshot) = phase else { return }
+        _ = cancelRecordingLimit()
         telemetryTask?.cancel()
         telemetryTask = nil
         captureFailureTask?.cancel()
@@ -1207,6 +1250,7 @@ public actor VoiceInputSessions {
         historyTextPolicy = .unclassified
         releasePending = false
         pendingReleaseCaptureHint = nil
+        _ = cancelRecordingLimit()
         transcriptionTask?.cancel()
         transcriptionTask = nil
         streamingCompletionTask?.cancel()
@@ -1303,6 +1347,7 @@ public actor VoiceInputSessions {
         historyTextPolicy = .unclassified
         releasePending = false
         pendingReleaseCaptureHint = nil
+        _ = cancelRecordingLimit()
         telemetryTask?.cancel()
         telemetryTask = nil
         captureFailureTask?.cancel()
@@ -1518,6 +1563,7 @@ public actor VoiceInputSessions {
         historyTextPolicy = .unclassified
         releasePending = false
         pendingReleaseCaptureHint = nil
+        _ = cancelRecordingLimit()
         transcriptionTask?.cancel()
         transcriptionTask = nil
         streamingCompletionTask = nil
@@ -1560,6 +1606,61 @@ public actor VoiceInputSessions {
             outcome: activity
         ))
         phase = .idle
+    }
+
+    private func startRecordingLimit(
+        for id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot
+    ) {
+        _ = cancelRecordingLimit()
+        let duration = maximumRecordingDuration
+        let sleep = sleepUntilRecordingLimit
+        recordingLimitTask = Task { [weak self] in
+            do {
+                try await sleep(duration)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.recordingLimitReached(
+                id: id,
+                startedAt: startedAt,
+                snapshot: snapshot
+            )
+        }
+    }
+
+    private func recordingLimitReached(
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot
+    ) async {
+        guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
+            return
+        }
+        recordingLimitTask = nil
+        await failActiveRecording(
+            id: id,
+            startedAt: startedAt,
+            snapshot: snapshot,
+            problem: VoiceInputProblem(
+                failure: .recordingLimitReached,
+                diagnostic: VoiceProviderDiagnostic(
+                    provider: "local",
+                    operation: .transcription,
+                    code: "recording.limit_reached"
+                )
+            )
+        )
+    }
+
+    @discardableResult
+    private func cancelRecordingLimit() -> Task<Void, Never>? {
+        let task = recordingLimitTask
+        recordingLimitTask = nil
+        task?.cancel()
+        return task
     }
 
     private func receivedTelemetry(
