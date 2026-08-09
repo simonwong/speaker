@@ -246,6 +246,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     private let canPostEvents: @Sendable () -> Bool
     private let preparePasteboardTransaction:
         @Sendable (String) async -> PasteboardDeliveryTransaction?
+    private let focusedTargetState:
+        (@Sendable (
+            AccessibilityTargetReference,
+            pid_t
+        ) async -> AccessibilityOperationResult<Bool>)?
+    private let postPasteCommand: @Sendable () async -> Bool
     private let captureDiagnosticBox = AccessibilityCaptureDiagnosticBox()
 
     package var captureDiagnostic: String? {
@@ -269,13 +275,23 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             @escaping @Sendable (String) async
                 -> PasteboardDeliveryTransaction? = { text in
                     await PasteboardDeliveryTransaction.prepare(text: text)
-                }
+                },
+        focusedTargetState:
+            (@Sendable (
+                AccessibilityTargetReference,
+                pid_t
+            ) async -> AccessibilityOperationResult<Bool>)? = nil,
+        postPasteCommand: @escaping @Sendable () async -> Bool = {
+            await PasteboardDeliveryTransaction.postCommandV()
+        }
     ) {
         self.isProcessTrusted = isProcessTrusted
         self.isSecureInputEnabled = isSecureInputEnabled
         self.frontmostProcessIdentifier = frontmostProcessIdentifier
         self.canPostEvents = canPostEvents
         self.preparePasteboardTransaction = preparePasteboardTransaction
+        self.focusedTargetState = focusedTargetState
+        self.postPasteCommand = postPasteCommand
     }
 
     package func captureFocusedTarget() async -> AccessibilityTargetCapture {
@@ -595,7 +611,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             await transaction.restoreIfOwned()
             return .targetChanged
         }
-        switch await focusedState(target, in: processID) {
+        let focusState = if let focusedTargetState {
+            await focusedTargetState(target, processID)
+        } else {
+            await focusedState(target, in: processID)
+        }
+        switch focusState {
         case .success(true):
             break
         case .success(false):
@@ -612,7 +633,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             await transaction.restoreIfOwned()
             return .eventFailed
         }
-        guard await PasteboardDeliveryTransaction.postCommandV() else {
+        guard await postPasteCommand() else {
             await transaction.restoreIfOwned()
             return .eventFailed
         }

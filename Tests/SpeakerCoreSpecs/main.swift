@@ -692,6 +692,248 @@ struct SpeakerCoreSpecs {
             )
         }
 
+        await runAsync(
+            "automatic paste refuses an over-budget clipboard before mutation",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(
+                items: [["public.png": Data([1, 2, 3, 4])]]
+            )
+            let system = LiveAccessibilityTargetSystem(
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        snapshotBudget: .init(
+                            maximumItemCount: 1,
+                            maximumRepresentationCount: 1,
+                            maximumBytesPerRepresentation: 4,
+                            maximumTotalBytes: 3
+                        )
+                    )
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+
+            try expect(result == .clipboardFailed)
+            try expect(pasteboard.clearCount == 0)
+        }
+
+        await runAsync(
+            "automatic paste restores a complete owned snapshot on pre-commit failure",
+            failures: &failures
+        ) {
+            let originalItems = [
+                [
+                    "public.utf8-plain-text": Data("original".utf8),
+                    "public.rtf": Data([1, 2, 3, 4]),
+                ],
+                ["public.png": Data([5, 6, 7, 8])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let system = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { true },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        snapshotBudget: .init(
+                            maximumItemCount: 2,
+                            maximumRepresentationCount: 3,
+                            maximumBytesPerRepresentation: 8,
+                            maximumTotalBytes: 16
+                        )
+                    )
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+
+            try expect(result == .secureTarget)
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "automatic paste never restores over a newer external clipboard",
+            failures: &failures
+        ) {
+            let externalItems = [
+                ["public.utf8-plain-text": Data("external".utf8)],
+            ]
+            let pasteboard = ClipboardPasteboardFake(
+                items: [["public.png": Data([1, 2, 3])]],
+                externalItemsAfterReplacement: externalItems
+            )
+            let system = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { true },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access
+                    )
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+
+            try expect(result == .clipboardFailed)
+            try expect(pasteboard.items == externalItems)
+        }
+
+        await runAsync(
+            "automatic paste rejects an inexact replacement before Command-V",
+            failures: &failures
+        ) {
+            let originalItems = [
+                ["public.utf8-plain-text": Data("original".utf8)],
+            ]
+            let pasteboard = ClipboardPasteboardFake(
+                items: originalItems,
+                replacementReadback: "mismatched text"
+            )
+            let pastePosts = LockedCounter()
+            let system = LiveAccessibilityTargetSystem(
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access
+                    )
+                },
+                postPasteCommand: {
+                    pastePosts.increment()
+                    return true
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+
+            try expect(result == .clipboardFailed)
+            try expect(pastePosts.value == 0)
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "successful automatic paste posts once then restores after 500 milliseconds",
+            failures: &failures
+        ) {
+            let originalItems = [
+                ["public.rtf": Data([1, 2, 3])],
+                ["public.png": Data([4, 5, 6])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let sleeper = ControlledPasteboardRestoreSleep()
+            let pastePosts = LockedCounter()
+            let system = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        conditionalRestoreDelay: .milliseconds(500),
+                        sleepBeforeRestore: { duration in
+                            try await sleeper.sleep(for: duration)
+                        },
+                        conditionalRestoreDidFinish: {
+                            await sleeper.markRestoreCompleted()
+                        }
+                    )
+                },
+                focusedTargetState: { _, _ in .success(true) },
+                postPasteCommand: {
+                    pastePosts.increment()
+                    return true
+                }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+            await sleeper.waitUntilStarted()
+
+            try expect(result == .posted)
+            try expect(pastePosts.value == 1)
+            try expect(
+                pasteboard.items
+                    == [["public.utf8-plain-text": Data("hello".utf8)]]
+            )
+            let requestedDuration = await sleeper.requestedDuration
+            try expect(requestedDuration == .milliseconds(500))
+
+            await sleeper.resume()
+            await sleeper.waitUntilRestoreCompleted()
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "automatic conditional restore preserves a newer clipboard owner",
+            failures: &failures
+        ) {
+            let externalItems = [
+                ["public.utf8-plain-text": Data("external".utf8)],
+            ]
+            let pasteboard = ClipboardPasteboardFake(
+                items: [["public.png": Data([1, 2, 3])]]
+            )
+            let sleeper = ControlledPasteboardRestoreSleep()
+            let system = LiveAccessibilityTargetSystem(
+                isSecureInputEnabled: { false },
+                frontmostProcessIdentifier: { 42 },
+                canPostEvents: { true },
+                preparePasteboardTransaction: { text in
+                    await PasteboardDeliveryTransaction.prepare(
+                        text: text,
+                        pasteboard: pasteboard.access,
+                        sleepBeforeRestore: { duration in
+                            try await sleeper.sleep(for: duration)
+                        },
+                        conditionalRestoreDidFinish: {
+                            await sleeper.markRestoreCompleted()
+                        }
+                    )
+                },
+                focusedTargetState: { _, _ in .success(true) },
+                postPasteCommand: { true }
+            )
+
+            let result = await system.paste(
+                "hello",
+                to: AccessibilityTargetReference(),
+                in: 42
+            )
+            await sleeper.waitUntilStarted()
+            pasteboard.replaceExternally(with: externalItems)
+            await sleeper.resume()
+            await sleeper.waitUntilRestoreCompleted()
+
+            try expect(result == .posted)
+            try expect(pasteboard.items == externalItems)
+        }
+
         await runAsync("background AX target never receives paste events", failures: &failures) {
             let system = AccessibilityTargetSystemFake(
                 isFrontmost: false,
@@ -1797,6 +2039,50 @@ struct SpeakerCoreSpecs {
                 try expect(pasteboard.clearCount == 0)
                 try expect(pasteboard.items == testCase.items)
             }
+        }
+
+        await runAsync(
+            "clipboard metadata enumeration stops at the configured boundary",
+            failures: &failures
+        ) {
+            let tooManyItems = ClipboardPasteboardFake(items: [
+                ["type.a": Data([1])],
+                ["type.b": Data([2])],
+            ])
+            let itemBoundedWriter = SystemClipboardWriter(
+                pasteboard: tooManyItems.access,
+                snapshotBudget: .init(
+                    maximumItemCount: 1,
+                    maximumRepresentationCount: 2,
+                    maximumBytesPerRepresentation: 1,
+                    maximumTotalBytes: 2
+                )
+            )
+
+            let itemResult = await itemBoundedWriter.copy("replacement")
+            try expect(!itemResult)
+            try expect(tooManyItems.itemTypesReadCount == 0)
+
+            let tooManyRepresentations = ClipboardPasteboardFake(items: [[
+                "type.a": Data([1]),
+                "type.b": Data([2]),
+            ]])
+            let representationBoundedWriter = SystemClipboardWriter(
+                pasteboard: tooManyRepresentations.access,
+                snapshotBudget: .init(
+                    maximumItemCount: 1,
+                    maximumRepresentationCount: 1,
+                    maximumBytesPerRepresentation: 1,
+                    maximumTotalBytes: 1
+                )
+            )
+
+            let representationResult = await representationBoundedWriter.copy(
+                "replacement"
+            )
+            try expect(!representationResult)
+            try expect(tooManyRepresentations.itemTypesReadCount == 1)
+            try expect(tooManyRepresentations.clearCount == 0)
         }
 
         await runAsync("system clipboard snapshot accepts exact resource limits", failures: &failures) {
@@ -6052,6 +6338,7 @@ private final class ClipboardPasteboardFake {
     private(set) var items: [[String: Data]]
     private(set) var changeCount = 0
     private(set) var clearCount = 0
+    private(set) var itemTypesReadCount = 0
     private var currentString: String?
     private var currentMarker: String?
     private let replacementWriteSucceeds: Bool
@@ -6076,7 +6363,12 @@ private final class ClipboardPasteboardFake {
     var access: ClipboardPasteboardAccess {
         ClipboardPasteboardAccess(
             changeCount: { self.changeCount },
-            itemTypes: { self.items.map { Array($0.keys) } },
+            itemCount: { self.items.count },
+            itemTypes: { itemIndex in
+                self.itemTypesReadCount += 1
+                guard self.items.indices.contains(itemIndex) else { return nil }
+                return Array(self.items[itemIndex].keys)
+            },
             data: { itemIndex, type in
                 guard !self.unreadableTypes.contains(type) else { return nil }
                 return self.items[itemIndex][type]
@@ -6113,6 +6405,49 @@ private final class ClipboardPasteboardFake {
                 return true
             }
         )
+    }
+
+    func replaceExternally(with items: [[String: Data]]) {
+        self.items = items
+        currentString = nil
+        currentMarker = nil
+        changeCount += 1
+    }
+}
+
+private actor ControlledPasteboardRestoreSleep {
+    private(set) var requestedDuration: Duration?
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var started = false
+    private var restoreCompleted = false
+
+    func sleep(for duration: Duration) async throws {
+        requestedDuration = duration
+        started = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while !started {
+            await Task.yield()
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func markRestoreCompleted() {
+        restoreCompleted = true
+    }
+
+    func waitUntilRestoreCompleted() async {
+        while !restoreCompleted {
+            await Task.yield()
+        }
     }
 }
 

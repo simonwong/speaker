@@ -9,6 +9,9 @@ package enum PasteboardTransactionMarker {
     )
 }
 
+/// Bounds data retained by Speaker for rollback. AppKit exposes each
+/// representation only as a complete `Data` value, so one value may be
+/// materialized by the system before its size can be checked.
 package struct PasteboardSnapshotBudget: Equatable, Sendable {
     package let maximumItemCount: Int
     package let maximumRepresentationCount: Int
@@ -49,15 +52,18 @@ package struct PasteboardSnapshot: Equatable, Sendable {
         budget: PasteboardSnapshotBudget
     ) -> Self? {
         let capturedChangeCount = pasteboard.changeCount()
-        let itemTypes = pasteboard.itemTypes()
-        guard itemTypes.count <= budget.maximumItemCount else { return nil }
+        let itemCount = pasteboard.itemCount()
+        guard itemCount <= budget.maximumItemCount else { return nil }
 
         var representationCount = 0
         var totalBytes = 0
         var items: [[String: Data]] = []
-        items.reserveCapacity(itemTypes.count)
+        items.reserveCapacity(itemCount)
 
-        for (itemIndex, types) in itemTypes.enumerated() {
+        for itemIndex in 0..<itemCount {
+            guard let types = pasteboard.itemTypes(itemIndex) else {
+                return nil
+            }
             guard types.count
                 <= budget.maximumRepresentationCount - representationCount
             else { return nil }
@@ -129,7 +135,7 @@ package struct PasteboardReplacementTransaction: Sendable {
 
     @MainActor
     package func stillOwnsPasteboard() -> Bool {
-        PasteboardDeliveryTransaction.ownsPasteboard(
+        PasteboardTransactionOwnership.ownsPasteboard(
             currentChangeCount: pasteboard.changeCount(),
             currentMarker: pasteboard.readMarker(),
             ownedChangeCount: ownedChangeCount,
@@ -144,6 +150,17 @@ package struct PasteboardReplacementTransaction: Sendable {
     ) -> Bool {
         _ = pasteboard.clearContents()
         return snapshot.items.isEmpty || pasteboard.writeItems(snapshot.items)
+    }
+}
+
+private enum PasteboardTransactionOwnership {
+    static func ownsPasteboard(
+        currentChangeCount: Int,
+        currentMarker: String?,
+        ownedChangeCount: Int,
+        marker: String
+    ) -> Bool {
+        currentChangeCount == ownedChangeCount && currentMarker == marker
     }
 }
 
@@ -170,36 +187,39 @@ package struct PasteCommandEventPlan: Sendable {
 }
 
 package struct PasteboardDeliveryTransaction: Sendable {
-    private static let markerType = PasteboardTransactionMarker.type
+    private let replacement: PasteboardReplacementTransaction
+    private let conditionalRestoreDelay: Duration
+    private let sleepBeforeRestore:
+        @Sendable (Duration) async throws -> Void
+    private let conditionalRestoreDidFinish: @Sendable () async -> Void
 
-    private let snapshot: [[String: Data]]
-    private let marker: String
-    private let ownedChangeCount: Int
-
-    package static func prepare(text: String) async -> Self? {
+    package static func prepare(
+        text: String,
+        pasteboard: ClipboardPasteboardAccess = .live,
+        snapshotBudget: PasteboardSnapshotBudget = .standard,
+        conditionalRestoreDelay: Duration = .milliseconds(500),
+        sleepBeforeRestore:
+            @escaping @Sendable (Duration) async throws -> Void = { duration in
+                try await Task.sleep(for: duration)
+            },
+        conditionalRestoreDidFinish:
+            @escaping @Sendable () async -> Void = {}
+    ) async -> Self? {
         await MainActor.run {
-            let pasteboard = NSPasteboard.general
-            let snapshot = (pasteboard.pasteboardItems ?? []).map { item in
-                Dictionary(uniqueKeysWithValues: item.types.compactMap { type in
-                    item.data(forType: type).map { (type.rawValue, $0) }
-                })
-            }
-            let marker = UUID().uuidString
-            let item = NSPasteboardItem()
-            guard item.setString(text, forType: .string),
-                  item.setString(marker, forType: markerType)
-            else { return nil }
-            let clearedChangeCount = pasteboard.clearContents()
-            guard pasteboard.writeObjects([item]) else {
-                if pasteboard.changeCount == clearedChangeCount {
-                    restore(snapshot, to: pasteboard)
-                }
+            guard let replacement = PasteboardReplacementTransaction.prepare(
+                text: text,
+                pasteboard: pasteboard,
+                budget: snapshotBudget
+            ) else { return nil }
+            guard replacement.verifies(text) else {
+                replacement.restoreIfOwned()
                 return nil
             }
             return Self(
-                snapshot: snapshot,
-                marker: marker,
-                ownedChangeCount: pasteboard.changeCount
+                replacement: replacement,
+                conditionalRestoreDelay: conditionalRestoreDelay,
+                sleepBeforeRestore: sleepBeforeRestore,
+                conditionalRestoreDidFinish: conditionalRestoreDidFinish
             )
         }
     }
@@ -210,29 +230,35 @@ package struct PasteboardDeliveryTransaction: Sendable {
         ownedChangeCount: Int,
         marker: String
     ) -> Bool {
-        currentChangeCount == ownedChangeCount && currentMarker == marker
+        PasteboardTransactionOwnership.ownsPasteboard(
+            currentChangeCount: currentChangeCount,
+            currentMarker: currentMarker,
+            ownedChangeCount: ownedChangeCount,
+            marker: marker
+        )
     }
 
     package func restoreIfOwned() async {
-        await MainActor.run { restoreIfOwnedOnMainActor() }
+        _ = await MainActor.run {
+            replacement.restoreIfOwned()
+        }
     }
 
     package func stillOwnsPasteboard() async -> Bool {
         await MainActor.run {
-            let pasteboard = NSPasteboard.general
-            return Self.ownsPasteboard(
-                currentChangeCount: pasteboard.changeCount,
-                currentMarker: pasteboard.string(forType: Self.markerType),
-                ownedChangeCount: ownedChangeCount,
-                marker: marker
-            )
+            replacement.stillOwnsPasteboard()
         }
     }
 
     package func scheduleConditionalRestore() {
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(500))
-            restoreIfOwnedOnMainActor()
+            do {
+                try await sleepBeforeRestore(conditionalRestoreDelay)
+            } catch {
+                return
+            }
+            replacement.restoreIfOwned()
+            await conditionalRestoreDidFinish()
         }
     }
 
@@ -270,36 +296,5 @@ package struct PasteboardDeliveryTransaction: Sendable {
             }
         }
         return true
-    }
-
-    @MainActor
-    private func restoreIfOwnedOnMainActor() {
-        let pasteboard = NSPasteboard.general
-        guard Self.ownsPasteboard(
-            currentChangeCount: pasteboard.changeCount,
-            currentMarker: pasteboard.string(forType: Self.markerType),
-            ownedChangeCount: ownedChangeCount,
-            marker: marker
-        )
-        else { return }
-
-        Self.restore(snapshot, to: pasteboard)
-    }
-
-    @MainActor
-    private static func restore(
-        _ snapshot: [[String: Data]],
-        to pasteboard: NSPasteboard
-    ) {
-        pasteboard.clearContents()
-        guard !snapshot.isEmpty else { return }
-        let items = snapshot.map { representations in
-            let item = NSPasteboardItem()
-            for (type, data) in representations {
-                item.setData(data, forType: .init(type))
-            }
-            return item
-        }
-        _ = pasteboard.writeObjects(items)
     }
 }

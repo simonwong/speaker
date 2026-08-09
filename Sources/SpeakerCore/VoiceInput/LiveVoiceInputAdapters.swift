@@ -546,7 +546,8 @@ public struct LocalPreviewTranscriber: SpeechTranscribing {
 
 package struct ClipboardPasteboardAccess: Sendable {
     let changeCount: @MainActor @Sendable () -> Int
-    let itemTypes: @MainActor @Sendable () -> [[String]]
+    let itemCount: @MainActor @Sendable () -> Int
+    let itemTypes: @MainActor @Sendable (Int) -> [String]?
     let data: @MainActor @Sendable (Int, String) -> Data?
     let clearContents: @MainActor @Sendable () -> Int
     let writeText: @MainActor @Sendable (String, String) -> Bool
@@ -556,7 +557,8 @@ package struct ClipboardPasteboardAccess: Sendable {
 
     package init(
         changeCount: @escaping @MainActor @Sendable () -> Int,
-        itemTypes: @escaping @MainActor @Sendable () -> [[String]],
+        itemCount: @escaping @MainActor @Sendable () -> Int,
+        itemTypes: @escaping @MainActor @Sendable (Int) -> [String]?,
         data: @escaping @MainActor @Sendable (Int, String) -> Data?,
         clearContents: @escaping @MainActor @Sendable () -> Int,
         writeText: @escaping @MainActor @Sendable (String, String) -> Bool,
@@ -565,6 +567,7 @@ package struct ClipboardPasteboardAccess: Sendable {
         writeItems: @escaping @MainActor @Sendable ([[String: Data]]) -> Bool
     ) {
         self.changeCount = changeCount
+        self.itemCount = itemCount
         self.itemTypes = itemTypes
         self.data = data
         self.clearContents = clearContents
@@ -574,12 +577,15 @@ package struct ClipboardPasteboardAccess: Sendable {
         self.writeItems = writeItems
     }
 
-    static let live = ClipboardPasteboardAccess(
+    package static let live = ClipboardPasteboardAccess(
         changeCount: { NSPasteboard.general.changeCount },
-        itemTypes: {
-            (NSPasteboard.general.pasteboardItems ?? []).map { item in
-                item.types.map(\.rawValue)
-            }
+        itemCount: {
+            NSPasteboard.general.pasteboardItems?.count ?? 0
+        },
+        itemTypes: { itemIndex in
+            let items = NSPasteboard.general.pasteboardItems ?? []
+            guard items.indices.contains(itemIndex) else { return nil }
+            return items[itemIndex].types.map(\.rawValue)
         },
         data: { itemIndex, type in
             let items = NSPasteboard.general.pasteboardItems ?? []
@@ -603,13 +609,16 @@ package struct ClipboardPasteboardAccess: Sendable {
             NSPasteboard.general.string(forType: PasteboardTransactionMarker.type)
         },
         writeItems: { snapshots in
-            let items = snapshots.map { representations in
+            let items = snapshots.compactMap { representations -> NSPasteboardItem? in
                 let item = NSPasteboardItem()
                 for (type, data) in representations {
-                    item.setData(data, forType: .init(type))
+                    guard item.setData(data, forType: .init(type)) else {
+                        return nil
+                    }
                 }
                 return item
             }
+            guard items.count == snapshots.count else { return false }
             return NSPasteboard.general.writeObjects(items)
         }
     )
