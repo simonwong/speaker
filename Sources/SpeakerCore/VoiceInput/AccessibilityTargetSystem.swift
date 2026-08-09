@@ -205,10 +205,13 @@ package protocol AccessibilityTargetSystem: Sendable {
         to target: AccessibilityTargetReference,
         in processID: pid_t
     ) async -> AccessibilityPasteResult
+    func shutdown() async
 }
 
 package extension AccessibilityTargetSystem {
     var captureDiagnostic: String? { nil }
+
+    func shutdown() async {}
 
     func captureFocusedTarget(
         in processID: pid_t
@@ -252,6 +255,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             pid_t
         ) async -> AccessibilityOperationResult<Bool>)?
     private let postPasteCommand: @Sendable () async -> Bool
+    private let pasteboardRestoreCoordinator: PasteboardRestoreCoordinator
     private let captureDiagnosticBox = AccessibilityCaptureDiagnosticBox()
 
     package var captureDiagnostic: String? {
@@ -283,7 +287,8 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             ) async -> AccessibilityOperationResult<Bool>)? = nil,
         postPasteCommand: @escaping @Sendable () async -> Bool = {
             await PasteboardDeliveryTransaction.postCommandV()
-        }
+        },
+        pasteboardRestoreCoordinator: PasteboardRestoreCoordinator = .init()
     ) {
         self.isProcessTrusted = isProcessTrusted
         self.isSecureInputEnabled = isSecureInputEnabled
@@ -292,6 +297,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         self.preparePasteboardTransaction = preparePasteboardTransaction
         self.focusedTargetState = focusedTargetState
         self.postPasteCommand = postPasteCommand
+        self.pasteboardRestoreCoordinator = pasteboardRestoreCoordinator
     }
 
     package func captureFocusedTarget() async -> AccessibilityTargetCapture {
@@ -597,18 +603,25 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         to target: AccessibilityTargetReference,
         in processID: pid_t
     ) async -> AccessibilityPasteResult {
-        guard canPostEvents() else { return .eventFailed }
+        guard canPostEvents(),
+              let restoreReservation = await pasteboardRestoreCoordinator.reserve()
+        else { return .eventFailed }
         guard !text.isEmpty,
               let transaction = await preparePasteboardTransaction(text)
-        else { return .clipboardFailed }
+        else {
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
+            return .clipboardFailed
+        }
 
         try? await Task.sleep(for: .milliseconds(100))
         guard !isSecureInputEnabled() else {
             await transaction.restoreIfOwned()
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .secureTarget
         }
         guard frontmostProcessIdentifier() == processID else {
             await transaction.restoreIfOwned()
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .targetChanged
         }
         let focusState = if let focusedTargetState {
@@ -621,24 +634,36 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             break
         case .success(false):
             await transaction.restoreIfOwned()
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .targetChanged
         case let .failure(failure):
             await transaction.restoreIfOwned()
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .targetFailure(failure)
         }
         guard await transaction.stillOwnsPasteboard() else {
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .clipboardFailed
         }
         guard canPostEvents() else {
             await transaction.restoreIfOwned()
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .eventFailed
         }
         guard await postPasteCommand() else {
             await transaction.restoreIfOwned()
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .eventFailed
         }
-        transaction.scheduleConditionalRestore()
+        await pasteboardRestoreCoordinator.schedule(
+            transaction,
+            reservation: restoreReservation
+        )
         return .posted
+    }
+
+    package func shutdown() async {
+        await pasteboardRestoreCoordinator.shutdown()
     }
 
     private func readElement(

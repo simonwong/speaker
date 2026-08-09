@@ -318,6 +318,10 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         targets[target.id] = nil
     }
 
+    public func shutdown() async {
+        await system.shutdown()
+    }
+
     private func verifyMutationReceipt(
         _ expectedValue: String,
         originalValue: String,

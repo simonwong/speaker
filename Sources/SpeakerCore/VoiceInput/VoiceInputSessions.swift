@@ -443,6 +443,11 @@ public protocol TextDelivering: Sendable {
         to target: InputTargetSnapshot,
         commitGate: DeliveryCommitGate
     ) async -> DeliveryOutcome
+    func shutdown() async
+}
+
+public extension TextDelivering {
+    func shutdown() async {}
 }
 
 public protocol ClipboardWriting: Sendable {
@@ -726,6 +731,7 @@ public actor VoiceInputSessions {
         await limitTask?.value
         await settlementTask?.value
         await finishingTask?.value
+        await delivery.shutdown()
         let pending = Array(historyWriteTasks.values)
         for task in pending {
             await task.value
