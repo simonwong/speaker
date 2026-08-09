@@ -289,7 +289,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     public func save(_ record: VoiceInputHistoryRecord) async {
         guard let db = connection?.raw else { return }
-        guard SessionHistoryRecordPolicy.hasRetainedContent(record) else {
+        guard SessionHistoryRecordPolicy.shouldRetain(record) else {
             if !loadRecords(
                 whereClause: "WHERE session_id = ?",
                 binding: record.sessionID.rawValue.uuidString
@@ -358,7 +358,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     HistoryRecordV1.self,
                     from: data
                 ), let record = try? stored.domainRecord else { continue }
-                guard SessionHistoryRecordPolicy.hasRetainedContent(record)
+                guard SessionHistoryRecordPolicy.shouldRetain(record)
                 else { continue }
                 accumulator.add(record)
             }
@@ -903,7 +903,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 continue
             }
 
-            guard SessionHistoryRecordPolicy.hasRetainedContent(record) else {
+            guard SessionHistoryRecordPolicy.shouldRetain(record) else {
                 plan.deletions.append(sessionID)
                 stepStatus = sqlite3_step(statement)
                 continue

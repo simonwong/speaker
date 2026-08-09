@@ -513,9 +513,12 @@ package final class VoiceInputExperience: ObservableObject {
         }
         // Idle notices are one-shot feedback effects (for example, successful
         // copy). They are announced below but must not become stale menu state.
-        let retainedMenuNotice: String? = if case .idle = activity {
+        let retainedMenuNotice: String? = switch activity {
+        case .idle:
             nil
-        } else {
+        case let .failed(_, failure):
+            failure.userGuidance
+        default:
             presentation.notice?.userMessage
         }
         let sessionID = activity.sessionID

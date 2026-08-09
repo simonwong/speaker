@@ -510,6 +510,7 @@ public actor VoiceInputSessions {
     private var telemetryTask: Task<Void, Never>?
     private var captureFailureTask: Task<Void, Never>?
     private var recordingLimitTask: Task<Void, Never>?
+    private var activeRecordingSettlementTask: Task<Void, Never>?
     private var deliveryCommitGate: DeliveryCommitGate?
     private var deliveryTask: Task<DeliveryOutcome, Never>?
     private var deliveryResolution: DeliveryResolution?
@@ -720,8 +721,10 @@ public actor VoiceInputSessions {
     public func shutdown() async {
         isShutDown = true
         let limitTask = cancelRecordingLimit()
+        let settlementTask = activeRecordingSettlementTask
         await cancelSession()
         await limitTask?.value
+        await settlementTask?.value
         await finishingTask?.value
         let pending = Array(historyWriteTasks.values)
         for task in pending {
@@ -1542,7 +1545,7 @@ public actor VoiceInputSessions {
         startedAt: Date,
         snapshot: VoiceTextProcessingSnapshot
     ) async {
-        await failActiveRecording(
+        failActiveRecording(
             id: id,
             startedAt: startedAt,
             snapshot: snapshot,
@@ -1558,7 +1561,7 @@ public actor VoiceInputSessions {
     ) async {
         let problem = (error as? VoiceTextProcessingFailure)?.problem
             ?? VoiceInputProblem(failure: .transcriptionFailed)
-        await failActiveRecording(
+        failActiveRecording(
             id: id,
             startedAt: startedAt,
             snapshot: snapshot,
@@ -1570,8 +1573,9 @@ public actor VoiceInputSessions {
         id: VoiceInputSessionID,
         startedAt: Date,
         snapshot: VoiceTextProcessingSnapshot,
-        problem: VoiceInputProblem
-    ) async {
+        problem: VoiceInputProblem,
+        cancelsRecordingLimit: Bool = true
+    ) {
         guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
             return
         }
@@ -1584,21 +1588,43 @@ public actor VoiceInputSessions {
         historyTextPolicy = .unclassified
         releasePending = false
         pendingReleaseCaptureHint = nil
-        _ = cancelRecordingLimit()
+        if cancelsRecordingLimit {
+            _ = cancelRecordingLimit()
+        }
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        streamingCompletionTask = nil
+        streamingCompletionTask?.cancel()
         telemetryTask?.cancel()
         telemetryTask = nil
         captureFailureTask?.cancel()
-        captureFailureTask = nil
 
         let activity = VoiceInputActivity.failed(id, problem.failure)
-        // The provider has already returned a definite failure. Surface that
-        // fact before recorder cleanup or history I/O, then fence late events.
+        // Surface the terminal problem before recorder cleanup or history I/O,
+        // then fence late events while shutdown retains the settlement task.
         publish(activity)
-        await audioCapture.cancel()
+        let audioCapture = audioCapture
+        activeRecordingSettlementTask = Task { [weak self] in
+            await audioCapture.cancel()
+            await self?.completeActiveRecordingFailure(
+                id: id,
+                startedAt: startedAt,
+                snapshot: snapshot,
+                problem: problem,
+                activity: activity,
+                stageDurations: audit.stageDurations
+            )
+        }
+    }
 
+    private func completeActiveRecordingFailure(
+        id: VoiceInputSessionID,
+        startedAt: Date,
+        snapshot: VoiceTextProcessingSnapshot,
+        problem: VoiceInputProblem,
+        activity: VoiceInputActivity,
+        stageDurations: [String: Int]
+    ) {
+        guard phase == .finalizing(id) else { return }
         let diagnostic = problem.diagnostic
         _ = queueHistory(.init(
             sessionID: id,
@@ -1623,9 +1649,12 @@ public actor VoiceInputSessions {
                 0,
                 Int(Date().timeIntervalSince(startedAt) * 1_000)
             ),
-            stageDurationsMilliseconds: audit.stageDurations,
+            stageDurationsMilliseconds: stageDurations,
             outcome: activity
         ))
+        streamingCompletionTask = nil
+        captureFailureTask = nil
+        activeRecordingSettlementTask = nil
         phase = .idle
     }
 
@@ -1660,8 +1689,7 @@ public actor VoiceInputSessions {
         guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
             return
         }
-        recordingLimitTask = nil
-        await failActiveRecording(
+        failActiveRecording(
             id: id,
             startedAt: startedAt,
             snapshot: snapshot,
@@ -1672,8 +1700,10 @@ public actor VoiceInputSessions {
                     operation: .transcription,
                     code: "recording.limit_reached"
                 )
-            )
+            ),
+            cancelsRecordingLimit: false
         )
+        recordingLimitTask = nil
     }
 
     @discardableResult
