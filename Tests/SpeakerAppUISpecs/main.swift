@@ -17,32 +17,21 @@ struct SpeakerAppUISpecs {
             failures: &failures,
             executed: &executed
         ) {
-            let size = VoiceInputPanelLayout.processing.size
-            let panel = VoiceInputPanelFactory.make(
-                contentRect: NSRect(
-                    x: 0,
-                    y: 0,
-                    width: size.width,
-                    height: size.height
-                )
-            )
-            defer { panel.close() }
+            let presenter = VoiceInputPanelPresenter { _ in Color.clear }
+            defer { presenter.stop() }
+            let evidence = presenter.evidence
 
-            try expect(panel.styleMask.contains(.borderless))
-            try expect(panel.styleMask.contains(.nonactivatingPanel))
-            try expect(panel.becomesKeyOnlyIfNeeded)
+            try expect(evidence.isBorderless)
+            try expect(evidence.isNonactivating)
+            try expect(evidence.becomesKeyOnlyIfNeeded)
             try expect(
-                !panel.canBecomeKey,
+                !evidence.canBecomeKey,
                 "a notification-only HUD accepted keyboard focus"
             )
-            try expect(!panel.canBecomeMain)
-            try expect(!panel.hidesOnDeactivate)
-            try expect(
-                panel.collectionBehavior.contains(.canJoinAllSpaces)
-            )
-            try expect(
-                panel.collectionBehavior.contains(.fullScreenAuxiliary)
-            )
+            try expect(!evidence.canBecomeMain)
+            try expect(!evidence.hidesOnDeactivate)
+            try expect(evidence.joinsAllSpaces)
+            try expect(evidence.appearsOverFullScreen)
         }
 
         run(
@@ -51,39 +40,24 @@ struct SpeakerAppUISpecs {
             executed: &executed
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
-            let size = VoiceInputPanelLayout.recording.size
-            let hostingView = NSHostingView(rootView: VoiceInputHUD(
-                presentation: presentation,
-                performAction: { _ in nil },
-                routeEffect: { _ in }
-            ))
-            hostingView.frame = NSRect(origin: .zero, size: size)
-            let panel = VoiceInputPanelFactory.make(
-                contentRect: NSRect(origin: .zero, size: size)
-            )
-            VoiceInputPanelFactory.install(hostingView, in: panel)
-            defer {
-                panel.orderOut(nil)
-                panel.close()
+            let presenter = VoiceInputPanelPresenter { presentation in
+                VoiceInputHUD(
+                    presentation: presentation,
+                    performAction: { _ in nil },
+                    routeEffect: { _ in }
+                )
             }
+            defer { presenter.stop() }
+            presenter.present(presentation)
+            let evidence = presenter.evidence
 
-            panel.orderFrontRegardless()
-            hostingView.layoutSubtreeIfNeeded()
-            panel.displayIfNeeded()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-
-            try expect(hostingView.wantsLayer)
-            try expect(hostingView.layer?.isOpaque == false)
+            try expect(evidence.hostingSurfaceIsLayerBacked)
+            try expect(evidence.hostingSurfaceIsOpaque == false)
             try expect(
-                hostingView.layer?.backgroundColor?.alpha == 0,
+                evidence.hostingSurfaceBackgroundAlpha == 0,
                 "the hosting surface added an opaque rectangular background"
             )
-            guard let image = hostingView.bitmapImageRepForCachingDisplay(
-                in: hostingView.bounds
-            ) else {
-                throw SpecFailure(message: "could not render the HUD hosting surface")
-            }
-            hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+            let image = try presenter.renderedBitmap()
             let corners = [
                 (x: 0, y: 0),
                 (x: image.pixelsWide - 1, y: 0),
@@ -106,24 +80,17 @@ struct SpeakerAppUISpecs {
             executed: &executed
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
-            let size = VoiceInputPanelLayout.recording.size
-            let hostingView = NSHostingView(rootView:
+            let presenter = VoiceInputPanelPresenter { presentation in
                 VoiceInputHUD(
                     presentation: presentation,
                     performAction: { _ in nil },
                     routeEffect: { _ in }
                 )
                 .environment(\.adaptiveGlassSurfaceStyleOverride, .opaque)
-            )
-            hostingView.frame = NSRect(origin: .zero, size: size)
-            hostingView.layoutSubtreeIfNeeded()
-
-            guard let image = hostingView.bitmapImageRepForCachingDisplay(
-                in: hostingView.bounds
-            ) else {
-                throw SpecFailure(message: "could not render opaque HUD fallback")
             }
-            hostingView.cacheDisplay(in: hostingView.bounds, to: image)
+            defer { presenter.stop() }
+            presenter.present(presentation)
+            let image = try presenter.renderedBitmap()
             let centerAlpha = image.colorAt(
                 x: image.pixelsWide / 2,
                 y: image.pixelsHigh / 2
@@ -146,29 +113,19 @@ struct SpeakerAppUISpecs {
             executed: &executed
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
-            let size = VoiceInputPanelLayout.recording.size
-            let hostingView = NSHostingView(rootView:
+            let presenter = VoiceInputPanelPresenter { presentation in
                 VoiceInputHUD(
                     presentation: presentation,
                     performAction: { _ in nil },
                     routeEffect: { _ in }
                 )
                 .environment(\.adaptiveGlassSurfaceStyleOverride, .systemMaterial)
-            )
-            hostingView.frame = NSRect(origin: .zero, size: size)
-            let window = NSWindow(
-                contentRect: hostingView.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentView = hostingView
-            window.orderFrontRegardless()
-            defer { window.close() }
-            hostingView.layoutSubtreeIfNeeded()
+            }
+            defer { presenter.stop() }
+            presenter.present(presentation)
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
 
-            let effects = visualEffectViews(in: hostingView)
+            let effects = presenter.visualEffectEvidence
             try expect(effects.count == 1, "found \(effects.count) material views")
             guard let effect = effects.first else { return }
             try expect(effect.material == .hudWindow)
@@ -182,29 +139,19 @@ struct SpeakerAppUISpecs {
             executed: &executed
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
-            let size = VoiceInputPanelLayout.recording.size
-            let hostingView = NSHostingView(rootView:
+            let presenter = VoiceInputPanelPresenter { presentation in
                 VoiceInputHUD(
                     presentation: presentation,
                     performAction: { _ in nil },
                     routeEffect: { _ in }
                 )
                 .environment(\.adaptiveGlassSurfaceStyleOverride, .liquidGlass)
-            )
-            hostingView.frame = NSRect(origin: .zero, size: size)
-            let window = NSWindow(
-                contentRect: hostingView.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            window.contentView = hostingView
-            window.orderFrontRegardless()
-            defer { window.close() }
-            hostingView.layoutSubtreeIfNeeded()
+            }
+            defer { presenter.stop() }
+            presenter.present(presentation)
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
 
-            let effects = visualEffectViews(in: hostingView)
+            let effects = presenter.visualEffectEvidence
             try expect(effects.count == 1, "found \(effects.count) material views")
             guard let effect = effects.first else { return }
             try expect(effect.material == .hudWindow)
@@ -405,21 +352,12 @@ struct SpeakerAppUISpecs {
             let app = NSApplication.shared
             let wasActive = app.isActive
             let keyWindowBefore = app.keyWindow
-            let size = VoiceInputPanelLayout.processing.size
-            let panel = VoiceInputPanelFactory.make(
-                contentRect: NSRect(
-                    x: -10_000,
-                    y: -10_000,
-                    width: size.width,
-                    height: size.height
-                )
-            )
-            defer {
-                panel.orderOut(nil)
-                panel.close()
-            }
+            let presenter = VoiceInputPanelPresenter { _ in Color.clear }
+            defer { presenter.stop() }
 
-            panel.orderFrontRegardless()
+            presenter.present(
+                VoiceInputHUDContractFixture.processing.presentation
+            )
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
             try expect(
@@ -431,7 +369,7 @@ struct SpeakerAppUISpecs {
                 "ordering the HUD replaced the existing key window"
             )
             try expect(
-                !panel.isKeyWindow,
+                !presenter.evidence.isKeyWindow,
                 "the non-activating HUD became the key window"
             )
         }
@@ -441,85 +379,126 @@ struct SpeakerAppUISpecs {
             failures: &failures,
             executed: &executed
         ) {
-            let layouts: [VoiceInputPanelLayout] = [
-                .processing,
-                .recording,
-                .pendingCopy,
-                .problem,
+            let presentations: [(VoiceInputOverlayPresentation, CGSize)] = [
+                (
+                    VoiceInputHUDContractFixture.processing.presentation,
+                    CGSize(width: 128, height: 44)
+                ),
+                (
+                    VoiceInputHUDContractFixture.recording.presentation,
+                    CGSize(width: 128, height: 44)
+                ),
+                (
+                    VoiceInputHUDContractFixture.pendingCopy.presentation,
+                    CGSize(width: 394, height: 54)
+                ),
+                (
+                    VoiceInputHUDContractFixture.problem.presentation,
+                    CGSize(width: 330, height: 54)
+                ),
             ]
-            let panel = VoiceInputPanelFactory.make(
-                contentRect: NSRect(
-                    origin: .zero,
-                    size: VoiceInputPanelLayout.processing.size
+            let presenter = VoiceInputPanelPresenter { presentation in
+                VoiceInputHUD(
+                    presentation: presentation,
+                    performAction: { _ in nil },
+                    routeEffect: { _ in }
                 )
-            )
-            defer { panel.close() }
+            }
+            defer { presenter.stop() }
 
-            for source in layouts {
-                VoiceInputPanelFactory.apply(source, to: panel)
-                for destination in layouts {
-                    VoiceInputPanelFactory.apply(destination, to: panel)
+            for (source, _) in presentations {
+                presenter.present(source)
+                for (destination, expectedSize) in presentations {
+                    presenter.present(destination)
+                    let evidence = presenter.evidence
                     try expect(
-                        panel.frame.size == destination.size,
-                        "the window retained \(source) geometry when switching to \(destination)"
+                        evidence.windowSize == expectedSize,
+                        "the window retained source geometry when switching presentation"
                     )
                     try expect(
-                        panel.contentView?.frame.size == destination.size,
-                        "the content retained \(source) geometry when switching to \(destination)"
+                        evidence.contentSize == expectedSize,
+                        "the content retained source geometry when switching presentation"
                     )
                 }
             }
         }
 
         run(
-            "voice HUD dismissal policy covers live phases and Reduce Motion",
+            "voice HUD presenter keeps a re-shown panel after stale dismissal",
             failures: &failures,
             executed: &executed
         ) {
-            for layout in [
-                VoiceInputPanelLayout.recording,
-                .processing,
-            ] {
-                var transitions = VoiceInputPanelTransitionState()
-                transitions.present(layout)
-                let animated = transitions.dismiss(reduceMotion: false)
-                try expect(animated.collapsesActivity)
-                try expect(animated.fadeDuration == 0.2)
-                try expect(
-                    animated.completionDelay == .milliseconds(220)
+            let presenter = VoiceInputPanelPresenter(
+                reduceMotion: { false },
+                sleep: { _ in }
+            ) { presentation in
+                VoiceInputHUD(
+                    presentation: presentation,
+                    performAction: { _ in nil },
+                    routeEffect: { _ in }
                 )
-                try expect(transitions.canComplete(animated))
-
-                transitions.present(layout)
-                let reduced = transitions.dismiss(reduceMotion: true)
-                try expect(!reduced.collapsesActivity)
-                try expect(reduced.fadeDuration == 0.12)
-                try expect(
-                    reduced.completionDelay == .milliseconds(140)
-                )
-                try expect(transitions.canComplete(reduced))
             }
+            defer { presenter.stop() }
+
+            presenter.present(VoiceInputHUDContractFixture.recording.presentation)
+            presenter.present(.hidden)
+            presenter.present(VoiceInputHUDContractFixture.problem.presentation)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+
+            try expect(presenter.evidence.isVisible)
+            try expect(
+                presenter.evidence.windowSize == CGSize(width: 330, height: 54)
+            )
         }
 
         run(
-            "showing a voice HUD fences stale dismissal completion",
+            "voice HUD presenter respects Reduce Motion during dismissal",
             failures: &failures,
             executed: &executed
         ) {
-            var transitions = VoiceInputPanelTransitionState()
-            transitions.present(.recording)
-            let stale = transitions.dismiss(reduceMotion: false)
-            try expect(transitions.canComplete(stale))
-
-            transitions.present(.processing)
-            try expect(
-                !transitions.canComplete(stale),
-                "a re-shown HUD accepted stale teardown work"
+            let animated = VoiceInputPanelPresenter(
+                reduceMotion: { false }
+            ) { _ in Color.clear }
+            defer { animated.stop() }
+            animated.present(
+                VoiceInputHUDContractFixture.recording.presentation
             )
-            try expect(transitions.presentedLayout == .processing)
+            animated.present(.hidden)
+            try expect(animated.evidence.isCollapsingActivity)
 
-            let current = transitions.dismiss(reduceMotion: false)
-            try expect(transitions.canComplete(current))
+            let reduced = VoiceInputPanelPresenter(
+                reduceMotion: { true }
+            ) { _ in Color.clear }
+            defer { reduced.stop() }
+            reduced.present(
+                VoiceInputHUDContractFixture.recording.presentation
+            )
+            reduced.present(.hidden)
+            try expect(!reduced.evidence.isCollapsingActivity)
+        }
+
+        run(
+            "every voice HUD presentation completes dismissal",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let presenter = VoiceInputPanelPresenter(
+                reduceMotion: { false },
+                sleep: { _ in }
+            ) { _ in Color.clear }
+            defer { presenter.stop() }
+
+            for fixture in VoiceInputHUDContractFixture.allCases {
+                presenter.present(fixture.presentation)
+                presenter.present(.hidden)
+                RunLoop.current.run(
+                    until: Date().addingTimeInterval(0.01)
+                )
+                try expect(
+                    !presenter.evidence.isVisible,
+                    "\(fixture) did not complete dismissal"
+                )
+            }
         }
 
         run(
@@ -1273,35 +1252,18 @@ private func verifyHUDControls(
 ) throws {
     let recorder = HUDActionRecorder()
     let presentation = fixture.presentation
-    guard let layout = VoiceInputPanelLayout(presentation) else {
-        throw SpecFailure(message: "fixture unexpectedly produced a hidden HUD")
-    }
-    let hostingView = NSHostingView(rootView: VoiceInputHUD(
-        presentation: presentation,
-        performAction: recorder.perform,
-        routeEffect: recorder.route
-    ))
-    hostingView.frame = NSRect(origin: .zero, size: layout.size)
-    let window = VoiceInputPanelFactory.make(
-        contentRect: NSRect(
-            x: -10_000,
-            y: -10_000,
-            width: layout.size.width,
-            height: layout.size.height
+    let presenter = VoiceInputPanelPresenter { presentation in
+        VoiceInputHUD(
+            presentation: presentation,
+            performAction: recorder.perform,
+            routeEffect: recorder.route
         )
-    )
-    window.contentView = hostingView
-    defer {
-        window.orderOut(nil)
-        window.close()
     }
-
-    window.orderFrontRegardless()
-    hostingView.layoutSubtreeIfNeeded()
-    window.displayIfNeeded()
+    defer { presenter.stop() }
+    presenter.present(presentation)
     RunLoop.current.run(until: Date().addingTimeInterval(0.02))
 
-    let buttons = accessibilityButtons(in: hostingView)
+    let buttons = presenter.accessibilityButtonEvidence
     let labels = buttons.compactMap(\.label)
     try expect(
         labels.count == expectedLabels.count,
@@ -1323,7 +1285,7 @@ private func verifyHUDControls(
         )
         let actionCount = recorder.performedActions
         try expect(
-            button.press(),
+            presenter.pressAccessibilityButton(label: expectedLabel),
             "\(expectedLabel) did not expose the press action"
         )
         RunLoop.current.run(until: Date().addingTimeInterval(0.01))
@@ -1399,21 +1361,6 @@ private func accessibilityLabels(in root: NSView) -> [String] {
 }
 
 @MainActor
-private func visualEffectViews(in root: NSView) -> [NSVisualEffectView] {
-    var effects: [NSVisualEffectView] = []
-
-    func visit(_ view: NSView) {
-        if let effect = view as? NSVisualEffectView {
-            effects.append(effect)
-        }
-        view.subviews.forEach(visit)
-    }
-
-    visit(root)
-    return effects
-}
-
-@MainActor
 private func segmentedControls(in root: NSView) -> [NSSegmentedControl] {
     var controls: [NSSegmentedControl] = []
 
@@ -1433,8 +1380,7 @@ private func renderedHUDBitmap(
     increasedContrast: Bool
 ) throws -> NSBitmapImageRep {
     let presentation = VoiceInputHUDContractFixture.recording.presentation
-    let size = VoiceInputPanelLayout.recording.size
-    let hostingView = NSHostingView(rootView:
+    let presenter = VoiceInputPanelPresenter { presentation in
         VoiceInputHUD(
             presentation: presentation,
             performAction: { _ in nil },
@@ -1446,16 +1392,10 @@ private func renderedHUDBitmap(
             increasedContrast
         )
         .environment(\.colorScheme, .dark)
-    )
-    hostingView.frame = NSRect(origin: .zero, size: size)
-    hostingView.layoutSubtreeIfNeeded()
-    guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(
-        in: hostingView.bounds
-    ) else {
-        throw SpecFailure(message: "could not render HUD contrast fixture")
     }
-    hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
-    return bitmap
+    defer { presenter.stop() }
+    presenter.present(presentation)
+    return try presenter.renderedBitmap()
 }
 
 private func hudTopBorderLuminance(_ bitmap: NSBitmapImageRep) -> Double {
