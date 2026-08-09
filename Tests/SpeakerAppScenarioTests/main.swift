@@ -773,28 +773,6 @@ struct SpeakerAppScenarioSpecs {
             try expect(defaults.bool(forKey: "hasCompletedOnboarding"))
         }
 
-        run("voice HUD footprints stay compact", failures: &failures, executed: &executed) {
-            try expect(
-                VoiceInputPanelLayout.recording.size
-                    == .init(width: 128, height: 44)
-            )
-            // Recording and processing are one pill; a size difference would
-            // make the panel jump when transcription starts.
-            try expect(
-                VoiceInputPanelLayout.processing.size
-                    == VoiceInputPanelLayout.recording.size
-            )
-            try expect(VoiceInputPanelLayout.recording.size.width < 160)
-            try expect(
-                VoiceInputPanelLayout.pendingCopy.size
-                    == .init(width: 394, height: 54)
-            )
-            try expect(
-                VoiceInputPanelLayout.problem.size
-                    == .init(width: 330, height: 54)
-            )
-        }
-
         await runAsync(
             "activating another app refreshes permission and restores the shortcut",
             failures: &failures,

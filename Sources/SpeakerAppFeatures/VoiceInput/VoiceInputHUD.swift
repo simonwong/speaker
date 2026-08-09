@@ -6,7 +6,7 @@ package struct VoiceInputHUD: View {
     let performAction:
         (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
-    let activityDismissal: VoiceInputPanelDismissal?
+    @Environment(\.voiceInputPanelDismissal) private var activityDismissal
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.voiceInputHUDIncreasedContrastOverride)
     private var increasedContrastOverride
@@ -15,13 +15,11 @@ package struct VoiceInputHUD: View {
         presentation: VoiceInputOverlayPresentation,
         performAction:
             @escaping (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?,
-        routeEffect: @escaping (VoiceInputExperienceEffect) -> Void,
-        activityDismissal: VoiceInputPanelDismissal? = nil
+        routeEffect: @escaping (VoiceInputExperienceEffect) -> Void
     ) {
         self.presentation = presentation
         self.performAction = performAction
         self.routeEffect = routeEffect
-        self.activityDismissal = activityDismissal
     }
 
     private var palette: VoiceInputHUDContrastPalette {

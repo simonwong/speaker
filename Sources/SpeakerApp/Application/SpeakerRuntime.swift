@@ -417,6 +417,7 @@ final class SpeakerRuntime: ObservableObject {
             startupTask?.cancel()
             self.onboardingController?.close()
             self.onboardingController = nil
+            self.panel.stop()
             self.historyModel.shutdown()
             await self.refinementSettings.shutdown()
             await self.doubaoSettings.shutdown()
@@ -663,6 +664,7 @@ final class SpeakerRuntime: ObservableObject {
         startupTask?.cancel()
         onboardingController?.close()
         onboardingController = nil
+        panel.stop()
         historyModel.shutdown()
         await refinementSettings.shutdown()
         await doubaoSettings.shutdown()
