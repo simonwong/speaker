@@ -165,7 +165,6 @@ private struct SettingsOverviewView: View {
     @ObservedObject private var navigation: SettingsNavigationModel
     @ObservedObject private var shortcut: VoiceShortcutFeature
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
-    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     init(
         workspace: SettingsWorkspace,
@@ -178,37 +177,11 @@ private struct SettingsOverviewView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    hero
-
-                    ForEach(SettingsOverviewSection.allCases) { section in
-                        sectionGroup(section) {
-                            sectionContent(section, proxy: proxy)
-                        }
-                    }
-                }
-                .frame(maxWidth: 680)
-                .frame(maxWidth: .infinity)
-                .padding(
-                    .horizontal,
-                    mainWindowLayout.pageHorizontalPadding
-                )
-                .padding(.bottom, 28)
-            }
-            .onChange(of: navigation.page) { _, page in
-                navigate(to: page, proxy: proxy)
-            }
-            .onAppear {
-                Task { @MainActor in
-                    await Task.yield()
-                    navigate(
-                        to: navigation.page,
-                        proxy: proxy,
-                        animated: false
-                    )
-                }
+        SettingsOverviewScrollView(navigation: navigation) {
+            hero
+        } section: { section in
+            sectionGroup(section) {
+                sectionContent(section)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -242,21 +215,17 @@ private struct SettingsOverviewView: View {
                 .padding(.leading, 6)
             content()
         }
-        .id(section)
     }
 
     @ViewBuilder
-    private func sectionContent(
-        _ section: SettingsOverviewSection,
-        proxy: ScrollViewProxy
-    ) -> some View {
+    private func sectionContent(_ section: SettingsOverviewSection) -> some View {
         switch section {
         case .shortcut:
             ShortcutSettingsPage(
                 shortcut: workspace.shortcut,
                 shortcutRecorder: shortcutRecorder,
                 openSpeechSettings: {
-                    open(.permissions, proxy: proxy)
+                    open(.permissions)
                 }
             )
         case .permissions:
@@ -280,30 +249,8 @@ private struct SettingsOverviewView: View {
         }
     }
 
-    private func open(
-        _ section: SettingsOverviewSection,
-        proxy: ScrollViewProxy
-    ) {
-        if navigation.page == section {
-            navigate(to: section, proxy: proxy)
-        } else {
-            navigation.open(section)
-        }
-    }
-
-    private func navigate(
-        to section: SettingsOverviewSection,
-        proxy: ScrollViewProxy,
-        animated: Bool = true
-    ) {
-        guard SettingsOverviewSection.allCases.contains(section) else { return }
-        if animated {
-            withAnimation(.easeInOut(duration: 0.25)) {
-                proxy.scrollTo(section, anchor: .top)
-            }
-        } else {
-            proxy.scrollTo(section, anchor: .top)
-        }
+    private func open(_ section: SettingsOverviewSection) {
+        navigation.open(section)
     }
 }
 

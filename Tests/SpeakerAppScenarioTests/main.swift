@@ -1721,6 +1721,42 @@ struct SpeakerAppScenarioSpecs {
             try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
         }
 
+        run("settings navigation presents ordinary entry at the top", failures: &failures, executed: &executed) {
+            let navigation = SettingsNavigationModel()
+
+            try expect(navigation.presentationRequest == nil)
+
+            navigation.open(.permissions)
+            guard let request = navigation.presentationRequest else {
+                throw SpecFailure(message: "permission presentation was not requested")
+            }
+            try expect(request.target == .section(.permissions))
+            navigation.completePresentation(request)
+            try expect(navigation.presentationRequest == nil)
+        }
+
+        run("settings navigation emits every explicit presentation request", failures: &failures, executed: &executed) {
+            let navigation = SettingsNavigationModel()
+
+            navigation.open(.permissions)
+            guard let firstRequest = navigation.presentationRequest else {
+                throw SpecFailure(message: "permission presentation was not requested")
+            }
+            try expect(firstRequest.target == .section(.permissions))
+            navigation.completePresentation(firstRequest)
+            try expect(navigation.presentationRequest == nil)
+
+            navigation.open(.permissions)
+            guard let repeatedRequest = navigation.presentationRequest else {
+                throw SpecFailure(message: "repeated permission presentation was not requested")
+            }
+            try expect(repeatedRequest != firstRequest)
+            try expect(repeatedRequest.target == .section(.permissions))
+
+            navigation.openTop()
+            try expect(navigation.presentationRequest?.target == .top)
+        }
+
         run("data erasure keeps failure recovery reachable", failures: &failures, executed: &executed) {
             let failure = SpeakerDataErasureFailure(
                 issues: [],
@@ -1872,10 +1908,12 @@ struct SpeakerAppScenarioSpecs {
             )
 
             router.perform(.settings)
+            try expect(navigation.page == .shortcut)
             try expect(
-                events.suffix(2) == ["settings.permissions", "activate"],
-                "ordinary settings did not preserve the current page"
+                events.suffix(2) == ["settings.shortcut", "activate"],
+                "ordinary settings did not return to the page top"
             )
+            try expect(navigation.presentationRequest?.target == .top)
 
             router.perform(.quit)
             try expect(events.last == "terminate")

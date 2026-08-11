@@ -727,6 +727,77 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "settings overview shows the top before explicit section navigation",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let navigation = SettingsNavigationModel()
+            let window = NSWindow(
+                contentRect: NSRect(
+                    x: -10_000,
+                    y: -10_000,
+                    width: 360,
+                    height: 220
+                ),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = NSHostingView(
+                rootView: SettingsOverviewScrollFixture(
+                    navigation: navigation
+                )
+            )
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+
+            guard let scrollView = firstScrollView(in: window.contentView) else {
+                throw SpecFailure(message: "settings fixture has no scroll view")
+            }
+            let initialDistance = verticalDistanceFromTop(scrollView)
+            try expect(
+                initialDistance < 1,
+                "ordinary settings opened \(initialDistance)pt below the top"
+            )
+
+            let explicitNavigation = SettingsNavigationModel()
+            explicitNavigation.open(.permissions)
+            window.contentView = NSHostingView(
+                rootView: SettingsOverviewScrollFixture(
+                    navigation: explicitNavigation
+                )
+            )
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            guard let explicitScrollView = firstScrollView(
+                in: window.contentView
+            ) else {
+                throw SpecFailure(
+                    message: "explicit settings fixture has no scroll view"
+                )
+            }
+            let deadline = Date().addingTimeInterval(1)
+            while verticalDistanceFromTop(explicitScrollView) < 100,
+                  Date() < deadline
+            {
+                RunLoop.current.run(
+                    until: min(deadline, Date().addingTimeInterval(0.01))
+                )
+            }
+            try expect(
+                verticalDistanceFromTop(explicitScrollView) >= 100,
+                "explicit permission navigation did not move the viewport; "
+                    + "request=\(String(describing: explicitNavigation.presentationRequest)), "
+                    + "visible=\(explicitScrollView.documentVisibleRect), "
+                    + "document=\(String(describing: explicitScrollView.documentView?.bounds))"
+            )
+            try expect(explicitNavigation.presentationRequest == nil)
+        }
+
+        run(
             "main window tabs keep the native style without separators",
             failures: &failures,
             executed: &executed
@@ -1472,6 +1543,39 @@ private struct MainWindowGeometryFixture: View {
             .background(MainWindowTabSeparatorHider())
         }
     }
+}
+
+private struct SettingsOverviewScrollFixture: View {
+    @ObservedObject var navigation: SettingsNavigationModel
+
+    var body: some View {
+        SettingsOverviewScrollView(navigation: navigation) {
+            Text("Settings top marker")
+                .frame(maxWidth: .infinity, minHeight: 60)
+        } section: { section in
+            VStack(spacing: 0) {
+                Text("Settings \(section.rawValue) marker")
+                Color.clear.frame(height: 220)
+            }
+        }
+    }
+}
+
+@MainActor
+private func firstScrollView(in root: NSView?) -> NSScrollView? {
+    guard let root else { return nil }
+    if let scrollView = root as? NSScrollView { return scrollView }
+    return root.subviews.lazy.compactMap(firstScrollView(in:)).first
+}
+
+@MainActor
+private func verticalDistanceFromTop(_ scrollView: NSScrollView) -> CGFloat {
+    guard let documentView = scrollView.documentView else { return .infinity }
+    let visibleRect = documentView.visibleRect
+    if documentView.isFlipped {
+        return visibleRect.minY - documentView.bounds.minY
+    }
+    return documentView.bounds.maxY - visibleRect.maxY
 }
 
 private struct SpecFailure: Error {

@@ -1,6 +1,6 @@
 import Combine
 
-package enum SettingsPage: String, CaseIterable, Identifiable {
+package enum SettingsPage: String, CaseIterable, Hashable, Identifiable {
     case shortcut
     case permissions
     case apiKeys
@@ -40,9 +40,24 @@ package enum SettingsPage: String, CaseIterable, Identifiable {
     }
 }
 
+package enum SettingsPresentationTarget: Equatable, Hashable {
+    case top
+    case section(SettingsPage)
+}
+
+package struct SettingsPresentationRequest: Equatable {
+    package let sequence: UInt
+    package let target: SettingsPresentationTarget
+}
+
 @MainActor
 package final class SettingsNavigationModel: ObservableObject {
     @Published package var page: SettingsPage
+    @Published package private(set) var presentationRequest:
+        SettingsPresentationRequest?
+    private var nextPresentationSequence: UInt = 0
+
+    package var presentationRevision: UInt { nextPresentationSequence }
 
     package init(page: SettingsPage = .shortcut) {
         self.page = page
@@ -50,5 +65,24 @@ package final class SettingsNavigationModel: ObservableObject {
 
     package func open(_ page: SettingsPage) {
         self.page = page
+        requestPresentation(of: .section(page))
+    }
+
+    package func openTop() {
+        page = .shortcut
+        requestPresentation(of: .top)
+    }
+
+    package func completePresentation(_ request: SettingsPresentationRequest) {
+        guard presentationRequest == request else { return }
+        presentationRequest = nil
+    }
+
+    private func requestPresentation(of target: SettingsPresentationTarget) {
+        nextPresentationSequence += 1
+        presentationRequest = SettingsPresentationRequest(
+            sequence: nextPresentationSequence,
+            target: target
+        )
     }
 }
