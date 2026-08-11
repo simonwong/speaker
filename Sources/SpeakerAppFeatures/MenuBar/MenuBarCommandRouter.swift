@@ -42,6 +42,7 @@ package struct MenuBarCommandRouter {
             openSettings()
             activate()
         case .settings:
+            navigation.openTop()
             openSettings()
             activate()
         case .dataErasureRecovery:
