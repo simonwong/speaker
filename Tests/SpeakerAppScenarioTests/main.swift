@@ -1,4 +1,5 @@
 import Darwin
+import AppKit
 import Combine
 import Foundation
 import SpeakerAppFeatures
@@ -1719,6 +1720,17 @@ struct SpeakerAppScenarioSpecs {
                 ]
             )
             try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
+        }
+
+        run("main window visibility drives dock activation policy", failures: &failures, executed: &executed) {
+            try expect(
+                MainWindowVisibilityBridge.activationPolicy(mainWindowVisible: true)
+                    == .regular
+            )
+            try expect(
+                MainWindowVisibilityBridge.activationPolicy(mainWindowVisible: false)
+                    == .accessory
+            )
         }
 
         run("settings navigation presents ordinary entry at the top", failures: &failures, executed: &executed) {
