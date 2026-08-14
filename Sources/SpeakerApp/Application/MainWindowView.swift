@@ -66,5 +66,6 @@ struct MainWindowView: View {
                 AboutView(workspace: settingsWorkspace)
             }
         }
+        .background(MainWindowVisibilityBridge())
     }
 }
