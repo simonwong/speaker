@@ -4,8 +4,8 @@ import SwiftUI
 package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
     case overview
     case history
-    case settings
     case dictionary
+    case settings
     case about
 
     package var id: String { rawValue }

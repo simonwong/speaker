@@ -1705,8 +1705,8 @@ struct SpeakerAppScenarioSpecs {
                 MainWindowTab.allCases == [
                     .overview,
                     .history,
-                    .settings,
                     .dictionary,
+                    .settings,
                     .about,
                 ]
             )
