@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — Speaker 主窗口重设计稿 v2（可丢弃，不进产品）
+
+  回答的问题：收敛后的单一方向整体感觉对不对？
+    - 历史：列表 + 就地展开详情（不新开页）；操作只有 复制/删除，
+      都在行尾 hover 浮现（展开时行仍在，展开区只留内容，不重复放按钮）；
+      展开时行内预览直接放开为全文，展开区只给诊断内容（豆包转录 / DeepSeek 整理 /
+      阶段耗时 / 请求 ID），无"诊断信息"标题、无折叠；
+      送达状态 = 已送达 / 已发送·未能确认送达 / 已送达·整理回退 / 待复制结果
+      （投递层回读验证，verifyMutationReceipt 已支持）；空文字与已取消记录不进列表。
+    - 设置：分组表单样式；整理区显示各模式真实提示词（默认顺滑无提示词），
+      内置模式可编辑 + 恢复默认；保存历史保留（功能已存在）。
+    - 关于：分组表单；只留 隐私边界 + 版本。
+    - 骨架：顶部 Tab，顺序 概览/历史/词典/设置/关于。
+
+  运行：open docs/prototypes/main-window-redesign-prototype.html
+  直达：?tab=history|settings|about
+  数据全部是假的；概览/词典两个 Tab 是摆设。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PROTOTYPE · Speaker 主窗口重设计 v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    font-size: 13px; color: #1d1d1f;
+    background: #24252b;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- macOS 窗口骨架 ---------- */
+  .window {
+    position: relative;
+    width: 900px; height: 640px;
+    background: #ececef;
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 24px 80px rgba(0,0,0,.5), 0 0 0 .5px rgba(0,0,0,.3);
+    display: flex; flex-direction: column;
+  }
+  .titlebar {
+    height: 52px; flex: none;
+    display: flex; align-items: center; padding: 0 16px;
+    background: #f6f6f7; border-bottom: 1px solid rgba(0,0,0,.08);
+  }
+  .lights { display: flex; gap: 8px; width: 68px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .tabs { flex: 1; display: flex; justify-content: center; }
+  .seg { display: flex; background: #e2e2e6; border-radius: 8px; padding: 2px; gap: 2px; }
+  .seg button {
+    border: 0; background: none; font: inherit; cursor: pointer;
+    padding: 4px 16px; border-radius: 6px; color: #555;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .seg button.on { background: #fff; color: #1d1d1f; box-shadow: 0 1px 3px rgba(0,0,0,.15); font-weight: 500; }
+  .content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ---------- 共享控件 ---------- */
+  .btn {
+    font: inherit; cursor: pointer;
+    border-radius: 6px; border: .5px solid rgba(0,0,0,.15);
+    background: #fff; padding: 3px 12px; color: #1d1d1f;
+    box-shadow: 0 .5px 1.5px rgba(0,0,0,.08);
+  }
+  .btn:active { filter: brightness(.94); }
+  .btn.primary { background: #007aff; border-color: #007aff; color: #fff; }
+  .btn.danger { color: #ff3b30; }
+  .btn.danger-fill { background: #ff3b30; border-color: #ff3b30; color: #fff; }
+  .btn.small { font-size: 12px; padding: 2px 9px; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn:disabled:active { filter: none; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 99px;
+  }
+  .badge.green { color: #248a3d; background: rgba(52,199,89,.14); }
+  .badge.gray { color: #6c6c70; background: rgba(120,120,128,.12); }
+  .badge.red { color: #d70015; background: rgba(255,59,48,.12); }
+  .badge.orange { color: #c93400; background: rgba(255,149,0,.14); }
+  .badge.blue { color: #0a64d8; background: rgba(0,122,255,.12); }
+  .scroll { flex: 1; overflow-y: auto; }
+  .muted { color: #6c6c70; }
+  .tiny { font-size: 11px; }
+  .cap { font-size: 12px; }
+  .sec-label { font-size: 12px; font-weight: 600; color: #6c6c70; margin: 0 0 6px 6px; }
+  .toast {
+    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: rgba(30,30,32,.92); color: #fff;
+    font-size: 12px; padding: 7px 14px; border-radius: 8px;
+    opacity: 0; transition: opacity .18s; pointer-events: none; z-index: 60;
+  }
+  .toast.show { opacity: 1; }
+  .iconbtn {
+    border: 0; background: none; font: inherit; cursor: pointer;
+    color: #6c6c70; border-radius: 5px; padding: 3px 7px;
+    display: inline-flex; align-items: center;
+  }
+  .iconbtn:hover { background: rgba(0,0,0,.06); }
+  .iconbtn.danger:hover { background: rgba(255,59,48,.12); color: #ff3b30; }
+  input[type=text], input[type=password], textarea, select {
+    font: inherit; padding: 5px 9px; border-radius: 6px;
+    border: .5px solid rgba(0,0,0,.18); background: #fff; outline: none;
+  }
+  input:focus, textarea:focus { border-color: #007aff; box-shadow: 0 0 0 3px rgba(0,122,255,.18); }
+  textarea { resize: vertical; line-height: 1.5; width: 100%; }
+
+  /* ---------- 分组表单（设置 / 关于） ---------- */
+  .page { max-width: 620px; margin: 0 auto; padding: 18px 24px 28px; }
+  .group {
+    background: #fff; border-radius: 10px;
+    border: 1px solid rgba(0,0,0,.07);
+    margin-bottom: 22px; overflow: hidden;
+  }
+  .grow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; min-height: 36px; }
+  .grow + .grow { border-top: 1px solid rgba(0,0,0,.06); }
+  .grow .lead {
+    width: 22px; height: 22px; flex: none; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px;
+  }
+  .grow .k { font-weight: 500; }
+  .grow .sp { flex: 1; }
+  .group-foot { font-size: 11.5px; color: #6c6c70; margin: -14px 6px 22px; }
+  .danger-group { border-color: rgba(255,59,48,.35); }
+  .prompt-editor { padding: 10px 14px 12px; border-top: 1px solid rgba(0,0,0,.06); background: rgba(0,0,0,.018); }
+  .prompt-editor textarea { font-size: 12px; }
+  .prompt-editor .ops { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .prompt-editor + .grow { border-top: 1px solid rgba(0,0,0,.06); }
+
+  /* ---------- 历史（列表 + 就地展开） ---------- */
+  .hpage { max-width: 680px; width: 100%; margin: 0 auto; padding: 14px 18px 20px; }
+  .day { font-size: 12px; font-weight: 600; color: #6c6c70; letter-spacing: .4px; padding: 16px 10px 7px; }
+  .hrow {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 9px 10px; border-radius: 9px; cursor: pointer;
+  }
+  .hrow:hover { background: rgba(0,0,0,.045); }
+  .hrow.open { background: rgba(0,0,0,.045); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .hrow .time {
+    width: 42px; flex: none; padding-top: 2px;
+    font-family: ui-monospace, monospace; font-size: 11px; color: #6c6c70;
+  }
+  .hrow .body { flex: 1; min-width: 0; }
+  .hrow .preview {
+    font-size: 12.5px; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .hrow.open .preview {
+    display: block; -webkit-line-clamp: unset; overflow: visible;
+  }
+  .hrow .quick { flex: none; display: flex; gap: 2px; opacity: 0; }
+  .hrow:hover .quick, .hrow.open .quick { opacity: 1; }
+  .hsep { height: 1px; background: rgba(0,0,0,.06); margin-left: 64px; }
+  .hxpand {
+    margin: -4px 0 6px; padding: 12px 14px 14px;
+    background: rgba(0,0,0,.035);
+    border-radius: 0 0 9px 9px;
+    margin-left: 10px; margin-right: 10px;
+  }
+  .hxpand .textblock {
+    background: rgba(255,255,255,.75); border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; line-height: 1.6;
+    margin: 4px 0 0;
+  }
+  .hxpand .stage-label { font-size: 12px; font-weight: 600; color: #6c6c70; }
+  .pill-menu {
+    position: absolute; right: 18px; top: 44px; z-index: 40;
+    background: rgba(246,246,247,.97); border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.18), 0 0 0 .5px rgba(0,0,0,.1);
+    padding: 4px; min-width: 158px;
+  }
+  .pill-menu button {
+    display: block; width: 100%; text-align: left;
+    border: 0; background: none; font: inherit; cursor: pointer;
+    padding: 5px 10px; border-radius: 5px;
+  }
+  .pill-menu button:hover { background: #007aff; color: #fff; }
+  .pill-menu button.danger { color: #ff3b30; }
+  .pill-menu button.danger:hover { background: #ff3b30; color: #fff; }
+  .proto-tag {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    color: rgba(255,255,255,.4); font-size: 11px; letter-spacing: 1px;
+  }
+
+  /* ---------- 图标对齐 ---------- */
+  .tic { display: inline-flex; align-items: center; }
+  .seg button svg, .badge svg, .grow .lead svg, .iconbtn svg { display: block; }
+  .st { display: flex; flex: none; padding-top: 3px; }
+  .searchwrap {
+    flex: 1; display: flex; align-items: center; gap: 7px;
+    background: rgba(0,0,0,.05); border: .5px solid rgba(0,0,0,.1);
+    border-radius: 8px; padding: 0 10px; height: 30px; color: #6c6c70;
+  }
+  .searchwrap input {
+    flex: 1; border: 0; background: none; padding: 0;
+    box-shadow: none !important; font: inherit; color: #1d1d1f;
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="tabs" id="tabs"></div>
+    <div style="width:68px"></div>
+  </div>
+  <div class="content" id="content"></div>
+  <div class="toast" id="toast"></div>
+</div>
+<div class="proto-tag">PROTOTYPE · v2 · 可丢弃</div>
+
+<script>
+/* ================= 假数据 ================= */
+/* 送达状态反映真实投递层能力：delivered=回读确认 / unconfirmed=已粘贴未确认 / fallback=整理回退（保留豆包结果） / pending=待复制结果 */
+const RECORDS = [
+  { id: 1, day: '今天', time: '14:32', status: 'delivered',
+    text: '第一条：把下周三的评审会改到下午三点，提前把设计稿发到群里，另外提醒我准备测试数据。',
+    mode: '完整重写', dur: '6420 ms', stages: '转录 2810 ms · 顺滑 1900 ms · 重写 1710 ms',
+    doubao: '第一条把下周三的评审会改到下午三点然后提前把设计稿发到群里还有提醒我准备测试数据',
+    deepseek: '第一条：把下周三的评审会改到下午三点，提前把设计稿发到群里，另外提醒我准备测试数据。',
+    fallback: false },
+  { id: 2, day: '今天', time: '11:05', status: 'fallback',
+    text: '明天早上十点之前，把报价单发给王总，抄送财务。',
+    mode: '完整重写', dur: '12890 ms', stages: '转录 2650 ms · 顺滑 1740 ms · 重写 8500 ms',
+    doubao: '嗯那个明天早上十点之前把报价单发给王总抄送财务',
+    deepseek: null, fallback: true },
+  { id: 3, day: '昨天', time: '18:20', status: 'unconfirmed',
+    text: '记一下：牙医复诊改到周五下午，带医保卡。',
+    mode: '默认顺滑', dur: '3980 ms', stages: '转录 2260 ms · 顺滑 1720 ms',
+    doubao: '记一下牙医复诊改到周五下午带医保卡', deepseek: null, fallback: false },
+  { id: 4, day: '昨天', time: '16:40', status: 'pending',
+    text: '这段文字的输入位置无法确认，已保留为待复制结果，可以手动复制。',
+    mode: '默认顺滑', dur: '4120 ms', stages: '转录 2400 ms · 顺滑 1720 ms',
+    doubao: '这段文字的输入位置无法确认', deepseek: null, fallback: false },
+];
+const STATUS = {
+  delivered:   { ic: 'checkcircle', c: 'green',  l: '已送达' },
+  unconfirmed: { ic: 'question',    c: 'orange', l: '已发送 · 未能确认送达' },
+  fallback:    { ic: 'warn',        c: 'orange', l: '已送达 · 整理回退' },
+  pending:     { ic: 'clipboard',   c: 'blue',   l: '待复制结果' },
+};
+const TABS = [
+  ['overview',  '概览', 'chart'],
+  ['history',   '历史', 'clock'],
+  ['dictionary','词典', 'book'],
+  ['settings',  '设置', 'gear'],
+  ['about',     '关于', 'info'],
+];
+/* 真实内置提示词（Sources/SpeakerCore/VoiceInput/TextRefinement.swift） */
+const DEFAULT_PROMPTS = {
+  concise: '删除不影响原意的口头禅、重复、自我修正和明显冗余；修正标点与语序；尽量保留原句结构、语气和信息量。不要概括，不要扩写。',
+  full: '在不增加、删除或改变事实与意图的前提下，重新组织为清晰、连贯、可以直接发送的文字；可以调整句序和段落，但不要补充标题、背景、论据或结论，除非原文已经包含。',
+};
+const MODE_LABEL = { default: '默认顺滑', concise: '精简清理', full: '完整重写', custom: '自定义模式' };
+const MODE_DESC = {
+  default: '豆包内置语义顺滑，无提示词',
+  concise: '去口头禅和冗余，保留原句结构',
+  full: '重组为可直接发送的文字',
+  custom: '自己写整理要求',
+};
+
+/* ================= 状态 ================= */
+const params = new URLSearchParams(location.search);
+let tab = ['history','settings','about'].includes(params.get('tab')) ? params.get('tab') : 'history';
+let expandedId = null;
+let openMenu = false;
+let replaceKey = false;
+let selMode = 'default';
+let promptDrafts = { concise: null, full: null, custom: '' };
+let customName = '我的模式';
+
+/* ================= 小工具 ================= */
+const $ = s => document.querySelector(s);
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+/* ---- 线条图标（SF Symbols 风格近似，stroke=currentColor） ---- */
+const IC = {
+  chart:   '<path d="M3 21h18"/><path d="M7 21v-6M12 21V9M17 21v-11"/>',
+  clock:   '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.2l3.4 2"/>',
+  book:    '<path d="M6.5 3H20v18H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3z"/><path d="M8 3v18"/>',
+  gear:    '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.7M12 18.5v2.7M2.8 12h2.7M18.5 12h2.7M5.5 5.5l1.9 1.9M16.6 16.6l1.9 1.9M18.5 5.5l-1.9 1.9M7.4 16.6l-1.9 1.9"/>',
+  info:    '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/>',
+  search:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.6-4.6"/>',
+  ellipsis:'<circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/>',
+  copy:    '<rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 5.5v-1a2 2 0 0 0-2-2h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1"/>',
+  trash:   '<path d="M4 7h16"/><path d="M9.5 7V4.8c0-.4.4-.8.8-.8h3.4c.4 0 .8.4.8.8V7"/><path d="M6.5 7l.8 12c.05.6.5 1 1.1 1h7.2c.6 0 1.05-.4 1.1-1l.8-12"/><path d="M10 11v5.5M14 11v5.5"/>',
+  checkcircle: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/>',
+  warn:    '<path d="M12 4.5L21 20H3z"/><path d="M12 10v4.2"/><circle cx="12" cy="16.8" r="1" fill="currentColor" stroke="none"/>',
+  question:'<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.2c.2-1.4 1.2-2.2 2.5-2.2 1.3 0 2.3.9 2.3 2.1 0 1.6-1.6 2-2.3 3.1-.2.4-.2.8-.2 1.3"/><circle cx="12" cy="16.8" r="1" fill="currentColor" stroke="none"/>',
+  clipboard:'<rect x="6" y="4.5" width="12" height="16.5" rx="2"/><path d="M9 4.5V4a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 4v.5"/>',
+  keyboard:'<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10.5 10h.01M14.5 10h.01M17.5 10h.01M6.5 13.5h.01M17.5 13.5h.01M9 13.5h6"/>',
+  mic:     '<rect x="9" y="3" width="6" height="10.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/>',
+  access:  '<circle cx="12" cy="4.8" r="1.9"/><path d="M4.5 9.3h15"/><path d="M12 9.3v5.7"/><path d="M12 15l-3 5.5M12 15l3 5.5"/>',
+  x:       '<path d="M6 6l12 12M18 6L6 18"/>',
+  wave:    '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+  doc:     '<rect x="6" y="3" width="12" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>',
+  external:'<path d="M9 5H5.5A1.5 1.5 0 0 0 4 6.5v12A1.5 1.5 0 0 0 5.5 20h12a1.5 1.5 0 0 0 1.5-1.5V15"/><path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/>',
+};
+function ic(name, size = 13){
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${IC[name]}</svg>`;
+}
+/* GitHub 品牌标（fill 制） */
+const GH_PATH = 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z';
+function icGitHub(size = 15){
+  return `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="currentColor" style="display:block"><path d="${GH_PATH}"/></svg>`;
+}
+let toastTimer = null;
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove('show'), 1400);
+}
+function syncURL(){
+  history.replaceState(null, '', '?' + new URLSearchParams({ tab }).toString());
+}
+function statusIcon(r){
+  if (r.status === 'delivered') return '';
+  const s = STATUS[r.status];
+  const color = { fallback: '#c93400', unconfirmed: '#c93400', pending: '#0a64d8' }[r.status] || '#8e8e93';
+  return `<span class="st" title="${s.l}" style="color:${color}">${ic(s.ic, 13)}</span>`;
+}
+</script>
+<script>
+/* ================= 历史 ================= */
+function historyTab(){
+  const toolbar = `<div class="hpage" style="padding-bottom:0;position:relative">
+    <div style="display:flex;gap:10px;align-items:center">
+      <div class="searchwrap">${ic('search', 13)}<input type="text" placeholder="搜索会话记录…"></div>
+      <button class="iconbtn" title="刷新 / 全部清空" data-act="histmenu">${ic('ellipsis', 16)}</button>
+    </div>
+    ${openMenu ? `<div class="pill-menu">
+      <button data-act="refresh">刷新</button>
+      <button class="danger" data-act="clearall">全部清空…</button>
+    </div>` : ''}
+  </div>`;
+  let out = '';
+  let lastDay = '';
+  RECORDS.forEach(r => {
+    if (r.day !== lastDay){ out += `<div class="day">${r.day}</div>`; lastDay = r.day; }
+    else out += `<div class="hsep"></div>`;
+    const open = expandedId === r.id;
+    out += `<div class="hrow ${open?'open':''}" data-act="toggle" data-id="${r.id}">
+      <span class="time">${r.time}</span>
+      <span class="body"><span class="preview">${esc(r.text)}</span></span>
+      ${statusIcon(r)}
+      <span class="quick">
+        <button class="iconbtn" title="复制" data-act="copy" data-id="${r.id}">${ic('copy', 13)}</button>
+        <button class="iconbtn danger" title="删除" data-act="del" data-id="${r.id}">${ic('trash', 13)}</button>
+      </span>
+    </div>`;
+    if (open) out += expandBlock(r);
+  });
+  return `<div style="flex:1;min-height:0;display:flex;flex-direction:column">
+    ${toolbar}
+    <div class="scroll"><div class="hpage" style="padding-top:0">${out}</div></div>
+  </div>`;
+}
+function expandBlock(r){
+  const s = STATUS[r.status];
+  return `<div class="hxpand">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span class="badge ${s.c}">${ic(s.ic, 11)} ${s.l}</span>
+      <span class="muted tiny">${r.day} ${r.time} · ${r.mode} · ${r.dur}</span>
+    </div>
+    <div><span class="stage-label">豆包转录</span><div class="textblock">${r.doubao ? esc(r.doubao) : '<span class="muted">无</span>'}</div></div>
+    ${r.deepseek !== null || r.fallback ? `<div style="margin-top:10px"><span class="stage-label">DeepSeek 整理</span><div class="textblock">${r.deepseek ? esc(r.deepseek) : '<span class="muted">无</span>'}</div></div>` : ''}
+    <div class="muted tiny" style="margin-top:10px">阶段耗时：${r.stages}</div>
+    <div class="muted tiny">豆包请求 ID：req_9f2…c1 · 送达诊断：—</div>
+  </div>`;
+}
+
+/* ================= 设置 ================= */
+function modeRow(key){
+  const checked = selMode === key;
+  let editor = '';
+  if (checked && key !== 'default'){
+    if (key === 'custom'){
+      editor = `<div class="prompt-editor">
+        <input type="text" value="${esc(customName)}" placeholder="模式名称（≤ 80 字）" style="width:100%;margin-bottom:8px" data-field="customName">
+        <textarea rows="3" placeholder="整理规则（≤ 4000 字）" data-field="custom">${esc(promptDrafts.custom)}</textarea>
+        <div class="ops"><span class="muted tiny">保存为新的整理模式</span><span style="flex:1"></span><button class="btn small primary" data-act="savemode">保存模式</button></div>
+      </div>`;
+    } else {
+      const cur = promptDrafts[key] ?? DEFAULT_PROMPTS[key];
+      const dirty = cur !== DEFAULT_PROMPTS[key];
+      editor = `<div class="prompt-editor">
+        <textarea rows="3" data-field="${key}">${esc(cur)}</textarea>
+        <div class="ops">
+          <span class="muted tiny">提示词只保存在本机，修改后对新会话生效</span>
+          <span style="flex:1"></span>
+          <button class="btn small" data-act="resetprompt" data-id="${key}" ${dirty?'':'disabled'}>恢复默认</button>
+          <button class="btn small primary" data-act="saveprompt" data-id="${key}">保存</button>
+        </div>
+      </div>`;
+    }
+  }
+  return `<div class="grow" data-act="mode" data-id="${key}" style="cursor:pointer">
+      <input type="radio" name="mode" ${checked?'checked':''} style="pointer-events:none">
+      <span><b>${MODE_LABEL[key]}</b> <span class="muted tiny">— ${MODE_DESC[key]}</span></span>
+    </div>${editor}`;
+}
+function settingsTab(){
+  return `<div class="scroll"><div class="page">
+    <div class="sec-label">快捷键</div>
+    <div class="group">
+      <div class="grow"><span class="lead" style="background:#007aff">${ic('keyboard', 12)}</span><span class="k">开始语音输入</span><span class="sp"></span><span class="muted">按住 Fn</span><button class="btn small" data-act="noop">更换…</button></div>
+    </div>
+    <div class="sec-label">权限</div>
+    <div class="group">
+      <div class="grow"><span class="lead" style="background:#34c759">${ic('mic', 12)}</span><span class="k">麦克风</span><span class="sp"></span><span class="badge green">${ic('checkcircle', 11)} 已授权</span></div>
+      <div class="grow"><span class="lead" style="background:#ff9500">${ic('access', 12)}</span><span class="k">辅助功能</span><span class="sp"></span><span class="badge red">${ic('x', 10)} 未授权</span><button class="btn small primary" data-act="noop">去授权…</button></div>
+    </div>
+    <div class="sec-label">API Key</div>
+    <div class="group">
+      <div class="grow"><span class="lead" style="background:#af52de">${ic('wave', 12)}</span><span class="k">豆包流式语音</span><span class="sp"></span><span class="badge green">${ic('checkcircle', 11)} Key 已保存 · 连接成功</span></div>
+      <div class="grow"><span class="muted cap">流式资源 bigmodel_async</span><span class="sp"></span>
+        <button class="btn small" data-act="noop">检查连接</button>
+        <button class="btn small" data-act="replacekey">更换 Key</button>
+        <button class="btn small danger" data-act="noop">删除…</button></div>
+      ${replaceKey ? `<div class="grow"><input type="password" placeholder="输入新 Key 以替换当前凭据" style="flex:1"><button class="btn small primary" data-act="replacekey">保存</button></div>` : ''}
+      <div class="grow"><span class="lead" style="background:#5856d6">${ic('sparkle', 12)}</span><span class="k">DeepSeek 整理（可选）</span><span class="sp"></span><span class="badge gray">未配置</span></div>
+      <div class="grow"><input type="password" placeholder="输入 DeepSeek API Key" style="flex:1"><button class="btn small primary" data-act="noop">保存 Key</button></div>
+    </div>
+    <div class="group-foot">音频只发给豆包；文字仅在启用对应整理模式时发给 DeepSeek。</div>
+    <div class="sec-label">整理</div>
+    <div class="group">
+      ${modeRow('default')}
+      ${modeRow('concise')}
+      ${modeRow('full')}
+      ${modeRow('custom')}
+    </div>
+    <div class="group-foot">提示词仅在选择需要 DeepSeek 的整理模式时生效；默认顺滑没有提示词。</div>
+    <div class="sec-label">通用</div>
+    <div class="group">
+      <div class="grow"><span class="k">登录时启动</span><span class="sp"></span><input type="checkbox" checked></div>
+      <div class="grow"><span class="k">保存历史</span><span class="sp"></span><select><option>最近 30 天</option><option>最近 90 天</option><option>最近一年</option><option>不按日期清理</option><option>不保存</option></select></div>
+      <div class="grow"><span class="k">自动检查更新</span><span class="sp"></span><input type="checkbox" checked></div>
+    </div>
+    <div class="sec-label" style="color:#ff3b30">本地数据</div>
+    <div class="group danger-group">
+      <div class="grow" style="align-items:flex-start"><span class="lead" style="background:#ff3b30">${ic('trash', 12)}</span><span class="cap">清除 API Key、会话记录、个人词库、设置、缓存和登录项，然后退出 Speaker。系统中的麦克风与辅助功能授权不会被自动撤销。</span></div>
+      <div class="grow"><span class="sp"></span><button class="btn danger-fill small" data-act="erase">清除本地数据并退出…</button></div>
+    </div>
+  </div></div>`;
+}
+
+/* ================= 关于 ================= */
+function aboutTab(){
+  return `<div class="scroll"><div class="page">
+    <div class="sec-label">隐私边界</div>
+    <div class="group">
+      ${[['mic','音频','录音只在内存中转换并发送到豆包，不保存到磁盘或历史。','#af52de'],
+         ['doc','识别文字','保留在本机；仅当你启用需要 DeepSeek 的整理模式时，文字才会发送给 DeepSeek。','#5856d6'],
+         ['clock','历史、设置与词库','只保存在这台 Mac 的当前用户目录；会话历史不包含音频或 API Key。','#ff9500']].map(r=>
+        `<div class="grow" style="align-items:flex-start"><span class="lead" style="background:${r[3]}">${ic(r[0], 12)}</span><div><b class="cap">${r[1]}</b><div class="muted tiny" style="margin-top:1px">${r[2]}</div></div></div>`).join('')}
+      <div class="grow"><button class="btn small" data-act="noop">查看完整隐私说明</button><button class="btn small" data-act="noop">打开本地数据文件夹</button></div>
+    </div>
+    <div class="group-foot">你应该清楚每一类数据会去哪里。</div>
+    <div class="sec-label">版本</div>
+    <div class="group">
+      <div class="grow"><span class="lead" style="background:#1d1d1f">${ic('wave', 12)}</span><span class="k">Speaker</span><span class="muted tiny">1.4.0 (20260812.1)</span><span class="sp"></span><button class="btn small" data-act="noop">检查更新…</button><button class="iconbtn" data-act="noop" title="在 GitHub 查看 Speaker">${icGitHub(15)}</button></div>
+    </div>
+  </div></div>`;
+}
+
+/* ================= 装配 ================= */
+function placeholder(name){
+  return `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#8e8e93;flex-direction:column;gap:8px">
+    <div style="font-size:15px;font-weight:600">「${name}」是摆设</div>
+    <div class="cap">本次样机只重设计 历史 / 设置 / 关于</div>
+  </div>`;
+}
+function render(){
+  syncURL();
+  $('#tabs').innerHTML = `<div class="seg">${TABS.map(t=>
+    `<button data-tab="${t[0]}" class="${tab===t[0]?'on':''}"><span class="tic">${ic(t[2], 13)}</span>${t[1]}</button>`).join('')}</div>`;
+  const c = $('#content');
+  c.innerHTML =
+    tab === 'history' ? historyTab() :
+    tab === 'settings' ? settingsTab() :
+    tab === 'about' ? aboutTab() :
+    placeholder(TABS.find(t=>t[0]===tab)[1]);
+}
+
+/* 行内操作（复制/删除）不整树重渲染，直接摘掉菜单节点，避免滚动位置跳动 */
+function closeMenu(){
+  if (!openMenu) return;
+  openMenu = false;
+  const m = $('.pill-menu'); if (m) m.remove();
+}
+document.body.addEventListener('click', e => {
+  const tabBtn = e.target.closest('[data-tab]');
+  if (tabBtn){ tab = tabBtn.dataset.tab; expandedId = null; openMenu = false; render(); return; }
+  const el = e.target.closest('[data-act]');
+  if (!el){
+    if (openMenu){ openMenu = false; render(); }
+    return;
+  }
+  const id = el.dataset.id ? (isNaN(Number(el.dataset.id)) ? el.dataset.id : Number(el.dataset.id)) : null;
+  switch (el.dataset.act){
+    case 'toggle':   expandedId = expandedId === id ? null : id; openMenu = false; render(); break;
+    case 'copy':     closeMenu(); toast('已复制到剪贴板（假）'); break;
+    case 'del':
+      closeMenu();
+      if (confirm('删除这条会话记录？\n记录只保存在本机，删除后无法恢复。')){
+        if (expandedId === id) expandedId = null;
+        render(); toast('已删除（假）');
+      }
+      break;
+    case 'histmenu': openMenu = !openMenu; render(); break;
+    case 'refresh':  openMenu = false; render(); toast('已刷新（假）'); break;
+    case 'clearall':
+      openMenu = false;
+      if (confirm(`清空所有会话记录？\n将删除 ${RECORDS.length} 条记录，此操作无法撤销。`)) toast('已清空（假）');
+      render(); break;
+    case 'erase':
+      if (confirm('清除 Speaker 保存的所有本地数据？\nAPI Key、会话记录、个人词库、设置和登录项将被永久移除，无法恢复。')) toast('开始清除（假）');
+      break;
+    case 'replacekey': replaceKey = !replaceKey; render(); break;
+    case 'mode':     if (selMode !== id){ selMode = id; render(); } break;
+    case 'saveprompt':   render(); toast('提示词已保存（假）'); break;
+    case 'resetprompt':  promptDrafts[id] = null; render(); toast('已恢复默认提示词'); break;
+    case 'savemode':     toast('自定义模式已保存（假）'); break;
+    default: toast('样机：无动作');
+  }
+});
+/* 提示词编辑：输入时暂存草稿（不触发重渲染，避免打断输入） */
+document.body.addEventListener('input', e => {
+  const f = e.target.dataset && e.target.dataset.field;
+  if (!f) return;
+  if (f === 'customName') customName = e.target.value;
+  else promptDrafts[f] = e.target.value;
+});
+
+render();
+</script>
+</body>
+</html>
