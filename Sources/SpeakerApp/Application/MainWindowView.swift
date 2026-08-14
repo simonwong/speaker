@@ -32,15 +32,6 @@ struct MainWindowView: View {
                         }
                         .tag(MainWindowTab.history)
 
-                    SettingsView(workspace: settingsWorkspace)
-                        .tabItem {
-                            Label(
-                                MainWindowTab.settings.title,
-                                systemImage: MainWindowTab.settings.icon
-                            )
-                        }
-                        .tag(MainWindowTab.settings)
-
                     DictionaryTabView(model: dictionary)
                         .tabItem {
                             Label(
@@ -49,6 +40,15 @@ struct MainWindowView: View {
                             )
                         }
                         .tag(MainWindowTab.dictionary)
+
+                    SettingsView(workspace: settingsWorkspace)
+                        .tabItem {
+                            Label(
+                                MainWindowTab.settings.title,
+                                systemImage: MainWindowTab.settings.icon
+                            )
+                        }
+                        .tag(MainWindowTab.settings)
 
                     AboutView(workspace: settingsWorkspace)
                         .tabItem {
