@@ -40,6 +40,9 @@ final class SpeakerRuntime: ObservableObject {
             guard let self else { return }
             await self.requestPermission(permission)
         },
+        routeEffects: SettingsRouteEffects(
+            openURL: { NSWorkspace.shared.open($0) }
+        ),
         refreshPermissions: { [weak self] in
             self?.refreshPermissions()
         },
