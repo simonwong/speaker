@@ -1330,13 +1330,14 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "history search matches displayed body without exposing target application",
+            "history search matches retained text and delivery diagnostics without exposing target application",
             failures: &failures,
             executed: &executed
         ) {
             let hiddenTranscriptID = VoiceInputSessionID()
             let bodyID = VoiceInputSessionID()
             let appID = VoiceInputSessionID()
+            let deliveryDiagnosticID = VoiceInputSessionID()
             let records = [
                 makeHistoryRecord(
                     id: hiddenTranscriptID,
@@ -1359,6 +1360,14 @@ struct SpeakerAppUISpecs {
                     transcription: "网页内容",
                     finalText: nil
                 ),
+                makeHistoryRecord(
+                    id: deliveryDiagnosticID,
+                    startedAt: Date(timeIntervalSince1970: 50),
+                    applicationName: "TextEdit",
+                    transcription: "普通正文",
+                    finalText: "普通正文",
+                    deliveryDiagnosticCode: "pasteReceipt.unconfirmed"
+                ),
             ]
 
             try expect(
@@ -1378,6 +1387,12 @@ struct SpeakerAppUISpecs {
                     records,
                     query: "safari"
                 ).isEmpty
+            )
+            try expect(
+                HistoryPresentation.filteredRecords(
+                    records,
+                    query: "pasteReceipt.unconfirmed"
+                ).map(\.sessionID) == [deliveryDiagnosticID]
             )
         }
 
@@ -1399,7 +1414,8 @@ private func makeHistoryRecord(
     startedAt: Date,
     applicationName: String? = "备忘录",
     transcription: String? = "测试文字",
-    finalText: String? = "测试文字"
+    finalText: String? = "测试文字",
+    deliveryDiagnosticCode: String? = nil
 ) -> VoiceInputHistoryRecord {
     VoiceInputHistoryRecord(
         sessionID: id,
@@ -1407,6 +1423,7 @@ private func makeHistoryRecord(
         applicationName: applicationName,
         transcription: transcription,
         finalText: finalText,
+        deliveryDiagnosticCode: deliveryDiagnosticCode,
         outcome: .delivered(
             id,
             applicationName: applicationName ?? "当前输入框",
