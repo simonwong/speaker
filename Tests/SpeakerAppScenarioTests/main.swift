@@ -1632,7 +1632,6 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 AboutSection.allCases.map(\.title) == [
                     "隐私边界",
-                    "本地数据",
                     "版本",
                 ]
             )
