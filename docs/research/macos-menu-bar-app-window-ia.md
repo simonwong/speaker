@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-08-12
 
-This note records evidence on how established macOS menu-bar utilities organize a main window that mixes *content* (history, usage stats) with *configuration*, and on the history-list interaction conventions of voice-input peers. It informs restructuring Speaker's main window (currently five top tabs: 概览 Overview, 历史 History, 设置 Settings, 词典 Dictionary, 关于 About) under the constraints of extreme simplicity, a native look, and no inner section navigation inside a tab. App UI structures and HIG wording drift; recheck the cited primary sources before implementing.
+This note records evidence on how established macOS menu-bar utilities organize a main window that mixes *content* (history, usage stats) with *configuration*, and on the history-list interaction conventions of voice-input peers. It informs restructuring Speaker's main window (currently five top tabs: 概览 Overview, 历史 History, 词典 Dictionary, 设置 Settings, 关于 About) under the constraints of extreme simplicity, a native look, and no inner section navigation inside a tab. App UI structures and HIG wording drift; recheck the cited primary sources before implementing.
 
 ## Decision summary
 
