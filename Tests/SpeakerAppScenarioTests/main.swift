@@ -1444,6 +1444,18 @@ struct SpeakerAppScenarioSpecs {
 
         run("only DeepSeek built-in modes expose a prompt editor", failures: &failures, executed: &executed) {
             try expect(
+                RefinementChoice(mode: .conciseCleanup()) == .conciseCleanup
+            )
+            try expect(
+                RefinementChoice(mode: .fullRewrite()) == .fullRewrite
+            )
+            try expect(
+                RefinementChoice.conciseCleanup.builtInMode == .conciseCleanup
+            )
+            try expect(
+                RefinementChoice.fullRewrite.builtInMode == .fullRewrite
+            )
+            try expect(
                 RefinementPromptPresentation.editorState(for: .defaultSmooth) == nil
             )
             try expect(

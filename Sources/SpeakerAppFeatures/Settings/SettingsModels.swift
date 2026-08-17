@@ -123,18 +123,23 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    init(mode: TextRefinementMode) {
-        if let builtInMode = mode.builtInMode,
-           let choice = Self(rawValue: builtInMode.rawValue)
-        {
-            self = choice
-            return
+    package init(mode: TextRefinementMode) {
+        switch mode.builtInMode {
+        case .conciseCleanup:
+            self = .conciseCleanup
+        case .fullRewrite:
+            self = .fullRewrite
+        case nil:
+            self = mode == .defaultSmooth ? .defaultSmooth : .custom
         }
-        self = mode == .defaultSmooth ? .defaultSmooth : .custom
     }
 
-    var builtInMode: BuiltInRefinementMode? {
-        BuiltInRefinementMode(rawValue: rawValue)
+    package var builtInMode: BuiltInRefinementMode? {
+        switch self {
+        case .conciseCleanup: .conciseCleanup
+        case .fullRewrite: .fullRewrite
+        case .defaultSmooth, .custom: nil
+        }
     }
 
     func refinementMode(
