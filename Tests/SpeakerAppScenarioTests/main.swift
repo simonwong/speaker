@@ -1722,14 +1722,20 @@ struct SpeakerAppScenarioSpecs {
             try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
         }
 
-        run("main window visibility drives dock activation policy", failures: &failures, executed: &executed) {
+        run("main window visibility drives dock activation policy once per transition", failures: &failures, executed: &executed) {
+            var appliedPolicies: [MainWindowActivationPolicy] = []
+            let feature = MainWindowVisibilityFeature {
+                appliedPolicies.append($0)
+            }
+
+            feature.mainWindowDidOpen()
+            feature.mainWindowDidOpen()
+            feature.mainWindowWillClose()
+            feature.mainWindowWillClose()
+            feature.mainWindowDidOpen()
+
             try expect(
-                MainWindowVisibilityBridge.activationPolicy(mainWindowVisible: true)
-                    == .regular
-            )
-            try expect(
-                MainWindowVisibilityBridge.activationPolicy(mainWindowVisible: false)
-                    == .accessory
+                appliedPolicies == [.regular, .accessory, .regular]
             )
         }
 
