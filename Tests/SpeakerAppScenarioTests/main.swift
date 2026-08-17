@@ -1428,18 +1428,68 @@ struct SpeakerAppScenarioSpecs {
 
         run("DeepSeek modes stay inactive until a key is available", failures: &failures, executed: &executed) {
             let unavailable = RefinementActivationPlan(
-                desiredMode: .fullRewrite,
+                desiredMode: .fullRewrite(),
                 hasStoredKey: false
             )
             try expect(unavailable.activeMode == .defaultSmooth)
-            try expect(unavailable.deferredMode == .fullRewrite)
+            try expect(unavailable.deferredMode == .fullRewrite())
 
             let available = RefinementActivationPlan(
-                desiredMode: .fullRewrite,
+                desiredMode: .fullRewrite(),
                 hasStoredKey: true
             )
-            try expect(available.activeMode == .fullRewrite)
+            try expect(available.activeMode == .fullRewrite())
             try expect(available.deferredMode == nil)
+        }
+
+        run("only DeepSeek built-in modes expose a prompt editor", failures: &failures, executed: &executed) {
+            try expect(
+                RefinementPromptPresentation.editorState(for: .defaultSmooth) == nil
+            )
+            try expect(
+                RefinementPromptPresentation.editorState(
+                    for: .custom(name: "邮件", prompt: "整理成邮件")
+                ) == nil
+            )
+
+            let concise = RefinementPromptPresentation.editorState(for: .conciseCleanup())
+            let builtInConcise = TextRefinementMode.conciseCleanup().deepSeekInstruction
+            try expect(concise?.defaultPrompt == builtInConcise)
+            try expect(concise?.effectivePrompt == builtInConcise)
+            try expect(concise?.isOverridden == false)
+
+            let overridden = RefinementPromptPresentation.editorState(
+                for: .fullRewrite(promptOverride: "自定义提示词")
+            )
+            try expect(
+                overridden?.defaultPrompt
+                    == TextRefinementMode.fullRewrite().deepSeekInstruction
+            )
+            try expect(overridden?.effectivePrompt == "自定义提示词")
+            try expect(overridden?.isOverridden == true)
+            try expect(overridden?.defaultPrompt != overridden?.effectivePrompt)
+        }
+
+        run("refinement prompt editor gates save and restore on the draft", failures: &failures, executed: &executed) {
+            let state = RefinementPromptPresentation.editorState(for: .conciseCleanup())
+            try expect(state != nil)
+            guard let state else { return }
+
+            try expect(!state.canRestoreDefault(draft: state.defaultPrompt))
+            try expect(state.canRestoreDefault(draft: "改成别的"))
+
+            // Nothing to save while the draft matches the prompt in effect.
+            try expect(!state.canSave(draft: state.effectivePrompt))
+            try expect(!state.canSave(draft: "   "))
+            try expect(
+                !state.canSave(
+                    draft: String(
+                        repeating: "x",
+                        count: TextRefinementMode.maximumCustomPromptLength + 1
+                    )
+                )
+            )
+            try expect(state.canSave(draft: "新提示词"))
         }
 
         await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures, executed: &executed) {

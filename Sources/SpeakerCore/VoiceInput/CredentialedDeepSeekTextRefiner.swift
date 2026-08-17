@@ -54,7 +54,7 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
     public func checkConnection() async throws -> String? {
         try await refine(
             "连接检查。",
-            using: .conciseCleanup
+            using: .conciseCleanup()
         ).providerRequestID
     }
 

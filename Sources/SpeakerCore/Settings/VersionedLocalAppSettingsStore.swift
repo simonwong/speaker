@@ -100,9 +100,9 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
         case .defaultSmooth:
             .defaultSmooth
         case .conciseCleanup:
-            .conciseCleanup
+            .conciseCleanup()
         case .fullRewrite:
-            .fullRewrite
+            .fullRewrite()
         case let .custom(name, prompt):
             .custom(name: name, prompt: prompt)
         }
@@ -177,10 +177,41 @@ public enum HistoryRetentionPolicy: String, CaseIterable, Equatable, Sendable, C
     }
 }
 
+/// Per-mode user replacements for the built-in DeepSeek refinement prompts.
+/// Modes without a built-in prompt (Default Smoothing, Custom Mode) can never
+/// hold an override here.
+public struct RefinementPromptOverrides: Equatable, Sendable, Codable {
+    public var conciseCleanup: String?
+    public var fullRewrite: String?
+
+    public init(conciseCleanup: String? = nil, fullRewrite: String? = nil) {
+        self.conciseCleanup = conciseCleanup
+        self.fullRewrite = fullRewrite
+    }
+
+    public subscript(mode: TextRefinementMode) -> String? {
+        get {
+            switch mode {
+            case .conciseCleanup: conciseCleanup
+            case .fullRewrite: fullRewrite
+            case .defaultSmooth, .custom: nil
+            }
+        }
+        set {
+            switch mode {
+            case .conciseCleanup: conciseCleanup = newValue
+            case .fullRewrite: fullRewrite = newValue
+            case .defaultSmooth, .custom: break
+            }
+        }
+    }
+}
+
 public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var shortcut: VoiceShortcutPreference
     public var refinement: RefinementPreference
     public var savedCustomRefinement: RefinementPreference?
+    public var refinementPromptOverrides: RefinementPromptOverrides
     public var launchAtLogin: Bool
     public var doubaoResourceID: String?
     public var historyRetention: HistoryRetentionPolicy
@@ -190,6 +221,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         shortcut: VoiceShortcutPreference = .functionKey,
         refinement: RefinementPreference = .defaultSmooth,
         savedCustomRefinement: RefinementPreference? = nil,
+        refinementPromptOverrides: RefinementPromptOverrides = RefinementPromptOverrides(),
         launchAtLogin: Bool = false,
         doubaoResourceID: String? = nil,
         historyRetention: HistoryRetentionPolicy = .forever,
@@ -198,6 +230,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.shortcut = shortcut
         self.refinement = refinement
         self.savedCustomRefinement = savedCustomRefinement
+        self.refinementPromptOverrides = refinementPromptOverrides
         self.launchAtLogin = launchAtLogin
         self.doubaoResourceID = doubaoResourceID
         self.historyRetention = historyRetention
@@ -212,6 +245,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         case shortcut
         case refinement
         case savedCustomRefinement
+        case refinementPromptOverrides
         case launchAtLogin
         case doubaoResourceID
         case historyRetention
@@ -232,6 +266,12 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
             RefinementPreference.self,
             forKey: .savedCustomRefinement
         )
+        // Incremental field: settings.json written before prompt overrides
+        // existed decodes with no overrides.
+        refinementPromptOverrides = try container.decodeIfPresent(
+            RefinementPromptOverrides.self,
+            forKey: .refinementPromptOverrides
+        ) ?? RefinementPromptOverrides()
         launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
         doubaoResourceID = try container.decodeIfPresent(
             String.self,
@@ -438,6 +478,19 @@ public actor VersionedLocalAppSettingsStore {
     ) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
         settings.savedCustomRefinement = refinement
+        try save(settings)
+        return settings
+    }
+
+    /// Saves (or, when nil, restores) one built-in mode's prompt override
+    /// without touching the selected refinement mode.
+    @discardableResult
+    public func updateRefinementPromptOverride(
+        _ promptOverride: String?,
+        for mode: TextRefinementMode
+    ) throws -> SpeakerAppSettings {
+        var settings = try settingsForUpdate()
+        settings.refinementPromptOverrides[mode] = promptOverride
         try save(settings)
         return settings
     }

@@ -333,6 +333,10 @@ private struct SettingsOverviewView: View {
                 .padding(.leading, 6)
         case .refinement:
             RefinementSettingsPage(model: workspace.refinement)
+            Text("提示词仅在选择需要 DeepSeek 的整理模式时生效；默认顺滑没有提示词。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 6)
         case .general:
             GeneralSettingsPage(
                 loginItemSettings: workspace.loginItemSettings,
@@ -1420,6 +1424,64 @@ private struct RefinementSettingsPage: View {
                         text: notice,
                         color: model.isConnectionVerified ? .green : .secondary
                     )
+                }
+            }
+
+            if let promptEditor = model.promptEditorState, !model.isEditingCustomMode {
+                SettingsCard(
+                    "“\(model.mode.displayName)”提示词",
+                    subtitle: "提示词只保存在本机，修改后对新会话生效",
+                    icon: "text.quote"
+                ) {
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $model.promptDraft)
+                            .font(.body)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+
+                        if model.promptDraft.isEmpty {
+                            Text("输入该模式的整理提示词……")
+                                .font(.body)
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 16)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(minHeight: 110)
+                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9)
+                            .stroke(.separator.opacity(0.7), lineWidth: 1)
+                    }
+
+                    HStack {
+                        Text(
+                            "\(model.promptDraft.count) / \(TextRefinementMode.maximumCustomPromptLength)"
+                        )
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(
+                            model.promptDraft.count
+                                > TextRefinementMode.maximumCustomPromptLength
+                                ? Color.red
+                                : .secondary
+                        )
+                        Text(promptEditor.isOverridden ? "当前为自定义提示词" : "当前为内置提示词")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("恢复默认") {
+                            Task { await model.restoreDefaultPrompt() }
+                        }
+                        .disabled(
+                            !promptEditor.canRestoreDefault(draft: model.promptDraft)
+                        )
+                        Button("保存") {
+                            Task { await model.savePromptOverride() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!promptEditor.canSave(draft: model.promptDraft))
+                    }
                 }
             }
 

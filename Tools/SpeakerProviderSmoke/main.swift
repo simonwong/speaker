@@ -496,13 +496,13 @@ private struct SpeakerProviderSmoke {
                 "concise",
                 .deepSeekModeConcise,
                 "嗯，我想说，就是这个版本是 2.0，然后周五交付，周五交付。",
-                .conciseCleanup
+                .conciseCleanup()
             ),
             (
                 "rewrite",
                 .deepSeekModeRewrite,
                 "版本是 2.0。周五交付。不得增加原文没有的信息。",
-                .fullRewrite
+                .fullRewrite()
             ),
             (
                 "custom",
@@ -551,7 +551,7 @@ private struct SpeakerProviderSmoke {
         let request = Task {
             try await service.refine(
                 String(repeating: "这是等待中取消的固定非敏感测试文本。", count: 120),
-                using: .fullRewrite
+                using: .fullRewrite()
             )
         }
         await Task.yield()
@@ -581,7 +581,7 @@ private struct SpeakerProviderSmoke {
         )
         do {
             announceStarted(.deepSeekInvalidCredential)
-            _ = try await service.refine("凭据边界检查。", using: .conciseCleanup)
+            _ = try await service.refine("凭据边界检查。", using: .conciseCleanup())
             return result(.deepSeekInvalidCredential, .fail, .unexpected)
         } catch let failure as DeepSeekRefinementFailure
             where failure.kind == .authentication
