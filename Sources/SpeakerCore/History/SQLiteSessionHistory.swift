@@ -375,20 +375,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         ).first
     }
 
-    public func search(_ query: String) async -> [VoiceInputHistoryRecord] {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return loadRecords(whereClause: nil, binding: nil) }
-        return loadRecords(whereClause: nil, binding: nil).filter { record in
-            SessionHistoryRecordPolicy.searchableValues(record).contains { value in
-                value.range(
-                    of: normalized,
-                    options: [.caseInsensitive, .diacriticInsensitive],
-                    locale: .current
-                ) != nil
-            }
-        }
-    }
-
     public func delete(sessionID: VoiceInputSessionID) async -> Bool {
         guard let db = connection?.raw else { return false }
         do {

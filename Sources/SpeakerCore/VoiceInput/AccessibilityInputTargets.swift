@@ -122,8 +122,8 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
     /// Captures the focused target only when it belongs to the exact process
     /// selected by the caller.
     ///
-    /// This is used by explicit redelivery flows where a frontmost-app change
-    /// between user confirmation and AX capture must fail closed.
+    /// A frontmost-app change before the AX capture fails closed instead of
+    /// freezing a target in the wrong process.
     public func capture(
         expectedProcessID: Int32
     ) async -> InputTargetCaptureResult {

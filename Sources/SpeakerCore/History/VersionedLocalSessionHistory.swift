@@ -9,7 +9,6 @@ public extension Notification.Name {
 public protocol LocalSessionHistoryStoring: SessionHistoryRecording {
     func allRecords() async -> [VoiceInputHistoryRecord]
     func record(sessionID: VoiceInputSessionID) async -> VoiceInputHistoryRecord?
-    func search(_ query: String) async -> [VoiceInputHistoryRecord]
     @discardableResult func delete(sessionID: VoiceInputSessionID) async -> Bool
     @discardableResult func clear() async -> Bool
     func persistenceStatus() async -> LocalHistoryPersistenceStatus
@@ -205,23 +204,6 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
 
     public func record(sessionID: VoiceInputSessionID) async -> VoiceInputHistoryRecord? {
         storedRecords.first { $0.sessionID == sessionID }
-    }
-
-    /// Searches all user-visible and diagnostic text retained by the history
-    /// model. Matching is localized, case-insensitive, and diacritic-insensitive.
-    public func search(_ query: String) async -> [VoiceInputHistoryRecord] {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedQuery.isEmpty else { return storedRecords }
-
-        return storedRecords.filter { record in
-            SessionHistoryRecordPolicy.searchableValues(record).contains { value in
-                value.range(
-                    of: normalizedQuery,
-                    options: [.caseInsensitive, .diacriticInsensitive],
-                    locale: .current
-                ) != nil
-            }
-        }
     }
 
     @discardableResult

@@ -43,7 +43,7 @@ Delivery mutates the frozen Input Target only after it remains safe and current.
 23. As a user, I want a local Personal Dictionary of names and specialist terms, so that those words are recognized more accurately.
 24. As a user, I want empty and duplicate Entries rejected and each session to use a stable dictionary snapshot, so that edits remain deterministic.
 25. As a user, I want Session Records with Stage Results, Refinement Mode, timing, delivery status, and sanitized diagnostics, so that the pipeline is inspectable without recording which application I used.
-26. As a user, I want to search, inspect, copy, redeliver, delete, and clear Session Records, so that local history remains useful and controllable.
+26. As a user, I want to search, inspect, copy, delete, and clear Session Records, so that local history remains useful and controllable.
 27. As a user, I want history retention to follow an explicit policy with a safety cap, so that storage behavior reflects my intent.
 28. As a user, I want raw audio, credentials, AX objects, captured source text, and clipboard contents excluded from persistence, so that local diagnostics remain minimal.
 29. As a user, I want login launch to be optional and disabled by default, so that Speaker changes startup behavior only with consent.

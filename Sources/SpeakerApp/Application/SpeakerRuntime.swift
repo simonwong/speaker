@@ -296,10 +296,8 @@ final class SpeakerRuntime: ObservableObject {
         )
         historyModel = HistoryModel(
             store: history,
-            targets: targets,
             clipboard: SystemClipboardWriter(),
-            announce: Self.announceAccessibility,
-            interactionRouter: globalInteraction
+            announce: Self.announceAccessibility
         )
         overviewModel = OverviewModel(store: history)
         loginItemSettings = LoginItemSettingsModel(
@@ -425,7 +423,6 @@ final class SpeakerRuntime: ObservableObject {
             self.onboardingController?.close()
             self.onboardingController = nil
             self.panel.stop()
-            self.historyModel.shutdown()
             await self.refinementSettings.shutdown()
             await self.doubaoSettings.shutdown()
             await self.voiceInput.shutdown()
@@ -672,7 +669,6 @@ final class SpeakerRuntime: ObservableObject {
         onboardingController?.close()
         onboardingController = nil
         panel.stop()
-        historyModel.shutdown()
         await refinementSettings.shutdown()
         await doubaoSettings.shutdown()
         await voiceInput.shutdown()

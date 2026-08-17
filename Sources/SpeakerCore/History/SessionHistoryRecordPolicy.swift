@@ -32,32 +32,6 @@ package enum SessionHistoryRecordPolicy {
         return false
     }
 
-    package static func searchableValues(
-        _ record: VoiceInputHistoryRecord
-    ) -> [String] {
-        [
-            record.transcription,
-            record.finalText,
-            record.providerErrorCode,
-            record.providerOperation,
-            record.providerStatusCode,
-            record.providerRequestID,
-            record.transcriptionProvider,
-            record.deliveryDiagnosticCode,
-            record.deepSeekText,
-            record.deepSeekRequestID,
-            record.refinementModeName,
-            record.refinementPrompt,
-            record.refinementFailureCode,
-            record.refinementFailureStatusCode,
-            record.cancelledAtStage,
-            record.dictionarySnapshotEntries
-                .flatMap { [$0.word] + $0.legacyAliases }
-                .joined(separator: " "),
-            record.dictionaryRequestContext?.hotwords.joined(separator: " "),
-        ].compactMap { $0 }
-    }
-
     package static func sort(
         _ records: [VoiceInputHistoryRecord]
     ) -> [VoiceInputHistoryRecord] {
