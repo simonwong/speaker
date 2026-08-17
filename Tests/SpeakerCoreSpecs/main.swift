@@ -5421,11 +5421,6 @@ struct SpeakerCoreSpecs {
 
             let reloaded = VersionedLocalSessionHistory(fileURL: fileURL)
             let allRecords = await reloaded.allRecords()
-            let transcriptMatches = await reloaded.search("ALPHA")
-            let errorMatches = await reloaded.search("invalidcredential")
-            let deliveryMatches = await reloaded.search(
-                "pastereceipt.unconfirmed"
-            )
             let encoded = try String(contentsOf: fileURL, encoding: .utf8)
             let historyAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             try expect(
@@ -5433,9 +5428,7 @@ struct SpeakerCoreSpecs {
                 "history file is not owner-only"
             )
             try expect(allRecords.map(\.sessionID) == [firstID])
-            try expect(transcriptMatches.map(\.sessionID) == [firstID])
-            try expect(errorMatches.isEmpty)
-            try expect(deliveryMatches.map(\.sessionID) == [firstID])
+            try expect(allRecords.first?.transcription == "豆包原文 alpha")
             try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
             try expect(allRecords.last?.transcriptionProvider == "doubao")
             try expect(
@@ -5512,10 +5505,8 @@ struct SpeakerCoreSpecs {
 
             let legacy = VersionedLocalSessionHistory(fileURL: legacyURL)
             let importedRecords = await legacy.allRecords()
-            let legacyMatches = await legacy.search("豆宝")
             let sqlite = SQLiteSessionHistory(fileURL: sqliteURL)
             let imported = await sqlite.importLegacyRecords(importedRecords)
-            let sqliteMatches = await sqlite.search("豆宝")
             let rewritten = await sqlite.record(sessionID: sessionID)
 
             try expect(
@@ -5526,9 +5517,7 @@ struct SpeakerCoreSpecs {
                 importedRecords.first?.dictionarySnapshotEntries.first?.legacyAliases
                     == ["豆宝"]
             )
-            try expect(legacyMatches.map(\.sessionID) == [sessionID])
             try expect(imported)
-            try expect(sqliteMatches.map(\.sessionID) == [sessionID])
             try expect(
                 rewritten?.dictionarySnapshotEntries.first?.legacyAliases
                     == ["豆宝"]
@@ -5732,13 +5721,11 @@ struct SpeakerCoreSpecs {
 
             let reloaded = SQLiteSessionHistory(fileURL: fileURL)
             let records = await reloaded.allRecords()
-            let matches = await reloaded.search("增量")
             let status = await reloaded.persistenceStatus()
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             try expect(records.count == 1)
             try expect(records.first?.finalText == "最终增量结果")
             try expect(records.first?.applicationName == nil)
-            try expect(matches.map(\.sessionID) == [id])
             try expect(status.recordCount == 1)
             try expect(
                 (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,

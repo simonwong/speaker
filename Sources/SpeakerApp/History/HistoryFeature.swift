@@ -1,4 +1,3 @@
-import AppKit
 import Combine
 import Foundation
 import SpeakerAppFeatures
@@ -19,34 +18,20 @@ final class HistoryModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published private(set) var feedback: HistoryDashboardFeedback?
     @Published private(set) var activeOperation: HistoryOperation?
-    @Published private(set) var isRedeliveryArmed = false
 
-    let store: any LocalSessionHistoryStoring
-    private let targets: AccessibilityInputTargets
+    private let store: any LocalSessionHistoryStoring
     private let clipboard: any ClipboardWriting
     private let announce: (String) -> Void
-    private let interactionRouter: GlobalVoiceInteractionRouter
-    private var activationObserver: NSObjectProtocol?
-    private var terminationObserver: NSObjectProtocol?
-    private var confirmationClickMonitor: Any?
     private var feedbackTask: Task<Void, Never>?
-    private var redeliveryID: UUID?
-    private var redeliveryCommitGate: DeliveryCommitGate?
-    private var redeliveryTarget = HistoryRedeliveryTargetState()
-    private var pendingConfirmationProcessID: Int32?
 
     init(
         store: any LocalSessionHistoryStoring,
-        targets: AccessibilityInputTargets,
         clipboard: any ClipboardWriting,
-        announce: @escaping (String) -> Void,
-        interactionRouter: GlobalVoiceInteractionRouter
+        announce: @escaping (String) -> Void
     ) {
         self.store = store
-        self.targets = targets
         self.clipboard = clipboard
         self.announce = announce
-        self.interactionRouter = interactionRouter
     }
 
     func refresh() async {
@@ -62,9 +47,7 @@ final class HistoryModel: ObservableObject {
         case let .privacyMigrationFailed(reason): notice = "旧版历史隐私清理未完成：\(reason)"
         case let .writeFailed(reason): notice = "历史写入失败：\(reason)"
         case nil:
-            if !isRedeliveryArmed {
-                notice = nil
-            }
+            notice = nil
         }
     }
 
@@ -126,323 +109,6 @@ final class HistoryModel: ObservableObject {
         return true
     }
 
-    func redeliver(_ record: VoiceInputHistoryRecord) async {
-        guard let text = HistoryPresentation.retainedText(for: record) else {
-            notice = "这条记录没有可重新送达的文本。"
-            return
-        }
-        cancelRedelivery()
-        let redeliveryID = UUID()
-        self.redeliveryID = redeliveryID
-        redeliveryTarget.reset()
-        pendingConfirmationProcessID = nil
-        isRedeliveryArmed = true
-        notice = "切换到目标 App，聚焦输入框后再次按语音快捷键；也可以直接点击输入位置。"
-        announce("重新输入已准备。切换到目标应用，聚焦输入框后再次按语音快捷键；按 Esc 取消。")
-        guard interactionRouter.beginExclusiveInteraction(
-            confirm: { [weak self] in
-                guard let self else { return false }
-                guard let expectedProcessID =
-                        self.consumeConfirmationProcessID()
-                else {
-                    self.notice = "请先切换到目标 App 并聚焦输入框，再次按语音快捷键确认。"
-                    return false
-                }
-                return await self.completeRedelivery(
-                    text,
-                    redeliveryID: redeliveryID,
-                    expectedProcessID: expectedProcessID
-                )
-            },
-            cancel: { [weak self] in
-                self?.cancelRedeliveryFromRouter(announceResult: true)
-            }
-        ) else {
-            self.redeliveryID = nil
-            isRedeliveryArmed = false
-            publishFeedback(
-                .warning,
-                "请先结束或取消当前语音输入，再重新输入历史文字。"
-            )
-            return
-        }
-        observeTargetApplication()
-        observeExplicitInputClick()
-    }
-
-    private func observeTargetApplication() {
-        let center = NSWorkspace.shared.notificationCenter
-        activationObserver = center.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
-                    as? NSRunningApplication
-            else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.isRedeliveryArmed else { return }
-                self.observeActivatedApplication(application)
-            }
-        }
-        terminationObserver = center.addObserver(
-            forName: NSWorkspace.didTerminateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let application = notification.userInfo?[
-                NSWorkspace.applicationUserInfoKey
-            ] as? NSRunningApplication else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.isRedeliveryArmed else { return }
-                let removed = self.redeliveryTarget.terminated(
-                    processIdentifier: application.processIdentifier
-                )
-                if removed {
-                    self.notice = "目标 App 已退出。请切换到其他 App 并聚焦输入框；按 Esc 取消。"
-                }
-            }
-        }
-        synchronizeTargetWithFrontmostApplication()
-    }
-
-    private func observeExplicitInputClick() {
-        confirmationClickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .leftMouseUp]
-        ) { [weak self] event in
-            let eventType = event.type
-            Task { @MainActor [weak self] in
-                guard let self,
-                      self.isRedeliveryArmed
-                else { return }
-                await Task.yield()
-                self.synchronizeTargetWithFrontmostApplication()
-                let frontmostProcessIdentifier = NSWorkspace.shared
-                    .frontmostApplication?.processIdentifier
-                switch eventType {
-                case .leftMouseDown:
-                    self.redeliveryTarget.mouseDown(
-                        frontmostProcessIdentifier: frontmostProcessIdentifier
-                    )
-                case .leftMouseUp:
-                    guard let processIdentifier =
-                            self.redeliveryTarget.mouseUp(
-                                frontmostProcessIdentifier:
-                                    frontmostProcessIdentifier
-                            )
-                    else { return }
-                    self.pendingConfirmationProcessID = processIdentifier
-                    let started = self.interactionRouter
-                        .confirmExclusiveInteraction()
-                    if !started,
-                       self.pendingConfirmationProcessID == processIdentifier
-                    {
-                        self.pendingConfirmationProcessID = nil
-                    }
-                default:
-                    break
-                }
-            }
-        }
-        if confirmationClickMonitor == nil {
-            notice = "无法监听鼠标点击；仍可聚焦输入框后再次按语音快捷键确认。"
-            publishFeedback(.warning, notice ?? "鼠标确认不可用。")
-        }
-    }
-
-    func cancelRedelivery() {
-        guard isRedeliveryArmed
-            || activationObserver != nil
-            || terminationObserver != nil
-            || confirmationClickMonitor != nil
-        else { return }
-        interactionRouter.cancelExclusiveInteraction()
-        if isRedeliveryArmed {
-            cancelRedeliveryFromRouter(announceResult: true)
-        }
-    }
-
-    private func cancelRedeliveryFromRouter(announceResult: Bool) {
-        let wasActive = isRedeliveryArmed
-        let commitGate = redeliveryCommitGate
-        redeliveryCommitGate = nil
-        redeliveryID = nil
-        pendingConfirmationProcessID = nil
-        redeliveryTarget.reset()
-        isRedeliveryArmed = false
-        removeTargetApplicationObservers()
-        removeConfirmationClickMonitor()
-        notice = nil
-        if let commitGate {
-            Task { _ = await commitGate.cancel() }
-        }
-        if wasActive, announceResult {
-            publishFeedback(.information, "重新输入已取消")
-        }
-    }
-
-    func shutdown() {
-        interactionRouter.cancelExclusiveInteraction()
-        if isRedeliveryArmed
-            || activationObserver != nil
-            || terminationObserver != nil
-            || confirmationClickMonitor != nil
-        {
-            cancelRedeliveryFromRouter(announceResult: false)
-        }
-    }
-
-    private func removeConfirmationClickMonitor() {
-        if let confirmationClickMonitor {
-            NSEvent.removeMonitor(confirmationClickMonitor)
-        }
-        confirmationClickMonitor = nil
-    }
-
-    private func completeRedelivery(
-        _ text: String,
-        redeliveryID: UUID,
-        expectedProcessID: Int32
-    ) async -> Bool {
-        guard isRedeliveryArmed,
-              self.redeliveryID == redeliveryID
-        else { return false }
-        guard let application = NSWorkspace.shared.frontmostApplication,
-              application.processIdentifier == expectedProcessID,
-              !isSpeaker(application)
-        else {
-            synchronizeTargetWithFrontmostApplication()
-            notice = "目标 App 已发生变化。请聚焦新的输入位置后再次确认。"
-            return false
-        }
-
-        notice = "正在重新输入到 \(application.localizedName ?? "目标 App")…"
-        let commitGate = DeliveryCommitGate()
-        redeliveryCommitGate = commitGate
-        let target = await targets.capture(
-            expectedProcessID: expectedProcessID
-        )
-        guard isRedeliveryArmed,
-              self.redeliveryID == redeliveryID
-        else {
-            _ = await commitGate.cancel()
-            return true
-        }
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier
-                == expectedProcessID
-        else {
-            if case let .writable(snapshot) = target {
-                await targets.discard(snapshot)
-            }
-            _ = await commitGate.cancel()
-            redeliveryCommitGate = nil
-            synchronizeTargetWithFrontmostApplication()
-            notice = "目标 App 已发生变化。请聚焦新的输入位置后再次确认。"
-            return false
-        }
-        removeTargetApplicationObservers()
-        removeConfirmationClickMonitor()
-        switch target {
-        case let .writable(snapshot):
-            let outcome = await targets.deliver(
-                text,
-                to: snapshot,
-                commitGate: commitGate
-            )
-            guard isRedeliveryArmed,
-                  self.redeliveryID == redeliveryID
-            else { return true }
-            finishRedelivery()
-            switch outcome {
-            case .delivered, .pasteCommandPosted:
-                publishFeedback(.success, "文字已重新输入")
-            case let .pendingCopy(reason),
-                 let .pendingCopyDiagnosed(reason, _):
-                publishFeedback(
-                    .warning,
-                    "\(reason.userTitle)，请使用“复制文字”。"
-                )
-            }
-        case let .unavailable(reason):
-            finishRedelivery()
-            publishFeedback(
-                .warning,
-                "\(reason.userTitle)，请使用“复制文字”。"
-            )
-        }
-        return true
-    }
-
-    private func finishRedelivery() {
-        redeliveryCommitGate = nil
-        redeliveryID = nil
-        pendingConfirmationProcessID = nil
-        redeliveryTarget.reset()
-        isRedeliveryArmed = false
-        notice = nil
-        removeTargetApplicationObservers()
-        removeConfirmationClickMonitor()
-    }
-
-    private func consumeConfirmationProcessID() -> Int32? {
-        if let pendingConfirmationProcessID {
-            self.pendingConfirmationProcessID = nil
-            return pendingConfirmationProcessID
-        }
-        synchronizeTargetWithFrontmostApplication()
-        return redeliveryTarget.shortcutConfirmation(
-            frontmostProcessIdentifier: NSWorkspace.shared
-                .frontmostApplication?.processIdentifier
-        )
-    }
-
-    private func synchronizeTargetWithFrontmostApplication() {
-        guard let application = NSWorkspace.shared.frontmostApplication else {
-            redeliveryTarget.reset()
-            return
-        }
-        observeActivatedApplication(application)
-    }
-
-    private func observeActivatedApplication(
-        _ application: NSRunningApplication
-    ) {
-        redeliveryTarget.activated(
-            processIdentifier: application.processIdentifier,
-            applicationName: application.localizedName,
-            isSpeaker: isSpeaker(application)
-        )
-        if let candidate = redeliveryTarget.candidate {
-            notice = "已切换到 \(candidate.applicationName)。聚焦输入框后再次按语音快捷键，或直接点击输入位置。"
-        } else {
-            notice = "切换到目标 App，聚焦输入框后再次按语音快捷键；按 Esc 取消。"
-        }
-    }
-
-    private func isSpeaker(_ application: NSRunningApplication) -> Bool {
-        if application.processIdentifier
-            == ProcessInfo.processInfo.processIdentifier
-        {
-            return true
-        }
-        guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
-            return false
-        }
-        return application.bundleIdentifier == bundleIdentifier
-    }
-
-    private func removeTargetApplicationObservers() {
-        let center = NSWorkspace.shared.notificationCenter
-        if let activationObserver {
-            center.removeObserver(activationObserver)
-        }
-        if let terminationObserver {
-            center.removeObserver(terminationObserver)
-        }
-        activationObserver = nil
-        terminationObserver = nil
-    }
-
     private func publishFeedback(
         _ kind: HistoryDashboardFeedback.Kind,
         _ message: String
@@ -481,8 +147,7 @@ struct HistoryView: View {
                 totalRecordCount: model.totalRecordCount,
                 notice: model.notice,
                 feedback: model.feedback,
-                isBusy: model.activeOperation != nil,
-                isRedeliveryArmed: model.isRedeliveryArmed
+                isBusy: model.activeOperation != nil
             ),
             query: $model.query,
             actions: HistoryDashboardActions(
@@ -490,13 +155,6 @@ struct HistoryView: View {
                 clear: { Task { _ = await model.clear() } },
                 copy: { record in
                     Task { _ = await model.copy(record) }
-                },
-                toggleRedelivery: { record in
-                    if model.isRedeliveryArmed {
-                        model.cancelRedelivery()
-                    } else {
-                        Task { await model.redeliver(record) }
-                    }
                 },
                 delete: { id in
                     Task { _ = await model.delete(id) }
@@ -509,6 +167,5 @@ struct HistoryView: View {
         ) { _ in
             Task { await model.refresh() }
         }
-        .onDisappear { model.cancelRedelivery() }
     }
 }

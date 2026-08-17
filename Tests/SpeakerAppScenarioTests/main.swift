@@ -1199,89 +1199,6 @@ struct SpeakerAppScenarioSpecs {
             try expect(router.shortcutTarget.shouldConsumeEscape())
         }
 
-        run(
-            "history redelivery follows the latest activated target process",
-            failures: &failures,
-            executed: &executed
-        ) {
-            var state = HistoryRedeliveryTargetState()
-            state.activated(
-                processIdentifier: 41,
-                applicationName: "App A",
-                isSpeaker: false
-            )
-            state.activated(
-                processIdentifier: 42,
-                applicationName: "App B",
-                isSpeaker: false
-            )
-
-            try expect(
-                state.shortcutConfirmation(
-                    frontmostProcessIdentifier: 42
-                ) == 42
-            )
-            try expect(
-                state.shortcutConfirmation(
-                    frontmostProcessIdentifier: 41
-                ) == nil
-            )
-        }
-
-        run(
-            "history redelivery rejects Speaker and terminated targets",
-            failures: &failures,
-            executed: &executed
-        ) {
-            var state = HistoryRedeliveryTargetState()
-            state.activated(
-                processIdentifier: 41,
-                applicationName: "Editor",
-                isSpeaker: false
-            )
-            state.activated(
-                processIdentifier: 10,
-                applicationName: "Speaker",
-                isSpeaker: true
-            )
-            try expect(state.candidate == nil)
-
-            state.activated(
-                processIdentifier: 42,
-                applicationName: "Editor",
-                isSpeaker: false
-            )
-            state.terminated(processIdentifier: 42)
-            try expect(state.candidate == nil)
-        }
-
-        run(
-            "history mouse confirmation requires one stable target for down and up",
-            failures: &failures,
-            executed: &executed
-        ) {
-            var state = HistoryRedeliveryTargetState()
-            state.activated(
-                processIdentifier: 41,
-                applicationName: "App A",
-                isSpeaker: false
-            )
-            state.mouseDown(frontmostProcessIdentifier: 41)
-            state.activated(
-                processIdentifier: 42,
-                applicationName: "App B",
-                isSpeaker: false
-            )
-            try expect(
-                state.mouseUp(frontmostProcessIdentifier: 42) == nil
-            )
-
-            state.mouseDown(frontmostProcessIdentifier: 42)
-            try expect(
-                state.mouseUp(frontmostProcessIdentifier: 42) == 42
-            )
-        }
-
         run("onboarding fits the visible screen and keeps a useful resizable minimum", failures: &failures, executed: &executed) {
             let largeScreen = OnboardingWindowLayout(
                 visibleFrame: .init(x: 0, y: 0, width: 1_440, height: 900)
@@ -1729,6 +1646,19 @@ struct SpeakerAppScenarioSpecs {
                     "不按日期清理",
                 ]
             )
+            try expect(
+                [
+                    HistoryRecordStatus.delivered,
+                    .deliveryUnconfirmed,
+                    .refinementFellBack,
+                    .pendingCopy,
+                ].map(\.label) == [
+                    "已送达",
+                    "已发送·未确认",
+                    "已送达·整理回退",
+                    "待复制结果",
+                ]
+            )
         }
 
         run("API key cards show a persistent input only before a key is saved", failures: &failures, executed: &executed) {
@@ -1972,7 +1902,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(events.last == "terminate")
         }
 
-        run("voice activity presentation is shared by experience and history", failures: &failures, executed: &executed) {
+        run("voice activity presentation is shared across experience surfaces", failures: &failures, executed: &executed) {
             let id = VoiceInputSessionID()
             let transcribing = VoiceInputActivity.processing(
                 id,
@@ -1982,7 +1912,6 @@ struct SpeakerAppScenarioSpecs {
             try expect(transcribing.isActive)
             try expect(transcribing.compactTitle == "正在转成文字…")
             try expect(transcribing.icon == "sparkles")
-            try expect(transcribing.historyLabel == "处理中")
             try expect(
                 transcribing.accessibilityAnnouncement
                     == "正在等待豆包返回文字"

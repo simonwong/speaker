@@ -1151,7 +1151,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "history presentation hides textless records and keeps fallback rows safe",
+            "history list hides cancelled and textless records",
             failures: &failures,
             executed: &executed
         ) {
@@ -1161,6 +1161,7 @@ struct SpeakerAppUISpecs {
                 year: 2026, month: 7, day: 20, hour: 9, minute: 5
             ))!
             let textID = VoiceInputSessionID()
+            let cancelledID = VoiceInputSessionID()
             let secureID = VoiceInputSessionID()
             let recordingLimitID = VoiceInputSessionID()
             let textRecord = makeHistoryRecord(
@@ -1169,6 +1170,15 @@ struct SpeakerAppUISpecs {
                 applicationName: "备忘录",
                 transcription: "豆包初稿",
                 finalText: "最终正文"
+            )
+            let cancelledRecord = VoiceInputHistoryRecord(
+                sessionID: cancelledID,
+                startedAt: startedAt,
+                applicationName: nil,
+                transcription: "取消前已确认的转录",
+                finalText: nil,
+                cancelledAtStage: "transcribing",
+                outcome: .cancelled(cancelledID)
             )
             let secureRecord = VoiceInputHistoryRecord(
                 sessionID: secureID,
@@ -1196,40 +1206,127 @@ struct SpeakerAppUISpecs {
                 )
             )
 
-            let visible = HistoryPresentation.row(
-                for: textRecord,
-                calendar: calendar
-            )
-            let redacted = HistoryPresentation.row(
-                for: secureRecord,
-                calendar: calendar
-            )
-            let recordingLimit = HistoryPresentation.row(
-                for: recordingLimitRecord,
-                calendar: calendar
-            )
             let filtered = HistoryPresentation.filteredRecords(
-                [textRecord, secureRecord, recordingLimitRecord],
+                [textRecord, cancelledRecord, secureRecord, recordingLimitRecord],
                 query: ""
             )
 
-            try expect(visible.text == "最终正文")
-            try expect(visible.time == "09:05")
-            try expect(visible.canCopy)
-            try expect(
-                filtered.map(\.sessionID) == [textID, recordingLimitID]
+            try expect(filtered.map(\.sessionID) == [textID])
+        }
+
+        run(
+            "history rows present the four delivery states",
+            failures: &failures,
+            executed: &executed
+        ) {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let startedAt = calendar.date(from: DateComponents(
+                year: 2026, month: 7, day: 20, hour: 9, minute: 5
+            ))!
+            let deliveredID = VoiceInputSessionID()
+            let unconfirmedID = VoiceInputSessionID()
+            let fallbackID = VoiceInputSessionID()
+            let pendingID = VoiceInputSessionID()
+            let deliveredRecord = makeHistoryRecord(
+                id: deliveredID,
+                startedAt: startedAt,
+                transcription: "豆包初稿",
+                finalText: "最终正文"
             )
-            try expect(redacted.text == "此会话未保留正文")
-            try expect(!redacted.canCopy)
-            try expect(
-                recordingLimit.text
-                    == "录音已达到 10 分钟上限：为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+            let unconfirmedRecord = VoiceInputHistoryRecord(
+                sessionID: unconfirmedID,
+                startedAt: startedAt,
+                applicationName: "备忘录",
+                transcription: "豆包初稿",
+                finalText: "未确认正文",
+                deliveryDiagnosticCode: "pasteReceipt.unconfirmed",
+                outcome: .delivered(
+                    unconfirmedID,
+                    applicationName: "备忘录",
+                    text: "未确认正文"
+                )
             )
-            try expect(!recordingLimit.canCopy)
-            try expect(
-                recordingLimitRecord.outcome.historyLabel
-                    == "录音已达到 10 分钟上限"
+            let fallbackRecord = VoiceInputHistoryRecord(
+                sessionID: fallbackID,
+                startedAt: startedAt,
+                applicationName: "备忘录",
+                transcription: "豆包初稿",
+                finalText: "回退正文",
+                refinementStatus: "fellBack",
+                outcome: .delivered(
+                    fallbackID,
+                    applicationName: "备忘录",
+                    text: "回退正文"
+                )
             )
+            let unconfirmedFallbackRecord = VoiceInputHistoryRecord(
+                sessionID: VoiceInputSessionID(),
+                startedAt: startedAt,
+                applicationName: "备忘录",
+                transcription: "豆包初稿",
+                finalText: "未确认回退正文",
+                deliveryDiagnosticCode: "pasteReceipt.unconfirmed",
+                refinementStatus: "fellBack",
+                outcome: .delivered(
+                    deliveredID,
+                    applicationName: "备忘录",
+                    text: "未确认回退正文"
+                )
+            )
+            let pendingRecord = VoiceInputHistoryRecord(
+                sessionID: pendingID,
+                startedAt: startedAt,
+                applicationName: nil,
+                transcription: "豆包初稿",
+                finalText: "待复制正文",
+                outcome: .pendingCopy(
+                    pendingID,
+                    text: "待复制正文",
+                    reason: .missingTarget
+                )
+            )
+
+            try expect(HistoryPresentation.status(for: deliveredRecord) == .delivered)
+            try expect(
+                HistoryPresentation.status(for: unconfirmedRecord)
+                    == .deliveryUnconfirmed
+            )
+            try expect(
+                HistoryPresentation.status(for: fallbackRecord)
+                    == .refinementFellBack
+            )
+            try expect(
+                HistoryPresentation.status(for: unconfirmedFallbackRecord)
+                    == .deliveryUnconfirmed
+            )
+            try expect(HistoryPresentation.status(for: pendingRecord) == .pendingCopy)
+            try expect(HistoryRecordStatus.delivered.label == "已送达")
+            try expect(HistoryRecordStatus.deliveryUnconfirmed.label == "已发送·未确认")
+            try expect(HistoryRecordStatus.refinementFellBack.label == "已送达·整理回退")
+            try expect(HistoryRecordStatus.pendingCopy.label == "待复制结果")
+
+            let deliveredRow = HistoryPresentation.row(
+                for: deliveredRecord,
+                calendar: calendar
+            )
+            let unconfirmedRow = HistoryPresentation.row(
+                for: unconfirmedRecord,
+                calendar: calendar
+            )
+            let pendingRow = HistoryPresentation.row(
+                for: pendingRecord,
+                calendar: calendar
+            )
+
+            try expect(deliveredRow.text == "最终正文")
+            try expect(deliveredRow.time == "09:05")
+            try expect(deliveredRow.canCopy)
+            try expect(deliveredRow.status == .delivered)
+            try expect(!deliveredRow.status.showsStatusIcon)
+            try expect(unconfirmedRow.status.showsStatusIcon)
+            try expect(pendingRow.status.showsStatusIcon)
+            try expect(pendingRow.canCopy)
         }
 
         run(
