@@ -1549,12 +1549,9 @@ private struct SettingsOverviewScrollFixture: View {
     @ObservedObject var navigation: SettingsNavigationModel
 
     var body: some View {
-        SettingsOverviewScrollView(navigation: navigation) {
-            Text("Settings top marker")
-                .frame(maxWidth: .infinity, minHeight: 60)
-        } section: { section in
+        SettingsOverviewScrollView(navigation: navigation) { group in
             VStack(spacing: 0) {
-                Text("Settings \(section.rawValue) marker")
+                Text("Settings \(group.rawValue) marker")
                 Color.clear.frame(height: 220)
             }
         }

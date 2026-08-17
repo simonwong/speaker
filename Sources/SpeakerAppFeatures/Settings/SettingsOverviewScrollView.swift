@@ -1,34 +1,27 @@
 import SwiftUI
 
-package struct SettingsOverviewScrollView<
-    TopContent: View,
-    SectionContent: View
->: View {
+/// The settings page's single scrolling grouped form. Every group is visible
+/// top-to-bottom; deep links only scroll the matching group into view.
+package struct SettingsOverviewScrollView<SectionContent: View>: View {
     @ObservedObject private var navigation: SettingsNavigationModel
-    private let topContent: () -> TopContent
-    private let sectionContent: (SettingsPage) -> SectionContent
+    private let sectionContent: (SettingsGroup) -> SectionContent
     @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(
         navigation: SettingsNavigationModel,
-        @ViewBuilder top: @escaping () -> TopContent,
-        @ViewBuilder section: @escaping (SettingsPage) -> SectionContent
+        @ViewBuilder section: @escaping (SettingsGroup) -> SectionContent
     ) {
         self.navigation = navigation
-        topContent = top
         sectionContent = section
     }
 
     package var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    topContent()
-                        .id(SettingsPresentationTarget.top)
-
-                    ForEach(SettingsPage.allCases) { section in
-                        sectionContent(section)
-                            .id(SettingsPresentationTarget.section(section))
+                VStack(alignment: .leading, spacing: 24) {
+                    ForEach(SettingsGroup.allCases) { group in
+                        sectionContent(group)
+                            .id(SettingsPresentationTarget.section(group))
                     }
                 }
                 .frame(maxWidth: 680)
@@ -37,7 +30,9 @@ package struct SettingsOverviewScrollView<
                     .horizontal,
                     mainWindowLayout.pageHorizontalPadding
                 )
+                .padding(.top, 24)
                 .padding(.bottom, 28)
+                .id(SettingsPresentationTarget.top)
             }
             .onChange(of: navigation.presentationRequest) { _, request in
                 guard let request else { return }

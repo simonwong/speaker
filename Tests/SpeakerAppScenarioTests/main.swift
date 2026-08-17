@@ -1679,27 +1679,27 @@ struct SpeakerAppScenarioSpecs {
             try expect(regular.pageHorizontalPadding == 24)
             try expect(minimum.overviewMetricDividerPadding == 18)
             try expect(regular.overviewMetricDividerPadding == 34)
-            try expect(minimum.usesScrollableSettingsNavigation)
-            try expect(!regular.usesScrollableSettingsNavigation)
         }
 
         run("settings and main window expose the approved information architecture", failures: &failures, executed: &executed) {
             try expect(
-                SettingsPage.allCases == [
+                SettingsGroup.allCases == [
                     .shortcut,
                     .permissions,
                     .apiKeys,
                     .refinement,
                     .general,
+                    .localData,
                 ]
             )
             try expect(
-                SettingsPage.allCases.map(\.title) == [
+                SettingsGroup.allCases.map(\.title) == [
                     "快捷键",
                     "权限",
                     "API Key",
                     "整理",
                     "通用",
+                    "本地数据",
                 ]
             )
             try expect(
@@ -1720,6 +1720,42 @@ struct SpeakerAppScenarioSpecs {
                 ]
             )
             try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
+            try expect(
+                HistoryRetentionPolicy.allCases.map(\.displayName) == [
+                    "不保存",
+                    "最近 30 天",
+                    "最近 90 天",
+                    "最近一年",
+                    "不按日期清理",
+                ]
+            )
+        }
+
+        run("API key cards show a persistent input only before a key is saved", failures: &failures, executed: &executed) {
+            try expect(
+                APIKeyCardPresentation.mode(
+                    hasStoredKey: false,
+                    isReplacingKey: false
+                ) == .enterKey
+            )
+            try expect(
+                APIKeyCardPresentation.mode(
+                    hasStoredKey: false,
+                    isReplacingKey: true
+                ) == .enterKey
+            )
+            try expect(
+                APIKeyCardPresentation.mode(
+                    hasStoredKey: true,
+                    isReplacingKey: false
+                ) == .configured
+            )
+            try expect(
+                APIKeyCardPresentation.mode(
+                    hasStoredKey: true,
+                    isReplacingKey: true
+                ) == .replacingKey
+            )
         }
 
         run("main window visibility drives dock activation policy once per transition", failures: &failures, executed: &executed) {
@@ -1898,11 +1934,7 @@ struct SpeakerAppScenarioSpecs {
             let router = MenuBarCommandRouter(
                 navigation: navigation,
                 openOverview: { events.append("overview") },
-                openSettings: {
-                    events.append(
-                        "settings.\(navigation.page.rawValue)"
-                    )
-                },
+                openSettings: { events.append("settings") },
                 openDataErasureRecovery: {
                     events.append("data-erasure-recovery")
                 },
@@ -1914,24 +1946,27 @@ struct SpeakerAppScenarioSpecs {
             try expect(events == ["overview", "activate"])
 
             router.perform(.permissionSettings)
-            try expect(navigation.page == .permissions)
             try expect(
-                events.suffix(2) == ["settings.permissions", "activate"]
+                navigation.presentationRequest?.target
+                    == .section(.permissions)
             )
+            try expect(events.suffix(2) == ["settings", "activate"])
 
             router.perform(.dataErasureRecovery)
-            try expect(navigation.page == .permissions)
+            try expect(
+                navigation.presentationRequest?.target
+                    == .section(.permissions)
+            )
             try expect(
                 events.suffix(2) == ["data-erasure-recovery", "activate"]
             )
 
             router.perform(.settings)
-            try expect(navigation.page == .shortcut)
             try expect(
-                events.suffix(2) == ["settings.shortcut", "activate"],
+                navigation.presentationRequest?.target == .top,
                 "ordinary settings did not return to the page top"
             )
-            try expect(navigation.presentationRequest?.target == .top)
+            try expect(events.suffix(2) == ["settings", "activate"])
 
             router.perform(.quit)
             try expect(events.last == "terminate")

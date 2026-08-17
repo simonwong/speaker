@@ -149,3 +149,17 @@ package enum HistoryPresentation {
         return "\(year)年\(month)月\(dayOfMonth)日"
     }
 }
+
+/// Interface labels for the retention picker; the policy's single home is
+/// 设置-通用.
+package extension HistoryRetentionPolicy {
+    var displayName: String {
+        switch self {
+        case .disabled: "不保存"
+        case .thirtyDays: "最近 30 天"
+        case .ninetyDays: "最近 90 天"
+        case .oneYear: "最近一年"
+        case .forever: "不按日期清理"
+        }
+    }
+}

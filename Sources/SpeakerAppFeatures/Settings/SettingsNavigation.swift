@@ -1,11 +1,14 @@
 import Combine
 
-package enum SettingsPage: String, CaseIterable, Hashable, Identifiable {
+/// The settings page is one scrolling grouped form; these groups are its
+/// sections in display order and double as scroll anchors for deep links.
+package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendable {
     case shortcut
     case permissions
     case apiKeys
     case refinement
     case general
+    case localData
 
     package var id: String { rawValue }
 
@@ -16,33 +19,14 @@ package enum SettingsPage: String, CaseIterable, Hashable, Identifiable {
         case .apiKeys: "API Key"
         case .refinement: "整理"
         case .general: "通用"
-        }
-    }
-
-    package var subtitle: String {
-        switch self {
-        case .shortcut: "选择开始语音输入的全局快捷键"
-        case .permissions: "检查麦克风与辅助功能授权"
-        case .apiKeys: "配置豆包与可选的 DeepSeek 凭据"
-        case .refinement: "选择识别后文字的整理程度"
-        case .general: "启动、历史保存与软件更新"
-        }
-    }
-
-    package var icon: String {
-        switch self {
-        case .shortcut: "keyboard"
-        case .permissions: "checkmark.shield"
-        case .apiKeys: "key.fill"
-        case .refinement: "text.alignleft"
-        case .general: "switch.2"
+        case .localData: "本地数据"
         }
     }
 }
 
 package enum SettingsPresentationTarget: Equatable, Hashable {
     case top
-    case section(SettingsPage)
+    case section(SettingsGroup)
 }
 
 package struct SettingsPresentationRequest: Equatable {
@@ -52,24 +36,19 @@ package struct SettingsPresentationRequest: Equatable {
 
 @MainActor
 package final class SettingsNavigationModel: ObservableObject {
-    @Published package var page: SettingsPage
     @Published package private(set) var presentationRequest:
         SettingsPresentationRequest?
     private var nextPresentationSequence: UInt = 0
 
     package var presentationRevision: UInt { nextPresentationSequence }
 
-    package init(page: SettingsPage = .shortcut) {
-        self.page = page
-    }
+    package init() {}
 
-    package func open(_ page: SettingsPage) {
-        self.page = page
-        requestPresentation(of: .section(page))
+    package func open(_ group: SettingsGroup) {
+        requestPresentation(of: .section(group))
     }
 
     package func openTop() {
-        page = .shortcut
         requestPresentation(of: .top)
     }
 

@@ -154,17 +154,6 @@ final class HistoryModel: ObservableObject {
         }
     }
 
-    func setHistorySavingEnabled(_ enabled: Bool) async {
-        let policy: HistoryRetentionPolicy
-        if enabled {
-            policy = await settingsStore.load().settings
-                .historyRetentionWhenEnabled
-        } else {
-            policy = .disabled
-        }
-        await setRetentionPolicy(policy)
-    }
-
     func redeliver(_ record: VoiceInputHistoryRecord) async {
         guard let text = HistoryPresentation.retainedText(for: record) else {
             notice = "这条记录没有可重新送达的文本。"
@@ -517,16 +506,11 @@ struct HistoryView: View {
                 notice: model.notice,
                 feedback: model.feedback,
                 isBusy: model.activeOperation != nil,
-                isRedeliveryArmed: model.isRedeliveryArmed,
-                retentionPolicy: model.retentionPolicy,
-                isUpdatingRetention: model.isUpdatingRetention
+                isRedeliveryArmed: model.isRedeliveryArmed
             ),
             query: $model.query,
             actions: HistoryDashboardActions(
                 refresh: { Task { await model.refresh() } },
-                setRetentionPolicy: { policy in
-                    Task { await model.setRetentionPolicy(policy) }
-                },
                 clear: { Task { _ = await model.clear() } },
                 copy: { record in
                     Task { _ = await model.copy(record) }
