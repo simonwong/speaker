@@ -53,7 +53,7 @@ The implementation owns the trigger dispatcher, hold/short-press gesture, synchr
 
 ### Application feature modules
 
-`SettingsNavigationModel` is the single page-selection source for the five settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
+`SettingsNavigationModel` is the single page-selection source for the six settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
 
 `OnboardingPresentation` owns permission actions, provider-check availability, resource selection, and completion rules. Production window configuration comes from a dedicated factory that the AppKit specifications exercise through the same interface.
 
