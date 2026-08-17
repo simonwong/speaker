@@ -5,8 +5,8 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     public static let maximumCustomPromptLength = 4_000
 
     case defaultSmooth
-    case conciseCleanup
-    case fullRewrite
+    case conciseCleanup(promptOverride: String? = nil)
+    case fullRewrite(promptOverride: String? = nil)
     case custom(name: String, prompt: String)
 
     public var requiresDeepSeek: Bool {
@@ -35,10 +35,29 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         }
     }
 
+    /// The user's saved replacement for the mode's built-in prompt, if any.
+    public var promptOverride: String? {
+        switch self {
+        case let .conciseCleanup(promptOverride),
+             let .fullRewrite(promptOverride):
+            promptOverride
+        case .defaultSmooth, .custom:
+            nil
+        }
+    }
+
     public func validated() throws -> TextRefinementMode {
         switch self {
-        case .defaultSmooth, .conciseCleanup, .fullRewrite:
+        case .defaultSmooth:
             return self
+        case let .conciseCleanup(promptOverride):
+            return .conciseCleanup(
+                promptOverride: try Self.validatedPromptOverride(promptOverride)
+            )
+        case let .fullRewrite(promptOverride):
+            return .fullRewrite(
+                promptOverride: try Self.validatedPromptOverride(promptOverride)
+            )
         case let .custom(name, prompt):
             let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -58,17 +77,61 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         }
     }
 
-    var deepSeekRule: String? {
+    /// Returns the mode with its built-in prompt replaced (or restored when
+    /// nil). Modes without a built-in prompt return unchanged.
+    public func withPromptOverride(_ promptOverride: String?) -> TextRefinementMode {
+        switch self {
+        case .conciseCleanup:
+            .conciseCleanup(promptOverride: promptOverride)
+        case .fullRewrite:
+            .fullRewrite(promptOverride: promptOverride)
+        case .defaultSmooth, .custom:
+            self
+        }
+    }
+
+    /// Applies the saved per-mode prompt overrides to a preference-loaded mode.
+    public func applyingPromptOverrides(
+        _ overrides: RefinementPromptOverrides
+    ) -> TextRefinementMode {
+        switch self {
+        case .conciseCleanup:
+            .conciseCleanup(promptOverride: overrides.conciseCleanup)
+        case .fullRewrite:
+            .fullRewrite(promptOverride: overrides.fullRewrite)
+        case .defaultSmooth, .custom:
+            self
+        }
+    }
+
+    /// The instruction sent to DeepSeek for this mode: the saved override when
+    /// present, otherwise the built-in prompt. Default Smoothing has no
+    /// prompt — it is Doubao built-in.
+    public var deepSeekInstruction: String? {
         switch self {
         case .defaultSmooth:
             nil
-        case .conciseCleanup:
-            "删除不影响原意的口头禅、重复、自我修正和明显冗余；修正标点与语序；尽量保留原句结构、语气和信息量。不要概括，不要扩写。"
-        case .fullRewrite:
-            "在不增加、删除或改变事实与意图的前提下，重新组织为清晰、连贯、可以直接发送的文字；可以调整句序和段落，但不要补充标题、背景、论据或结论，除非原文已经包含。"
+        case let .conciseCleanup(promptOverride):
+            promptOverride ?? "删除不影响原意的口头禅、重复、自我修正和明显冗余；修正标点与语序；尽量保留原句结构、语气和信息量。不要概括，不要扩写。"
+        case let .fullRewrite(promptOverride):
+            promptOverride ?? "在不增加、删除或改变事实与意图的前提下，重新组织为清晰、连贯、可以直接发送的文字；可以调整句序和段落，但不要补充标题、背景、论据或结论，除非原文已经包含。"
         case let .custom(_, prompt):
             prompt
         }
+    }
+
+    private static func validatedPromptOverride(
+        _ promptOverride: String?
+    ) throws -> String? {
+        guard let promptOverride else { return nil }
+        let cleaned = promptOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            throw TextRefinementModeValidationError.emptyCustomPrompt
+        }
+        guard cleaned.count <= maximumCustomPromptLength else {
+            throw TextRefinementModeValidationError.customPromptTooLong
+        }
+        return cleaned
     }
 }
 

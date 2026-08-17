@@ -130,6 +130,8 @@ package final class RefinementSettingsModel: ObservableObject {
     @Published var apiKeyDraft = ""
     @Published var customName = "我的整理规则"
     @Published var customPrompt = ""
+    @Published var promptDraft = ""
+    @Published private(set) var promptOverrides = RefinementPromptOverrides()
     @Published private(set) var isEditingCustomMode = false
     @Published package private(set) var hasStoredKey = false
     @Published package private(set) var isConnectionVerified = false
@@ -164,6 +166,12 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
+    /// The prompt editor state for the active mode, or nil when the mode has
+    /// no prompt UI (Default Smoothing, or Custom Mode's dedicated editor).
+    var promptEditorState: RefinementPromptEditorState? {
+        RefinementPromptPresentation.editorState(for: mode)
+    }
+
     package var savedCustomModeName: String? {
         let name = customName.trimmingCharacters(in: .whitespacesAndNewlines)
         let prompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -178,7 +186,9 @@ package final class RefinementSettingsModel: ObservableObject {
         }
 
         let loadedSettings = await settingsStore.load().settings
+        promptOverrides = loadedSettings.refinementPromptOverrides
         let loadedMode = loadedSettings.refinement.textRefinementMode
+            .applyingPromptOverrides(loadedSettings.refinementPromptOverrides)
         let savedCustomMode = loadedSettings.savedCustomRefinement?.textRefinementMode
         if case let .custom(name, prompt) = savedCustomMode ?? loadedMode {
             customName = name
@@ -194,6 +204,7 @@ package final class RefinementSettingsModel: ObservableObject {
                 activation.activeMode
             )
             mode = activation.activeMode
+            syncPromptDraft()
             deferredMode = activation.deferredMode
             if activation.deferredMode != nil {
                 notice = "已保留“\(validated.displayName)”模式；保存 DeepSeek Key 后会自动恢复使用。"
@@ -321,9 +332,13 @@ package final class RefinementSettingsModel: ObservableObject {
         case .defaultSmooth:
             selectedMode = .defaultSmooth
         case .conciseCleanup:
-            selectedMode = .conciseCleanup
+            selectedMode = .conciseCleanup(
+                promptOverride: promptOverrides.conciseCleanup
+            )
         case .fullRewrite:
-            selectedMode = .fullRewrite
+            selectedMode = .fullRewrite(
+                promptOverride: promptOverrides.fullRewrite
+            )
         case .custom:
             return
         }
@@ -331,6 +346,7 @@ package final class RefinementSettingsModel: ObservableObject {
         do {
             try await configuration.selectRefinementMode(selectedMode)
             mode = try selectedMode.validated()
+            syncPromptDraft()
             notice = nil
             if persist {
                 try await persistSelection(mode)
@@ -338,6 +354,50 @@ package final class RefinementSettingsModel: ObservableObject {
         } catch {
             notice = error.localizedDescription
         }
+    }
+
+    /// Saves the draft as the active built-in mode's prompt override, taking
+    /// effect for new sessions through the same `deepSeekInstruction` request path.
+    func savePromptOverride() async {
+        guard promptEditorState != nil else { return }
+        do {
+            let updatedMode = try mode.withPromptOverride(promptDraft).validated()
+            try await settingsStore.updateRefinementPromptOverride(
+                updatedMode.promptOverride,
+                for: updatedMode
+            )
+            promptOverrides[updatedMode] = updatedMode.promptOverride
+            try await configuration.selectRefinementMode(updatedMode)
+            mode = updatedMode
+            syncPromptDraft()
+            notice = nil
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    /// Restores the active built-in mode's built-in prompt and clears the
+    /// saved override.
+    func restoreDefaultPrompt() async {
+        guard promptEditorState != nil else { return }
+        do {
+            let updatedMode = mode.withPromptOverride(nil)
+            try await settingsStore.updateRefinementPromptOverride(
+                nil,
+                for: updatedMode
+            )
+            promptOverrides[updatedMode] = nil
+            try await configuration.selectRefinementMode(updatedMode)
+            mode = updatedMode
+            syncPromptDraft()
+            notice = nil
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
+    private func syncPromptDraft() {
+        promptDraft = promptEditorState?.effectivePrompt ?? promptDraft
     }
 
     func saveCustomMode() async {

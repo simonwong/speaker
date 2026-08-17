@@ -913,7 +913,7 @@ public actor VoiceInputSessions {
                 transcription: nil,
                 finalText: nil,
                 refinementModeName: snapshot.refinementMode.displayName,
-                refinementPrompt: snapshot.refinementMode.deepSeekRule,
+                refinementPrompt: snapshot.refinementMode.deepSeekInstruction,
                 dictionarySnapshotID: snapshot.dictionary.id,
                 dictionarySnapshotEntries: snapshot.dictionary.entries.map(
                     RecordedDictionaryEntry.init
@@ -1312,7 +1312,7 @@ public actor VoiceInputSessions {
             transcriptionProvider: confirmedDoubaoResult == nil ? nil : "doubao",
             providerRequestID: confirmedDoubaoResult?.providerRequestID,
             refinementModeName: processingSnapshot?.refinementMode.displayName,
-            refinementPrompt: processingSnapshot?.refinementMode.deepSeekRule,
+            refinementPrompt: processingSnapshot?.refinementMode.deepSeekInstruction,
             cancelledAtStage: cancelledAtStage,
             dictionarySnapshotID: processingSnapshot?.dictionary.id,
             dictionarySnapshotEntries: processingSnapshot?.dictionary.entries
@@ -1434,7 +1434,7 @@ public actor VoiceInputSessions {
                 ? processedText?.deepSeekRequestID
                 : nil,
             refinementModeName: processingSnapshot?.refinementMode.displayName,
-            refinementPrompt: processingSnapshot?.refinementMode.deepSeekRule,
+            refinementPrompt: processingSnapshot?.refinementMode.deepSeekInstruction,
             refinementStatus: processedText?.refinementStatus.rawValue,
             refinementFailureCode: processedText?.refinementFailure?.kind.rawValue,
             refinementFailureStatusCode: refinementDiagnostic?.statusCode,
@@ -1645,7 +1645,7 @@ public actor VoiceInputSessions {
             providerStatusCode: diagnostic?.statusCode,
             providerMessage: nil,
             refinementModeName: snapshot.refinementMode.displayName,
-            refinementPrompt: snapshot.refinementMode.deepSeekRule,
+            refinementPrompt: snapshot.refinementMode.deepSeekInstruction,
             dictionarySnapshotID: snapshot.dictionary.id,
             dictionarySnapshotEntries: snapshot.dictionary.entries.map(
                 RecordedDictionaryEntry.init
@@ -1785,7 +1785,7 @@ public actor VoiceInputSessions {
             transcriptionProvider: nil,
             providerRequestID: nil,
             refinementModeName: snapshot?.refinementMode.displayName,
-            refinementPrompt: snapshot?.refinementMode.deepSeekRule,
+            refinementPrompt: snapshot?.refinementMode.deepSeekInstruction,
             dictionarySnapshotID: snapshot?.dictionary.id,
             dictionarySnapshotEntries: snapshot?.dictionary.entries
                 .map(RecordedDictionaryEntry.init) ?? [],

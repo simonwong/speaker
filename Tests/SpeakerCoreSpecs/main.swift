@@ -2395,7 +2395,7 @@ struct SpeakerCoreSpecs {
             let secret = "secure-inflight-sentinel-\(UUID().uuidString)"
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(
-                    refinementMode: .conciseCleanup
+                    refinementMode: .conciseCleanup()
                 ),
                 doubao: ContextualTranscriberFake(text: secret),
                 refinement: OptionalTextRefinementPipeline(refiner: refiner)
@@ -3901,7 +3901,7 @@ struct SpeakerCoreSpecs {
             let delivery = TextDeliveryFake(result: .delivered)
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(
-                    refinementMode: .conciseCleanup
+                    refinementMode: .conciseCleanup()
                 ),
                 doubao: ContextualTranscriberFake(text: "豆包已确认结果"),
                 refinement: OptionalTextRefinementPipeline(refiner: refiner)
@@ -4829,7 +4829,7 @@ struct SpeakerCoreSpecs {
                     refiner: refiner
                 ).refine(
                     doubaoText: "豆包文字仍应保留",
-                    mode: .fullRewrite
+                    mode: .fullRewrite()
                 )
 
                 try expect(outcome.status == .fellBack)
@@ -4849,7 +4849,7 @@ struct SpeakerCoreSpecs {
             let successfulPipeline = OptionalTextRefinementPipeline(refiner: successfulRefiner)
             let success = try await successfulPipeline.refine(
                 doubaoText: "嗯 原始文本",
-                mode: .conciseCleanup
+                mode: .conciseCleanup()
             )
             try expect(success.status == .succeeded)
             try expect(success.deepSeekText == "整理后的文本")
@@ -4861,7 +4861,7 @@ struct SpeakerCoreSpecs {
             let fallbackPipeline = OptionalTextRefinementPipeline(refiner: failingRefiner)
             let fallback = try await fallbackPipeline.refine(
                 doubaoText: "豆包结果仍保留",
-                mode: .fullRewrite
+                mode: .fullRewrite()
             )
             try expect(fallback.status == .fellBack)
             try expect(fallback.deepSeekText == nil)
@@ -4888,6 +4888,97 @@ struct SpeakerCoreSpecs {
             }
         }
 
+        run("built-in refinement modes resolve and validate prompt overrides", failures: &failures) {
+            let builtInConcise = TextRefinementMode.conciseCleanup().deepSeekInstruction
+            let builtInFullRewrite = TextRefinementMode.fullRewrite().deepSeekInstruction
+            try expect(builtInConcise != nil)
+            try expect(builtInFullRewrite != nil)
+            try expect(builtInConcise != builtInFullRewrite)
+            try expect(TextRefinementMode.defaultSmooth.deepSeekInstruction == nil)
+            try expect(TextRefinementMode.defaultSmooth.promptOverride == nil)
+
+            let overridden = TextRefinementMode.conciseCleanup(promptOverride: "只保留要点")
+            try expect(overridden.promptOverride == "只保留要点")
+            try expect(overridden.deepSeekInstruction == "只保留要点")
+            try expect(overridden.displayName == TextRefinementMode.conciseCleanup().displayName)
+            try expect(overridden.diagnosticKind == "conciseCleanup")
+            try expect(overridden.requiresDeepSeek)
+
+            let overrides = RefinementPromptOverrides(conciseCleanup: "覆盖精简")
+            try expect(
+                TextRefinementMode.conciseCleanup().applyingPromptOverrides(overrides)
+                    == .conciseCleanup(promptOverride: "覆盖精简")
+            )
+            try expect(
+                TextRefinementMode.fullRewrite().applyingPromptOverrides(overrides)
+                    == .fullRewrite()
+            )
+            try expect(
+                TextRefinementMode.defaultSmooth.applyingPromptOverrides(overrides)
+                    == .defaultSmooth
+            )
+            try expect(
+                TextRefinementMode.custom(name: "我的", prompt: "规则")
+                    .applyingPromptOverrides(overrides)
+                    == .custom(name: "我的", prompt: "规则")
+            )
+            try expect(
+                TextRefinementMode.fullRewrite().withPromptOverride("改写规则")
+                    == .fullRewrite(promptOverride: "改写规则")
+            )
+
+            let trimmed = try TextRefinementMode.fullRewrite(
+                promptOverride: "  覆盖重写  "
+            ).validated()
+            try expect(trimmed == .fullRewrite(promptOverride: "覆盖重写"))
+            let noOverride = try TextRefinementMode.conciseCleanup(
+                promptOverride: nil
+            ).validated()
+            try expect(noOverride == .conciseCleanup())
+
+            do {
+                _ = try TextRefinementMode.conciseCleanup(promptOverride: " ").validated()
+                throw SpecFailure(message: "empty prompt override was accepted")
+            } catch let error as TextRefinementModeValidationError {
+                try expect(error == .emptyCustomPrompt)
+            }
+
+            do {
+                _ = try TextRefinementMode.fullRewrite(
+                    promptOverride: String(repeating: "x", count: 4_001)
+                ).validated()
+                throw SpecFailure(message: "oversized prompt override was accepted")
+            } catch let error as TextRefinementModeValidationError {
+                try expect(error == .customPromptTooLong)
+            }
+        }
+
+        await runAsync("DeepSeek request sends the saved prompt override instead of the built-in prompt", failures: &failures) {
+            let transport = DeepSeekTransportFake(response: .init(
+                statusCode: 200,
+                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#.utf8)
+            ))
+            let client = DeepSeekRefinementClient(
+                configuration: .init(apiKey: "deepseek-test-key"),
+                transport: transport
+            )
+
+            _ = try await client.refine(
+                "嗯，原始文本。",
+                using: .conciseCleanup(promptOverride: "只输出三个字")
+            )
+            let request = try await transport.onlyRequest()
+            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let messages = body?["messages"] as? [[String: Any]]
+            let userContent = messages?
+                .first { $0["role"] as? String == "user" }?["content"] as? String
+
+            try expect(userContent?.contains("只输出三个字") == true)
+            let builtInInstruction = TextRefinementMode.conciseCleanup().deepSeekInstruction
+            try expect(builtInInstruction != nil)
+            try expect(userContent?.contains(builtInInstruction ?? "") == false)
+        }
+
         await runAsync("DeepSeek request disables thinking and requires strict JSON output", failures: &failures) {
             let transport = DeepSeekTransportFake(response: .init(
                 statusCode: 200,
@@ -4899,7 +4990,7 @@ struct SpeakerCoreSpecs {
                 transport: transport
             )
 
-            let result = try await client.refine("嗯，原始文本。", using: .conciseCleanup)
+            let result = try await client.refine("嗯，原始文本。", using: .conciseCleanup())
             let request = try await transport.onlyRequest()
             let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
             let thinking = body?["thinking"] as? [String: Any]
@@ -4936,7 +5027,7 @@ struct SpeakerCoreSpecs {
 
             let result = try await client.refine(
                 "原文",
-                using: .conciseCleanup
+                using: .conciseCleanup()
             )
 
             try expect(
@@ -4962,7 +5053,7 @@ struct SpeakerCoreSpecs {
             let request = Task {
                 try await client.refine(
                     "需要取消的文字",
-                    using: .conciseCleanup
+                    using: .conciseCleanup()
                 )
             }
             let started = await eventually(
@@ -4995,7 +5086,7 @@ struct SpeakerCoreSpecs {
         await runAsync("DeepSeek rejects extra JSON fields and abnormal expansion", failures: &failures) {
             let extraFieldClient = makeDeepSeekClient(content: #"{"text":"结果","extra":true}"#)
             do {
-                _ = try await extraFieldClient.refine("原文", using: .fullRewrite)
+                _ = try await extraFieldClient.refine("原文", using: .fullRewrite())
                 throw SpecFailure(message: "extra JSON field was accepted")
             } catch let failure as DeepSeekRefinementFailure {
                 try expect(failure.kind == .unexpectedJSONShape)
@@ -5006,7 +5097,7 @@ struct SpeakerCoreSpecs {
             let expandedJSON = String(decoding: expandedJSONData, as: UTF8.self)
             let expandedClient = makeDeepSeekClient(content: expandedJSON)
             do {
-                _ = try await expandedClient.refine("短文本", using: .fullRewrite)
+                _ = try await expandedClient.refine("短文本", using: .fullRewrite())
                 throw SpecFailure(message: "abnormally expanded output was accepted")
             } catch let failure as DeepSeekRefinementFailure {
                 try expect(failure.kind == .outputTooLarge)
@@ -5031,7 +5122,7 @@ struct SpeakerCoreSpecs {
                     ))
                 )
                 do {
-                    _ = try await client.refine("原文", using: .conciseCleanup)
+                    _ = try await client.refine("原文", using: .conciseCleanup())
                     throw SpecFailure(message: "HTTP \(statusCode) was accepted")
                 } catch let failure as DeepSeekRefinementFailure {
                     try expect(failure.kind == expectedKind)
@@ -5064,7 +5155,7 @@ struct SpeakerCoreSpecs {
                     ))
                 )
                 do {
-                    _ = try await client.refine("原文", using: .conciseCleanup)
+                    _ = try await client.refine("原文", using: .conciseCleanup())
                     throw SpecFailure(message: "\(expectedKind.rawValue) response was accepted")
                 } catch let failure as DeepSeekRefinementFailure {
                     try expect(failure.kind == expectedKind)
@@ -5078,7 +5169,7 @@ struct SpeakerCoreSpecs {
             ])
             let configuration = VoiceInputConfigurationController(
                 dictionary: initialDictionary,
-                refinementMode: .conciseCleanup
+                refinementMode: .conciseCleanup()
             )
             let doubao = ContextualTranscriberFake(text: "Use swift-lang")
             let refiner = DeepSeekRefinerFake(result: .success(.init(text: "Use Swift.")))
@@ -5102,7 +5193,7 @@ struct SpeakerCoreSpecs {
 
             await sessions.send(.pressed)
             await configuration.replaceDictionary(.empty)
-            try await configuration.selectRefinementMode(.fullRewrite)
+            try await configuration.selectRefinementMode(.fullRewrite())
             await sessions.send(.released)
             await sessions.shutdown()
 
@@ -5112,7 +5203,7 @@ struct SpeakerCoreSpecs {
             let deliveredTexts = await delivery.deliveredTexts
             let record = await history.records.first
             try expect(hotwordCalls == [["Swift"]])
-            try expect(refinementModes == [.conciseCleanup])
+            try expect(refinementModes == [.conciseCleanup()])
             try expect(refinementInputs == ["Use swift-lang"])
             try expect(deliveredTexts == ["Use Swift."])
             try expect(record?.transcription == "Use swift-lang")
@@ -7099,6 +7190,48 @@ struct SpeakerCoreSpecs {
 
             let loaded = await VersionedLocalAppSettingsStore(fileURL: fileURL).load()
             try expect(loaded.settings.historyRetention == .forever)
+        }
+
+        await runAsync("refinement prompt overrides persist incrementally and stay optional for legacy settings", failures: &failures) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-settings-prompts-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let legacy = Data(#"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"conciseCleanup"},"launchAtLogin":false}}"#.utf8)
+            try legacy.write(to: fileURL)
+
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            let legacyLoaded = await store.load()
+            try expect(legacyLoaded.settings.refinementPromptOverrides == RefinementPromptOverrides())
+            try expect(
+                legacyLoaded.settings.refinement.textRefinementMode
+                    .applyingPromptOverrides(legacyLoaded.settings.refinementPromptOverrides)
+                    == .conciseCleanup()
+            )
+
+            try await store.updateRefinementPromptOverride("只保留要点", for: .conciseCleanup())
+            try await store.updateRefinementPromptOverride("重组但别发挥", for: .fullRewrite())
+            let overridden = await store.load().settings
+            try expect(overridden.refinementPromptOverrides.conciseCleanup == "只保留要点")
+            try expect(overridden.refinementPromptOverrides.fullRewrite == "重组但别发挥")
+            try expect(overridden.refinement == .conciseCleanup)
+            try expect(
+                overridden.refinement.textRefinementMode
+                    .applyingPromptOverrides(overridden.refinementPromptOverrides)
+                    == .conciseCleanup(promptOverride: "只保留要点")
+            )
+
+            // Selecting another mode never clears the saved overrides.
+            try await store.updateRefinement(.fullRewrite)
+            let reselected = await store.load().settings
+            try expect(reselected.refinementPromptOverrides == overridden.refinementPromptOverrides)
+
+            // Restoring the default clears only that mode's override.
+            try await store.updateRefinementPromptOverride(nil, for: .conciseCleanup())
+            let restored = await store.load().settings
+            try expect(restored.refinementPromptOverrides.conciseCleanup == nil)
+            try expect(restored.refinementPromptOverrides.fullRewrite == "重组但别发挥")
         }
 
         await runAsync("disabling history remembers the enabled retention across restart", failures: &failures) {
