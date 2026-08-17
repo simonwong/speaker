@@ -1492,6 +1492,99 @@ struct SpeakerAppScenarioSpecs {
             try expect(state.canSave(draft: "新提示词"))
         }
 
+        await runAsync(
+            "built-in prompts stay inspectable and editable without a DeepSeek key",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-refinement-prompt-no-key-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settingsStore = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json")
+            )
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: CredentialedDeepSeekTextRefiner(
+                    credentials: ScenarioProviderCredentialStore()
+                ),
+                configuration: configuration,
+                settingsStore: settingsStore
+            )
+
+            await model.load()
+            await model.select(.conciseCleanup)
+
+            try expect(model.mode == .defaultSmooth)
+            try expect(model.promptEditorState?.title == "精简清理")
+            try expect(
+                model.promptDraft
+                    == TextRefinementMode.conciseCleanup().deepSeekInstruction
+            )
+
+            model.promptDraft = "无 Key 时保存的精简规则"
+            await model.savePromptOverride()
+
+            let persisted = await settingsStore.load().settings
+            try expect(
+                persisted.refinementPromptOverrides.conciseCleanup
+                    == "无 Key 时保存的精简规则"
+            )
+            let currentMode = await configuration.currentRefinementMode()
+            try expect(currentMode == .defaultSmooth)
+        }
+
+        await runAsync(
+            "saving a key restores the deferred mode and its current prompt draft",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-refinement-prompt-deferred-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settingsStore = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json")
+            )
+            try await settingsStore.updateRefinement(.fullRewrite)
+            try await settingsStore.updateRefinementPromptOverride(
+                "初始完整重写规则",
+                for: .fullRewrite()
+            )
+            let credentials = ScenarioProviderCredentialStore()
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: CredentialedDeepSeekTextRefiner(
+                    credentials: credentials
+                ),
+                configuration: configuration,
+                settingsStore: settingsStore
+            )
+
+            await model.load()
+            try expect(model.mode == .defaultSmooth)
+            try expect(model.promptEditorState?.title == "完整重写")
+            try expect(model.promptDraft == "初始完整重写规则")
+
+            model.promptDraft = "保存 Key 前更新的完整重写规则"
+            await model.savePromptOverride()
+            model.apiKeyDraft = "scenario-deepseek-key"
+            await model.saveAPIKey()
+
+            let expectedMode = TextRefinementMode.fullRewrite(
+                promptOverride: "保存 Key 前更新的完整重写规则"
+            )
+            try expect(model.mode == expectedMode)
+            try expect(model.promptDraft == "保存 Key 前更新的完整重写规则")
+            let currentMode = await configuration.currentRefinementMode()
+            try expect(currentMode == expectedMode)
+        }
+
         await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures, executed: &executed) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -3059,6 +3152,26 @@ private actor FailOncePersistence {
 
 private struct PersistenceFailure: LocalizedError {
     var errorDescription: String? { "无法保存快捷键设置" }
+}
+
+private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
+    private var values: [ProviderID: String] = [:]
+
+    func save(apiKey: String, for provider: ProviderID) throws {
+        let normalized = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw ProviderCredentialStoreError.emptyAPIKey
+        }
+        values[provider] = normalized
+    }
+
+    func apiKey(for provider: ProviderID) -> String? {
+        values[provider]
+    }
+
+    func deleteAPIKey(for provider: ProviderID) {
+        values[provider] = nil
+    }
 }
 
 private final class RouterVoiceRecorder: @unchecked Sendable {

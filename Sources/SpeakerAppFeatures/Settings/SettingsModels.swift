@@ -122,16 +122,42 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
         case .custom: "slider.horizontal.3"
         }
     }
+
+    init(mode: TextRefinementMode) {
+        if let builtInMode = mode.builtInMode,
+           let choice = Self(rawValue: builtInMode.rawValue)
+        {
+            self = choice
+            return
+        }
+        self = mode == .defaultSmooth ? .defaultSmooth : .custom
+    }
+
+    var builtInMode: BuiltInRefinementMode? {
+        BuiltInRefinementMode(rawValue: rawValue)
+    }
+
+    func refinementMode(
+        promptOverrides: RefinementPromptOverrides
+    ) -> TextRefinementMode? {
+        if let builtInMode {
+            return builtInMode.refinementMode(
+                promptOverride: promptOverrides[builtInMode]
+            )
+        }
+        return self == .defaultSmooth ? .defaultSmooth : nil
+    }
 }
 
 @MainActor
 package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
-    @Published var apiKeyDraft = ""
+    @Published package var apiKeyDraft = ""
     @Published var customName = "我的整理规则"
     @Published var customPrompt = ""
-    @Published var promptDraft = ""
-    @Published private(set) var promptOverrides = RefinementPromptOverrides()
+    @Published package var promptDraft = ""
+    @Published package private(set) var promptOverrides = RefinementPromptOverrides()
+    @Published package private(set) var inspectedPromptMode: BuiltInRefinementMode?
     @Published private(set) var isEditingCustomMode = false
     @Published package private(set) var hasStoredKey = false
     @Published package private(set) var isConnectionVerified = false
@@ -158,18 +184,17 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     var choice: RefinementChoice {
-        switch mode {
-        case .defaultSmooth: .defaultSmooth
-        case .conciseCleanup: .conciseCleanup
-        case .fullRewrite: .fullRewrite
-        case .custom: .custom
-        }
+        RefinementChoice(mode: mode)
     }
 
     /// The prompt editor state for the active mode, or nil when the mode has
     /// no prompt UI (Default Smoothing, or Custom Mode's dedicated editor).
-    var promptEditorState: RefinementPromptEditorState? {
-        RefinementPromptPresentation.editorState(for: mode)
+    package var promptEditorState: RefinementPromptEditorState? {
+        guard let inspectedPromptMode else { return nil }
+        return RefinementPromptPresentation.editorState(
+            for: inspectedPromptMode,
+            promptOverride: promptOverrides[inspectedPromptMode]
+        )
     }
 
     package var savedCustomModeName: String? {
@@ -204,8 +229,9 @@ package final class RefinementSettingsModel: ObservableObject {
                 activation.activeMode
             )
             mode = activation.activeMode
-            syncPromptDraft()
             deferredMode = activation.deferredMode
+            inspectedPromptMode = validated.builtInMode
+            syncPromptDraft()
             if activation.deferredMode != nil {
                 notice = "已保留“\(validated.displayName)”模式；保存 DeepSeek Key 后会自动恢复使用。"
             } else {
@@ -216,7 +242,7 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func saveAPIKey() async {
+    package func saveAPIKey() async {
         await cancelConnectionCheck()
         do {
             try await service.saveAPIKey(apiKeyDraft)
@@ -227,9 +253,14 @@ package final class RefinementSettingsModel: ObservableObject {
             connectionFailure = nil
             credentialNotice = nil
             if let deferredMode {
-                try await configuration.selectRefinementMode(deferredMode)
-                mode = deferredMode
+                let restoredMode = deferredMode.applyingPromptOverrides(
+                    promptOverrides
+                )
+                try await configuration.selectRefinementMode(restoredMode)
+                mode = restoredMode
+                inspectedPromptMode = restoredMode.builtInMode
                 self.deferredMode = nil
+                syncPromptDraft()
             }
             notice = nil
         } catch {
@@ -314,34 +345,30 @@ package final class RefinementSettingsModel: ObservableObject {
         _ choice: RefinementChoice,
         persist: Bool = true
     ) async {
-        if choice != .defaultSmooth, !hasStoredKey {
-            notice = "请先保存 DeepSeek API Key，再启用进一步整理。"
-            return
+        if let builtInMode = choice.builtInMode {
+            inspectPrompt(builtInMode)
+        } else {
+            inspectedPromptMode = nil
         }
 
         if choice == .custom {
             isEditingCustomMode = true
-            notice = nil
+            notice = hasStoredKey
+                ? nil
+                : "可先编辑规则；保存 DeepSeek API Key 后才能启用。"
             return
         }
 
         isEditingCustomMode = false
 
-        let selectedMode: TextRefinementMode
-        switch choice {
-        case .defaultSmooth:
-            selectedMode = .defaultSmooth
-        case .conciseCleanup:
-            selectedMode = .conciseCleanup(
-                promptOverride: promptOverrides.conciseCleanup
-            )
-        case .fullRewrite:
-            selectedMode = .fullRewrite(
-                promptOverride: promptOverrides.fullRewrite
-            )
-        case .custom:
+        if choice != .defaultSmooth, !hasStoredKey {
+            notice = "提示词可查看和编辑；保存 DeepSeek API Key 后才能启用该模式。"
             return
         }
+
+        guard let selectedMode = choice.refinementMode(
+            promptOverrides: promptOverrides
+        ) else { return }
 
         do {
             try await configuration.selectRefinementMode(selectedMode)
@@ -356,19 +383,20 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    /// Saves the draft as the active built-in mode's prompt override, taking
+    /// Saves the inspected built-in mode's prompt override, taking
     /// effect for new sessions through the same `deepSeekInstruction` request path.
-    func savePromptOverride() async {
-        guard promptEditorState != nil else { return }
+    package func savePromptOverride() async {
+        guard let promptEditorState else { return }
         do {
-            let updatedMode = try mode.withPromptOverride(promptDraft).validated()
+            let updatedMode = try promptEditorState.mode
+                .refinementMode(promptOverride: promptDraft)
+                .validated()
             try await settingsStore.updateRefinementPromptOverride(
                 updatedMode.promptOverride,
                 for: updatedMode
             )
-            promptOverrides[updatedMode] = updatedMode.promptOverride
-            try await configuration.selectRefinementMode(updatedMode)
-            mode = updatedMode
+            promptOverrides[promptEditorState.mode] = updatedMode.promptOverride
+            try await applyEditedPromptModeIfSelected(updatedMode)
             syncPromptDraft()
             notice = nil
         } catch {
@@ -376,19 +404,18 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    /// Restores the active built-in mode's built-in prompt and clears the
+    /// Restores the inspected built-in mode's built-in prompt and clears the
     /// saved override.
-    func restoreDefaultPrompt() async {
-        guard promptEditorState != nil else { return }
+    package func restoreDefaultPrompt() async {
+        guard let promptEditorState else { return }
         do {
-            let updatedMode = mode.withPromptOverride(nil)
+            let updatedMode = promptEditorState.mode.refinementMode()
             try await settingsStore.updateRefinementPromptOverride(
                 nil,
                 for: updatedMode
             )
-            promptOverrides[updatedMode] = nil
-            try await configuration.selectRefinementMode(updatedMode)
-            mode = updatedMode
+            promptOverrides[promptEditorState.mode] = nil
+            try await applyEditedPromptModeIfSelected(updatedMode)
             syncPromptDraft()
             notice = nil
         } catch {
@@ -398,6 +425,24 @@ package final class RefinementSettingsModel: ObservableObject {
 
     private func syncPromptDraft() {
         promptDraft = promptEditorState?.effectivePrompt ?? promptDraft
+    }
+
+    private func inspectPrompt(_ mode: BuiltInRefinementMode) {
+        inspectedPromptMode = mode
+        syncPromptDraft()
+    }
+
+    private func applyEditedPromptModeIfSelected(
+        _ updatedMode: TextRefinementMode
+    ) async throws {
+        guard let editedBuiltInMode = updatedMode.builtInMode else { return }
+        if mode.builtInMode == editedBuiltInMode {
+            try await configuration.selectRefinementMode(updatedMode)
+            mode = updatedMode
+        }
+        if deferredMode?.builtInMode == editedBuiltInMode {
+            deferredMode = updatedMode
+        }
     }
 
     func saveCustomMode() async {
@@ -419,6 +464,7 @@ package final class RefinementSettingsModel: ObservableObject {
             }
             try await configuration.selectRefinementMode(customMode)
             mode = customMode
+            inspectedPromptMode = nil
             isEditingCustomMode = false
             notice = nil
             try await persistSelection(customMode)
@@ -439,6 +485,7 @@ package final class RefinementSettingsModel: ObservableObject {
             ).validated()
             try await configuration.selectRefinementMode(customMode)
             mode = customMode
+            inspectedPromptMode = nil
             isEditingCustomMode = false
             notice = nil
             try await persistSelection(customMode)
