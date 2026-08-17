@@ -310,33 +310,31 @@ private struct HistoryRecordRow: View {
                         .accessibilityLabel(presentation.status.label)
                 }
 
-                HStack(spacing: 2) {
-                    if presentation.canCopy {
-                        Button(action: copy) {
-                            Image(systemName: "doc.on.doc")
+                if isHovered && !isExpanded {
+                    HStack(spacing: 2) {
+                        if presentation.canCopy {
+                            Button(action: copy) {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .disabled(isBusy)
+                            .help("复制")
+                            .accessibilityLabel("复制")
+                        }
+                        Button {
+                            confirmsDelete = true
+                        } label: {
+                            Image(systemName: "trash")
                         }
                         .disabled(isBusy)
-                        .help("复制")
-                        .accessibilityLabel("复制")
+                        .help("删除")
+                        .accessibilityLabel("删除")
                     }
-                    Button {
-                        confirmsDelete = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .disabled(isBusy)
-                    .help("删除")
-                    .accessibilityLabel("删除")
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 1)
+                    .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .padding(.top, 1)
-                .opacity(isHovered && !isExpanded ? 1 : 0)
-                .animation(
-                    reduceMotion ? nil : .easeOut(duration: 0.12),
-                    value: isHovered
-                )
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)

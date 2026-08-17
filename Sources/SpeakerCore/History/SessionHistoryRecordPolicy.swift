@@ -32,6 +32,17 @@ package enum SessionHistoryRecordPolicy {
         return false
     }
 
+    /// Search covers the retained body plus content-free delivery evidence.
+    /// Raw target identity and superseded transcription stay excluded.
+    package static func searchableValues(
+        _ record: VoiceInputHistoryRecord
+    ) -> [String] {
+        [
+            retainedText(record),
+            record.deliveryDiagnosticCode,
+        ].compactMap { $0 }
+    }
+
     package static func sort(
         _ records: [VoiceInputHistoryRecord]
     ) -> [VoiceInputHistoryRecord] {

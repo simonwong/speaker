@@ -98,11 +98,13 @@ package enum HistoryPresentation {
         guard !normalizedQuery.isEmpty else { return visibleRecords }
 
         return visibleRecords.filter { record in
-            rowText(for: record).range(
-                of: normalizedQuery,
-                options: [.caseInsensitive, .diacriticInsensitive],
-                locale: .current
-            ) != nil
+            SessionHistoryRecordPolicy.searchableValues(record).contains {
+                $0.range(
+                    of: normalizedQuery,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    locale: .current
+                ) != nil
+            }
         }
     }
 
