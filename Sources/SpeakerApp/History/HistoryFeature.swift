@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
@@ -11,7 +12,7 @@ enum HistoryOperation: Equatable {
 }
 
 @MainActor
-package final class HistoryModel: ObservableObject {
+final class HistoryModel: ObservableObject {
     @Published private(set) var records: [VoiceInputHistoryRecord] = []
     @Published private(set) var totalRecordCount = 0
     @Published var query = ""
@@ -19,12 +20,9 @@ package final class HistoryModel: ObservableObject {
     @Published private(set) var feedback: HistoryDashboardFeedback?
     @Published private(set) var activeOperation: HistoryOperation?
     @Published private(set) var isRedeliveryArmed = false
-    @Published private(set) var retentionPolicy: HistoryRetentionPolicy = .forever
-    @Published private(set) var isUpdatingRetention = false
 
     let store: any LocalSessionHistoryStoring
     private let targets: AccessibilityInputTargets
-    private let settingsStore: VersionedLocalAppSettingsStore
     private let clipboard: any ClipboardWriting
     private let announce: (String) -> Void
     private let interactionRouter: GlobalVoiceInteractionRouter
@@ -37,30 +35,27 @@ package final class HistoryModel: ObservableObject {
     private var redeliveryTarget = HistoryRedeliveryTargetState()
     private var pendingConfirmationProcessID: Int32?
 
-    package init(
+    init(
         store: any LocalSessionHistoryStoring,
         targets: AccessibilityInputTargets,
-        settingsStore: VersionedLocalAppSettingsStore,
         clipboard: any ClipboardWriting,
         announce: @escaping (String) -> Void,
         interactionRouter: GlobalVoiceInteractionRouter
     ) {
         self.store = store
         self.targets = targets
-        self.settingsStore = settingsStore
         self.clipboard = clipboard
         self.announce = announce
         self.interactionRouter = interactionRouter
     }
 
-    package func refresh() async {
+    func refresh() async {
         records = HistoryPresentation.filteredRecords(
             await store.allRecords(),
             query: query
         )
         let status = await store.persistenceStatus()
         totalRecordCount = status.recordCount
-        retentionPolicy = await store.currentRetentionPolicy()
         switch status.notice {
         case let .corruptedDataPreserved(_, reason): notice = "已保留损坏的历史文件：\(reason)"
         case let .corruptedRecordsSkipped(count): notice = "有 \(count) 条历史记录已损坏，已跳过；其他记录仍可使用。"
@@ -129,28 +124,6 @@ package final class HistoryModel: ObservableObject {
             "已清空 \(deletedCount) 条会话记录"
         )
         return true
-    }
-
-    func setRetentionPolicy(_ policy: HistoryRetentionPolicy) async {
-        guard policy != retentionPolicy, !isUpdatingRetention else { return }
-        isUpdatingRetention = true
-        defer { isUpdatingRetention = false }
-        do {
-            try await settingsStore.updateHistoryRetention(policy)
-            retentionPolicy = policy
-            guard await store.applyRetentionPolicy(policy, now: Date()) else {
-                notice = "保留设置已保存，但旧记录尚未完成清理；Speaker 会在后续写入或下次启动时重试。"
-                publishFeedback(
-                    .warning,
-                    notice ?? "历史清理尚未完成。"
-                )
-                return
-            }
-            await refresh()
-        } catch {
-            notice = error.localizedDescription
-            publishFeedback(.error, "无法保存历史保留设置，请重试。")
-        }
     }
 
     func redeliver(_ record: VoiceInputHistoryRecord) async {
@@ -308,7 +281,7 @@ package final class HistoryModel: ObservableObject {
         }
     }
 
-    package func shutdown() {
+    func shutdown() {
         interactionRouter.cancelExclusiveInteraction()
         if isRedeliveryArmed
             || activationObserver != nil
@@ -494,14 +467,14 @@ package final class HistoryModel: ObservableObject {
 }
 
 
-package struct HistoryView: View {
+struct HistoryView: View {
     @ObservedObject var model: HistoryModel
 
-    package init(model: HistoryModel) {
+    init(model: HistoryModel) {
         self.model = model
     }
 
-    package var body: some View {
+    var body: some View {
         HistoryDashboard(
             state: HistoryDashboardState(
                 records: model.records,

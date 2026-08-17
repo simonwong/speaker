@@ -13,6 +13,7 @@ final class SpeakerRuntime: ObservableObject {
     let refinementSettings: RefinementSettingsModel
     let dictionarySettings: DictionarySettingsModel
     let historyModel: HistoryModel
+    let historyRetention: HistoryRetentionSettingsModel
     let overviewModel: OverviewModel
     let mainWindow = MainWindowModel()
     let loginItemSettings: LoginItemSettingsModel
@@ -29,7 +30,7 @@ final class SpeakerRuntime: ObservableObject {
         permissions: permissions,
         shortcut: shortcut,
         loginItemSettings: loginItemSettings,
-        history: historyModel,
+        historyRetention: historyRetention,
         doubao: doubaoSettings,
         refinement: refinementSettings,
         dictionary: dictionarySettings,
@@ -289,10 +290,13 @@ final class SpeakerRuntime: ObservableObject {
             store: dictionaryStore,
             configuration: configuration
         )
+        historyRetention = HistoryRetentionSettingsModel(
+            store: history,
+            settingsStore: settingsStore
+        )
         historyModel = HistoryModel(
             store: history,
             targets: targets,
-            settingsStore: settingsStore,
             clipboard: SystemClipboardWriter(),
             announce: Self.announceAccessibility,
             interactionRouter: globalInteraction

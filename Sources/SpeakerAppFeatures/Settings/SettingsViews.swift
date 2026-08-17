@@ -336,7 +336,7 @@ private struct SettingsOverviewView: View {
         case .general:
             GeneralSettingsPage(
                 loginItemSettings: workspace.loginItemSettings,
-                history: workspace.history,
+                historyRetention: workspace.historyRetention,
                 softwareUpdate: workspace.softwareUpdate
             )
         case .localData:
@@ -477,7 +477,7 @@ private struct ShortcutSettingsPage: View {
 
 private struct GeneralSettingsPage: View {
     let loginItemSettings: LoginItemSettingsModel
-    let history: HistoryModel
+    let historyRetention: HistoryRetentionSettingsModel
     let softwareUpdate: SoftwareUpdateFeature
 
     var body: some View {
@@ -487,7 +487,7 @@ private struct GeneralSettingsPage: View {
             icon: "switch.2"
         ) {
             LaunchAtLoginSettingsRow(model: loginItemSettings)
-            HistoryRetentionSettingsRow(model: history)
+            HistoryRetentionSettingsRow(model: historyRetention)
             AutomaticUpdateSettingsRow(model: softwareUpdate)
         }
     }
@@ -524,7 +524,7 @@ private struct LaunchAtLoginSettingsRow: View {
 
 /// 历史保留策略的唯一入口：设置-通用。历史页不再提供策略切换。
 private struct HistoryRetentionSettingsRow: View {
-    @ObservedObject var model: HistoryModel
+    @ObservedObject var model: HistoryRetentionSettingsModel
 
     var body: some View {
         HStack {
@@ -546,7 +546,11 @@ private struct HistoryRetentionSettingsRow: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(maxWidth: 220, alignment: .trailing)
-            .disabled(model.isUpdatingRetention)
+            .disabled(model.isUpdating)
+        }
+
+        if let notice = model.notice {
+            SettingsNotice(text: notice, color: .orange)
         }
     }
 }
@@ -731,7 +735,6 @@ package struct AboutView: View {
     package var body: some View {
         ScrollView {
             AboutSettingsPage(
-                dataErasure: workspace.dataErasure,
                 softwareUpdate: workspace.softwareUpdate,
                 routeEffects: workspace.routeEffects
             )
@@ -749,10 +752,8 @@ package struct AboutView: View {
 }
 
 private struct AboutSettingsPage: View {
-    @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
     let routeEffects: SettingsRouteEffects
-    @State private var confirmsDataErasure = false
 
     private var versionText: String {
         SpeakerBuildIdentity.current.displayText
@@ -791,47 +792,9 @@ private struct AboutSettingsPage: View {
                         }
                     }
                     Button("打开本地数据文件夹") {
-                        routeEffects.openURL(Self.applicationSupportDirectory)
+                        routeEffects.openURL(speakerApplicationSupportDirectory)
                     }
                     Spacer()
-                }
-            }
-
-            SettingsCard(
-                AboutSection.localData.title,
-                subtitle: "完全清除这台 Mac 上由 Speaker 保存的数据",
-                icon: AboutSection.localData.icon
-            ) {
-                Text(
-                    "清除 API Key、会话历史、个人词库、设置、缓存和登录项，然后退出 Speaker。系统中的麦克风与辅助功能授权不会被自动撤销。"
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-                HStack {
-                    Spacer()
-                    if dataErasure.state == .erasing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("正在清除 Speaker 本地数据")
-                    }
-                    Button(
-                        dataErasure.state == .erasing
-                            ? "正在清除…"
-                            : "清除本地数据并退出",
-                        role: .destructive
-                    ) {
-                        confirmsDataErasure = true
-                    }
-                    .disabled(dataErasure.state == .erasing)
-                }
-
-                if case let .failed(failure) = dataErasure.state {
-                    SettingsNotice(
-                        text: Self.failureMessage(failure),
-                        color: .red
-                    )
                 }
             }
 
@@ -865,51 +828,6 @@ private struct AboutSettingsPage: View {
                 }
             }
         }
-        .alert(
-            "清除 Speaker 保存的所有本地数据？",
-            isPresented: $confirmsDataErasure
-        ) {
-            Button("取消", role: .cancel) {}
-            Button("清除并退出", role: .destructive) {
-                Task {
-                    _ = await dataErasure.eraseAllAndExit()
-                }
-            }
-        } message: {
-            Text(
-                "API Key、文字历史、个人词库、设置和登录项将被永久移除。Speaker 不会删除系统权限记录，也无法恢复这些本地数据。"
-            )
-        }
-    }
-
-    private static func failureMessage(
-        _ failure: SpeakerDataErasureFailure
-    ) -> String {
-        guard let issue = failure.issues.first else {
-            return "本地数据未能全部清除，请重试。"
-        }
-        return switch issue.reason {
-        case .accessDenied:
-            "macOS 拒绝删除部分数据，请检查文件权限后重试。"
-        case .interactionUnavailable:
-            "无法访问凭据存储，请解锁 Mac 后重试。"
-        case .busy:
-            "本地历史仍在使用中，未删除数据库。请重试。"
-        case .unsafePath:
-            "待删除路径未通过安全校验，Speaker 已停止清除。"
-        case .verificationMismatch:
-            "清除结果未通过验证，Speaker 没有报告成功；请重试。"
-        case .io:
-            "部分本地数据无法删除，请关闭可能占用文件的程序后重试。"
-        }
-    }
-
-    private static var applicationSupportDirectory: URL {
-        FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first?.appendingPathComponent("Speaker", isDirectory: true)
-            ?? FileManager.default.homeDirectoryForCurrentUser
     }
 
     private static var privacyPolicyURL: URL? {

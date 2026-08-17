@@ -28,7 +28,7 @@ package final class SettingsWorkspace {
     let permissions: PermissionModel
     let shortcut: VoiceShortcutFeature
     let loginItemSettings: LoginItemSettingsModel
-    let history: HistoryModel
+    let historyRetention: HistoryRetentionSettingsModel
     let doubao: DoubaoSettingsModel
     let refinement: RefinementSettingsModel
     let dictionary: DictionarySettingsModel
@@ -46,7 +46,7 @@ package final class SettingsWorkspace {
         permissions: PermissionModel,
         shortcut: VoiceShortcutFeature,
         loginItemSettings: LoginItemSettingsModel,
-        history: HistoryModel,
+        historyRetention: HistoryRetentionSettingsModel,
         doubao: DoubaoSettingsModel,
         refinement: RefinementSettingsModel,
         dictionary: DictionarySettingsModel,
@@ -62,7 +62,7 @@ package final class SettingsWorkspace {
         self.permissions = permissions
         self.shortcut = shortcut
         self.loginItemSettings = loginItemSettings
-        self.history = history
+        self.historyRetention = historyRetention
         self.doubao = doubao
         self.refinement = refinement
         self.dictionary = dictionary
@@ -80,7 +80,7 @@ package final class SettingsWorkspace {
         refreshPermissions()
         await doubao.refresh()
         await loginItemSettings.refresh()
-        await history.refresh()
+        await historyRetention.refresh()
     }
 
     func copyDiagnostics() async {

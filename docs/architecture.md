@@ -113,7 +113,7 @@ The persistence decision is recorded in [ADR-0004](adr/0004-protect-local-sensit
 
 Concurrent requests share one task, and caller cancellation cannot interrupt destruction already in progress. Deletion targets must remain within verified, symlink-resolved user Library roots. A separate owner-only recovery marker survives preferences removal; partial failure preserves it for the next startup. Normal termination cannot write settings after erasure.
 
-Both the main window and the system Settings scene replace writable controls while erasure is running. A failed erasure routes to the guarded About recovery surface so its reason and retry action remain reachable without reopening ordinary settings.
+Both the main window and the system Settings scene replace writable controls while erasure is running. A failed erasure routes to a guarded recovery destination that replaces ordinary settings so its reason and retry action remain reachable without reopening writable controls.
 
 ## UI verification seams
 
