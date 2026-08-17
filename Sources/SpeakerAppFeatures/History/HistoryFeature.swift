@@ -1,7 +1,6 @@
 import AppKit
 import Combine
 import Foundation
-import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
@@ -12,7 +11,7 @@ enum HistoryOperation: Equatable {
 }
 
 @MainActor
-final class HistoryModel: ObservableObject {
+package final class HistoryModel: ObservableObject {
     @Published private(set) var records: [VoiceInputHistoryRecord] = []
     @Published private(set) var totalRecordCount = 0
     @Published var query = ""
@@ -38,7 +37,7 @@ final class HistoryModel: ObservableObject {
     private var redeliveryTarget = HistoryRedeliveryTargetState()
     private var pendingConfirmationProcessID: Int32?
 
-    init(
+    package init(
         store: any LocalSessionHistoryStoring,
         targets: AccessibilityInputTargets,
         settingsStore: VersionedLocalAppSettingsStore,
@@ -54,7 +53,7 @@ final class HistoryModel: ObservableObject {
         self.interactionRouter = interactionRouter
     }
 
-    func refresh() async {
+    package func refresh() async {
         records = HistoryPresentation.filteredRecords(
             await store.allRecords(),
             query: query
@@ -309,7 +308,7 @@ final class HistoryModel: ObservableObject {
         }
     }
 
-    func shutdown() {
+    package func shutdown() {
         interactionRouter.cancelExclusiveInteraction()
         if isRedeliveryArmed
             || activationObserver != nil
@@ -495,10 +494,14 @@ final class HistoryModel: ObservableObject {
 }
 
 
-struct HistoryView: View {
+package struct HistoryView: View {
     @ObservedObject var model: HistoryModel
 
-    var body: some View {
+    package init(model: HistoryModel) {
+        self.model = model
+    }
+
+    package var body: some View {
         HistoryDashboard(
             state: HistoryDashboardState(
                 records: model.records,

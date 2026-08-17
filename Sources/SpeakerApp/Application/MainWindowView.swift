@@ -63,7 +63,10 @@ struct MainWindowView: View {
             case .erasing:
                 DataErasureInProgressView()
             case .aboutRecovery:
-                DataErasureRecoveryView(dataErasure: dataErasure)
+                DataErasureRecoveryView(
+                    dataErasure: dataErasure,
+                    routeEffects: settingsWorkspace.routeEffects
+                )
             }
         }
         .background(MainWindowVisibilityBridge())

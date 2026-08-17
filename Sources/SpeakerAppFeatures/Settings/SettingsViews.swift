@@ -1,5 +1,4 @@
 import AppKit
-import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
@@ -61,13 +60,19 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
-struct StatusBadge: View {
+package struct StatusBadge: View {
     let text: String
     let icon: String
     let color: Color
     @Environment(\.colorSchemeContrast) private var contrast
 
-    var body: some View {
+    package init(text: String, icon: String, color: Color) {
+        self.text = text
+        self.icon = icon
+        self.color = color
+    }
+
+    package var body: some View {
         Label {
             Text(text)
                 .foregroundStyle(contrast == .increased ? Color.primary : color)
@@ -91,12 +96,17 @@ struct StatusBadge: View {
     }
 }
 
-struct SettingsNotice: View {
+package struct SettingsNotice: View {
     let text: String
     var color: Color = .secondary
     @Environment(\.colorSchemeContrast) private var contrast
 
-    var body: some View {
+    package init(text: String, color: Color = .secondary) {
+        self.text = text
+        self.color = color
+    }
+
+    package var body: some View {
         Label {
             Text(text)
                 .foregroundStyle(contrast == .increased ? Color.primary : color)
@@ -121,19 +131,33 @@ struct SettingsNotice: View {
     }
 }
 
-struct SettingsView: View {
+package struct SettingsView: View {
     let workspace: SettingsWorkspace
     @StateObject private var shortcutRecorder = ShortcutRecorderModel()
+    @ObservedObject private var dataErasure: SpeakerDataErasureCoordinator
 
-    init(workspace: SettingsWorkspace) {
+    package init(workspace: SettingsWorkspace) {
         self.workspace = workspace
+        dataErasure = workspace.dataErasure
     }
 
-    var body: some View {
-        SettingsOverviewView(
-            workspace: workspace,
-            shortcutRecorder: shortcutRecorder
-        )
+    package var body: some View {
+        Group {
+            switch dataErasure.state.workspaceRoute {
+            case .normal:
+                SettingsOverviewView(
+                    workspace: workspace,
+                    shortcutRecorder: shortcutRecorder
+                )
+            case .erasing:
+                DataErasureInProgressView()
+            case .aboutRecovery:
+                DataErasureRecoveryView(
+                    dataErasure: dataErasure,
+                    routeEffects: workspace.routeEffects
+                )
+            }
+        }
         .task {
             await workspace.refresh()
         }
@@ -141,8 +165,10 @@ struct SettingsView: View {
     }
 }
 
-struct DataErasureInProgressView: View {
-    var body: some View {
+package struct DataErasureInProgressView: View {
+    package init() {}
+
+    package var body: some View {
         ContentUnavailableView(
             "本地数据清除中",
             systemImage: "externaldrive.badge.xmark",
@@ -153,11 +179,20 @@ struct DataErasureInProgressView: View {
 
 /// Full-window recovery surface shown when a local-data erasure did not
 /// complete. This is its own destination, not the About page.
-struct DataErasureRecoveryView: View {
+package struct DataErasureRecoveryView: View {
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
+    let routeEffects: SettingsRouteEffects
     @State private var confirmsRetry = false
 
-    var body: some View {
+    package init(
+        dataErasure: SpeakerDataErasureCoordinator,
+        routeEffects: SettingsRouteEffects
+    ) {
+        self.dataErasure = dataErasure
+        self.routeEffects = routeEffects
+    }
+
+    package var body: some View {
         VStack(spacing: 16) {
             ContentUnavailableView(
                 "本地数据尚未全部清除",
@@ -167,7 +202,7 @@ struct DataErasureRecoveryView: View {
 
             HStack(spacing: 12) {
                 Button("打开本地数据文件夹") {
-                    NSWorkspace.shared.open(speakerApplicationSupportDirectory)
+                    routeEffects.openURL(speakerApplicationSupportDirectory)
                 }
                 Button("重试清除并退出", role: .destructive) {
                     confirmsRetry = true
@@ -685,15 +720,20 @@ private struct GitHubMark: Shape {
     }
 }
 
-struct AboutView: View {
+package struct AboutView: View {
     let workspace: SettingsWorkspace
     @Environment(\.mainWindowLayout) private var mainWindowLayout
 
-    var body: some View {
+    package init(workspace: SettingsWorkspace) {
+        self.workspace = workspace
+    }
+
+    package var body: some View {
         ScrollView {
             AboutSettingsPage(
                 dataErasure: workspace.dataErasure,
-                softwareUpdate: workspace.softwareUpdate
+                softwareUpdate: workspace.softwareUpdate,
+                routeEffects: workspace.routeEffects
             )
             .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
@@ -711,6 +751,7 @@ struct AboutView: View {
 private struct AboutSettingsPage: View {
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
+    let routeEffects: SettingsRouteEffects
     @State private var confirmsDataErasure = false
 
     private var versionText: String {
@@ -746,11 +787,11 @@ private struct AboutSettingsPage: View {
                 HStack {
                     if let privacyPolicyURL = Self.privacyPolicyURL {
                         Button("查看完整隐私说明") {
-                            NSWorkspace.shared.open(privacyPolicyURL)
+                            routeEffects.openURL(privacyPolicyURL)
                         }
                     }
                     Button("打开本地数据文件夹") {
-                        NSWorkspace.shared.open(Self.applicationSupportDirectory)
+                        routeEffects.openURL(Self.applicationSupportDirectory)
                     }
                     Spacer()
                 }
@@ -1708,11 +1749,15 @@ private struct DictionaryChipFlowLayout: Layout {
     }
 }
 
-struct DictionaryTabView: View {
+package struct DictionaryTabView: View {
     @ObservedObject var model: DictionarySettingsModel
     @Environment(\.mainWindowLayout) private var mainWindowLayout
 
-    var body: some View {
+    package init(model: DictionarySettingsModel) {
+        self.model = model
+    }
+
+    package var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 DictionarySettingsPage(model: model)

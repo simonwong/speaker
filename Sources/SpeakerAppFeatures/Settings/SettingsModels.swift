@@ -1,20 +1,29 @@
 import AppKit
 @preconcurrency import Carbon
 import Combine
-import SpeakerAppFeatures
 import SpeakerCore
 
 @MainActor
-final class DiagnosticNoticeModel: ObservableObject {
+package final class DiagnosticNoticeModel: ObservableObject {
     @Published private(set) var notice: String?
 
-    func publish(_ notice: String?) {
+    package init() {}
+
+    package func publish(_ notice: String?) {
         self.notice = notice
     }
 }
 
+package struct SettingsRouteEffects {
+    let openURL: (URL) -> Void
+
+    package init(openURL: @escaping (URL) -> Void) {
+        self.openURL = openURL
+    }
+}
+
 @MainActor
-final class SettingsWorkspace {
+package final class SettingsWorkspace {
     let navigation: SettingsNavigationModel
     let permissions: PermissionModel
     let shortcut: VoiceShortcutFeature
@@ -27,11 +36,12 @@ final class SettingsWorkspace {
     let diagnostics: DiagnosticNoticeModel
     let dataErasure: SpeakerDataErasureCoordinator
     let requestPermission: (PermissionKind) async -> Void
+    package let routeEffects: SettingsRouteEffects
 
     private let refreshPermissions: () -> Void
     private let copyDiagnosticsAction: () async -> Void
 
-    init(
+    package init(
         navigation: SettingsNavigationModel,
         permissions: PermissionModel,
         shortcut: VoiceShortcutFeature,
@@ -44,6 +54,7 @@ final class SettingsWorkspace {
         diagnostics: DiagnosticNoticeModel,
         dataErasure: SpeakerDataErasureCoordinator,
         requestPermission: @escaping (PermissionKind) async -> Void,
+        routeEffects: SettingsRouteEffects,
         refreshPermissions: @escaping () -> Void,
         copyDiagnostics: @escaping () async -> Void
     ) {
@@ -59,6 +70,7 @@ final class SettingsWorkspace {
         self.diagnostics = diagnostics
         self.dataErasure = dataErasure
         self.requestPermission = requestPermission
+        self.routeEffects = routeEffects
         self.refreshPermissions = refreshPermissions
         copyDiagnosticsAction = copyDiagnostics
     }
@@ -76,13 +88,13 @@ final class SettingsWorkspace {
     }
 }
 
-enum RefinementChoice: String, CaseIterable, Identifiable {
+package enum RefinementChoice: String, CaseIterable, Identifiable {
     case defaultSmooth
     case conciseCleanup
     case fullRewrite
     case custom
 
-    var id: String { rawValue }
+    package var id: String { rawValue }
 
     var title: String {
         switch self {
@@ -113,14 +125,14 @@ enum RefinementChoice: String, CaseIterable, Identifiable {
 }
 
 @MainActor
-final class RefinementSettingsModel: ObservableObject {
-    @Published private(set) var mode: TextRefinementMode = .defaultSmooth
+package final class RefinementSettingsModel: ObservableObject {
+    @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
     @Published var apiKeyDraft = ""
     @Published var customName = "我的整理规则"
     @Published var customPrompt = ""
     @Published private(set) var isEditingCustomMode = false
-    @Published private(set) var hasStoredKey = false
-    @Published private(set) var isConnectionVerified = false
+    @Published package private(set) var hasStoredKey = false
+    @Published package private(set) var isConnectionVerified = false
     @Published private(set) var isCheckingConnection = false
     @Published private(set) var connectionFailure: String?
     @Published private(set) var credentialNotice: String?
@@ -133,7 +145,7 @@ final class RefinementSettingsModel: ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var deferredMode: TextRefinementMode?
 
-    init(
+    package init(
         service: CredentialedDeepSeekTextRefiner,
         configuration: VoiceInputConfigurationController,
         settingsStore: VersionedLocalAppSettingsStore
@@ -152,13 +164,13 @@ final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    var savedCustomModeName: String? {
+    package var savedCustomModeName: String? {
         let name = customName.trimmingCharacters(in: .whitespacesAndNewlines)
         let prompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty || prompt.isEmpty ? nil : name
     }
 
-    func load() async {
+    package func load() async {
         do {
             hasStoredKey = try await service.hasAPIKey()
         } catch {
@@ -274,7 +286,7 @@ final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func shutdown() async {
+    package func shutdown() async {
         await cancelConnectionCheck()
     }
 
@@ -287,7 +299,10 @@ final class RefinementSettingsModel: ObservableObject {
         isCheckingConnection = false
     }
 
-    func select(_ choice: RefinementChoice, persist: Bool = true) async {
+    package func select(
+        _ choice: RefinementChoice,
+        persist: Bool = true
+    ) async {
         if choice != .defaultSmooth, !hasStoredKey {
             notice = "请先保存 DeepSeek API Key，再启用进一步整理。"
             return
@@ -352,7 +367,7 @@ final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func selectSavedCustomMode() async {
+    package func selectSavedCustomMode() async {
         guard hasStoredKey else {
             notice = "请先保存 DeepSeek API Key。"
             return
@@ -409,7 +424,7 @@ final class RefinementSettingsModel: ObservableObject {
 }
 
 @MainActor
-final class DictionarySettingsModel: ObservableObject {
+package final class DictionarySettingsModel: ObservableObject {
     @Published var entries: [DictionaryEntry] = []
     @Published var draftWord = ""
     @Published private(set) var notice: String?
@@ -418,7 +433,7 @@ final class DictionarySettingsModel: ObservableObject {
     private let configuration: VoiceInputConfigurationController
     private var allowsPersistence = false
 
-    init(
+    package init(
         store: VersionedJSONPersonalDictionaryStore,
         configuration: VoiceInputConfigurationController
     ) {
@@ -426,7 +441,7 @@ final class DictionarySettingsModel: ObservableObject {
         self.configuration = configuration
     }
 
-    func load() async {
+    package func load() async {
         do {
             let dictionary = try await store.load()
             entries = dictionary.entries
