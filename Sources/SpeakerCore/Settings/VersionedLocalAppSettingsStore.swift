@@ -189,20 +189,29 @@ public struct RefinementPromptOverrides: Equatable, Sendable, Codable {
         self.fullRewrite = fullRewrite
     }
 
-    public subscript(mode: TextRefinementMode) -> String? {
+    package subscript(mode: BuiltInRefinementMode) -> String? {
         get {
             switch mode {
             case .conciseCleanup: conciseCleanup
             case .fullRewrite: fullRewrite
-            case .defaultSmooth, .custom: nil
             }
         }
         set {
             switch mode {
             case .conciseCleanup: conciseCleanup = newValue
             case .fullRewrite: fullRewrite = newValue
-            case .defaultSmooth, .custom: break
             }
+        }
+    }
+
+    public subscript(mode: TextRefinementMode) -> String? {
+        get {
+            guard let builtInMode = mode.builtInMode else { return nil }
+            return self[builtInMode]
+        }
+        set {
+            guard let builtInMode = mode.builtInMode else { return }
+            self[builtInMode] = newValue
         }
     }
 }

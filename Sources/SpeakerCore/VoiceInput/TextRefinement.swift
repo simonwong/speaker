@@ -1,5 +1,39 @@
 import Foundation
 
+/// The two Speaker-owned Refinement Modes whose DeepSeek instructions users
+/// can inspect and override independently.
+package enum BuiltInRefinementMode: String, CaseIterable, Equatable, Hashable, Sendable {
+    case conciseCleanup
+    case fullRewrite
+
+    package var displayName: String {
+        return switch self {
+        case .conciseCleanup: "精简清理"
+        case .fullRewrite: "完整重写"
+        }
+    }
+
+    package var defaultPrompt: String {
+        return switch self {
+        case .conciseCleanup:
+            "删除不影响原意的口头禅、重复、自我修正和明显冗余；修正标点与语序；尽量保留原句结构、语气和信息量。不要概括，不要扩写。"
+        case .fullRewrite:
+            "在不增加、删除或改变事实与意图的前提下，重新组织为清晰、连贯、可以直接发送的文字；可以调整句序和段落，但不要补充标题、背景、论据或结论，除非原文已经包含。"
+        }
+    }
+
+    package func refinementMode(
+        promptOverride: String? = nil
+    ) -> TextRefinementMode {
+        return switch self {
+        case .conciseCleanup:
+            .conciseCleanup(promptOverride: promptOverride)
+        case .fullRewrite:
+            .fullRewrite(promptOverride: promptOverride)
+        }
+    }
+}
+
 public enum TextRefinementMode: Equatable, Hashable, Sendable {
     public static let maximumCustomNameLength = 80
     public static let maximumCustomPromptLength = 4_000
@@ -14,24 +48,36 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     }
 
     public var displayName: String {
-        switch self {
+        if let builtInMode {
+            return builtInMode.displayName
+        }
+        return switch self {
         case .defaultSmooth:
             "默认顺滑"
-        case .conciseCleanup:
-            "精简清理"
-        case .fullRewrite:
-            "完整重写"
         case let .custom(name, _):
             name.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .conciseCleanup, .fullRewrite:
+            preconditionFailure("built-in mode handled above")
         }
     }
 
     public var diagnosticKind: String {
-        switch self {
+        if let builtInMode {
+            return builtInMode.rawValue
+        }
+        return switch self {
         case .defaultSmooth: "defaultSmooth"
-        case .conciseCleanup: "conciseCleanup"
-        case .fullRewrite: "fullRewrite"
         case .custom: "custom"
+        case .conciseCleanup, .fullRewrite:
+            preconditionFailure("built-in mode handled above")
+        }
+    }
+
+    package var builtInMode: BuiltInRefinementMode? {
+        return switch self {
+        case .conciseCleanup: .conciseCleanup
+        case .fullRewrite: .fullRewrite
+        case .defaultSmooth, .custom: nil
         }
     }
 
@@ -47,17 +93,14 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     }
 
     public func validated() throws -> TextRefinementMode {
+        if let builtInMode {
+            return builtInMode.refinementMode(
+                promptOverride: try Self.validatedPromptOverride(promptOverride)
+            )
+        }
         switch self {
         case .defaultSmooth:
             return self
-        case let .conciseCleanup(promptOverride):
-            return .conciseCleanup(
-                promptOverride: try Self.validatedPromptOverride(promptOverride)
-            )
-        case let .fullRewrite(promptOverride):
-            return .fullRewrite(
-                promptOverride: try Self.validatedPromptOverride(promptOverride)
-            )
         case let .custom(name, prompt):
             let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -74,49 +117,41 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
                 throw TextRefinementModeValidationError.customPromptTooLong
             }
             return .custom(name: cleanName, prompt: cleanPrompt)
+        case .conciseCleanup, .fullRewrite:
+            preconditionFailure("built-in mode handled above")
         }
     }
 
     /// Returns the mode with its built-in prompt replaced (or restored when
     /// nil). Modes without a built-in prompt return unchanged.
     public func withPromptOverride(_ promptOverride: String?) -> TextRefinementMode {
-        switch self {
-        case .conciseCleanup:
-            .conciseCleanup(promptOverride: promptOverride)
-        case .fullRewrite:
-            .fullRewrite(promptOverride: promptOverride)
-        case .defaultSmooth, .custom:
-            self
-        }
+        builtInMode?.refinementMode(promptOverride: promptOverride) ?? self
     }
 
     /// Applies the saved per-mode prompt overrides to a preference-loaded mode.
     public func applyingPromptOverrides(
         _ overrides: RefinementPromptOverrides
     ) -> TextRefinementMode {
-        switch self {
-        case .conciseCleanup:
-            .conciseCleanup(promptOverride: overrides.conciseCleanup)
-        case .fullRewrite:
-            .fullRewrite(promptOverride: overrides.fullRewrite)
-        case .defaultSmooth, .custom:
-            self
-        }
+        guard let builtInMode else { return self }
+        return builtInMode.refinementMode(
+            promptOverride: overrides[builtInMode]
+        )
     }
 
     /// The instruction sent to DeepSeek for this mode: the saved override when
     /// present, otherwise the built-in prompt. Default Smoothing has no
     /// prompt — it is Doubao built-in.
     public var deepSeekInstruction: String? {
-        switch self {
+        if let builtInMode {
+            return promptOverride ?? builtInMode.defaultPrompt
+        }
+        return switch self {
         case .defaultSmooth:
             nil
-        case let .conciseCleanup(promptOverride):
-            promptOverride ?? "删除不影响原意的口头禅、重复、自我修正和明显冗余；修正标点与语序；尽量保留原句结构、语气和信息量。不要概括，不要扩写。"
-        case let .fullRewrite(promptOverride):
-            promptOverride ?? "在不增加、删除或改变事实与意图的前提下，重新组织为清晰、连贯、可以直接发送的文字；可以调整句序和段落，但不要补充标题、背景、论据或结论，除非原文已经包含。"
         case let .custom(_, prompt):
             prompt
+        case .conciseCleanup, .fullRewrite:
+            preconditionFailure("built-in mode handled above")
         }
     }
 

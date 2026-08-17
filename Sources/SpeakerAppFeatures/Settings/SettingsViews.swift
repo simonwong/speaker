@@ -1412,6 +1412,8 @@ private struct RefinementSettingsPage: View {
                         RefinementModeButton(
                             choice: choice,
                             selected: model.choice == choice,
+                            inspected: model.inspectedPromptMode
+                                == choice.builtInMode,
                             locked: choice != .defaultSmooth && !model.hasStoredKey
                         ) {
                             Task { await model.select(choice) }
@@ -1429,7 +1431,7 @@ private struct RefinementSettingsPage: View {
 
             if let promptEditor = model.promptEditorState, !model.isEditingCustomMode {
                 SettingsCard(
-                    "“\(model.mode.displayName)”提示词",
+                    "“\(promptEditor.title)”提示词",
                     subtitle: "提示词只保存在本机，修改后对新会话生效",
                     icon: "text.quote"
                 ) {
@@ -1559,6 +1561,7 @@ private struct RefinementSettingsPage: View {
 private struct RefinementModeButton: View {
     let choice: RefinementChoice
     let selected: Bool
+    let inspected: Bool
     let locked: Bool
     let action: () -> Void
 
@@ -1568,7 +1571,9 @@ private struct RefinementModeButton: View {
                 HStack {
                     Image(systemName: choice.icon)
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(selected ? Color.accentColor : .secondary)
+                        .foregroundStyle(
+                            selected || inspected ? Color.accentColor : .secondary
+                        )
                     Spacer()
                     Image(systemName: selected ? "checkmark.circle.fill" : locked ? "lock.fill" : "circle")
                         .foregroundStyle(
@@ -1587,14 +1592,18 @@ private struct RefinementModeButton: View {
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
             .background(
-                selected ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.025),
+                selected || inspected
+                    ? Color.accentColor.opacity(0.09)
+                    : Color.primary.opacity(0.025),
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(
-                        selected ? Color.accentColor.opacity(0.8) : Color.primary.opacity(0.08),
-                        lineWidth: selected ? 1.5 : 1
+                        selected || inspected
+                            ? Color.accentColor.opacity(0.8)
+                            : Color.primary.opacity(0.08),
+                        lineWidth: selected || inspected ? 1.5 : 1
                     )
             }
         }
