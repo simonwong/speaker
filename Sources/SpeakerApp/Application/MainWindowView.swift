@@ -63,7 +63,7 @@ struct MainWindowView: View {
             case .erasing:
                 DataErasureInProgressView()
             case .aboutRecovery:
-                AboutView(workspace: settingsWorkspace)
+                DataErasureRecoveryView(dataErasure: dataErasure)
             }
         }
         .background(MainWindowVisibilityBridge())

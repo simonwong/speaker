@@ -28,8 +28,6 @@ package struct HistoryDashboardState: Equatable, Sendable {
     package let feedback: HistoryDashboardFeedback?
     package let isBusy: Bool
     package let isRedeliveryArmed: Bool
-    package let retentionPolicy: HistoryRetentionPolicy
-    package let isUpdatingRetention: Bool
 
     package init(
         records: [VoiceInputHistoryRecord],
@@ -37,9 +35,7 @@ package struct HistoryDashboardState: Equatable, Sendable {
         notice: String?,
         feedback: HistoryDashboardFeedback?,
         isBusy: Bool,
-        isRedeliveryArmed: Bool,
-        retentionPolicy: HistoryRetentionPolicy,
-        isUpdatingRetention: Bool
+        isRedeliveryArmed: Bool
     ) {
         self.records = records
         self.totalRecordCount = totalRecordCount
@@ -47,14 +43,11 @@ package struct HistoryDashboardState: Equatable, Sendable {
         self.feedback = feedback
         self.isBusy = isBusy
         self.isRedeliveryArmed = isRedeliveryArmed
-        self.retentionPolicy = retentionPolicy
-        self.isUpdatingRetention = isUpdatingRetention
     }
 }
 
 package struct HistoryDashboardActions {
     package let refresh: () -> Void
-    package let setRetentionPolicy: (HistoryRetentionPolicy) -> Void
     package let clear: () -> Void
     package let copy: (VoiceInputHistoryRecord) -> Void
     package let toggleRedelivery: (VoiceInputHistoryRecord) -> Void
@@ -62,14 +55,12 @@ package struct HistoryDashboardActions {
 
     package init(
         refresh: @escaping () -> Void,
-        setRetentionPolicy: @escaping (HistoryRetentionPolicy) -> Void,
         clear: @escaping () -> Void,
         copy: @escaping (VoiceInputHistoryRecord) -> Void,
         toggleRedelivery: @escaping (VoiceInputHistoryRecord) -> Void,
         delete: @escaping (VoiceInputSessionID) -> Void
     ) {
         self.refresh = refresh
-        self.setRetentionPolicy = setRetentionPolicy
         self.clear = clear
         self.copy = copy
         self.toggleRedelivery = toggleRedelivery
@@ -163,20 +154,6 @@ package struct HistoryDashboard: View {
 
             Menu {
                 Button("刷新", systemImage: "arrow.clockwise", action: actions.refresh)
-                Picker(
-                    "保留历史",
-                    selection: Binding(
-                        get: { state.retentionPolicy },
-                        set: { policy in
-                            actions.setRetentionPolicy(policy)
-                        }
-                    )
-                ) {
-                    ForEach(HistoryRetentionPolicy.allCases, id: \.self) { policy in
-                        Text(policy.displayName).tag(policy)
-                    }
-                }
-                .disabled(state.isUpdatingRetention)
                 Divider()
                 Button(role: .destructive) {
                     confirmsClear = true
@@ -190,7 +167,7 @@ package struct HistoryDashboard: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("刷新、保留与清空历史")
+            .help("刷新与清空历史")
             .accessibilityLabel("历史选项")
         }
         .padding(.horizontal, 18)
@@ -603,18 +580,6 @@ private struct HistoryTextBlock: View {
                     Color.primary.opacity(0.04),
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
-        }
-    }
-}
-
-private extension HistoryRetentionPolicy {
-    var displayName: String {
-        switch self {
-        case .disabled: "不保存"
-        case .thirtyDays: "最近 30 天"
-        case .ninetyDays: "最近 90 天"
-        case .oneYear: "最近一年"
-        case .forever: "不按日期清理"
         }
     }
 }

@@ -3,12 +3,11 @@ import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
-private typealias SettingsOverviewSection = SettingsPage
-
 private struct SettingsCard<Content: View>: View {
     let title: String
     let subtitle: String?
     let icon: String
+    let tint: Color
     let content: Content
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -16,11 +15,13 @@ private struct SettingsCard<Content: View>: View {
         _ title: String,
         subtitle: String? = nil,
         icon: String,
+        tint: Color = .accentColor,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
         self.icon = icon
+        self.tint = tint
         self.content = content()
     }
 
@@ -29,9 +30,9 @@ private struct SettingsCard<Content: View>: View {
             HStack(alignment: .top, spacing: 11) {
                 Image(systemName: icon)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(tint)
                     .frame(width: 30, height: 30)
-                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -122,31 +123,21 @@ struct SettingsNotice: View {
 
 struct SettingsView: View {
     let workspace: SettingsWorkspace
-    @ObservedObject private var dataErasure: SpeakerDataErasureCoordinator
     @StateObject private var shortcutRecorder = ShortcutRecorderModel()
 
     init(workspace: SettingsWorkspace) {
         self.workspace = workspace
-        dataErasure = workspace.dataErasure
     }
 
-    @ViewBuilder
     var body: some View {
-        switch dataErasure.state.workspaceRoute {
-        case .normal:
-            SettingsOverviewView(
-                workspace: workspace,
-                shortcutRecorder: shortcutRecorder
-            )
-            .task {
-                await workspace.refresh()
-            }
-            .onDisappear { shortcutRecorder.stop() }
-        case .erasing:
-            DataErasureInProgressView()
-        case .aboutRecovery:
-            AboutView(workspace: workspace)
+        SettingsOverviewView(
+            workspace: workspace,
+            shortcutRecorder: shortcutRecorder
+        )
+        .task {
+            await workspace.refresh()
         }
+        .onDisappear { shortcutRecorder.stop() }
     }
 }
 
@@ -160,10 +151,91 @@ struct DataErasureInProgressView: View {
     }
 }
 
+/// Full-window recovery surface shown when a local-data erasure did not
+/// complete. This is its own destination, not the About page.
+struct DataErasureRecoveryView: View {
+    @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
+    @State private var confirmsRetry = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ContentUnavailableView(
+                "本地数据尚未全部清除",
+                systemImage: "externaldrive.badge.xmark",
+                description: Text(failureText)
+            )
+
+            HStack(spacing: 12) {
+                Button("打开本地数据文件夹") {
+                    NSWorkspace.shared.open(speakerApplicationSupportDirectory)
+                }
+                Button("重试清除并退出", role: .destructive) {
+                    confirmsRetry = true
+                }
+                .disabled(dataErasure.state == .erasing)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .alert(
+            "重试清除 Speaker 保存的所有本地数据？",
+            isPresented: $confirmsRetry
+        ) {
+            Button("取消", role: .cancel) {}
+            Button("清除并退出", role: .destructive) {
+                Task {
+                    _ = await dataErasure.eraseAllAndExit()
+                }
+            }
+        } message: {
+            Text(
+                "API Key、文字历史、个人词库、设置和登录项将被永久移除。Speaker 不会删除系统权限记录，也无法恢复这些本地数据。"
+            )
+        }
+    }
+
+    private var failureText: String {
+        guard case let .failed(failure) = dataErasure.state else {
+            return "Speaker 正在完成剩余的清除步骤。"
+        }
+        return Self.failureMessage(failure)
+    }
+
+    static func failureMessage(
+        _ failure: SpeakerDataErasureFailure
+    ) -> String {
+        guard let issue = failure.issues.first else {
+            return "本地数据未能全部清除，请重试。"
+        }
+        return switch issue.reason {
+        case .accessDenied:
+            "macOS 拒绝删除部分数据，请检查文件权限后重试。"
+        case .interactionUnavailable:
+            "无法访问凭据存储，请解锁 Mac 后重试。"
+        case .busy:
+            "本地历史仍在使用中，未删除数据库。请重试。"
+        case .unsafePath:
+            "待删除路径未通过安全校验，Speaker 已停止清除。"
+        case .verificationMismatch:
+            "清除结果未通过验证，Speaker 没有报告成功；请重试。"
+        case .io:
+            "部分本地数据无法删除，请关闭可能占用文件的程序后重试。"
+        }
+    }
+}
+
+private var speakerApplicationSupportDirectory: URL {
+    FileManager.default.urls(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask
+    ).first?.appendingPathComponent("Speaker", isDirectory: true)
+        ?? FileManager.default.homeDirectoryForCurrentUser
+}
+
 private struct SettingsOverviewView: View {
     let workspace: SettingsWorkspace
     @ObservedObject private var navigation: SettingsNavigationModel
-    @ObservedObject private var shortcut: VoiceShortcutFeature
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
 
     init(
@@ -172,60 +244,42 @@ private struct SettingsOverviewView: View {
     ) {
         self.workspace = workspace
         navigation = workspace.navigation
-        shortcut = workspace.shortcut
         self.shortcutRecorder = shortcutRecorder
     }
 
     var body: some View {
-        SettingsOverviewScrollView(navigation: navigation) {
-            hero
-        } section: { section in
-            sectionGroup(section) {
-                sectionContent(section)
+        SettingsOverviewScrollView(navigation: navigation) { group in
+            sectionGroup(group) {
+                sectionContent(group)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var hero: some View {
-        HStack(spacing: 14) {
-            SpeakerIdentityTile(size: 44, accessibility: .named)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("按下 \(shortcut.preference.displayName) 开始说话")
-                    .font(.system(size: 25, weight: .bold))
-                Text("松开或再按结束，整理后的文字自动送到当前输入位置。")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding(.top, 16)
-    }
-
     private func sectionGroup<Content: View>(
-        _ section: SettingsOverviewSection,
+        _ group: SettingsGroup,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(section.title)
+            Text(group.title)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(
+                    group == .localData ? Color.red : Color.secondary
+                )
                 .padding(.leading, 6)
             content()
         }
     }
 
     @ViewBuilder
-    private func sectionContent(_ section: SettingsOverviewSection) -> some View {
-        switch section {
+    private func sectionContent(_ group: SettingsGroup) -> some View {
+        switch group {
         case .shortcut:
             ShortcutSettingsPage(
                 shortcut: workspace.shortcut,
                 shortcutRecorder: shortcutRecorder,
-                openSpeechSettings: {
-                    open(.permissions)
+                openPermissionSettings: {
+                    navigation.open(.permissions)
                 }
             )
         case .permissions:
@@ -238,6 +292,10 @@ private struct SettingsOverviewView: View {
                 DoubaoSettingsCard(model: workspace.doubao)
                 DeepSeekSettingsCard(model: workspace.refinement)
             }
+            Text("音频只发给豆包；文字仅在启用对应整理模式时发给 DeepSeek。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 6)
         case .refinement:
             RefinementSettingsPage(model: workspace.refinement)
         case .general:
@@ -246,18 +304,16 @@ private struct SettingsOverviewView: View {
                 history: workspace.history,
                 softwareUpdate: workspace.softwareUpdate
             )
+        case .localData:
+            LocalDataSettingsCard(dataErasure: workspace.dataErasure)
         }
-    }
-
-    private func open(_ section: SettingsOverviewSection) {
-        navigation.open(section)
     }
 }
 
 private struct ShortcutSettingsPage: View {
     @ObservedObject var shortcut: VoiceShortcutFeature
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
-    let openSpeechSettings: () -> Void
+    let openPermissionSettings: () -> Void
 
     var body: some View {
         VStack(spacing: 16) {
@@ -330,7 +386,7 @@ private struct ShortcutSettingsPage: View {
                                 case .retryPersistence:
                                     shortcut.retryPersistence()
                                 case .openAccessibilitySettings:
-                                    openSpeechSettings()
+                                    openPermissionSettings()
                                 }
                             }
                             .controlSize(.small)
@@ -396,7 +452,7 @@ private struct GeneralSettingsPage: View {
             icon: "switch.2"
         ) {
             LaunchAtLoginSettingsRow(model: loginItemSettings)
-            HistorySavingSettingsRow(model: history)
+            HistoryRetentionSettingsRow(model: history)
             AutomaticUpdateSettingsRow(model: softwareUpdate)
         }
     }
@@ -431,23 +487,32 @@ private struct LaunchAtLoginSettingsRow: View {
     }
 }
 
-private struct HistorySavingSettingsRow: View {
+/// 历史保留策略的唯一入口：设置-通用。历史页不再提供策略切换。
+private struct HistoryRetentionSettingsRow: View {
     @ObservedObject var model: HistoryModel
 
     var body: some View {
-        Toggle(
-            "保存历史",
-            isOn: Binding(
-                get: { model.retentionPolicy.savesNewRecords },
-                set: { enabled in
-                    Task {
-                        await model.setHistorySavingEnabled(enabled)
+        HStack {
+            Text("保存历史")
+            Spacer()
+            Picker(
+                "保存历史",
+                selection: Binding(
+                    get: { model.retentionPolicy },
+                    set: { policy in
+                        Task { await model.setRetentionPolicy(policy) }
                     }
+                )
+            ) {
+                ForEach(HistoryRetentionPolicy.allCases, id: \.self) { policy in
+                    Text(policy.displayName).tag(policy)
                 }
-            )
-        )
-        .toggleStyle(.switch)
-        .disabled(model.isUpdatingRetention)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: 220, alignment: .trailing)
+            .disabled(model.isUpdatingRetention)
+        }
     }
 }
 
@@ -814,6 +879,61 @@ private struct AboutSettingsPage: View {
     }
 }
 
+/// 设置页底部的红色危险区：本地数据清除的唯一入口。
+private struct LocalDataSettingsCard: View {
+    @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
+    @State private var confirmsDataErasure = false
+
+    var body: some View {
+        SettingsCard(
+            SettingsGroup.localData.title,
+            subtitle: "完全清除这台 Mac 上由 Speaker 保存的数据",
+            icon: "externaldrive.badge.xmark",
+            tint: .red
+        ) {
+            Text(
+                "清除 API Key、会话历史、个人词库、设置、缓存和登录项，然后退出 Speaker。系统中的麦克风与辅助功能授权不会被自动撤销。"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                if dataErasure.state == .erasing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("正在清除 Speaker 本地数据")
+                }
+                Button(
+                    dataErasure.state == .erasing
+                    ? "正在清除…"
+                    : "清除本地数据并退出",
+                    role: .destructive
+                ) {
+                    confirmsDataErasure = true
+                }
+                .disabled(dataErasure.state == .erasing)
+            }
+        }
+        .alert(
+            "清除 Speaker 保存的所有本地数据？",
+            isPresented: $confirmsDataErasure
+        ) {
+            Button("取消", role: .cancel) {}
+            Button("清除并退出", role: .destructive) {
+                Task {
+                    _ = await dataErasure.eraseAllAndExit()
+                }
+            }
+        } message: {
+            Text(
+                "API Key、文字历史、个人词库、设置和登录项将被永久移除。Speaker 不会删除系统权限记录，也无法恢复这些本地数据。"
+            )
+        }
+    }
+}
+
 private struct PrivacyBoundaryRow: View {
     let icon: String
     let title: String
@@ -991,6 +1111,14 @@ private struct PermissionSettingsRow: View {
 private struct DoubaoSettingsCard: View {
     @ObservedObject var model: DoubaoSettingsModel
     @State private var confirmingDelete = false
+    @State private var isReplacingKey = false
+
+    private var mode: APIKeyCardMode {
+        APIKeyCardPresentation.mode(
+            hasStoredKey: model.hasConfiguredKey,
+            isReplacingKey: isReplacingKey
+        )
+    }
 
     var body: some View {
         SettingsCard(
@@ -1017,32 +1145,16 @@ private struct DoubaoSettingsCard: View {
 
             Divider()
 
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
-                GridRow {
-                    Text("API Key")
-                        .font(.subheadline.weight(.medium))
-                    HStack(spacing: 8) {
-                        SecureField(
-                            model.hasConfiguredKey ? "输入新 Key 以替换当前凭据" : "输入豆包语音 API Key",
-                            text: $model.apiKeyDraft
-                        )
-                        .textContentType(.password)
-
-                        Button(model.hasConfiguredKey ? "替换 Key" : "保存 Key") {
-                            Task { await model.save() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(
-                            model.apiKeyDraft
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                                .isEmpty
-                        )
-                    }
-                }
-
-                GridRow {
+            if mode == .enterKey {
+                keyInput(
+                    placeholder: "输入豆包语音 API Key",
+                    saveTitle: "保存 Key"
+                )
+            } else {
+                HStack {
                     Text("流式资源")
                         .font(.subheadline.weight(.medium))
+                    Spacer()
                     Picker(
                         "流式资源",
                         selection: Binding(
@@ -1056,31 +1168,42 @@ private struct DoubaoSettingsCard: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 300, alignment: .leading)
-                }
-            }
-
-            HStack(spacing: 10) {
-                if case .checking = model.status {
-                    ProgressView()
-                        .controlSize(.small)
+                    .frame(maxWidth: 300, alignment: .trailing)
                 }
 
-                Button("检查连接") {
-                    model.checkConnection()
+                HStack(spacing: 10) {
+                    if case .checking = model.status {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Button("检查连接") {
+                        model.checkConnection()
+                    }
+                    .disabled(isChecking)
+
+                    Button(isReplacingKey ? "收起" : "更换 Key") {
+                        isReplacingKey.toggle()
+                    }
+                    .disabled(isChecking)
+
+                    Text("资源类型必须与控制台中已开通的套餐一致。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button("删除 Key", role: .destructive) {
+                        confirmingDelete = true
+                    }
                 }
-                .disabled(!model.hasConfiguredKey || isChecking)
 
-                Text("资源类型必须与控制台中已开通的套餐一致。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button("删除 Key", role: .destructive) {
-                    confirmingDelete = true
+                if mode == .replacingKey {
+                    keyInput(
+                        placeholder: "输入新 Key 以替换当前凭据",
+                        saveTitle: "保存"
+                    )
                 }
-                .disabled(!model.hasConfiguredKey)
             }
         }
         .confirmationDialog(
@@ -1094,6 +1217,32 @@ private struct DoubaoSettingsCard: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("删除后将无法进行新的语音转录，历史记录不会受影响。")
+        }
+        .onChange(of: model.hasConfiguredKey) { _, hasKey in
+            if !hasKey { isReplacingKey = false }
+        }
+    }
+
+    private func keyInput(
+        placeholder: String,
+        saveTitle: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            SecureField(placeholder, text: $model.apiKeyDraft)
+                .textContentType(.password)
+
+            Button(saveTitle) {
+                Task {
+                    await model.save()
+                    isReplacingKey = false
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+                model.apiKeyDraft
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            )
         }
     }
 
@@ -1116,7 +1265,7 @@ private struct DoubaoSettingsCard: View {
         switch model.status {
         case .loading: "正在读取本机配置"
         case .unconfigured: "未配置"
-        case .configured: "Key 已保存在本机"
+        case .configured: "已配置"
         case .checking: "正在检查连接"
         case .success: "连接成功"
         case .failure: model.summary
@@ -1125,10 +1274,10 @@ private struct DoubaoSettingsCard: View {
 
     private var statusColor: Color {
         switch model.status {
-        case .success: .green
+        case .success, .configured: .green
         case .failure: .red
         case .checking: .blue
-        case .loading, .unconfigured, .configured: .secondary
+        case .loading, .unconfigured: .secondary
         }
     }
 }
@@ -1136,6 +1285,14 @@ private struct DoubaoSettingsCard: View {
 private struct DeepSeekSettingsCard: View {
     @ObservedObject var model: RefinementSettingsModel
     @State private var confirmingDelete = false
+    @State private var isReplacingKey = false
+
+    private var mode: APIKeyCardMode {
+        APIKeyCardPresentation.mode(
+            hasStoredKey: model.hasStoredKey,
+            isReplacingKey: isReplacingKey
+        )
+    }
 
     var body: some View {
         SettingsCard(
@@ -1159,49 +1316,49 @@ private struct DeepSeekSettingsCard: View {
                 .font(.caption)
             }
 
-            HStack(spacing: 8) {
-                SecureField(
-                    model.hasStoredKey
-                        ? "输入新 Key 以替换当前凭据"
-                        : "输入 DeepSeek API Key",
-                    text: $model.apiKeyDraft
-                )
-                .textContentType(.password)
+            Divider()
 
-                Button(model.hasStoredKey ? "替换 Key" : "保存 Key") {
-                    Task { await model.saveAPIKey() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    model.apiKeyDraft
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .isEmpty
-                        || model.isCheckingConnection
+            if mode == .enterKey {
+                keyInput(
+                    placeholder: "输入 DeepSeek API Key",
+                    saveTitle: "保存 Key"
                 )
-            }
-
-            HStack {
-                Button {
-                    model.checkConnection()
-                } label: {
-                    if model.isCheckingConnection {
-                        HStack(spacing: 5) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("检查中…")
+            } else {
+                HStack {
+                    Button {
+                        model.checkConnection()
+                    } label: {
+                        if model.isCheckingConnection {
+                            HStack(spacing: 5) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("检查中…")
+                            }
+                        } else {
+                            Text("检查连接")
                         }
-                    } else {
-                        Text("检查连接")
                     }
-                }
-                .disabled(!model.hasStoredKey || model.isCheckingConnection)
+                    .disabled(model.isCheckingConnection)
 
-                Spacer()
+                    Button(isReplacingKey ? "收起" : "更换 Key") {
+                        isReplacingKey.toggle()
+                    }
+                    .disabled(model.isCheckingConnection)
 
-                Button("删除 Key", role: .destructive) {
-                    confirmingDelete = true
+                    Spacer()
+
+                    Button("删除 Key", role: .destructive) {
+                        confirmingDelete = true
+                    }
+                    .disabled(model.isCheckingConnection)
                 }
-                .disabled(!model.hasStoredKey || model.isCheckingConnection)
+
+                if mode == .replacingKey {
+                    keyInput(
+                        placeholder: "输入新 Key 以替换当前凭据",
+                        saveTitle: "保存"
+                    )
+                }
             }
 
             if let credentialNotice = model.credentialNotice {
@@ -1223,26 +1380,53 @@ private struct DeepSeekSettingsCard: View {
         } message: {
             Text("删除后会自动切回默认顺滑，豆包转录仍可正常使用。")
         }
+        .onChange(of: model.hasStoredKey) { _, hasKey in
+            if !hasKey { isReplacingKey = false }
+        }
+    }
+
+    private func keyInput(
+        placeholder: String,
+        saveTitle: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            SecureField(placeholder, text: $model.apiKeyDraft)
+                .textContentType(.password)
+
+            Button(saveTitle) {
+                Task {
+                    await model.saveAPIKey()
+                    isReplacingKey = false
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(
+                model.apiKeyDraft
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+                    || model.isCheckingConnection
+            )
+        }
     }
 
     private var statusText: String {
         if model.isConnectionVerified { return "已验证" }
         if model.connectionFailure != nil { return "连接失败" }
-        if model.hasStoredKey { return "已保存，待验证" }
+        if model.hasStoredKey { return "已配置" }
         return "未配置"
     }
 
     private var statusIcon: String {
         if model.isConnectionVerified { return "checkmark.circle.fill" }
         if model.connectionFailure != nil { return "xmark.circle.fill" }
-        if model.hasStoredKey { return "exclamationmark.circle.fill" }
+        if model.hasStoredKey { return "checkmark.shield" }
         return "key.slash"
     }
 
     private var statusColor: Color {
         if model.isConnectionVerified { return .green }
         if model.connectionFailure != nil { return .red }
-        if model.hasStoredKey { return .orange }
+        if model.hasStoredKey { return .green }
         return .secondary
     }
 }

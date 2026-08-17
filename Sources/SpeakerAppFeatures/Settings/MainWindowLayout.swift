@@ -28,10 +28,6 @@ package struct MainWindowLayout: Equatable, Sendable {
     package var overviewMetricDividerPadding: CGFloat {
         widthClass == .compact ? 18 : 34
     }
-
-    package var usesScrollableSettingsNavigation: Bool {
-        widthClass == .compact
-    }
 }
 
 private struct MainWindowLayoutEnvironmentKey: EnvironmentKey {
