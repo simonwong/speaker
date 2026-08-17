@@ -36,11 +36,10 @@ Speaker 已可作为本机开发版持续试用，但还不能对外发布。主
 - [x] 文件型历史、设置、个人词库和开发版凭据使用 descriptor-relative 的 no-follow 安全读写；只接受当前用户拥有的普通文件，读写均按数据类型限制大小，并以同目录 `0600` 临时文件、`fsync`、`renameat` 原子提交。符号链接目录/文件、非普通文件和超限文件会保留证据并停止加载/保存，加载失败后的设置更新和词库 UI 也不得覆盖原文件；旧历史不会以空数据迁移后删除原文件。
 - [x] 提供“清除本地数据并退出”：先通过 no-follow owner-only 写入独立恢复标记并停止所有写入，再注销登录项、清除本地/Keychain 凭据、显式关闭 SQLite、删除当前与开发版遗留的 Application Support/缓存/saved state/偏好并逐项验证；恢复标记和凭据删除也使用 descriptor-relative `unlinkat`，父路径 symlink 逃逸会 fail closed，只有最终验证成功后才清除恢复标记并退出。
 - [x] DeepSeek 连接检查仅更新诊断状态，不再覆盖用户持久化选择；无 Key 时依赖 DeepSeek 的已保存模式不会进入运行态，保存 Key 后才恢复。（Key 指纹随正式 Keychain/升级验证一并复核。）
-- [x] 历史重新输入使用单一可取消状态；目标 App 激活后仍需用户再次明确点击输入位置，禁止把激活事件误当作送达确认。
 - [x] 浮层优先按前台 App 的 AX focused window 所在显示器定位，鼠标仅作 fallback；切换布局、前台 App 或显示器配置时会重新定位，录音 telemetry 不会触发高频 AX 查询。
 - [ ] UI 支持 Reduce Motion、Increase Contrast 和 VoiceOver 独立取消按钮/状态播报。（Reduce Motion、Increase Contrast palette、独立取消按钮与克制的状态 announcement 已完成，仍需 VoiceOver/Increase Contrast 实机 smoke。）
 - [x] 权限菜单和错误恢复使用共享设置路由，直接落到语音识别页。
-- [x] 建立 SwiftUI/AppKit UI 测试 target，覆盖首次引导、菜单命令、浮层不抢焦点和设置路由。（67 项 App scenario specs 已覆盖 onboarding 权限/连接动作、DeepSeek 可用性、菜单命令顺序与共享设置路由，以及数据清除恢复标记/遗留路径/symlink 防护、快捷键、全局交互、历史重送、HUD、Esc、VoiceOver、notice、辅助功能权限边界、开发 smoke 发布隔离、登录项、权限外部变更恢复和 shutdown 规则；5 项 AppKit UI specs 使用生产 panel/onboarding/HUD 视图验证 HUD non-activating、orderFront 不抢 key window、跨状态恢复紧凑尺寸、辅助功能按钮的标签/点击范围/真实 action，以及欢迎窗口在受限屏幕中的完整配置。）
+- [x] 建立 SwiftUI/AppKit UI 测试 target，覆盖首次引导、菜单命令、浮层不抢焦点和设置路由。（App scenario specs 已覆盖 onboarding 权限/连接动作、DeepSeek 可用性、菜单命令顺序与共享设置路由，以及数据清除恢复标记/遗留路径/symlink 防护、快捷键、全局交互、历史列表、HUD、Esc、VoiceOver、notice、辅助功能权限边界、开发 smoke 发布隔离、登录项、权限外部变更恢复和 shutdown 规则；AppKit UI specs 使用生产 panel/onboarding/HUD/历史视图验证 HUD non-activating、orderFront 不抢 key window、跨状态恢复紧凑尺寸、辅助功能按钮的标签/点击范围/真实 action、历史行交互，以及欢迎窗口在受限屏幕中的完整配置。）
 - [x] 提供“关于、版本、隐私、打开数据目录、复制脱敏诊断”入口；诊断不包含转录文字、音频或 Key。
 - [x] 活跃豆包请求提供内容无关的精确 transport 阶段、客户端/服务端请求标识和 HTTP 状态；阶段由实际协议边界推进，取消/结束立即清理。远端 close code、DNS、断网、连接丢失和 TLS 故障保留稳定子类；连接仍开放却没有最终帧时保持 `awaitingFinal`，不以本地经过时间推断 provider 故障。
 
@@ -55,7 +54,7 @@ Speaker 已可作为本机开发版持续试用，但还不能对外发布。主
 
 ## 当前自动证据
 
-- `./scripts/test`：164 项核心规格、67 项 App scenario specs 与 5 项 AppKit UI specs 通过。
+- `./scripts/test`：核心、App scenario、AppKit UI、provider evidence 与发布脚本规格通过；精确数量以该命令当前输出为准。
 - `./scripts/test-compatibility-smoke`：使用本地构建候选验证人工兼容报告契约；partial PASS 返回 3、报告权限为 `0600`、记录可执行文件 SHA-256 且不包含绝对 Bundle 路径。
 - `./scripts/provider-smoke doubao`：2026-07-17 使用当前 BYOK 再次完成 `volc.seedasr.sauc.duration` 静音连接探针，服务端请求 ID `20260717125537286AF74BAC3BF6B4ED6B`。该结果只证明连接，不证明模型矩阵；DeepSeek 仍未配置。当前 matrix 要求显式付费确认、全新 evidence 目录及候选 version/build；报告以固定 13-case schema 绑定 source commit/clean 状态、`Package.resolved` SHA-256、macOS/架构、凭据来源、资源与模型，逐级 no-follow 校验父目录后原子写入 `0700/0600`，且 verifier 对未知字段、缺失/重复、FAIL/SKIP、dirty source 与非正式 Keychain 凭据 fail closed。受保护 production workflow 已把 matrix 接成正式硬门禁：在同一 run 的临时 Keychain 中生成报告，并再次精确绑定 commit、依赖锁 hash、version、build 与不超过四小时的生成时间窗，报告及其 hash 进入 exact-allowlist release evidence ZIP，旧报告不能复用。完整 BYOK 与正式身份的真实成功运行证据仍待取得。工具与 verifier 由 `./scripts/test` 以 warnings-as-errors 编译，并有离线隐私/权限/原子写反例规格。
 - 2026-07-17 旧版开发 matrix（严格报告 schema 落地前）：使用 226 秒非敏感系统 TTS 的前 60 秒完成开发预检。豆包 1/5/15/60 秒实时 paced 转录、流式取消和错误 Key全部 PASS；request ID 分别为 `20260717130020408124A2C1B9F0D44A84`、`20260717130022E8FA7E55CDA7BBB97D7F`、`2026071713002723F393A0B537B2B4AF8B`、`20260717130043BFCC2F1416BF87BBE9C0`、取消 `7669280B-705D-4856-B275-12280D970DFC`、错误 Key `20260717130146B7236D4D34EEBDC471A4`。临时 AIFF/WAV 已删除。DeepSeek 未配置，连接、三模式和取消均 SKIP；错误 Key边界 PASS。因此这只是历史 PARTIAL 日志，不是当前 schema 报告、完整 provider 或正式 Keychain 候选证据。
