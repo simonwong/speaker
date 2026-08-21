@@ -428,9 +428,12 @@ struct SpeakerAppUISpecs {
             failures: &failures,
             executed: &executed
         ) {
+            var completeDismissal: (() -> Void)?
             let presenter = VoiceInputPanelPresenter(
                 reduceMotion: { false },
-                sleep: { _ in }
+                scheduleDismissal: { _, completion in
+                    completeDismissal = completion
+                }
             ) { presentation in
                 VoiceInputHUD(
                     presentation: presentation,
@@ -443,7 +446,7 @@ struct SpeakerAppUISpecs {
             presenter.present(VoiceInputHUDContractFixture.recording.presentation)
             presenter.present(.hidden)
             presenter.present(VoiceInputHUDContractFixture.problem.presentation)
-            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            completeDismissal?()
 
             try expect(presenter.evidence.isVisible)
             try expect(
@@ -484,16 +487,13 @@ struct SpeakerAppUISpecs {
         ) {
             let presenter = VoiceInputPanelPresenter(
                 reduceMotion: { false },
-                sleep: { _ in }
+                scheduleDismissal: { _, completion in completion() }
             ) { _ in Color.clear }
             defer { presenter.stop() }
 
             for fixture in VoiceInputHUDContractFixture.allCases {
                 presenter.present(fixture.presentation)
                 presenter.present(.hidden)
-                RunLoop.current.run(
-                    until: Date().addingTimeInterval(0.01)
-                )
                 try expect(
                     !presenter.evidence.isVisible,
                     "\(fixture) did not complete dismissal"

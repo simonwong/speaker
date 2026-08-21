@@ -108,7 +108,9 @@ package struct PasteboardReplacementTransaction: Sendable {
         let marker = UUID().uuidString
         let clearedChangeCount = pasteboard.clearContents()
         guard pasteboard.writeText(text, marker) else {
-            if pasteboard.changeCount() == clearedChangeCount {
+            if pasteboard.changeCount() == clearedChangeCount
+                || pasteboard.readMarker() == marker
+            {
                 _ = restore(snapshot, to: pasteboard)
             }
             return nil

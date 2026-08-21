@@ -6,13 +6,6 @@ package enum BuiltInRefinementMode: String, CaseIterable, Equatable, Hashable, S
     case conciseCleanup
     case fullRewrite
 
-    package var displayName: String {
-        return switch self {
-        case .conciseCleanup: "精简清理"
-        case .fullRewrite: "完整重写"
-        }
-    }
-
     package var defaultPrompt: String {
         return switch self {
         case .conciseCleanup:
@@ -48,16 +41,15 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     }
 
     public var displayName: String {
-        if let builtInMode {
-            return builtInMode.displayName
-        }
-        return switch self {
+        switch self {
         case .defaultSmooth:
             "默认顺滑"
+        case .conciseCleanup:
+            "精简清理"
+        case .fullRewrite:
+            "完整重写"
         case let .custom(name, _):
             name.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .conciseCleanup, .fullRewrite:
-            preconditionFailure("built-in mode handled above")
         }
     }
 
