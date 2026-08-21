@@ -1840,6 +1840,13 @@ struct SpeakerCoreSpecs {
                 history: history
             )
             let presentations = await sessions.observe()
+
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            let deliveryCompleted = await eventually(before: .seconds(1)) {
+                await delivery.deliveredTexts == ["你好，SwiftUI。"]
+            }
+
             let terminal = Task { () -> [VoiceInputPresentation] in
                 var values: [VoiceInputPresentation] = []
                 for await presentation in presentations {
@@ -1851,9 +1858,6 @@ struct SpeakerCoreSpecs {
                 return values
             }
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
-
             let values = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
             let historyCommitted = await eventually(before: .seconds(1)) {
@@ -1861,18 +1865,37 @@ struct SpeakerCoreSpecs {
             }
             let records = await history.records
 
-            try expect(values.contains { $0.activity.isRecording })
-            try expect(values.contains { $0.activity.stage == .transcribing })
-            try expect(values.last?.activity.isDelivered == true)
-            try expect(zip(values, values.dropFirst()).allSatisfy { $0.revision < $1.revision })
-            try expect(deliveredTexts == ["你好，SwiftUI。"])
+            try expect(
+                deliveryCompleted,
+                "Voice Input Session did not deliver the transcript"
+            )
+            try expect(
+                values.last?.activity.isDelivered == true,
+                "slow observer did not receive the current terminal presentation"
+            )
+            try expect(
+                zip(values, values.dropFirst()).allSatisfy {
+                    $0.revision < $1.revision
+                },
+                "presentation revisions were not strictly increasing"
+            )
+            try expect(
+                deliveredTexts == ["你好，SwiftUI。"],
+                "delivered transcript changed"
+            )
             try expect(
                 historyCommitted,
                 "terminal delivery was not committed to history"
             )
-            try expect(records.count == 1)
-            try expect(records.first?.finalText == "你好，SwiftUI。")
-            try expect(records.first?.providerRequestID == "local-spec")
+            try expect(records.count == 1, "Session Record count changed")
+            try expect(
+                records.first?.finalText == "你好，SwiftUI。",
+                "Session Record final text changed"
+            )
+            try expect(
+                records.first?.providerRequestID == "local-spec",
+                "Session Record provider request ID changed"
+            )
         }
 
         await runAsync("release during recorder startup still completes once", failures: &failures) {
