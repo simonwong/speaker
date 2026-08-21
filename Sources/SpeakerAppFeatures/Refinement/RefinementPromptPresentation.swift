@@ -12,7 +12,12 @@ package struct RefinementPromptEditorState: Equatable, Sendable {
     /// Whether a saved override currently replaces the built-in prompt.
     package let isOverridden: Bool
 
-    package var title: String { mode.displayName }
+    package var title: String {
+        switch mode {
+        case .conciseCleanup: "精简清理"
+        case .fullRewrite: "完整重写"
+        }
+    }
 
     /// 恢复默认 is meaningful while the draft differs from the built-in prompt.
     package func canRestoreDefault(draft: String) -> Bool {

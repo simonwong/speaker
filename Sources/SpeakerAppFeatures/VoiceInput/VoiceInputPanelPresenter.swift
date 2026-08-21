@@ -199,7 +199,10 @@ package final class VoiceInputPanelPresenter<Content: View> {
     private let content: (VoiceInputOverlayPresentation) -> Content
     private let animationState: VoiceInputPanelAnimationState
     private let reduceMotion: () -> Bool
-    private let sleep: @Sendable (Duration) async throws -> Void
+    private let scheduleDismissal: @MainActor (
+        Duration,
+        @escaping @MainActor () -> Void
+    ) -> Void
     private var placementCancellables: Set<AnyCancellable> = []
     private var transitionState = VoiceInputPanelTransitionState()
 
@@ -207,15 +210,21 @@ package final class VoiceInputPanelPresenter<Content: View> {
         reduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         },
-        sleep: @escaping @Sendable (Duration) async throws -> Void = {
-            try await Task.sleep(for: $0)
+        scheduleDismissal: @escaping @MainActor (
+            Duration,
+            @escaping @MainActor () -> Void
+        ) -> Void = { delay, completion in
+            Task { @MainActor in
+                try? await Task.sleep(for: delay)
+                completion()
+            }
         },
         @ViewBuilder content:
             @escaping (VoiceInputOverlayPresentation) -> Content
     ) {
         self.content = content
         self.reduceMotion = reduceMotion
-        self.sleep = sleep
+        self.scheduleDismissal = scheduleDismissal
 
         let animationState = VoiceInputPanelAnimationState()
         self.animationState = animationState
@@ -355,9 +364,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }
-        let sleep = sleep
-        Task { @MainActor [weak self] in
-            try? await sleep(dismissal.completionDelay)
+        scheduleDismissal(dismissal.completionDelay) { [weak self] in
             guard let self,
                   self.transitionState.canComplete(dismissal)
             else { return }

@@ -2130,6 +2130,32 @@ struct SpeakerCoreSpecs {
             try expect(emptyPasteboard.items.isEmpty)
         }
 
+        await runAsync(
+            "failed owned system copy restores after a partial pasteboard mutation",
+            failures: &failures
+        ) {
+            let originalItems = [
+                [
+                    "public.utf8-plain-text": Data("original text".utf8),
+                    "public.rtf": Data([0x7B, 0x5C, 0x72, 0x74, 0x66, 0x31, 0x7D]),
+                ],
+                ["public.png": Data([0x89, 0x50, 0x4E, 0x47])],
+            ]
+            let pasteboard = ClipboardPasteboardFake(
+                items: originalItems,
+                replacementWriteSucceeds: false,
+                failedReplacementItems: [[
+                    "public.utf8-plain-text": Data("partial replacement".utf8),
+                ]]
+            )
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+
+            let copied = await writer.copy("replacement")
+
+            try expect(!copied)
+            try expect(pasteboard.items == originalItems)
+        }
+
         await runAsync("system clipboard reports success only after exact readback", failures: &failures) {
             let originalItems = [
                 ["public.utf8-plain-text": Data("original".utf8)],
@@ -7415,6 +7441,7 @@ private final class ClipboardPasteboardFake {
     private var currentMarker: String?
     private let replacementWriteSucceeds: Bool
     private let replacementReadback: String?
+    private let failedReplacementItems: [[String: Data]]?
     private let externalItemsAfterReplacement: [[String: Data]]?
     private let unreadableTypes: Set<String>
 
@@ -7422,12 +7449,14 @@ private final class ClipboardPasteboardFake {
         items: [[String: Data]],
         replacementWriteSucceeds: Bool = true,
         replacementReadback: String? = nil,
+        failedReplacementItems: [[String: Data]]? = nil,
         externalItemsAfterReplacement: [[String: Data]]? = nil,
         unreadableTypes: Set<String> = []
     ) {
         self.items = items
         self.replacementWriteSucceeds = replacementWriteSucceeds
         self.replacementReadback = replacementReadback
+        self.failedReplacementItems = failedReplacementItems
         self.externalItemsAfterReplacement = externalItemsAfterReplacement
         self.unreadableTypes = unreadableTypes
     }
@@ -7454,7 +7483,15 @@ private final class ClipboardPasteboardFake {
                 return self.changeCount
             },
             writeText: { text, marker in
-                guard self.replacementWriteSucceeds else { return false }
+                guard self.replacementWriteSucceeds else {
+                    if let failedReplacementItems = self.failedReplacementItems {
+                        self.currentString = text
+                        self.currentMarker = marker
+                        self.items = failedReplacementItems
+                        self.changeCount += 1
+                    }
+                    return false
+                }
                 self.currentString = self.replacementReadback ?? text
                 self.currentMarker = marker
                 self.items = [["public.utf8-plain-text": Data(text.utf8)]]
