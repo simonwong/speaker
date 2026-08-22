@@ -1,0 +1,61 @@
+# Development Workflow
+
+Read this page before provider smoke or acceptance, building, testing, launching, bundling, installing, or releasing Speaker.
+
+## Provider smoke and acceptance
+
+`./scripts/provider-smoke doubao|deepseek` uses the key saved by Speaker. `./scripts/provider-smoke matrix --confirm-paid-requests ...` makes billed requests; obtain explicit approval before running it. Redact credentials, audio, transcript text, raw provider messages, and auth headers from captured evidence.
+
+A provider check is complete only when the requested provider and scenario report a terminal verdict; a connection-only probe is not transcription or refinement acceptance evidence.
+
+## Build and test
+
+Speaker requires Swift 6 and the macOS 26 SDK. Run build and test work through `scripts/*`; the wrappers select `MacOSX26.sdk`, isolate the per-user module cache, and disable the nested SwiftPM sandbox. Override only the SDK with `SPEAKER_SDKROOT`. Bare `swift build`, `swift run`, and `swift test` are not equivalent to CI.
+
+Use the tightest relevant specification executable while iterating:
+
+```bash
+./scripts/swiftw run --disable-sandbox SpeakerCoreSpecs
+./scripts/swiftw run --disable-sandbox SpeakerAppScenarioSpecs
+./scripts/swiftw run --disable-sandbox SpeakerAppUISpecs
+./scripts/swiftw run --disable-sandbox SpeakerProviderEvidenceSpecs
+```
+
+These are sequential `@main` executables with local `run`/`runAsync` and `expect` helpers. They have no per-case filter. Locate a case by name, iterate with its whole executable, then run the full deterministic gate:
+
+```bash
+./scripts/test
+```
+
+`./scripts/test` is the repository's full deterministic gate: all specification executables, its shell contract tests, and warnings-as-errors builds for tool executables. It is not the whole CI workflow. An ordinary code change is test-complete when its tightest relevant specification executable and `./scripts/test` both exit 0.
+
+For installer, release, or workflow changes, also inspect `.github/workflows/ci.yml` and run every directly relevant CI-only gate. `./scripts/test-install-rollback` is currently a CI-only gate and does not run inside `./scripts/test`. Such a change is test-complete only when the ordinary code gates and all directly relevant CI-only gates exit 0.
+
+Use `./scripts/build` for the ordinary debug App build. For a focused warnings gate, use:
+
+```bash
+./scripts/swiftw build --disable-sandbox --configuration <debug|release> --product SpeakerApp -Xswiftc -warnings-as-errors
+```
+
+A build check is complete only when the relevant configuration exits 0 without warnings.
+
+## Launch, bundle, and local install
+
+Every command that bundles or launches Speaker must keep one stable local code identity:
+
+```bash
+SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Development" ./scripts/launch
+SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Development" ./scripts/bundle
+```
+
+The certificate lives in the login keychain. Ad-hoc signing changes code identity after rebuilds, so macOS can silently discard Accessibility and Microphone grants.
+
+Run `./scripts/release` without an identity override when the keychain contains exactly one `Speaker Local Development` identity. The script selects it automatically; if absent, it selects exactly one `Apple Development: ...` identity. Multiple matching identities require an explicit `SPEAKER_LOCAL_CODESIGN_IDENTITY`. This is the development “try my change” loop: release build, bundle, install to `/Applications/Speaker.app`, and launch. It is not a production release.
+
+Local App verification is complete when the launched bundle uses the selected stable identity and the expected TCC grants remain effective.
+
+## Production release
+
+Read [`../releasing.md`](../releasing.md) and [`../production-readiness.md`](../production-readiness.md) before production work. `./scripts/distribute` is the only production entrypoint. It must fail closed for placeholder release identity, missing Developer ID/notary/Sparkle inputs, dirty source or dependency checkouts, and incomplete provider evidence.
+
+Production work is complete only after signed and notarized artifacts, signed appcast, public readback, retained evidence, and required clean-machine/old-version acceptance all pass. A successful local bundle is not production evidence.
