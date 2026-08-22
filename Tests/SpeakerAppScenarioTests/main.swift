@@ -1,5 +1,6 @@
 import Darwin
 import AppKit
+@preconcurrency import Carbon
 import Combine
 import Foundation
 import SpeakerAppFeatures
@@ -68,6 +69,64 @@ struct SpeakerAppScenarioSpecs {
             try expect(!deletedKeyWithStaleSuccess.isReady)
         }
 
+        run("shortcut recorder captures one physical modifier on release", failures: &failures, executed: &executed) {
+            var policy = ShortcutRecorderPolicy()
+            try expect(
+                policy.handle(.flagsChanged(
+                    keyCode: UInt16(kVK_Option),
+                    flags: [.option]
+                )) == .consume
+            )
+            try expect(
+                policy.handle(.flagsChanged(
+                    keyCode: UInt16(kVK_Option),
+                    flags: []
+                )) == .capture(
+                    CustomHotKey.modifierOnly(keyCode: UInt32(kVK_Option))!
+                )
+            )
+
+            policy.reset()
+            try expect(
+                policy.handle(.flagsChanged(
+                    keyCode: UInt16(kVK_RightOption),
+                    flags: [.option]
+                )) == .consume
+            )
+            try expect(
+                policy.handle(.keyDown(
+                    keyCode: UInt16(kVK_Space),
+                    flags: [.option],
+                    charactersIgnoringModifiers: " "
+                )) == .capture(CustomHotKey(
+                    keyCode: UInt32(kVK_Space),
+                    modifiers: UInt32(optionKey),
+                    displayName: "⌥Space"
+                ))
+            )
+
+            policy.reset()
+            try expect(
+                policy.handle(.keyDown(
+                    keyCode: UInt16(kVK_Escape),
+                    flags: [],
+                    charactersIgnoringModifiers: nil
+                )) == .cancel
+            )
+            try expect(
+                policy.handle(.flagsChanged(
+                    keyCode: UInt16(kVK_Command),
+                    flags: [.command]
+                )) == .consume
+            )
+            guard case .reject = policy.handle(.flagsChanged(
+                keyCode: UInt16(kVK_Command),
+                flags: []
+            )) else {
+                throw SpecFailure(message: "Command alone was accepted")
+            }
+        }
+
         run("onboarding exposes only valid permission and provider actions", failures: &failures, executed: &executed) {
             let presentation = OnboardingPresentation(
                 permissions: .init(
@@ -106,6 +165,68 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(restricted.canCheckConnection)
             try expect(restricted.canSelectResource)
+        }
+
+        await runAsync(
+            "onboarding advances from an explicit microphone grant only",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let grantedAccess = ScenarioPermissionAccess(
+                snapshot: .init(
+                    accessibility: .denied,
+                    microphone: .notDetermined
+                ),
+                requestSnapshots: [
+                    .microphone: .init(
+                        accessibility: .denied,
+                        microphone: .granted
+                    ),
+                ]
+            )
+            let grantedPermissions = PermissionModel(access: grantedAccess)
+            var grantedSynchronizations = 0
+            let grantedCoordinator = OnboardingPermissionCoordinator(
+                permissions: grantedPermissions,
+                synchronize: { grantedSynchronizations += 1 }
+            )
+
+            await grantedCoordinator.request(.microphone)
+
+            try expect(
+                grantedAccess.requestedPermissions
+                    == [.microphone, .accessibility]
+            )
+            try expect(grantedSynchronizations == 2)
+
+            for terminalState in [
+                PermissionState.denied,
+                PermissionState.restricted,
+            ] {
+                let stoppedAccess = ScenarioPermissionAccess(
+                    snapshot: .init(
+                        accessibility: .denied,
+                        microphone: .notDetermined
+                    ),
+                    requestSnapshots: [
+                        .microphone: .init(
+                            accessibility: .denied,
+                            microphone: terminalState
+                        ),
+                    ]
+                )
+                let stoppedPermissions = PermissionModel(access: stoppedAccess)
+                var stoppedSynchronizations = 0
+                let stoppedCoordinator = OnboardingPermissionCoordinator(
+                    permissions: stoppedPermissions,
+                    synchronize: { stoppedSynchronizations += 1 }
+                )
+
+                await stoppedCoordinator.request(.microphone)
+
+                try expect(stoppedAccess.requestedPermissions == [.microphone])
+                try expect(stoppedSynchronizations == 1)
+            }
         }
 
         await runAsync(
@@ -587,6 +708,12 @@ struct SpeakerAppScenarioSpecs {
                     == .unavailable(
                         diagnosticCode: "update.development-build"
                     )
+            )
+            try expect(
+                SoftwareUpdateState
+                    .unavailable("update.development-build")
+                    .unavailableMessage
+                    == "检查更新仅用于正式发布版本。"
             )
             try expect(
                 SoftwareUpdateConfiguration(
@@ -3137,9 +3264,15 @@ private final class SoftwareUpdateDriverFake: SoftwareUpdateDriving {
 @MainActor
 private final class ScenarioPermissionAccess: PermissionAccess {
     var snapshot: PermissionSnapshot
+    private(set) var requestedPermissions: [PermissionKind] = []
+    private let requestSnapshots: [PermissionKind: PermissionSnapshot]
 
-    init(snapshot: PermissionSnapshot) {
+    init(
+        snapshot: PermissionSnapshot,
+        requestSnapshots: [PermissionKind: PermissionSnapshot] = [:]
+    ) {
         self.snapshot = snapshot
+        self.requestSnapshots = requestSnapshots
     }
 
     func currentSnapshot() -> PermissionSnapshot {
@@ -3147,7 +3280,11 @@ private final class ScenarioPermissionAccess: PermissionAccess {
     }
 
     func request(_ permission: PermissionKind) async -> PermissionSnapshot {
-        snapshot
+        requestedPermissions.append(permission)
+        if let requestedSnapshot = requestSnapshots[permission] {
+            snapshot = requestedSnapshot
+        }
+        return snapshot
     }
 }
 

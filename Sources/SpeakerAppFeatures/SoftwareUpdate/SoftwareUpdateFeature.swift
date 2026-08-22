@@ -87,6 +87,20 @@ package struct SoftwareUpdateState: Equatable, Sendable {
         )
     }
 
+    package var unavailableMessage: String? {
+        guard !isAvailable else { return nil }
+        return switch diagnosticCode {
+        case "update.development-build":
+            "检查更新仅用于正式发布版本。"
+        case "update.invalid-feed", "update.invalid-public-key":
+            "正式更新配置无效；已停止检查更新。"
+        case "update.start-failed":
+            "更新服务启动失败；请重新打开 Speaker 后重试。"
+        default:
+            "当前无法检查更新。"
+        }
+    }
+
     fileprivate static func ready(
         _ snapshot: SoftwareUpdateDriverSnapshot
     ) -> Self {

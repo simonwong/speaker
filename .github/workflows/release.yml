@@ -61,6 +61,7 @@ jobs:
           source ./scripts/release-common
           load_reviewed_release_identity "$GITHUB_WORKSPACE"
           load_reviewed_release_candidate "$GITHUB_WORKSPACE"
+          [[ "$GITHUB_REPOSITORY" == "$REVIEWED_GITHUB_REPOSITORY" ]]
           verify_release_candidate_history "$GITHUB_WORKSPACE"
           case "$RELEASE_NOTES_INPUT" in
             ""|/*|*..*|*[^A-Za-z0-9._/-]*)
@@ -86,6 +87,8 @@ jobs:
             "$GITHUB_ENV" SPEAKER_VERSION "$REVIEWED_RELEASE_VERSION"
           append_github_environment_value \
             "$GITHUB_ENV" SPEAKER_BUILD_NUMBER "$REVIEWED_RELEASE_BUILD_NUMBER"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_TAG "v$REVIEWED_RELEASE_VERSION"
           append_github_environment_value \
             "$GITHUB_ENV" SPEAKER_RELEASE_NOTES_FILE \
             "$REVIEWED_RELEASE_NOTES_RELATIVE_PATH"
@@ -290,3 +293,193 @@ jobs:
             "$RUNNER_TEMP/speaker-developer-id.p12" \
             "$RUNNER_TEMP/speaker-notary-api-key.p8" \
             "$RUNNER_TEMP/speaker-sparkle-private-key"
+
+  publish:
+    name: Publish verified production release
+    needs: release
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      actions: read
+      contents: write
+    env:
+      SPEAKER_SPARKLE_KEY_ACCOUNT: speaker-release-ci
+
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load reviewed publication metadata
+        id: metadata
+        shell: zsh {0}
+        env:
+          RELEASE_NOTES_INPUT: ${{ inputs.release_notes_file }}
+        run: |
+          set -euo pipefail
+          source ./scripts/release-common
+          load_reviewed_release_identity "$GITHUB_WORKSPACE"
+          load_reviewed_release_candidate "$GITHUB_WORKSPACE"
+          [[ "$GITHUB_REPOSITORY" == "$REVIEWED_GITHUB_REPOSITORY" ]]
+          verify_release_candidate_history "$GITHUB_WORKSPACE"
+          resolve_tracked_release_notes \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/$RELEASE_NOTES_INPUT"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_VERSION "$REVIEWED_RELEASE_VERSION"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_BUILD_NUMBER "$REVIEWED_RELEASE_BUILD_NUMBER"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_TAG "v$REVIEWED_RELEASE_VERSION"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_NOTES_FILE \
+            "$REVIEWED_RELEASE_NOTES_RELATIVE_PATH"
+          print -r -- \
+            "artifact_name=Speaker-$REVIEWED_RELEASE_VERSION-$REVIEWED_RELEASE_BUILD_NUMBER-production" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Download protected production artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: .build/distribution
+
+      - name: Resolve pinned Sparkle tools
+        run: ./scripts/swiftw package resolve --disable-sandbox
+
+      - name: Configure ephemeral Sparkle keychain
+        shell: zsh {0}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPEAKER_SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SPARKLE_PRIVATE_KEY" ]]
+          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-publish.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          SPARKLE_KEY_PATH="$RUNNER_TEMP/speaker-sparkle-private-key"
+          print -rn -- "$SPARKLE_PRIVATE_KEY" > "$SPARKLE_KEY_PATH"
+          chmod 600 "$SPARKLE_KEY_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          GENERATE_KEYS=.build/artifacts/sparkle/Sparkle/bin/generate_keys
+          [[ -x "$GENERATE_KEYS" ]]
+          "$GENERATE_KEYS" \
+            --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
+            -f "$SPARKLE_KEY_PATH"
+          REVIEWED_PUBLIC_KEY="$(/usr/libexec/PlistBuddy \
+            -c 'Print :UpdatePublicEDKey' \
+            Resources/ReleaseIdentity.plist)"
+          ACTUAL_PUBLIC_KEY="$("$GENERATE_KEYS" \
+            --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
+            -p)"
+          [[ "$ACTUAL_PUBLIC_KEY" == "$REVIEWED_PUBLIC_KEY" ]]
+
+      - name: Publish verified GitHub production release
+        id: github_release
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source ./scripts/release-common
+          load_reviewed_release_identity "$GITHUB_WORKSPACE"
+          [[ "$GITHUB_REPOSITORY" == "$REVIEWED_GITHUB_REPOSITORY" ]]
+          [[ "$SPEAKER_RELEASE_TAG" == "v$SPEAKER_VERSION" ]]
+          TAG="$SPEAKER_RELEASE_TAG"
+          DMG="Speaker-$SPEAKER_VERSION-$SPEAKER_BUILD_NUMBER.dmg"
+          CHECKSUM="$DMG.sha256"
+          DISTRIBUTION="$GITHUB_WORKSPACE/.build/distribution"
+          DOWNLOAD="$RUNNER_TEMP/speaker-production-draft"
+
+          if gh release view "$TAG" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            print -u2 "Refusing to reuse an existing GitHub Release: $TAG"
+            exit 1
+          fi
+          if gh api --silent \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            print -u2 "Refusing to reuse an existing Git tag: $TAG"
+            exit 1
+          fi
+
+          gh release create "$TAG" \
+            "$DISTRIBUTION/$DMG#Speaker $SPEAKER_VERSION" \
+            "$DISTRIBUTION/$CHECKSUM#SHA-256 checksum" \
+            "$DISTRIBUTION/appcast.xml#Signed Sparkle appcast" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Speaker $SPEAKER_VERSION" \
+            --notes-file "$SPEAKER_RELEASE_NOTES_FILE" \
+            --draft
+          print 'draft_created=true' >> "$GITHUB_OUTPUT"
+
+          DRAFT_STATE="$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,targetCommitish \
+            --jq '[.isDraft, .targetCommitish] | @tsv')"
+          [[ "$DRAFT_STATE" == $'true\t'"$GITHUB_SHA" ]]
+          ASSETS="$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets | map(.name) | sort | join("\n")')"
+          EXPECTED_ASSETS="$(print -r -- "$DMG" "$CHECKSUM" appcast.xml | sort)"
+          [[ "$ASSETS" == "$EXPECTED_ASSETS" ]]
+
+          mkdir "$DOWNLOAD"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$DOWNLOAD" \
+            --pattern "$DMG" \
+            --pattern "$CHECKSUM" \
+            --pattern appcast.xml
+          cmp -s "$DISTRIBUTION/$DMG" "$DOWNLOAD/$DMG"
+          cmp -s "$DISTRIBUTION/$CHECKSUM" "$DOWNLOAD/$CHECKSUM"
+          cmp -s "$DISTRIBUTION/appcast.xml" "$DOWNLOAD/appcast.xml"
+
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest
+          print 'published=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify public production update channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$SPEAKER_RELEASE_TAG"
+          [[ "$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft')" == "false" ]]
+          ./scripts/verify-published-update
+
+      - name: Remove failed draft release
+        if: ${{ failure() && steps.github_release.outputs.draft_created == 'true' && steps.github_release.outputs.published != 'true' }}
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete "$SPEAKER_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --cleanup-tag \
+            --yes
+
+      - name: Remove ephemeral publication credentials
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: zsh {0}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-publish.keychain-db"
+          security default-keychain -d user -s login.keychain-db || true
+          security list-keychains -d user -s login.keychain-db || true
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -f "$RUNNER_TEMP/speaker-sparkle-private-key"

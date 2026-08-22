@@ -298,6 +298,19 @@ validate_production_metadata() {
     fi
 }
 
+reviewed_release_archive_url_prefix() {
+    local version="$1"
+
+    if [[ -z "${REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX:-}" ]] \
+          || ! matches_release_pattern \
+              "$version" \
+              '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+        release_error "A reviewed GitHub release channel and stable SemVer are required."
+        return 1
+    fi
+    print -r -- "${REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX}v${version}/"
+}
+
 load_reviewed_release_identity() {
     local root="$1"
     local identity_file="$root/Resources/ReleaseIdentity.plist"
@@ -310,6 +323,10 @@ load_reviewed_release_identity() {
     local decoded_key
     local decoded_key_size
     local reviewed_value
+    local github_repository
+    local feed_repository
+    local download_repository
+    local product_repository
 
     if [[ ! -f "$identity_file" || -L "$identity_file" ]]; then
         release_error "Reviewed release identity is missing: $identity_file"
@@ -402,11 +419,26 @@ load_reviewed_release_identity() {
         release_error "UpdateDownloadURLPrefix must be a reviewed HTTPS directory URL ending in /."
         return 1
     fi
+    feed_repository="${update_feed_url#https://github.com/}"
+    feed_repository="${feed_repository%/releases/latest/download/appcast.xml}"
+    download_repository="${update_download_url_prefix#https://github.com/}"
+    download_repository="${download_repository%/releases/download/}"
+    product_repository="${product_url#https://github.com/}"
+    product_repository="${product_repository%/}"
     if [[ "$update_feed_url" \
-          != "${update_download_url_prefix}appcast.xml" ]]; then
-        release_error "UpdateFeedURL must publish appcast.xml beside update archives."
+              != "https://github.com/${feed_repository}/releases/latest/download/appcast.xml" \
+          || "$update_download_url_prefix" \
+              != "https://github.com/${download_repository}/releases/download/" \
+          || "$product_url" != "https://github.com/${product_repository}" \
+          || "$feed_repository" != "$download_repository" \
+          || "$feed_repository" != "$product_repository" ]] \
+          || ! matches_release_pattern \
+              "$feed_repository" \
+              '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
+        release_error "Update URLs must use one reviewed GitHub Releases repository."
         return 1
     fi
+    github_repository="$feed_repository"
     if [[ "$product_url" != https://* \
           || "$product_url" == *".invalid"* ]]; then
         release_error "ProductURL must be a reviewed HTTPS production URL."
@@ -435,6 +467,7 @@ load_reviewed_release_identity() {
     typeset -g REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX="$update_download_url_prefix"
     typeset -g REVIEWED_PRODUCT_URL="$product_url"
     typeset -g REVIEWED_UPDATE_PUBLIC_ED_KEY="$update_public_ed_key"
+    typeset -g REVIEWED_GITHUB_REPOSITORY="$github_repository"
 }
 
 load_reviewed_release_candidate() {

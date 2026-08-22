@@ -209,7 +209,7 @@ package final class VoiceShortcutFeature: ObservableObject {
             }
             guard hotKey.isSafeForGlobalVoiceInput else {
                 fallbackToFunctionKey(
-                    reason: "单个修饰键可能干扰正常输入；请使用 ⌥ Space 或至少两个 ⌘/⌥/⌃ 修饰键",
+                    reason: "请使用单独的左/右 ⌥、⌃、⇧，或安全的组合键",
                     persist: persist
                 )
                 return
@@ -294,10 +294,10 @@ package final class VoiceShortcutFeature: ObservableObject {
             "无法安装自定义快捷键事件处理"
         case .hotKeyRegistrationUnavailable:
             "系统未接受这个自定义快捷键"
-        case .escapeEventTapUnavailable:
-            "自定义快捷键的 Esc 取消监听未能创建"
-        case .escapeRunLoopSourceUnavailable:
-            "自定义快捷键的 Esc 取消监听无法接入系统事件循环"
+        case .shortcutEventTapUnavailable:
+            "无法创建自定义快捷键的系统事件监听"
+        case .shortcutRunLoopSourceUnavailable:
+            "自定义快捷键监听无法接入系统事件循环"
         }
     }
 

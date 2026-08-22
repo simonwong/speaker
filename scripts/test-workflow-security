@@ -54,6 +54,56 @@ verify_workflows() {
     done
 }
 
+verify_production_release_publication() {
+    local file="$1"
+    local create_line
+    local download_line
+    local publish_line
+    local readback_line
+    local release_job
+    local publish_job
+
+    release_job="$(sed -n '/^  release:/,/^  publish:/p' "$file")"
+    publish_job="$(sed -n '/^  publish:/,$p' "$file")"
+    [[ "$release_job" != *'contents: write'* ]] || {
+        print -u2 "Build and signing job must not receive contents: write."
+        return 1
+    }
+    print -r -- "$publish_job" | grep -Eq '^    permissions:$' \
+        && print -r -- "$publish_job" | grep -Eq '^      contents: write$' || {
+        print -u2 "Production release job must have scoped contents: write."
+        return 1
+    }
+    for contract in \
+        'gh release create "$TAG"' \
+        'gh release download "$TAG"' \
+        'gh release edit "$TAG"' \
+        '--draft' \
+        '--draft=false' \
+        '--latest' \
+        './scripts/verify-published-update'
+    do
+        grep -F -- "$contract" "$file" >/dev/null || {
+            print -u2 "Production release workflow is missing: $contract"
+            return 1
+        }
+    done
+    create_line="$(grep -nF 'gh release create "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
+    download_line="$(grep -nF 'gh release download "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
+    publish_line="$(grep -nF 'gh release edit "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
+    readback_line="$(grep -nF './scripts/verify-published-update' "$file" | head -n 1 | cut -d: -f1)"
+    (( create_line < download_line \
+        && download_line < publish_line \
+        && publish_line < readback_line )) || {
+        print -u2 "Production assets must be draft-verified before publish and public readback."
+        return 1
+    }
+    if grep -F -- '-evidence.zip#' "$file" >/dev/null; then
+        print -u2 "Protected release evidence must not be attached publicly."
+        return 1
+    fi
+}
+
 mkdir "$TEST_ROOT/valid" "$TEST_ROOT/unpinned" \
     "$TEST_ROOT/target" "$TEST_ROOT/write-all"
 print -r -- 'name: valid
@@ -98,5 +148,6 @@ if verify_workflows "$TEST_ROOT/write-all" >/dev/null 2>&1; then
     exit 1
 fi
 verify_workflows "$ROOT/.github/workflows"
+verify_production_release_publication "$ROOT/.github/workflows/release.yml"
 
 print "PASS: workflows use least privilege and immutable Action revisions"

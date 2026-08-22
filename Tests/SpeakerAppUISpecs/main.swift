@@ -1324,7 +1324,7 @@ struct SpeakerAppUISpecs {
             try expect(deliveredRow.canCopy)
             try expect(deliveredRow.status == .delivered)
             try expect(!deliveredRow.status.showsStatusIcon)
-            try expect(unconfirmedRow.status.showsStatusIcon)
+            try expect(!unconfirmedRow.status.showsStatusIcon)
             try expect(pendingRow.status.showsStatusIcon)
             try expect(pendingRow.canCopy)
         }

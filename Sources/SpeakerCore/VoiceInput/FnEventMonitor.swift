@@ -86,9 +86,14 @@ package enum FunctionKeyMonitorStartResult: Equatable, Sendable {
     case runLoopSourceUnavailable
 }
 
-package enum FunctionKeyFlagEventDecision: Equatable, Sendable {
+package enum ModifierFlagEventEdge: Equatable, Sendable {
     case pressed
     case released
+}
+
+package enum ModifierFlagEventDisposition: Equatable, Sendable {
+    case passThrough
+    case consume(ModifierFlagEventEdge)
 }
 
 /// Accepts modifier edges only when macOS identifies the physical Fn key as
@@ -102,12 +107,12 @@ package struct FunctionKeyFlagEventPolicy: Sendable {
     package mutating func handle(
         keyCode: Int64,
         flags: CGEventFlags
-    ) -> FunctionKeyFlagEventDecision? {
-        guard keyCode == Int64(kVK_Function) else { return nil }
+    ) -> ModifierFlagEventDisposition {
+        guard keyCode == Int64(kVK_Function) else { return .passThrough }
         let functionFlagIsSet = flags.contains(.maskSecondaryFn)
-        guard functionFlagIsSet != isDown else { return nil }
+        guard functionFlagIsSet != isDown else { return .passThrough }
         isDown = functionFlagIsSet
-        return functionFlagIsSet ? .pressed : .released
+        return .consume(functionFlagIsSet ? .pressed : .released)
     }
 
     package mutating func reset() {
@@ -214,10 +219,11 @@ private final class FnEventTapBox: @unchecked Sendable {
             }
             return false
         case .flagsChanged:
-            guard let trigger = functionKeyPolicy.handle(
+            let disposition = functionKeyPolicy.handle(
                 keyCode: event.getIntegerValueField(.keyboardEventKeycode),
                 flags: event.flags
-            ) else { return false }
+            )
+            guard case let .consume(trigger) = disposition else { return false }
             switch trigger {
             case .pressed:
                 guard !IsSecureEventInputEnabled() else {
@@ -234,7 +240,7 @@ private final class FnEventTapBox: @unchecked Sendable {
                     target.receive(.released)
                 }
             }
-            return false
+            return true
         case .keyDown, .keyUp:
             guard event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
             let keyEvent: EscapeKeyEvent = type == .keyDown ? .keyDown : .keyUp
