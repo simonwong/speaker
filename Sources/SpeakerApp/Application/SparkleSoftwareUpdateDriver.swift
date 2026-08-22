@@ -4,12 +4,28 @@ import Sparkle
 
 @MainActor
 final class SparkleSoftwareUpdateDriver: SoftwareUpdateDriving {
-    private let controller = SPUStandardUpdaterController(
-        startingUpdater: false,
-        updaterDelegate: nil,
-        userDriverDelegate: nil
-    )
+    private let updaterDelegate: SparkleUpdaterDelegate
+    private let controller: SPUStandardUpdaterController
     private var observation: AnyCancellable?
+
+    init(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        stableFeedURLString: String? = Bundle.main.object(
+            forInfoDictionaryKey: "SUFeedURL"
+        ) as? String
+    ) {
+        let feedURL = SoftwareUpdateFeedOverridePolicy.stagingFeedURL(
+            arguments: arguments,
+            stableFeedURLString: stableFeedURLString
+        )
+        let updaterDelegate = SparkleUpdaterDelegate(feedURLString: feedURL)
+        self.updaterDelegate = updaterDelegate
+        controller = SPUStandardUpdaterController(
+            startingUpdater: false,
+            updaterDelegate: updaterDelegate,
+            userDriverDelegate: nil
+        )
+    }
 
     func start(
         observing: @escaping @MainActor @Sendable (
@@ -54,5 +70,17 @@ final class SparkleSoftwareUpdateDriver: SoftwareUpdateDriving {
             automaticallyChecksForUpdates:
                 controller.updater.automaticallyChecksForUpdates
         )
+    }
+}
+
+private final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    private let feedURLString: String?
+
+    init(feedURLString: String?) {
+        self.feedURLString = feedURLString
+    }
+
+    func feedURLString(for updater: SPUUpdater) -> String? {
+        feedURLString
     }
 }

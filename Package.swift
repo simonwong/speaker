@@ -31,6 +31,14 @@ let package = Package(
             targets: ["SpeakerProviderEvidenceSpecs"]
         ),
         .executable(
+            name: "SpeakerUpdateSignatureVerifier",
+            targets: ["SpeakerUpdateSignatureVerifier"]
+        ),
+        .executable(
+            name: "SpeakerReleaseEvidenceProtector",
+            targets: ["SpeakerReleaseEvidenceProtector"]
+        ),
+        .executable(
             name: "SpeakerDeliverySmokeTarget",
             targets: ["SpeakerDeliverySmokeTarget"]
         ),
@@ -94,6 +102,14 @@ let package = Package(
         .executableTarget(
             name: "SpeakerDeliverySmokeTarget",
             path: "Tools/SpeakerDeliverySmokeTarget"
+        ),
+        .executableTarget(
+            name: "SpeakerUpdateSignatureVerifier",
+            path: "Tools/SpeakerUpdateSignatureVerifier"
+        ),
+        .executableTarget(
+            name: "SpeakerReleaseEvidenceProtector",
+            path: "Tools/SpeakerReleaseEvidenceProtector"
         ),
     ]
 )

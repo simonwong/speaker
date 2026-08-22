@@ -82,7 +82,10 @@ struct SpeakerAppScenarioSpecs {
                     keyCode: UInt16(kVK_Option),
                     flags: []
                 )) == .capture(
-                    CustomHotKey.modifierOnly(keyCode: UInt32(kVK_Option))!
+                    CustomHotKey.modifierOnly(
+                        .leftOption,
+                        displayName: "左 ⌥"
+                    )
                 )
             )
 
@@ -103,6 +106,27 @@ struct SpeakerAppScenarioSpecs {
                     modifiers: UInt32(optionKey),
                     displayName: "⌥Space"
                 ))
+            )
+
+            policy.reset()
+            try expect(
+                policy.handle(.flagsChanged(
+                    keyCode: UInt16(kVK_Option),
+                    flags: [.option]
+                )) == .consume
+            )
+            guard case .reject = policy.handle(.keyDown(
+                keyCode: UInt16(kVK_ANSI_A),
+                flags: [.option],
+                charactersIgnoringModifiers: "a"
+            )) else {
+                throw SpecFailure(message: "unsafe Option chord was accepted")
+            }
+            try expect(
+                policy.handle(.flagsChanged(
+                    keyCode: UInt16(kVK_Option),
+                    flags: []
+                )) == .consume
             )
 
             policy.reset()
@@ -705,13 +729,11 @@ struct SpeakerAppScenarioSpecs {
                         "https://updates.example.com/appcast.xml",
                     publicEDKey: validKey
                 ).availability
-                    == .unavailable(
-                        diagnosticCode: "update.development-build"
-                    )
+                    == .unavailable(.developmentBuild)
             )
             try expect(
                 SoftwareUpdateState
-                    .unavailable("update.development-build")
+                    .unavailable(.developmentBuild)
                     .unavailableMessage
                     == "检查更新仅用于正式发布版本。"
             )
@@ -722,9 +744,7 @@ struct SpeakerAppScenarioSpecs {
                         "http://updates.example.com/appcast.xml",
                     publicEDKey: validKey
                 ).availability
-                    == .unavailable(
-                        diagnosticCode: "update.invalid-feed"
-                    )
+                    == .unavailable(.invalidFeed)
             )
             try expect(
                 SoftwareUpdateConfiguration(
@@ -733,9 +753,7 @@ struct SpeakerAppScenarioSpecs {
                         "https://updates.example.com/appcast.xml",
                     publicEDKey: "REPLACE_WITH_PUBLIC_KEY"
                 ).availability
-                    == .unavailable(
-                        diagnosticCode: "update.invalid-public-key"
-                    )
+                    == .unavailable(.invalidPublicKey)
             )
             try expect(
                 SoftwareUpdateConfiguration(
@@ -745,6 +763,48 @@ struct SpeakerAppScenarioSpecs {
                     publicEDKey: validKey
                 ).availability == .ready
             )
+        }
+
+        run(
+            "software update staging feed accepts only this repository immutable release",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let stableFeed =
+                "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml"
+            let candidateFeed =
+                "https://github.com/simonwong/speaker/releases/download/v1.2.3/appcast.xml"
+            try expect(
+                SoftwareUpdateFeedOverridePolicy.stagingFeedURL(
+                    arguments: [
+                        "SpeakerApp",
+                        "--speaker-update-feed",
+                        candidateFeed,
+                    ],
+                    stableFeedURLString: stableFeed
+                ) == candidateFeed
+            )
+            for rejected in [
+                "https://evil.example/releases/download/v1.2.3/appcast.xml",
+                "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml",
+                "https://github.com/simonwong/speaker/releases/download/latest/appcast.xml",
+                "https://github.com/simonwong/speaker/releases/download/v1.2/appcast.xml",
+                "https://github.com:444/simonwong/speaker/releases/download/v1.2.3/appcast.xml",
+                "https://user@github.com/simonwong/speaker/releases/download/v1.2.3/appcast.xml",
+                "https://github.com/simonwong/speaker/releases/download/v01.2.3/appcast.xml",
+                "https://github.com/simonwong/other/releases/download/v1.2.3/appcast.xml",
+            ] {
+                try expect(
+                    SoftwareUpdateFeedOverridePolicy.stagingFeedURL(
+                        arguments: [
+                            "SpeakerApp",
+                            "--speaker-update-feed",
+                            rejected,
+                        ],
+                        stableFeedURLString: stableFeed
+                    ) == nil
+                )
+            }
         }
 
         await runAsync(

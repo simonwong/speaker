@@ -1288,16 +1288,17 @@ struct SpeakerCoreSpecs {
         }
 
         run("a selected physical Option Control or Shift key is a safe exclusive trigger", failures: &failures) {
-            let supportedKeyCodes: [UInt32] = [
-                UInt32(kVK_Option), UInt32(kVK_RightOption),
-                UInt32(kVK_Control), UInt32(kVK_RightControl),
-                UInt32(kVK_Shift), UInt32(kVK_RightShift),
+            let supportedModifiers: [CustomHotKey.PhysicalModifier] = [
+                .leftOption, .rightOption,
+                .leftControl, .rightControl,
+                .leftShift, .rightShift,
             ]
-            for keyCode in supportedKeyCodes {
-                guard let hotKey = CustomHotKey.modifierOnly(keyCode: keyCode) else {
-                    throw SpecFailure(message: "supported modifier was rejected")
-                }
-                try expect(hotKey.trigger == .modifierOnly(keyCode: keyCode))
+            for modifier in supportedModifiers {
+                let hotKey = CustomHotKey.modifierOnly(
+                    modifier,
+                    displayName: "modifier"
+                )
+                try expect(hotKey.trigger == .modifierOnly(modifier))
                 try expect(hotKey.isModifierOnly)
                 try expect(hotKey.isSafeForGlobalVoiceInput)
             }
@@ -1305,12 +1306,24 @@ struct SpeakerCoreSpecs {
                 CustomHotKey.optionSpace.trigger
                     == .keyChord(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
             )
-            try expect(CustomHotKey.modifierOnly(keyCode: UInt32(kVK_Command)) == nil)
-            try expect(CustomHotKey.modifierOnly(keyCode: UInt32(kVK_RightCommand)) == nil)
+            try expect(
+                CustomHotKey.PhysicalModifier(
+                    keyCode: UInt32(kVK_Command)
+                ) == nil
+            )
+            try expect(
+                CustomHotKey.PhysicalModifier(
+                    keyCode: UInt32(kVK_RightCommand)
+                ) == nil
+            )
 
-            guard let rightOption = CustomHotKey.modifierOnly(
-                keyCode: UInt32(kVK_RightOption)
-            ), var policy = ModifierOnlyFlagEventPolicy(hotKey: rightOption) else {
+            let rightOption = CustomHotKey.modifierOnly(
+                .rightOption,
+                displayName: "right Option"
+            )
+            guard var policy = ModifierOnlyFlagEventPolicy(
+                hotKey: rightOption
+            ) else {
                 throw SpecFailure(message: "right Option policy was unavailable")
             }
             try expect(
@@ -1352,7 +1365,7 @@ struct SpeakerCoreSpecs {
             await feature.flushPersistence()
             try expect(feature.preference == .init(customHotKey: custom))
             try expect(customMonitor.registeredKeys.isEmpty)
-            try expect(feature.notice?.message.contains("辅助功能权限") == true)
+            try expect(feature.notice?.kind == .accessibilityRequired)
             try expect(
                 feature.activation == .waitingForAccessibility(.init(customHotKey: custom))
             )
@@ -1390,8 +1403,7 @@ struct SpeakerCoreSpecs {
             try expect(functionMonitor.startCount == 1)
             try expect(customMonitor.registeredKeys.isEmpty)
             try expect(
-                feature.notice?.message
-                    == "这个组合键可能与 macOS 或当前 App 的菜单命令冲突，已继续使用 Fn。"
+                feature.notice?.kind == .fellBackToFunctionKey(.editingConflict)
             )
             try expect(feature.notice?.level == .warning)
             let persistedFallback = await persistence.values
@@ -1423,8 +1435,7 @@ struct SpeakerCoreSpecs {
             try expect(functionMonitor.startCount == 1)
             try expect(customMonitor.registeredKeys.isEmpty)
             try expect(
-                feature.notice?.message.contains("请使用单独的左/右")
-                    == true
+                feature.notice?.kind == .fellBackToFunctionKey(.unsafeShortcut)
             )
             let persistedFallback = await persistence.values
             try expect(persistedFallback == [.functionKey])
@@ -1452,8 +1463,14 @@ struct SpeakerCoreSpecs {
             try expect(feature.preference == .functionKey)
             try expect(customMonitor.registeredKeys == [.optionSpace])
             try expect(functionMonitor.startCount == 1)
-            try expect(feature.notice?.message.contains("系统未接受这个自定义快捷键") == true)
-            try expect(feature.notice?.message.contains("无法创建 Fn 键的系统事件监听") == true)
+            try expect(
+                feature.notice?.kind == .fallbackUnavailable(
+                    .activationFailed(
+                        .hotKeyRegistrationUnavailable(status: -9876)
+                    ),
+                    .eventTapUnavailable
+                )
+            )
             try expect(feature.activation == .unavailable(.functionKey))
             let persistedFallback = await persistence.values
             try expect(persistedFallback == [.functionKey])
@@ -1578,7 +1595,10 @@ struct SpeakerCoreSpecs {
             await feature.flushPersistence()
 
             try expect(feature.activation == .unavailable(.functionKey))
-            try expect(feature.notice?.message == "无法创建 Fn 键的系统事件监听。")
+            try expect(
+                feature.notice?.kind
+                    == .functionKeyActivationFailed(.eventTapUnavailable)
+            )
             let persistedPreferences = await persistence.values
             try expect(persistedPreferences == [.functionKey])
         }
@@ -1604,7 +1624,7 @@ struct SpeakerCoreSpecs {
             await feature.flushPersistence()
             try expect(feature.notice == nil)
             try expect(
-                feature.persistenceConfirmation == "Fn 快捷键设置已保存。"
+                feature.persistenceConfirmation == .functionKey
             )
             let persistedPreferences = await persistence.values
             try expect(persistedPreferences == [.functionKey])

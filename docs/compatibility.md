@@ -44,11 +44,11 @@ provider request and does not replace the cross-application matrix.
 
 ## Real-machine cross-application matrix
 
-Run `./scripts/compatibility-smoke` on an unlocked Mac with Microphone and Accessibility permission. The report contains no transcript text, credentials, request bodies, or absolute application path. It binds the candidate version, signing mode, and executable SHA-256.
+Run `./scripts/compatibility-smoke` on an unlocked Mac with Microphone and Accessibility permission. The report contains no transcript text, credentials, request bodies, or absolute application path. It binds the candidate version, signing mode, and executable SHA-256. Production old-version evidence also requires `--upgrade-from` and the candidate prerelease's immutable `--staging-feed`; the Sparkle case launches the old App with that feed override.
 
 | Target or scenario | Exercise | Acceptance |
 | --- | --- | --- |
-| Built-in and external-keyboard `Fn` | Hold, speak, and release | Exactly one recording and submission; the system Fn/Globe action is not swallowed |
+| Built-in and external-keyboard `Fn` | Hold, speak, and release | Exactly one recording and submission; while selected, Speaker consumes the Fn/Globe action |
 | Custom shortcut | Register an available combination, then a conflicting one | The available shortcut works; the conflict is rejected with a recoverable fallback |
 | TextEdit plain text | Cursor insertion, selection replacement, undo | The shared transactional paste path inserts once and native undo remains usable |
 | Safari editable controls | Text input, textarea, contenteditable, secure field | Supported controls deliver; secure or uncertain controls produce a Pending Copy Result |

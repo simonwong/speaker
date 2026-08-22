@@ -226,10 +226,7 @@ private final class FnEventTapBox: @unchecked Sendable {
             guard case let .consume(trigger) = disposition else { return false }
             switch trigger {
             case .pressed:
-                guard !IsSecureEventInputEnabled() else {
-                    functionKeyPolicy.reset()
-                    return false
-                }
+                guard !IsSecureEventInputEnabled() else { return true }
                 didEmitPress = true
                 target.receive(.pressed)
                 startSecureInputMonitoring()

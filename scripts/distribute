@@ -19,6 +19,8 @@ NOTARY_PROFILE="${SPEAKER_NOTARY_PROFILE:-}"
 NOTARY_KEYCHAIN="${SPEAKER_NOTARY_KEYCHAIN:-}"
 SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
 RELEASE_NOTES_FILE="${SPEAKER_RELEASE_NOTES_FILE:-}"
+UPGRADE_EVIDENCE_FILE="${SPEAKER_UPGRADE_EVIDENCE_FILE:-}"
+PREPARE_UPGRADE_CANDIDATE="${SPEAKER_PREPARE_UPGRADE_CANDIDATE:-0}"
 PROVIDER_EVIDENCE_FILE="${SPEAKER_PROVIDER_EVIDENCE_FILE:-}"
 PROVIDER_EVIDENCE_NOT_BEFORE="${SPEAKER_PROVIDER_EVIDENCE_NOT_BEFORE:-}"
 REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
@@ -69,6 +71,24 @@ verify_release_source_tree_clean "$ROOT"
 verify_swiftpm_dependency_checkouts_clean "$ROOT"
 verify_release_candidate_history "$ROOT"
 resolve_tracked_release_notes "$ROOT" "$RELEASE_NOTES_FILE"
+if [[ -n "$UPGRADE_EVIDENCE_FILE" ]]; then
+    [[ "$PREPARE_UPGRADE_CANDIDATE" == 0 ]] || {
+        print -u2 "Candidate preparation and reviewed upgrade evidence are mutually exclusive."
+        exit 1
+    }
+    resolve_reviewed_upgrade_evidence \
+        "$ROOT" \
+        "$UPGRADE_EVIDENCE_FILE" \
+        "$VERSION" \
+        "$BUILD_NUMBER" \
+        "$REVIEWED_PREVIOUS_PUBLISHED_BUILD_NUMBER" \
+        "$BUNDLE_IDENTIFIER" \
+        "$EXPECTED_TEAM_ID" \
+        "$REVIEWED_GITHUB_REPOSITORY"
+elif [[ "$PREPARE_UPGRADE_CANDIDATE" != 1 ]]; then
+    print -u2 "Reviewed old-version upgrade evidence is required outside candidate preparation."
+    exit 1
+fi
 if [[ -z "$PROVIDER_EVIDENCE_FILE" || -z "$PROVIDER_EVIDENCE_NOT_BEFORE" ]]; then
     print -u2 "Fresh provider evidence from this release run is required."
     exit 1
@@ -317,6 +337,9 @@ verify_production_build_provenance \
     "$SPEAKER_RELEASE_NOTES_SHA256" \
     "$VERSION" \
     "$BUILD_NUMBER"
+if [[ -n "$UPGRADE_EVIDENCE_FILE" ]]; then
+    verify_reviewed_upgrade_candidate "$VERIFIED_APP"
+fi
 verify_sparkle_layout "$VERIFIED_APP"
 verify_production_sparkle_signatures \
     "$VERIFIED_APP" \

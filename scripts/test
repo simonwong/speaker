@@ -24,3 +24,13 @@ SCRIPT_DIR="${0:A:h}"
 /bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
     --product SpeakerDeliverySmokeTarget \
     -Xswiftc -warnings-as-errors
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+    SpeakerUpdateSignatureVerifier --self-test
+/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerUpdateSignatureVerifier \
+    -Xswiftc -warnings-as-errors
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+    SpeakerReleaseEvidenceProtector --self-test
+/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerReleaseEvidenceProtector \
+    -Xswiftc -warnings-as-errors

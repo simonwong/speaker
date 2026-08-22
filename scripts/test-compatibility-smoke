@@ -58,4 +58,22 @@ if /usr/bin/grep -q -- '- Bundle:' "$report"; then
     exit 1
 fi
 
+if /bin/zsh "$SCRIPT_DIR/compatibility-smoke" \
+    --app "$APP" \
+    --upgrade-from "$APP" >/dev/null 2>&1; then
+    print -u2 "Production upgrade evidence accepted no staging feed."
+    exit 1
+else
+    [[ "$?" == 64 ]]
+fi
+if /bin/zsh "$SCRIPT_DIR/compatibility-smoke" \
+    --app "$APP" \
+    --staging-feed https://github.com/example/speaker/releases/download/v1.0.0/appcast.xml \
+    >/dev/null 2>&1; then
+    print -u2 "A staging feed was accepted without an upgrade source."
+    exit 1
+else
+    [[ "$?" == 64 ]]
+fi
+
 print "PASS: compatibility smoke report contract"

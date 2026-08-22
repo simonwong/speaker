@@ -4,9 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
 APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
 OUTPUT_DIR="$ROOT/.build/compatibility-smoke"
 SELECTED_CASE=""
+UPGRADE_SOURCE_APP=""
+STAGING_FEED_URL=""
 LIST_ONLY=0
 
 typeset -a CASE_IDS=(
@@ -32,7 +35,7 @@ typeset -a CASE_IDS=(
 )
 
 usage() {
-    print "Usage: ./scripts/compatibility-smoke [--list] [--case ID] [--output DIR] [--app PATH]"
+    print "Usage: ./scripts/compatibility-smoke [--list] [--case ID] [--output DIR] [--app PATH] [--upgrade-from OLD_APP --staging-feed URL]"
     print "Exit: 0=full matrix PASS, 1=FAIL, 2=SKIP, 3=partial case PASS"
 }
 
@@ -57,6 +60,10 @@ case_title() {
         permissions-recovery) print "权限撤销与恢复" ;;
         voiceover-hud) print "VoiceOver HUD 操作" ;;
         visual-accessibility) print "动态效果与增强对比度" ;;
+        sparkle-update) print "Sparkle 覆盖升级" ;;
+        developer-id-continuity) print "Developer ID 连续性" ;;
+        tcc-continuity) print "TCC 权限连续性" ;;
+        keychain-continuity) print "Keychain 连续性" ;;
         *) return 1 ;;
     esac
 }
@@ -139,6 +146,22 @@ case_instructions() {
             print "分别开启“减弱动态效果”和“增强对比度”，检查录音、处理中、待复制与错误 HUD。"
             print "通过：减弱动态效果后无持续旋转/脉冲；增强对比度下边界、文字和按钮清晰，布局不跳动或截断。"
             ;;
+        sparkle-update)
+            print "退出候选，打开旧版：open -n \"$UPGRADE_SOURCE_APP\" --args --speaker-update-feed \"$STAGING_FEED_URL\"。再从旧版通过 Sparkle 安装当前候选，不手工替换 App。"
+            print "通过：更新检查识别候选，下载、校验、退出、替换和重启完整成功。"
+            ;;
+        developer-id-continuity)
+            print "升级前后检查 Gatekeeper、Developer ID、Bundle ID 和 Team ID。"
+            print "通过：两版均为同一 Team 的真实 Developer ID 签名，升级后 Gatekeeper 接受。"
+            ;;
+        tcc-continuity)
+            print "旧版授予麦克风和辅助功能权限后升级，再直接录音和送达。"
+            print "通过：升级后权限仍有效，无需删除或重新添加 App。"
+            ;;
+        keychain-continuity)
+            print "旧版保存 provider Key 后升级，再运行连接检查。"
+            print "通过：升级后 Key 仍可用，未写入报告，也无需重新输入。"
+            ;;
         *) return 1 ;;
     esac
 }
@@ -164,6 +187,16 @@ while (( $# > 0 )); do
             APP="$2"
             shift 2
             ;;
+        --upgrade-from)
+            [[ $# -ge 2 ]] || { usage; exit 64; }
+            UPGRADE_SOURCE_APP="$2"
+            shift 2
+            ;;
+        --staging-feed)
+            [[ $# -ge 2 ]] || { usage; exit 64; }
+            STAGING_FEED_URL="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -175,6 +208,26 @@ while (( $# > 0 )); do
             ;;
     esac
 done
+
+if [[ -n "$UPGRADE_SOURCE_APP" ]]; then
+    [[ -n "$STAGING_FEED_URL" ]] || {
+        print -u2 "Production upgrade evidence requires --staging-feed."
+        exit 64
+    }
+    [[ -z "$SELECTED_CASE" ]] || {
+        print -u2 "Production upgrade evidence requires the full matrix."
+        exit 64
+    }
+    CASE_IDS+=(
+        sparkle-update
+        developer-id-continuity
+        tcc-continuity
+        keychain-continuity
+    )
+elif [[ -n "$STAGING_FEED_URL" ]]; then
+    print -u2 -- "--staging-feed requires --upgrade-from."
+    exit 64
+fi
 
 if [[ -n "$SELECTED_CASE" ]] && (( ! ${CASE_IDS[(Ie)$SELECTED_CASE]} )); then
     print -u2 "Unknown compatibility case: $SELECTED_CASE"
@@ -230,6 +283,68 @@ executable="$APP/Contents/MacOS/SpeakerApp"
     exit 65
 }
 executable_sha256="$(/usr/bin/shasum -a 256 "$executable" | /usr/bin/awk '{print $1}')"
+team_identifier=""
+authority=""
+arm64_code_directory_hash=""
+x86_64_code_directory_hash=""
+source_commit=""
+upgrade_source_bundle_identifier=""
+upgrade_source_version=""
+upgrade_source_build=""
+upgrade_source_team_identifier=""
+upgrade_source_authority=""
+upgrade_source_arm64_code_directory_hash=""
+upgrade_source_x86_64_code_directory_hash=""
+upgrade_source_executable_sha256=""
+if [[ -n "$UPGRADE_SOURCE_APP" ]]; then
+    stable_feed_url="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$APP/Contents/Info.plist")"
+    expected_staging_feed_url="${stable_feed_url%/releases/latest/download/appcast.xml}/releases/download/v$version/appcast.xml"
+    [[ "$stable_feed_url" == https://github.com/*/releases/latest/download/appcast.xml \
+       && "$STAGING_FEED_URL" == "$expected_staging_feed_url" ]] || {
+        print -u2 "Staging feed must be this candidate's immutable GitHub Release appcast."
+        exit 65
+    }
+    [[ -d "$UPGRADE_SOURCE_APP" && ! -L "$UPGRADE_SOURCE_APP" ]] || {
+        print -u2 "Upgrade source must be a regular app bundle."
+        exit 66
+    }
+    /usr/bin/codesign --verify --deep --strict "$UPGRADE_SOURCE_APP"
+    candidate_signature="$(/usr/bin/codesign -dvvv "$APP" 2>&1)"
+    source_signature="$(/usr/bin/codesign -dvvv "$UPGRADE_SOURCE_APP" 2>&1)"
+    team_identifier="$(print -r -- "$candidate_signature" | sed -n 's/^TeamIdentifier=//p')"
+    authority="$(print -r -- "$candidate_signature" | sed -n 's/^Authority=//p' | head -n 1)"
+    arm64_code_directory_hash="$(/usr/bin/codesign -dvvv --arch arm64 "$APP" 2>&1 | sed -n 's/^CDHash=//p')"
+    x86_64_code_directory_hash="$(/usr/bin/codesign -dvvv --arch x86_64 "$APP" 2>&1 | sed -n 's/^CDHash=//p')"
+    upgrade_source_team_identifier="$(print -r -- "$source_signature" | sed -n 's/^TeamIdentifier=//p')"
+    upgrade_source_authority="$(print -r -- "$source_signature" | sed -n 's/^Authority=//p' | head -n 1)"
+    upgrade_source_arm64_code_directory_hash="$(/usr/bin/codesign -dvvv --arch arm64 "$UPGRADE_SOURCE_APP" 2>&1 | sed -n 's/^CDHash=//p')"
+    upgrade_source_x86_64_code_directory_hash="$(/usr/bin/codesign -dvvv --arch x86_64 "$UPGRADE_SOURCE_APP" 2>&1 | sed -n 's/^CDHash=//p')"
+    source_commit="$(/usr/libexec/PlistBuddy -c 'Print :SpeakerSourceRevision' "$APP/Contents/Info.plist")"
+    upgrade_source_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$UPGRADE_SOURCE_APP/Contents/Info.plist")"
+    upgrade_source_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$UPGRADE_SOURCE_APP/Contents/Info.plist")"
+    upgrade_source_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$UPGRADE_SOURCE_APP/Contents/Info.plist")"
+    upgrade_source_executable="$UPGRADE_SOURCE_APP/Contents/MacOS/SpeakerApp"
+    [[ "$signing_mode" == developer-id \
+       && "$authority" == 'Developer ID Application:'* \
+       && "$upgrade_source_authority" == 'Developer ID Application:'* \
+       && "$bundle_identifier" == "$upgrade_source_bundle_identifier" \
+       && -n "$team_identifier" \
+       && "$team_identifier" == "$upgrade_source_team_identifier" \
+       && -x "$upgrade_source_executable" ]] || {
+        print -u2 "Production upgrade evidence requires two ordered apps with one Bundle ID and Developer ID Team."
+        exit 65
+    }
+    matches_release_pattern "$source_commit" '^[0-9a-f]{40}$' \
+        && matches_release_pattern "$arm64_code_directory_hash" '^[0-9a-f]{40}$' \
+        && matches_release_pattern "$x86_64_code_directory_hash" '^[0-9a-f]{40}$' \
+        && matches_release_pattern "$upgrade_source_arm64_code_directory_hash" '^[0-9a-f]{40}$' \
+        && matches_release_pattern "$upgrade_source_x86_64_code_directory_hash" '^[0-9a-f]{40}$' \
+        && release_build_is_greater "$build" "$upgrade_source_build" || {
+        print -u2 "Production upgrade evidence requires an older source build and a traceable candidate commit."
+        exit 65
+    }
+    upgrade_source_executable_sha256="$(/usr/bin/shasum -a 256 "$upgrade_source_executable" | /usr/bin/awk '{print $1}')"
+fi
 scope="FULL"
 if [[ -n "$SELECTED_CASE" ]]; then
     scope="PARTIAL"
@@ -240,10 +355,26 @@ fi
     print
     print -r -- "- UTC: $(date -u '+%Y-%m-%d %H:%M:%S')"
     print -r -- "- macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+    print -r -- "- Machine: $(uname -m)"
     print -r -- "- App: $bundle_identifier $version ($build)"
     print -r -- "- Signing: $signing_mode"
     print -r -- "- Executable SHA-256: $executable_sha256"
     print -r -- "- Scope: $scope (${#RUN_CASES} / ${#CASE_IDS})"
+    if [[ -n "$UPGRADE_SOURCE_APP" ]]; then
+        print -r -- "- Evidence Schema: production-upgrade-v1"
+        print -r -- "- Team ID: $team_identifier"
+        print -r -- "- Authority: $authority"
+        print -r -- "- Source Commit: $source_commit"
+        print -r -- "- Staging Feed URL: $STAGING_FEED_URL"
+        print -r -- "- CodeDirectory CDHash arm64: $arm64_code_directory_hash"
+        print -r -- "- CodeDirectory CDHash x86_64: $x86_64_code_directory_hash"
+        print -r -- "- Upgrade Source: $upgrade_source_bundle_identifier $upgrade_source_version ($upgrade_source_build)"
+        print -r -- "- Upgrade Source Team ID: $upgrade_source_team_identifier"
+        print -r -- "- Upgrade Source Authority: $upgrade_source_authority"
+        print -r -- "- Upgrade Source CodeDirectory CDHash arm64: $upgrade_source_arm64_code_directory_hash"
+        print -r -- "- Upgrade Source CodeDirectory CDHash x86_64: $upgrade_source_x86_64_code_directory_hash"
+        print -r -- "- Upgrade Source Executable SHA-256: $upgrade_source_executable_sha256"
+    fi
     print
     print "报告只记录通过/失败及脱敏备注。不要填写转录文字、API Key、请求正文或其他敏感信息。"
     print

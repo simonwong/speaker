@@ -11,7 +11,7 @@ entitlements。仅 Bundle ID 相同但签名损坏或身份不同的包会被 fa
 
 - `SPEAKER_VERSION` 使用稳定 SemVer，例如 `1.2.0`，对应 `CFBundleShortVersionString`。当前正式 feed 尚未建立 prerelease channel，因此 `beta`、`rc` 等先行版本会 fail closed。
 - `SPEAKER_BUILD_NUMBER` 是 CI 为每次正式候选构建注入的、全局单调递增的正整数，对应 `CFBundleVersion`。同一版本重新构建时也不得复用。
-- Git tag 使用 `v<SemVer>`。只有通过签名、公证、制品复验和人工验收的构建才能创建正式 tag。
+- Git tag 使用 `v<SemVer>`。候选签名、公证和制品复验通过后，staging 可创建该 tag 及 prerelease；只有人工验收通过，才能把同一 tag 提升为 stable latest。
 - 正式 Bundle ID 和 Apple Team ID 一经发布不得随版本改变，否则 macOS 会把新版本视作不同 App，Keychain 与 TCC 权限也无法稳定延续。
 
 Formal releases never derive a build number from dates, Git history, or the local environment. CI must provide the unique value; a missing or malformed value fails closed.
@@ -102,7 +102,7 @@ Resources/ReleaseCandidate.plist
 下一次候选必须把本次 build 写入 `PreviousPublishedBuildNumber`。环境中的版本、build、
 Bundle ID 与 Team ID 只能与这两份受审查文件完全相同，不能由 CI 临时替换。
 
-CI 的受保护发布任务需要提供：
+`scripts/distribute` 的本地正式参数：
 
 ```text
 SPEAKER_VERSION=1.0.0
@@ -111,12 +111,16 @@ SPEAKER_CODESIGN_IDENTITY=Developer ID Application: ...
 SPEAKER_NOTARY_PROFILE=<notarytool Keychain profile>
 SPEAKER_SPARKLE_KEY_ACCOUNT=<Sparkle 私钥的 Keychain account>
 SPEAKER_RELEASE_NOTES_FILE=<仓库内已提交、已审查的 .md/.txt/.html>
+SPEAKER_UPGRADE_EVIDENCE_FILE=<仓库内已提交、由 compatibility-smoke 生成的完整报告>
 ```
 
+GitHub workflow 从 `ReleaseCandidate.plist` 读取 version/build；首次输入 release notes，
+promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
+
 仓库提供 `.github/workflows/release.yml` 作为唯一的 GitHub Actions 正式发布入口。
-它只允许从默认分支手动触发，并绑定 `production` Environment；建议为该
-Environment 开启 required reviewers、禁止发起者自批，并只允许受保护的 `main`
-部署。配置以下 Environment secrets：
+它只允许从默认分支手动触发。签名 job 绑定 `production` Environment；建议开启
+required reviewers、禁止发起者自批，并只允许受保护的 `main` 部署。只在
+`production` 配置以下 Environment secrets：
 
 ```text
 SPEAKER_DEVELOPER_ID_P12_BASE64
@@ -127,6 +131,7 @@ SPEAKER_NOTARY_ISSUER_ID
 SPEAKER_SPARKLE_PRIVATE_KEY
 SPEAKER_DOUBAO_API_KEY
 SPEAKER_DEEPSEEK_API_KEY
+SPEAKER_EVIDENCE_ARCHIVE_PASSWORD
 ```
 
 P12 与 App Store Connect API `.p8` 以完整文件的 base64 保存；Sparkle secret
@@ -135,11 +140,31 @@ P12 与 App Store Connect API `.p8` 以完整文件的 base64 保存；Sparkle s
 和 Sparkle 公私钥绑定，再用固定非敏感 TTS 样本执行完整 provider matrix。Matrix
 必须在本次 run 内生成，并与当前 commit、`Package.resolved` hash、version、build
 及四小时内的执行时间窗完全一致；任何 FAIL/SKIP 或开发文件凭据都会阻止
-`scripts/distribute`。任务结束后删除临时 Keychain 和 secret files。DMG、checksum、
-appcast 与 evidence archive 会作为 90 天的受保护 Actions artifact 留存。随后 workflow
-以 `v<SemVer>` 创建 GitHub draft Release，只附加 DMG、checksum 和签名 appcast；
-evidence archive 不公开。Workflow 从 draft 下载并逐字节复验三个公开制品后才设为
-latest，最后执行公开地址回读门禁。已有 release、tag 或仓库身份不匹配均 fail closed。
+`scripts/distribute`。任务结束后删除临时 Keychain 和 secret files。DMG、checksum 与
+appcast 作为 90 天 Actions artifact 留存，并同时附加到公开 prerelease。Evidence archive
+先用至少 32 字符的随机 production secret 经 ChaCha20-Poly1305 加密；Actions 只保留
+密文及其 checksum。仓库公开，因此 artifact 与 prerelease 都按公开数据处理；明文
+notarization/provider evidence 不离开 ephemeral runner。
+
+受审查人恢复 evidence 时，在受控机器下载 `.zip.enc` 并运行：
+
+```bash
+SPEAKER_EVIDENCE_ARCHIVE_PASSWORD='<production secret>' \
+./scripts/swiftw run --disable-sandbox \
+  SpeakerReleaseEvidenceProtector decrypt \
+  Speaker-<version>-<build>-evidence.zip.enc \
+  Speaker-<version>-<build>-evidence.zip
+```
+
+错误 secret、损坏或篡改密文都会认证失败，不产生可接受 evidence。
+
+`production-staging` job 以 `v<SemVer>` 创建公开 GitHub prerelease，只附加 DMG、checksum
+和签名 appcast，并从公开地址逐字节回读。稳定 feed 使用 `releases/latest`，不会选择
+prerelease。`production-publication` job 不读取 Developer ID、公证、provider、Sparkle
+私钥或 evidence 解密 secret；它凭受审查报告和 candidate run ID 下载首次 run 的同一
+artifact，核对公开 prerelease、完整 executable SHA-256、两架构 CodeDirectory CDHash
+和 Ed25519 签名，再把同一个 Release 原地改为 non-prerelease/latest。任何第二次构建都
+不能进入 promotion。
 
 然后运行：
 
@@ -149,6 +174,10 @@ latest，最后执行公开地址回读门禁。已有 release、tag 或仓库�
 ./scripts/build
 ./scripts/distribute
 ```
+
+仅为生成待实测候选时，可不设置 upgrade evidence，并显式使用
+`SPEAKER_PREPARE_UPGRADE_CANDIDATE=1 ./scripts/distribute`。GitHub workflow 的首次 run
+固定使用该模式，并把验证后的产物发布为不进入 stable latest feed 的 prerelease。
 
 `scripts/distribute` 会按以下顺序 fail closed：
 
@@ -162,20 +191,52 @@ latest，最后执行公开地址回读门禁。已有 release、tag 或仓库�
 
 整个正式流程由当前 shell 的文件描述符持有 macOS `lockf` 单一发布锁，不信任可伪造的环境标记；每次正式 build 使用独立 scratch，两个发布也不能并发晋升 feed，进程崩溃后内核会自动释放锁。晋升前会把制品名、DMG/checksum/新旧 appcast 的 SHA-256 和 `prepared` 状态持久写入 promotion journal；DMG、校验和与 appcast 全部落位并同步后才持久切换为 `committed`。普通失败或可处理信号会立即按 journal 恢复；若遭遇 `SIGKILL` 或断电，下一次拿到锁时会先清理带 owner-only Speaker marker 的遗留 pending（包括尝试卸载其固定 mountpoint），再恢复 `prepared` 状态，或校验并完成 `committed` 状态的清理。恢复对象 hash 不符、旧 feed 损坏、未知 pending 或 journal 被篡改时 fail closed 并保留证据，不会删除外来同名制品或猜测成功。任一步失败都会清理可证明属于本事务的 pending 制品；不会退回 ad-hoc 签名，也不会把未验证的 DMG 或 appcast 留在正式制品目录。同一个版本号和构建号的 DMG 或 checksum 一旦存在，脚本会直接拒绝覆盖；任何重发都必须增加 build number。
 
-GitHub draft Release 是发布事务边界：DMG、checksum 与 `appcast.xml` 在 draft 中同时上传并复验，draft 对 Sparkle 的 `releases/latest/download/appcast.xml` 不可见；只有三者一致时才发布为 latest。`Speaker-<version>-<build>-evidence.zip` 及其 checksum 以 `0600` 生成，只作为受保护 CI artifact 显式留存，不得附加到 GitHub Release，因为 Apple notarization log 可能包含团队和构建环境元数据。发布后在同一受保护环境自动执行：
+GitHub prerelease 是候选事务边界：DMG、checksum 与 `appcast.xml` 同时上传并从公开
+immutable tag URL 复验；它不进入 `releases/latest`。`Speaker-<version>-<build>-evidence.zip`
+只在签名 runner 上短暂存在，随后变成认证加密的 `.zip.enc` 和 checksum；只有密文进入
+Actions artifact，不附加到 GitHub Release。旧版实测绑定该 prerelease 后，publication
+job 只允许提升同一 tag、同一 public assets 和同一 candidate-run artifact。发布后执行：
 
 ```bash
 SPEAKER_VERSION=1.0.0 \
 SPEAKER_BUILD_NUMBER=<同一 build> \
-SPEAKER_SPARKLE_KEY_ACCOUNT=<同一 account> \
 ./scripts/verify-published-update
 ```
 
-该门禁从正式 HTTPS 地址回读 signed feed、DMG 和 checksum，复验 EdDSA、长度、SHA-256、公证、Gatekeeper、Developer ID/Team、版本号与 Sparkle 嵌套结构。
+该门禁从正式 HTTPS 地址回读 signed feed、DMG 和 checksum，只用受审查公钥复验 archive EdDSA，并核对 appcast 原始字节、长度、SHA-256、公证、Gatekeeper、Developer ID/Team、版本号与 Sparkle 嵌套结构。
 
-## 对外发布前的人工门槛
+先在 `main` 手动运行 production workflow；把 `upgrade_evidence_file` 与
+`candidate_run_id` 都留空。该 run 完成签名、公证、密文 evidence 留存，并创建公开
+`v<SemVer>` prerelease。记录 workflow run ID。下载候选，用两份真实 Developer ID App
+生成完整旧版本升级报告：
 
-自动化通过后，仍需在干净 macOS 用户上完成并留存证据：
+```bash
+./scripts/compatibility-smoke \
+  --app /path/to/candidate/Speaker.app \
+  --upgrade-from /path/to/previous/Speaker.app \
+  --staging-feed https://github.com/simonwong/speaker/releases/download/v1.0.0/appcast.xml \
+  --output docs/release-evidence
+```
+
+`sparkle-update` 用例会要求退出候选，并通过 `open -n <旧版> --args
+--speaker-update-feed <staging-feed>` 启动旧版。参数只接受当前 GitHub 仓库与候选 SemVer
+完全匹配的 immutable prerelease appcast；普通启动不读取该 override，继续使用 stable feed。
+
+候选必须来自首次 workflow 固定的 commit。完成实机矩阵后，只提交生成的报告；从
+候选 commit 到发布 commit 只能变更该报告。再次运行 production workflow，同时传入报告
+路径 `upgrade_evidence_file` 和首次 `candidate_run_id`。门禁验证 run 成功且 source commit
+等于报告候选，再验证生成器 schema、七天时间窗、macOS/架构、两版
+Developer ID/Bundle ID/Team ID、候选 source commit、审计用 executable SHA-256 与稳定的
+两个架构各自的 CodeDirectory CDHash，并要求
+Sparkle 更新、Developer ID、TCC、Keychain 连续性四项 `PASS`。Promotion 重新下载首次
+artifact，并要求 DMG、checksum、appcast、完整 executable SHA-256 与 universal2 的
+arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或重签。非首次发布时旧 build 必须等于上一公开 build；
+首次发布的上一公开 build 为 `0`，但仍要求一个小于候选 build 的真实开发版作为升级
+源。`production-publication` reviewer 只在复核报告、candidate run 与 prerelease 后批准。
+
+## Stable promotion 前的人工门槛
+
+公开 prerelease staging 后、stable promotion 前，需在干净 macOS 用户上完成并留存证据：
 
 - 首次安装、Gatekeeper、麦克风和辅助功能授权。
 - 从上一个公开版本覆盖升级，确认 Keychain API Key 与 TCC 权限保持。

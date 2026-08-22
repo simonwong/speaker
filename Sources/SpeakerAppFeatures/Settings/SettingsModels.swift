@@ -604,15 +604,20 @@ package struct ShortcutRecorderModifierPolicy {
         keyCode: UInt16,
         flags: NSEvent.ModifierFlags
     ) -> CustomHotKey? {
-        guard let hotKey = CustomHotKey.modifierOnly(keyCode: UInt32(keyCode)) else {
+        guard let modifier = CustomHotKey.PhysicalModifier(
+            keyCode: UInt32(keyCode)
+        ) else {
             candidate = nil
             return nil
         }
-        let expectedFlag: NSEvent.ModifierFlags = switch Int(keyCode) {
-        case kVK_Option, kVK_RightOption: .option
-        case kVK_Control, kVK_RightControl: .control
-        case kVK_Shift, kVK_RightShift: .shift
-        default: []
+        let hotKey = CustomHotKey.modifierOnly(
+            modifier,
+            displayName: modifier.displayName
+        )
+        let expectedFlag: NSEvent.ModifierFlags = switch modifier {
+        case .leftOption, .rightOption: .option
+        case .leftControl, .rightControl: .control
+        case .leftShift, .rightShift: .shift
         }
         let relevantFlags = flags.intersection([.command, .option, .control, .shift])
         if flags.contains(expectedFlag) {
@@ -626,6 +631,19 @@ package struct ShortcutRecorderModifierPolicy {
 
     package mutating func reset() {
         candidate = nil
+    }
+}
+
+private extension CustomHotKey.PhysicalModifier {
+    var displayName: String {
+        switch self {
+        case .leftOption: "左 ⌥"
+        case .rightOption: "右 ⌥"
+        case .leftControl: "左 ⌃"
+        case .rightControl: "右 ⌃"
+        case .leftShift: "左 ⇧"
+        case .rightShift: "右 ⇧"
+        }
     }
 }
 
@@ -668,6 +686,7 @@ package struct ShortcutRecorderPolicy {
             }
             return .consume
         case let .keyDown(keyCode, flags, charactersIgnoringModifiers):
+            modifierPolicy.reset()
             guard keyCode != UInt16(kVK_Escape) else { return .cancel }
             let modifiers = Self.carbonModifiers(flags)
             guard modifiers != 0 else {
