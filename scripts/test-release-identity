@@ -5,6 +5,14 @@ unsetopt BG_NICE
 
 SCRIPT_DIR="${0:A:h}"
 source "$SCRIPT_DIR/release-common"
+VERIFIED_APP_ASSIGNMENT_LINE="$(grep -nF 'VERIFIED_APP="$MOUNT_POINT/Speaker.app"' "$SCRIPT_DIR/distribute" | cut -d: -f1)"
+UPGRADE_BINDING_LINE="$(grep -nF 'verify_reviewed_upgrade_candidate "$VERIFIED_APP"' "$SCRIPT_DIR/distribute" | cut -d: -f1)"
+[[ -n "$VERIFIED_APP_ASSIGNMENT_LINE" \
+   && -n "$UPGRADE_BINDING_LINE" \
+   && "$VERIFIED_APP_ASSIGNMENT_LINE" -lt "$UPGRADE_BINDING_LINE" ]] || {
+    print -u2 "Final upgrade candidate verification runs before the DMG app is mounted."
+    exit 1
+}
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-identity.XXXXXX")"
 trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
 mkdir -p "$TEST_ROOT/Resources"
@@ -114,6 +122,8 @@ load_reviewed_release_identity "$TEST_ROOT"
 [[ "$REVIEWED_GITHUB_REPOSITORY" == "simonwong/speaker" ]]
 [[ "$(reviewed_release_archive_url_prefix "1.2.3")" \
     == "https://github.com/simonwong/speaker/releases/download/v1.2.3/" ]]
+[[ "$(reviewed_github_release_asset_names "Speaker-1.2.3-42.dmg")" \
+    == $'Speaker-1.2.3-42.dmg\nSpeaker-1.2.3-42.dmg.sha256\nappcast.xml' ]]
 [[ "$REVIEWED_UPDATE_PUBLIC_ED_KEY" \
     == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" ]]
 write_identity \
@@ -689,6 +699,123 @@ resolve_tracked_release_notes \
     "$LEDGER_ROOT" \
     "$LEDGER_ROOT/docs/release-1.2.4.md"
 [[ "$REVIEWED_RELEASE_NOTES_RELATIVE_PATH" == docs/release-1.2.4.md ]]
+write_upgrade_report() {
+    local candidate_version="$1"
+    local candidate_build="$2"
+    local source_version="$3"
+    local source_build="$4"
+    local source_commit="$5"
+    local tcc_result="$6"
+    local destination="$7"
+
+    print -r -- "# Speaker compatibility smoke
+
+- UTC: $(date -u '+%Y-%m-%d %H:%M:%S')
+- macOS: 26.0 (25A1)
+- Machine: arm64
+- App: com.example.speaker $candidate_version ($candidate_build)
+- Signing: developer-id
+- Executable SHA-256: $(printf 'e%.0s' {1..64})
+- Scope: FULL (23 / 23)
+- Evidence Schema: production-upgrade-v1
+- Team ID: A1B2C3D4E5
+- Authority: Developer ID Application: Speaker Test (A1B2C3D4E5)
+- Source Commit: $source_commit
+- Staging Feed URL: https://github.com/example/speaker/releases/download/v$candidate_version/appcast.xml
+- CodeDirectory CDHash arm64: $(printf 'a%.0s' {1..40})
+- CodeDirectory CDHash x86_64: $(printf 'c%.0s' {1..40})
+- Upgrade Source: com.example.speaker $source_version ($source_build)
+- Upgrade Source Team ID: A1B2C3D4E5
+- Upgrade Source Authority: Developer ID Application: Speaker Test (A1B2C3D4E5)
+- Upgrade Source CodeDirectory CDHash arm64: $(printf 'b%.0s' {1..40})
+- Upgrade Source CodeDirectory CDHash x86_64: $(printf 'd%.0s' {1..40})
+- Upgrade Source Executable SHA-256: $(printf 'f%.0s' {1..64})
+
+| Case | Result | Notes |
+| --- | --- | --- |
+| sparkle-update — Sparkle 覆盖升级 | PASS | - |
+| developer-id-continuity — Developer ID 连续性 | PASS | - |
+| tcc-continuity — TCC 权限连续性 | $tcc_result | - |
+| keychain-continuity — Keychain 连续性 | PASS | - |
+
+## Verdict
+
+- Failed: 0
+- Skipped: 0
+- Result: FULL PASS" > "$destination"
+}
+
+UPGRADE_SOURCE_COMMIT="$(git -C "$LEDGER_ROOT" rev-parse HEAD)"
+write_upgrade_report \
+    1.2.4 45 1.2.3 42 "$UPGRADE_SOURCE_COMMIT" PASS \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md"
+git -C "$LEDGER_ROOT" add docs/upgrade-1.2.4.md
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'review upgrade evidence'
+resolve_reviewed_upgrade_evidence \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    1.2.4 \
+    45 \
+    42 \
+    com.example.speaker \
+    A1B2C3D4E5 \
+    example/speaker
+[[ "$REVIEWED_UPGRADE_EVIDENCE_RELATIVE_PATH" \
+    == docs/upgrade-1.2.4.md ]]
+[[ "$(reviewed_release_promotion_state \
+    $'false\ttrue\t'"$UPGRADE_SOURCE_COMMIT" \
+    "$UPGRADE_SOURCE_COMMIT")" == candidate ]]
+[[ "$(reviewed_release_promotion_state \
+    $'false\tfalse\t'"$UPGRADE_SOURCE_COMMIT" \
+    "$UPGRADE_SOURCE_COMMIT")" == promoted ]]
+if reviewed_release_promotion_state \
+    $'true\tfalse\t'"$UPGRADE_SOURCE_COMMIT" \
+    "$UPGRADE_SOURCE_COMMIT" >/dev/null 2>&1; then
+    print -u2 "A draft release was accepted for promotion."
+    exit 1
+fi
+UPGRADE_SOURCE_COMMIT="$(git -C "$LEDGER_ROOT" rev-parse HEAD)"
+write_upgrade_report \
+    1.2.4 45 1.2.3 42 "$UPGRADE_SOURCE_COMMIT" FAIL \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md"
+git -C "$LEDGER_ROOT" add docs/upgrade-1.2.4.md
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'record failed upgrade evidence'
+if resolve_reviewed_upgrade_evidence \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    1.2.4 \
+    45 \
+    42 \
+    com.example.speaker \
+    A1B2C3D4E5 \
+    example/speaker 2>/dev/null; then
+    print -u2 "Failed old-version upgrade evidence was accepted."
+    exit 1
+fi
+UPGRADE_SOURCE_COMMIT="$(git -C "$LEDGER_ROOT" rev-parse HEAD)"
+write_upgrade_report \
+    1.0.0 42 0.2.0-dev 41 "$UPGRADE_SOURCE_COMMIT" PASS \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md"
+git -C "$LEDGER_ROOT" add docs/upgrade-1.2.4.md
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'record first release upgrade evidence'
+resolve_reviewed_upgrade_evidence \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    1.0.0 \
+    42 \
+    0 \
+    com.example.speaker \
+    A1B2C3D4E5 \
+    example/speaker
 print -r -- 'external notes' > "$TEST_ROOT/external-notes.md"
 if resolve_tracked_release_notes \
     "$LEDGER_ROOT" \

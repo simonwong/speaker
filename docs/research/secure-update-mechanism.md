@@ -498,8 +498,9 @@ Gatekeeper、key rotation、权限提升和实际替换行为。
 8. 使用公证 DMG 建立 appcast，先只发布 full update。
 9. 从真实旧版测试自动/手动检查、无更新、网络断开、签名损坏、授权取消、
    App 不退出、安装重启和 hotfix。
-10. release gate 全通过后才允许创建 GitHub draft Release；复验 draft 内的 DMG、
-    checksum 与 appcast 后才发布为 latest，再从公开 URL 回读验证。
+10. 签名、公证和制品 gate 通过后，创建带 immutable appcast 的 GitHub prerelease；
+    从真实旧版通过该 staging feed 完成升级 gate。报告绑定后只提升同一 tag 和同一
+    DMG/checksum/appcast 为 latest，不重新构建；最后从 stable URL 回读验证。
 
 ## 官方资料索引
 

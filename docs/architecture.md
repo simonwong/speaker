@@ -31,7 +31,7 @@ Platform adapters           AppKit, AX, AVAudio, Carbon, Keychain, SMAppService
 
 The user interface is `select`, `retryActivation`, and observable state. The implementation hides:
 
-- mutual exclusion between the `Fn` event tap and a custom Carbon hot key;
+- mutual exclusion among the `Fn` event tap, side-specific modifier event tap, and custom Carbon key chord;
 - stop and recovery after Accessibility permission changes;
 - `Esc` reservation, common editing conflicts, and fallback when the system owns `Fn`;
 - ordered persistence when shortcut selections change quickly;
@@ -125,7 +125,7 @@ Onboarding has a separate debug capture entry point that renders the production 
 
 ## Software updates and release
 
-`SoftwareUpdateFeature` isolates update state and intents. A live Sparkle adapter exists only when the Developer ID identity, GitHub Releases HTTPS feed, and Ed25519 public key are all valid. Development builds disable updates. The protected production workflow creates a draft release for `v<SemVer>`, verifies the exact public assets, publishes it as latest, and reads the signed channel back before succeeding. Distribution, notarization, appcast signing, publication, public readback, and old-version upgrade evidence are release gates rather than application-scene responsibilities.
+`SoftwareUpdateFeature` isolates update state and intents. A live Sparkle adapter exists only when the Developer ID identity, GitHub Releases HTTPS feed, and Ed25519 public key are all valid. Development builds disable updates. Production acceptance may inject only this repository's immutable `v<SemVer>` prerelease appcast through a launch argument; normal launches always use the stable latest feed. The production workflow signs once, publishes that exact DMG as a prerelease candidate, binds old-version evidence to it, then promotes the same release as latest and reads the signed channel back. The signing job owns private keys but no repository write permission; staging and publication jobs own scoped repository write permission and verify with only the reviewed public key. Distribution, notarization, appcast signing, exact-artifact promotion, public readback, and candidate-bound old-version upgrade evidence are release gates rather than application-scene responsibilities.
 
 ## Invariants
 

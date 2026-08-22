@@ -834,6 +834,9 @@ private struct AboutSettingsPage: View {
                     .accessibilityLabel("在 GitHub 查看 Speaker")
                     .help("在 GitHub 查看 Speaker")
                 }
+                if let message = softwareUpdate.state.unavailableMessage {
+                    SettingsNotice(text: message, color: .secondary)
+                }
             }
         }
     }

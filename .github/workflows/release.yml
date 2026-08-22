@@ -7,6 +7,14 @@ on:
         description: Committed release notes path (.md, .txt, or .html)
         required: true
         type: string
+      upgrade_evidence_file:
+        description: Committed old-version upgrade evidence path; empty prepares candidate only
+        required: false
+        type: string
+      candidate_run_id:
+        description: Successful candidate workflow run ID; required with upgrade evidence
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -16,9 +24,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate release transaction inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require one complete transaction phase
+        shell: bash
+        env:
+          UPGRADE_EVIDENCE_INPUT: ${{ inputs.upgrade_evidence_file }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          if [[ -z "$UPGRADE_EVIDENCE_INPUT" && -z "$CANDIDATE_RUN_ID" ]]; then
+            exit 0
+          fi
+          if [[ -n "$UPGRADE_EVIDENCE_INPUT" && -n "$CANDIDATE_RUN_ID" ]]; then
+            exit 0
+          fi
+          echo "upgrade_evidence_file and candidate_run_id must be both empty or both set." >&2
+          exit 1
+
   release:
-    name: Sign, notarize, and retain release
-    if: github.ref == 'refs/heads/main'
+    name: Sign, notarize, and retain candidate
+    needs: validate
+    if: github.ref == 'refs/heads/main' && inputs.upgrade_evidence_file == '' && inputs.candidate_run_id == ''
     runs-on: macos-26
     timeout-minutes: 180
     environment: production
@@ -79,6 +110,8 @@ jobs:
           resolve_tracked_release_notes \
             "$GITHUB_WORKSPACE" \
             "$GITHUB_WORKSPACE/$RELEASE_NOTES_INPUT"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_PREPARE_UPGRADE_CANDIDATE 1
           SOURCE_COMMIT="$(git rev-parse HEAD)"
           PACKAGE_RESOLVED_SHA256="$(
             shasum -a 256 Package.resolved | awk '{print $1}'
@@ -267,15 +300,36 @@ jobs:
       - name: Build, sign, notarize, and verify distribution
         run: ./scripts/distribute
 
-      - name: Retain protected production artifacts
+      - name: Encrypt private release evidence
+        shell: zsh {0}
+        env:
+          SPEAKER_EVIDENCE_ARCHIVE_PASSWORD: ${{ secrets.SPEAKER_EVIDENCE_ARCHIVE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ ${#SPEAKER_EVIDENCE_ARCHIVE_PASSWORD} -ge 32 ]] || {
+            print -u2 "SPEAKER_EVIDENCE_ARCHIVE_PASSWORD must contain at least 32 characters."
+            exit 1
+          }
+          EVIDENCE=".build/distribution/Speaker-$SPEAKER_VERSION-$SPEAKER_BUILD_NUMBER-evidence.zip"
+          PROTECTED="$EVIDENCE.enc"
+          ./scripts/swiftw run --disable-sandbox \
+            SpeakerReleaseEvidenceProtector \
+            encrypt \
+            "$EVIDENCE" \
+            "$PROTECTED"
+          shasum -a 256 "$PROTECTED" > "$PROTECTED.sha256"
+          chmod 600 "$PROTECTED" "$PROTECTED.sha256"
+          rm -f "$EVIDENCE" "$EVIDENCE.sha256"
+
+      - name: Retain candidate artifacts and encrypted evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-production
           path: |
             .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}.dmg
             .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}.dmg.sha256
-            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-evidence.zip
-            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-evidence.zip.sha256
+            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-evidence.zip.enc
+            .build/distribution/Speaker-${{ env.SPEAKER_VERSION }}-${{ env.SPEAKER_BUILD_NUMBER }}-evidence.zip.enc.sha256
             .build/distribution/appcast.xml
           if-no-files-found: error
           retention-days: 90
@@ -294,19 +348,16 @@ jobs:
             "$RUNNER_TEMP/speaker-notary-api-key.p8" \
             "$RUNNER_TEMP/speaker-sparkle-private-key"
 
-  publish:
-    name: Publish verified production release
+  stage:
+    name: Publish immutable upgrade candidate
     needs: release
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.upgrade_evidence_file == '' && inputs.candidate_run_id == ''
     runs-on: macos-26
     timeout-minutes: 30
-    environment: production
+    environment: production-staging
     permissions:
       actions: read
       contents: write
-    env:
-      SPEAKER_SPARKLE_KEY_ACCOUNT: speaker-release-ci
-
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -314,7 +365,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Load reviewed publication metadata
+      - name: Load reviewed candidate metadata
         id: metadata
         shell: zsh {0}
         env:
@@ -342,46 +393,16 @@ jobs:
             "artifact_name=Speaker-$REVIEWED_RELEASE_VERSION-$REVIEWED_RELEASE_BUILD_NUMBER-production" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Download protected production artifacts
+      - name: Download candidate artifacts
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           name: ${{ steps.metadata.outputs.artifact_name }}
           path: .build/distribution
 
-      - name: Resolve pinned Sparkle tools
+      - name: Resolve pinned packages
         run: ./scripts/swiftw package resolve --disable-sandbox
 
-      - name: Configure ephemeral Sparkle keychain
-        shell: zsh {0}
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPEAKER_SPARKLE_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          [[ -n "$SPARKLE_PRIVATE_KEY" ]]
-          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-publish.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
-          SPARKLE_KEY_PATH="$RUNNER_TEMP/speaker-sparkle-private-key"
-          print -rn -- "$SPARKLE_PRIVATE_KEY" > "$SPARKLE_KEY_PATH"
-          chmod 600 "$SPARKLE_KEY_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security default-keychain -d user -s "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          GENERATE_KEYS=.build/artifacts/sparkle/Sparkle/bin/generate_keys
-          [[ -x "$GENERATE_KEYS" ]]
-          "$GENERATE_KEYS" \
-            --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
-            -f "$SPARKLE_KEY_PATH"
-          REVIEWED_PUBLIC_KEY="$(/usr/libexec/PlistBuddy \
-            -c 'Print :UpdatePublicEDKey' \
-            Resources/ReleaseIdentity.plist)"
-          ACTUAL_PUBLIC_KEY="$("$GENERATE_KEYS" \
-            --account "$SPEAKER_SPARKLE_KEY_ACCOUNT" \
-            -p)"
-          [[ "$ACTUAL_PUBLIC_KEY" == "$REVIEWED_PUBLIC_KEY" ]]
-
-      - name: Publish verified GitHub production release
+      - name: Publish GitHub prerelease candidate
         id: github_release
         shell: zsh {0}
         env:
@@ -396,7 +417,7 @@ jobs:
           DMG="Speaker-$SPEAKER_VERSION-$SPEAKER_BUILD_NUMBER.dmg"
           CHECKSUM="$DMG.sha256"
           DISTRIBUTION="$GITHUB_WORKSPACE/.build/distribution"
-          DOWNLOAD="$RUNNER_TEMP/speaker-production-draft"
+          DOWNLOAD="$RUNNER_TEMP/speaker-upgrade-candidate"
 
           if gh release view "$TAG" \
               --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -415,21 +436,21 @@ jobs:
             "$DISTRIBUTION/appcast.xml#Signed Sparkle appcast" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Speaker $SPEAKER_VERSION" \
+            --title "Speaker $SPEAKER_VERSION upgrade candidate" \
             --notes-file "$SPEAKER_RELEASE_NOTES_FILE" \
-            --draft
-          print 'draft_created=true' >> "$GITHUB_OUTPUT"
+            --prerelease
+          print 'candidate_created=true' >> "$GITHUB_OUTPUT"
 
-          DRAFT_STATE="$(gh release view "$TAG" \
+          CANDIDATE_STATE="$(gh release view "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,targetCommitish \
-            --jq '[.isDraft, .targetCommitish] | @tsv')"
-          [[ "$DRAFT_STATE" == $'true\t'"$GITHUB_SHA" ]]
+            --json isDraft,isPrerelease,targetCommitish \
+            --jq '[.isDraft, .isPrerelease, .targetCommitish] | @tsv')"
+          [[ "$CANDIDATE_STATE" == $'false\ttrue\t'"$GITHUB_SHA" ]]
           ASSETS="$(gh release view "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --json assets \
             --jq '.assets | map(.name) | sort | join("\n")')"
-          EXPECTED_ASSETS="$(print -r -- "$DMG" "$CHECKSUM" appcast.xml | sort)"
+          EXPECTED_ASSETS="$(reviewed_github_release_asset_names "$DMG")"
           [[ "$ASSETS" == "$EXPECTED_ASSETS" ]]
 
           mkdir "$DOWNLOAD"
@@ -443,13 +464,8 @@ jobs:
           cmp -s "$DISTRIBUTION/$CHECKSUM" "$DOWNLOAD/$CHECKSUM"
           cmp -s "$DISTRIBUTION/appcast.xml" "$DOWNLOAD/appcast.xml"
 
-          gh release edit "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false \
-            --latest
-          print 'published=true' >> "$GITHUB_OUTPUT"
-
-      - name: Verify public production update channel
+      - name: Verify public staging update channel
+        id: staging_readback
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -457,12 +473,23 @@ jobs:
           TAG="$SPEAKER_RELEASE_TAG"
           [[ "$(gh release view "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --json isDraft \
-            --jq '.isDraft')" == "false" ]]
-          ./scripts/verify-published-update
+            --json isDraft,isPrerelease \
+            --jq '[.isDraft, .isPrerelease] | @tsv')" == $'false\ttrue' ]]
+          PUBLIC_APPCAST="$RUNNER_TEMP/speaker-staging-appcast.xml"
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output "$PUBLIC_APPCAST" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/appcast.xml"
+          cmp -s .build/distribution/appcast.xml "$PUBLIC_APPCAST"
+          print 'verified=true' >> "$GITHUB_OUTPUT"
 
-      - name: Remove failed draft release
-        if: ${{ failure() && steps.github_release.outputs.draft_created == 'true' && steps.github_release.outputs.published != 'true' }}
+      - name: Remove failed candidate release
+        if: ${{ failure() && steps.github_release.outputs.candidate_created == 'true' && steps.staging_readback.outputs.verified != 'true' }}
         shell: zsh {0}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -473,13 +500,196 @@ jobs:
             --cleanup-tag \
             --yes
 
-      - name: Remove ephemeral publication credentials
-        if: ${{ always() }}
-        continue-on-error: true
+  publish:
+    name: Promote tested candidate to production
+    needs: validate
+    if: github.ref == 'refs/heads/main' && inputs.upgrade_evidence_file != '' && inputs.candidate_run_id != ''
+    runs-on: macos-26
+    timeout-minutes: 45
+    environment: production-publication
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out reviewed evidence commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load reviewed publication metadata
+        id: metadata
         shell: zsh {0}
+        env:
+          RELEASE_NOTES_INPUT: ${{ inputs.release_notes_file }}
+          UPGRADE_EVIDENCE_INPUT: ${{ inputs.upgrade_evidence_file }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-publish.keychain-db"
-          security default-keychain -d user -s login.keychain-db || true
-          security list-keychains -d user -s login.keychain-db || true
-          security delete-keychain "$KEYCHAIN_PATH" || true
-          rm -f "$RUNNER_TEMP/speaker-sparkle-private-key"
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" == <-> ]] || {
+            print -u2 "candidate_run_id must be a numeric Actions run ID."
+            exit 1
+          }
+          source ./scripts/release-common
+          load_reviewed_release_identity "$GITHUB_WORKSPACE"
+          load_reviewed_release_candidate "$GITHUB_WORKSPACE"
+          [[ "$GITHUB_REPOSITORY" == "$REVIEWED_GITHUB_REPOSITORY" ]]
+          verify_release_candidate_history "$GITHUB_WORKSPACE"
+          resolve_tracked_release_notes \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/$RELEASE_NOTES_INPUT"
+          resolve_reviewed_upgrade_evidence \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/$UPGRADE_EVIDENCE_INPUT" \
+            "$REVIEWED_RELEASE_VERSION" \
+            "$REVIEWED_RELEASE_BUILD_NUMBER" \
+            "$REVIEWED_PREVIOUS_PUBLISHED_BUILD_NUMBER" \
+            "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" \
+            "$REVIEWED_RELEASE_TEAM_IDENTIFIER" \
+            "$REVIEWED_GITHUB_REPOSITORY"
+          RUN_STATE="$(gh run view "$CANDIDATE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json conclusion,event,headSha,workflowName \
+            --jq '[.conclusion, .event, .headSha, .workflowName] | @tsv')"
+          [[ "$RUN_STATE" == $'success\tworkflow_dispatch\t'"$REVIEWED_UPGRADE_CANDIDATE_SOURCE_COMMIT"$'\tProduction Release' ]] || {
+            print -u2 "candidate_run_id is not the successful reviewed candidate run."
+            exit 1
+          }
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_VERSION "$REVIEWED_RELEASE_VERSION"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_BUILD_NUMBER "$REVIEWED_RELEASE_BUILD_NUMBER"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_TAG "v$REVIEWED_RELEASE_VERSION"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_RELEASE_SOURCE_COMMIT \
+            "$REVIEWED_UPGRADE_CANDIDATE_SOURCE_COMMIT"
+          print -r -- \
+            "artifact_name=Speaker-$REVIEWED_RELEASE_VERSION-$REVIEWED_RELEASE_BUILD_NUMBER-production" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Download exact tested candidate artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: .build/distribution
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+
+      - name: Resolve pinned packages
+        run: ./scripts/swiftw package resolve --disable-sandbox
+
+      - name: Verify and promote exact candidate release
+        id: promotion
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPGRADE_EVIDENCE_INPUT: ${{ inputs.upgrade_evidence_file }}
+        run: |
+          set -euo pipefail
+          source ./scripts/release-common
+          load_reviewed_release_identity "$GITHUB_WORKSPACE"
+          load_reviewed_release_candidate "$GITHUB_WORKSPACE"
+          resolve_reviewed_upgrade_evidence \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/$UPGRADE_EVIDENCE_INPUT" \
+            "$REVIEWED_RELEASE_VERSION" \
+            "$REVIEWED_RELEASE_BUILD_NUMBER" \
+            "$REVIEWED_PREVIOUS_PUBLISHED_BUILD_NUMBER" \
+            "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" \
+            "$REVIEWED_RELEASE_TEAM_IDENTIFIER" \
+            "$REVIEWED_GITHUB_REPOSITORY"
+          TAG="$SPEAKER_RELEASE_TAG"
+          DMG="Speaker-$SPEAKER_VERSION-$SPEAKER_BUILD_NUMBER.dmg"
+          CHECKSUM="$DMG.sha256"
+          DISTRIBUTION="$GITHUB_WORKSPACE/.build/distribution"
+          DOWNLOAD="$RUNNER_TEMP/speaker-public-candidate"
+          MOUNT="$RUNNER_TEMP/speaker-candidate-mount"
+          CANDIDATE_STATE="$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,targetCommitish \
+            --jq '[.isDraft, .isPrerelease, .targetCommitish] | @tsv')"
+          PROMOTION_STATE="$(reviewed_release_promotion_state \
+            "$CANDIDATE_STATE" \
+            "$SPEAKER_RELEASE_SOURCE_COMMIT")"
+          ASSETS="$(gh release view "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets | map(.name) | sort | join("\n")')"
+          EXPECTED_ASSETS="$(reviewed_github_release_asset_names "$DMG")"
+          [[ "$ASSETS" == "$EXPECTED_ASSETS" ]]
+
+          mkdir "$DOWNLOAD"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$DOWNLOAD" \
+            --pattern "$DMG" \
+            --pattern "$CHECKSUM" \
+            --pattern appcast.xml
+          cmp -s "$DISTRIBUTION/$DMG" "$DOWNLOAD/$DMG"
+          cmp -s "$DISTRIBUTION/$CHECKSUM" "$DOWNLOAD/$CHECKSUM"
+          cmp -s "$DISTRIBUTION/appcast.xml" "$DOWNLOAD/appcast.xml"
+          EXPECTED_CHECKSUM_LINE="$(<"$DISTRIBUTION/$CHECKSUM")"
+          validate_portable_checksum_line "$EXPECTED_CHECKSUM_LINE" "$DMG"
+          [[ "$(shasum -a 256 "$DISTRIBUTION/$DMG" | awk '{print $1}')" \
+            == "${EXPECTED_CHECKSUM_LINE%%  *}" ]]
+          SIGNATURE="$(xmllint --xpath \
+            "string((//*[local-name()='item'][*[local-name()='version' and text()='$SPEAKER_BUILD_NUMBER']]/enclosure/@*[local-name()='edSignature'])[1])" \
+            "$DISTRIBUTION/appcast.xml")"
+          [[ -n "$SIGNATURE" ]]
+          ./scripts/verify-update-signature \
+            "$DISTRIBUTION/$DMG" \
+            "$SIGNATURE" \
+            "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+          verify_notarized_dmg "$DISTRIBUTION/$DMG"
+
+          mkdir "$MOUNT"
+          hdiutil attach \
+            "$DISTRIBUTION/$DMG" \
+            -readonly \
+            -nobrowse \
+            -mountpoint "$MOUNT" >/dev/null
+          trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+          verify_reviewed_upgrade_candidate "$MOUNT/Speaker.app"
+          verify_production_app \
+            "$MOUNT/Speaker.app" \
+            "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" \
+            "$REVIEWED_RELEASE_TEAM_IDENTIFIER" \
+            "$GITHUB_WORKSPACE/Resources/Speaker.entitlements" \
+            "$REVIEWED_UPDATE_FEED_URL" \
+            "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+          verify_notarized_app "$MOUNT/Speaker.app"
+          hdiutil detach "$MOUNT" >/dev/null
+          trap - EXIT
+
+          [[ "$PROMOTION_STATE" == candidate \
+             || "$PROMOTION_STATE" == promoted ]]
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease=false \
+            --latest
+          print 'promoted=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify public production update channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh release view "$SPEAKER_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease \
+            --jq '[.isDraft, .isPrerelease] | @tsv')" == $'false\tfalse' ]]
+          PUBLIC_APPCAST="$RUNNER_TEMP/speaker-public-appcast.xml"
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output "$PUBLIC_APPCAST" \
+            "$(/usr/libexec/PlistBuddy -c 'Print :UpdateFeedURL' Resources/ReleaseIdentity.plist)"
+          cmp -s .build/distribution/appcast.xml "$PUBLIC_APPCAST"
+          ./scripts/verify-published-update

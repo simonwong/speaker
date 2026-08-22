@@ -8,16 +8,11 @@ source "$SCRIPT_DIR/release-common"
 
 VERSION="${SPEAKER_VERSION:-}"
 BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-}"
-SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
 
 load_reviewed_release_identity "$ROOT"
 load_reviewed_release_candidate "$ROOT"
 if [[ -z "$VERSION" || -z "$BUILD_NUMBER" ]]; then
     print -u2 "SPEAKER_VERSION and SPEAKER_BUILD_NUMBER are required."
-    exit 1
-fi
-if [[ -z "$SPARKLE_KEY_ACCOUNT" ]]; then
-    print -u2 "SPEAKER_SPARKLE_KEY_ACCOUNT is required to verify the signed feed."
     exit 1
 fi
 reject_release_candidate_override "$VERSION" "$BUILD_NUMBER"
@@ -69,23 +64,6 @@ download_https() {
 
 download_https "$REVIEWED_UPDATE_FEED_URL" "$APPCAST_FILE"
 xmllint --noout "$APPCAST_FILE"
-
-resolve_sparkle_release_tools "$ROOT"
-SIGN_UPDATE="$REVIEWED_SPARKLE_SIGN_UPDATE"
-GENERATE_KEYS="$REVIEWED_SPARKLE_GENERATE_KEYS"
-ACTUAL_UPDATE_PUBLIC_KEY="$(
-    "$GENERATE_KEYS" \
-        --account "$SPARKLE_KEY_ACCOUNT" \
-        -p
-)"
-if [[ "$ACTUAL_UPDATE_PUBLIC_KEY" != "$REVIEWED_UPDATE_PUBLIC_ED_KEY" ]]; then
-    print -u2 "The Sparkle verification account does not match the reviewed public key."
-    exit 1
-fi
-"$SIGN_UPDATE" \
-    --account "$SPARKLE_KEY_ACCOUNT" \
-    --verify \
-    "$APPCAST_FILE"
 
 ITEM_XPATH="//*[local-name()='item'][*[local-name()='version' and text()='$BUILD_NUMBER']]"
 ITEM_COUNT="$(xmllint --xpath "count($ITEM_XPATH)" "$APPCAST_FILE")"
@@ -146,11 +124,10 @@ if [[ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]]; then
     print -u2 "Published DMG does not match its SHA-256 checksum."
     exit 1
 fi
-"$SIGN_UPDATE" \
-    --account "$SPARKLE_KEY_ACCOUNT" \
-    --verify \
+/bin/zsh "$SCRIPT_DIR/verify-update-signature" \
     "$ARCHIVE_FILE" \
-    "$PUBLISHED_SIGNATURE"
+    "$PUBLISHED_SIGNATURE" \
+    "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
 verify_notarized_dmg "$ARCHIVE_FILE"
 
 mkdir -p "$MOUNT_POINT"

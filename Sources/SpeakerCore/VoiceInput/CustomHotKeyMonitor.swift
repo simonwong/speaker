@@ -3,9 +3,57 @@
 import Foundation
 
 public struct CustomHotKey: Codable, Equatable, Sendable {
+    public enum PhysicalModifier: Equatable, Sendable {
+        case leftOption
+        case rightOption
+        case leftControl
+        case rightControl
+        case leftShift
+        case rightShift
+
+        public init?(keyCode: UInt32) {
+            switch Int(keyCode) {
+            case kVK_Option: self = .leftOption
+            case kVK_RightOption: self = .rightOption
+            case kVK_Control: self = .leftControl
+            case kVK_RightControl: self = .rightControl
+            case kVK_Shift: self = .leftShift
+            case kVK_RightShift: self = .rightShift
+            default: return nil
+            }
+        }
+
+        public var keyCode: UInt32 {
+            switch self {
+            case .leftOption: UInt32(kVK_Option)
+            case .rightOption: UInt32(kVK_RightOption)
+            case .leftControl: UInt32(kVK_Control)
+            case .rightControl: UInt32(kVK_RightControl)
+            case .leftShift: UInt32(kVK_Shift)
+            case .rightShift: UInt32(kVK_RightShift)
+            }
+        }
+
+        fileprivate var carbonModifiers: UInt32 {
+            switch self {
+            case .leftOption, .rightOption: UInt32(optionKey)
+            case .leftControl, .rightControl: UInt32(controlKey)
+            case .leftShift, .rightShift: UInt32(shiftKey)
+            }
+        }
+
+        fileprivate var eventFlag: CGEventFlags {
+            switch self {
+            case .leftOption, .rightOption: .maskAlternate
+            case .leftControl, .rightControl: .maskControl
+            case .leftShift, .rightShift: .maskShift
+            }
+        }
+    }
+
     public enum Trigger: Equatable, Sendable {
         case keyChord(keyCode: UInt32, modifiers: UInt32)
-        case modifierOnly(keyCode: UInt32)
+        case modifierOnly(PhysicalModifier)
     }
 
     public let keyCode: UInt32
@@ -24,27 +72,22 @@ public struct CustomHotKey: Codable, Equatable, Sendable {
         displayName: "⌥ Space"
     )
 
-    public static func modifierOnly(keyCode: UInt32) -> CustomHotKey? {
-        let configuration: (modifiers: UInt32, displayName: String)? = switch Int(keyCode) {
-        case kVK_Option: (UInt32(optionKey), "左 ⌥")
-        case kVK_RightOption: (UInt32(optionKey), "右 ⌥")
-        case kVK_Control: (UInt32(controlKey), "左 ⌃")
-        case kVK_RightControl: (UInt32(controlKey), "右 ⌃")
-        case kVK_Shift: (UInt32(shiftKey), "左 ⇧")
-        case kVK_RightShift: (UInt32(shiftKey), "右 ⇧")
-        default: nil
-        }
-        guard let configuration else { return nil }
+    public static func modifierOnly(
+        _ modifier: PhysicalModifier,
+        displayName: String
+    ) -> CustomHotKey {
         return CustomHotKey(
-            keyCode: keyCode,
-            modifiers: configuration.modifiers,
-            displayName: configuration.displayName
+            keyCode: modifier.keyCode,
+            modifiers: modifier.carbonModifiers,
+            displayName: displayName
         )
     }
 
     public var trigger: Trigger {
-        if Self.modifierOnly(keyCode: keyCode)?.modifiers == modifiers {
-            return .modifierOnly(keyCode: keyCode)
+        if let modifier = PhysicalModifier(keyCode: keyCode),
+           modifier.carbonModifiers == modifiers
+        {
+            return .modifierOnly(modifier)
         }
         return .keyChord(keyCode: keyCode, modifiers: modifiers)
     }
@@ -54,13 +97,8 @@ public struct CustomHotKey: Codable, Equatable, Sendable {
     }
 
     package var modifierOnlyEventFlag: CGEventFlags? {
-        guard isModifierOnly else { return nil }
-        return switch Int(keyCode) {
-        case kVK_Option, kVK_RightOption: .maskAlternate
-        case kVK_Control, kVK_RightControl: .maskControl
-        case kVK_Shift, kVK_RightShift: .maskShift
-        default: nil
-        }
+        guard case let .modifierOnly(modifier) = trigger else { return nil }
+        return modifier.eventFlag
     }
 
     public var isReservedForCancellation: Bool {

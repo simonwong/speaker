@@ -22,7 +22,7 @@ Delivery mutates the frozen Input Target only after it remains safe and current.
 2. As a first-time user, I want Microphone and Accessibility onboarding, so that I understand each permission before granting it.
 3. As a user, I want missing or revoked permissions reported explicitly, so that platform failures are not confused with provider failures.
 4. As a user, I want `Fn` as the default voice shortcut, so that recording requires minimal hand movement.
-5. As a user, I want to select a custom modifier-and-key shortcut, so that I can avoid hardware or system conflicts.
+5. As a user, I want to select a safe key chord or dedicate one physical Option, Control, or Shift key, so that I can avoid hardware or system conflicts.
 6. As a user, I want real shortcut registration to reject conflicts, so that a saved shortcut is actually usable.
 7. As a user, I want press/release and short-press interactions to create at most one Voice Input Session, so that repeated events cannot race.
 8. As a user, I want `Esc` to cancel an active session, so that accidental audio or text is not delivered.
@@ -55,6 +55,7 @@ Delivery mutates the frozen Input Target only after it remains safe and current.
 
 - Speaker targets macOS 14 or later and uses Swift 6. It is a menu-bar application outside App Sandbox because global shortcut monitoring and cross-application Accessibility delivery are core behavior.
 - Accessibility and Microphone are the only runtime permissions required for voice input. Shortcut activation and permission recovery are coordinated as one ordered feature lifecycle.
+- The selected `Fn` or side-specific modifier is consumed as Speaker's dedicated trigger without changing macOS global keyboard preferences. Left and right Option, Control, and Shift remain distinct; Command alone is rejected. Key-chord registration continues through Carbon.
 - The Voice Input Session module is the primary deep module. Its interface accepts semantic intents and publishes observable session behavior; it hides event ordering, recording, target capture, provider processing, delivery, cancellation, cleanup, and history settlement.
 - Commands are serialized. Duplicate edges are idempotent, asynchronous work carries session identity, and late results from cancelled or superseded sessions are discarded.
 - Audio is converted to 16 kHz, 16-bit, mono PCM in memory and placed in a bounded stream. It is never persisted as a normal application artifact.

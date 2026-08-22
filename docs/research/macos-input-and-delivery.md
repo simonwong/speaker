@@ -1,13 +1,13 @@
 # macOS Input and Delivery Constraints
 
-Last reviewed: 2026-08-01
+Last reviewed: 2026-08-22
 
 This page records the platform evidence behind [ADR-0001](../adr/0001-run-outside-app-sandbox.md) and [ADR-0002](../adr/0002-freeze-the-input-target.md). It is a dated research record; Apple contracts and observed application behavior must be rechecked before widening delivery support.
 
 ## Findings
 
-- `Fn` is modifier state rather than a normal character key. A session-level, listen-only `CGEventTap` can observe `flagsChanged` and derive press/release edges from `maskSecondaryFn`.
-- A custom modifier-and-key shortcut can use Carbon hot-key registration and receive pressed/released events. The live registration result, not a static conflict list, decides whether the shortcut is available.
+- `Fn` is modifier state rather than a normal character key. Speaker uses an active session event tap to derive press/release edges from `maskSecondaryFn`; while Fn is selected, it consumes those edges so the Globe action does not also open.
+- A modifier-and-key shortcut uses Carbon hot-key registration. Left/right Option, Control, and Shift alone use the event-tap gesture path because Carbon cannot register side-specific modifier-only gestures. Command alone is rejected. The live registration result, not a static conflict list, decides whether a chord is available.
 - The system-wide Accessibility element exposes the focused application and focused UI element at release. Third-party controls may return unsupported, invalid-element, cannot-complete, or not-implemented errors.
 - An `AXUIElement` can be retained in memory, but its validity is not guaranteed after a control, page, window, or process changes. Every later use requires revalidation.
 - macOS has no universal atomic operation that inserts text into an arbitrary historical editing position across all applications. Attribute writability, selection behavior, rich-text semantics, and receipt behavior vary by control family.
@@ -19,7 +19,7 @@ This page records the platform evidence behind [ADR-0001](../adr/0001-run-outsid
 
 The event-tap callback performs minimal edge bookkeeping and hands semantic intent to ordered application code. It does not perform AX IPC, stop audio, or start provider work inline. When macOS disables the tap for timeout, Speaker resets gesture ownership, re-enables the tap, and reports recovery.
 
-`Fn` cannot be exclusively registered as an ordinary Carbon hot key. The user's Fn/Globe system setting and external keyboard may produce competing behavior, so Speaker provides a custom-shortcut alternative and requires real-machine evidence.
+`Fn` cannot be registered as an ordinary Carbon hot key. When selected, Speaker's active tap consumes its press/release sequence and suppresses the competing Globe action without changing the user's system setting. Secure Event Input blocks recording but keeps the selected Fn sequence consumed. External keyboards and tap recovery still require real-machine evidence. Carbon remains the chord path; side-specific modifier-only shortcuts share the active event-tap gesture contract.
 
 ## Input Target contract
 

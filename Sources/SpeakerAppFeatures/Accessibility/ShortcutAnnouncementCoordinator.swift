@@ -28,7 +28,7 @@ package final class ShortcutAnnouncementCoordinator {
             .store(in: &cancellables)
 
         feature.$persistenceConfirmation
-            .compactMap { $0 }
+            .compactMap { $0?.persistenceConfirmationMessage }
             .sink(receiveValue: announce)
             .store(in: &cancellables)
     }

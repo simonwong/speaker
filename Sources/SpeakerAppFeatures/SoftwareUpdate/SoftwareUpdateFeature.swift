@@ -2,8 +2,17 @@ import Combine
 import Foundation
 
 package enum SoftwareUpdateAvailability: Equatable, Sendable {
-    case unavailable(diagnosticCode: String)
+    case unavailable(SoftwareUpdateStatusCode)
     case ready
+}
+
+package enum SoftwareUpdateStatusCode: String, Equatable, Sendable {
+    case developmentBuild = "update.development-build"
+    case invalidFeed = "update.invalid-feed"
+    case invalidPublicKey = "update.invalid-public-key"
+    case notStarted = "update.not-started"
+    case ready = "update.ready"
+    case startFailed = "update.start-failed"
 }
 
 package struct SoftwareUpdateConfiguration: Equatable, Sendable {
@@ -15,9 +24,7 @@ package struct SoftwareUpdateConfiguration: Equatable, Sendable {
         publicEDKey: String?
     ) {
         guard signingMode == .developerID else {
-            availability = .unavailable(
-                diagnosticCode: "update.development-build"
-            )
+            availability = .unavailable(.developmentBuild)
             return
         }
         guard let feedURLString,
@@ -26,9 +33,7 @@ package struct SoftwareUpdateConfiguration: Equatable, Sendable {
               feedURL.host != nil,
               !feedURLString.contains(".invalid")
         else {
-            availability = .unavailable(
-                diagnosticCode: "update.invalid-feed"
-            )
+            availability = .unavailable(.invalidFeed)
             return
         }
         guard let publicEDKey,
@@ -36,12 +41,65 @@ package struct SoftwareUpdateConfiguration: Equatable, Sendable {
               let keyData = Data(base64Encoded: publicEDKey),
               keyData.count == 32
         else {
-            availability = .unavailable(
-                diagnosticCode: "update.invalid-public-key"
-            )
+            availability = .unavailable(.invalidPublicKey)
             return
         }
         availability = .ready
+    }
+}
+
+package enum SoftwareUpdateFeedOverridePolicy {
+    package static func stagingFeedURL(
+        arguments: [String],
+        stableFeedURLString: String?
+    ) -> String? {
+        guard let optionIndex = arguments.firstIndex(
+            of: "--speaker-update-feed"
+        ), arguments.indices.contains(optionIndex + 1),
+              arguments.lastIndex(of: "--speaker-update-feed") == optionIndex,
+              let stableFeedURLString,
+              let stableURL = URL(string: stableFeedURLString),
+              let candidateURL = URL(string: arguments[optionIndex + 1]),
+              stableURL.scheme?.lowercased() == "https",
+              candidateURL.scheme?.lowercased() == "https",
+              candidateURL.host?.lowercased() == stableURL.host?.lowercased(),
+              stableURL.user == nil,
+              stableURL.password == nil,
+              stableURL.port == nil,
+              candidateURL.user == nil,
+              candidateURL.password == nil,
+              candidateURL.port == nil
+        else {
+            return nil
+        }
+        let stableParts = stableURL.pathComponents.filter { $0 != "/" }
+        let candidateParts = candidateURL.pathComponents.filter { $0 != "/" }
+        let versionParts = candidateParts.indices.contains(4)
+            ? candidateParts[4].dropFirst().split(separator: ".")
+            : []
+        guard stableParts.count == 6,
+              candidateParts.count == 6,
+              Array(candidateParts.prefix(3))
+                == Array(stableParts.prefix(3)),
+              Array(stableParts[3...5])
+                == ["latest", "download", "appcast.xml"],
+              candidateParts[3] == "download",
+              candidateParts[4].first == "v",
+              versionParts.count == 3,
+              versionParts.allSatisfy({ part in
+                  !part.isEmpty
+                    && part.allSatisfy(\.isNumber)
+                    && (part == "0" || !part.hasPrefix("0"))
+              }),
+              candidateParts[5] == "appcast.xml",
+              candidateURL.query == nil,
+              candidateURL.fragment == nil,
+              stableURL.query == nil,
+              stableURL.fragment == nil
+        else {
+            return nil
+        }
+        return candidateURL.absoluteString
     }
 }
 
@@ -76,27 +134,29 @@ package struct SoftwareUpdateState: Equatable, Sendable {
     package let isAvailable: Bool
     package let canCheckForUpdates: Bool
     package let automaticallyChecksForUpdates: Bool
-    package let diagnosticCode: String
+    package let statusCode: SoftwareUpdateStatusCode
 
-    package static func unavailable(_ diagnosticCode: String) -> Self {
+    package var diagnosticCode: String { statusCode.rawValue }
+
+    package static func unavailable(_ statusCode: SoftwareUpdateStatusCode) -> Self {
         .init(
             isAvailable: false,
             canCheckForUpdates: false,
             automaticallyChecksForUpdates: false,
-            diagnosticCode: diagnosticCode
+            statusCode: statusCode
         )
     }
 
     package var unavailableMessage: String? {
         guard !isAvailable else { return nil }
-        return switch diagnosticCode {
-        case "update.development-build":
+        return switch statusCode {
+        case .developmentBuild:
             "检查更新仅用于正式发布版本。"
-        case "update.invalid-feed", "update.invalid-public-key":
+        case .invalidFeed, .invalidPublicKey:
             "正式更新配置无效；已停止检查更新。"
-        case "update.start-failed":
+        case .startFailed:
             "更新服务启动失败；请重新打开 Speaker 后重试。"
-        default:
+        case .notStarted, .ready:
             "当前无法检查更新。"
         }
     }
@@ -109,7 +169,7 @@ package struct SoftwareUpdateState: Equatable, Sendable {
             canCheckForUpdates: snapshot.canCheckForUpdates,
             automaticallyChecksForUpdates:
                 snapshot.automaticallyChecksForUpdates,
-            diagnosticCode: "update.ready"
+            statusCode: .ready
         )
     }
 }
@@ -133,15 +193,15 @@ package final class SoftwareUpdateFeature: ObservableObject {
         makeDriver: MakeDriver
     ) {
         switch configuration.availability {
-        case let .unavailable(diagnosticCode):
-            state = .unavailable(diagnosticCode)
+        case let .unavailable(statusCode):
+            state = .unavailable(statusCode)
         case .ready:
             driver = makeDriver()
             state = .init(
                 isAvailable: true,
                 canCheckForUpdates: false,
                 automaticallyChecksForUpdates: false,
-                diagnosticCode: "update.not-started"
+                statusCode: .notStarted
             )
         }
     }
@@ -156,7 +216,7 @@ package final class SoftwareUpdateFeature: ObservableObject {
             state = .ready(snapshot)
         } catch {
             self.driver = nil
-            state = .unavailable("update.start-failed")
+            state = .unavailable(.startFailed)
         }
     }
 

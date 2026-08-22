@@ -96,6 +96,206 @@ resolve_tracked_release_notes() {
     typeset -g REVIEWED_RELEASE_NOTES_RELATIVE_PATH="$relative_path"
 }
 
+resolve_reviewed_upgrade_evidence() {
+    local root="$1"
+    local requested_path="$2"
+    local candidate_version="$3"
+    local candidate_build="$4"
+    local previous_build="$5"
+    local expected_bundle_identifier="$6"
+    local expected_team_identifier="$7"
+    local expected_github_repository="$8"
+    local canonical_root
+    local absolute_path
+    local relative_path
+    local candidate_source_commit
+    local candidate_executable_hash
+    local candidate_arm64_code_directory_hash
+    local candidate_x86_64_code_directory_hash
+    local staging_feed_url
+    local upgrade_source
+    local upgrade_source_version
+    local upgrade_source_build
+    local upgrade_source_hash
+    local upgrade_source_arm64_code_directory_hash
+    local upgrade_source_x86_64_code_directory_hash
+    local generated_utc
+    local generated_epoch
+    local current_epoch
+    local current_commit
+    local changed_paths
+    local case_id
+
+    validate_bundle_metadata \
+        "$candidate_version" \
+        "$candidate_build" \
+        "$expected_bundle_identifier" \
+        || return 1
+    if ! matches_release_pattern "$previous_build" '^(0|[1-9][0-9]*)$' \
+          || { [[ "$previous_build" != 0 ]] \
+              && ! release_build_is_greater "$candidate_build" "$previous_build"; }; then
+        release_error "Upgrade evidence has an invalid previous published build."
+        return 1
+    fi
+    if [[ ! -f "$requested_path" || -L "$requested_path" \
+          || ! -s "$requested_path" \
+          || "$(stat -f %z "$requested_path")" -gt 262144 ]]; then
+        release_error "Upgrade evidence must be a bounded, non-empty regular file."
+        return 1
+    fi
+    canonical_root="${root:A}"
+    absolute_path="${requested_path:A}"
+    if [[ "$absolute_path" != "$canonical_root/"* ]]; then
+        release_error "Upgrade evidence must be committed inside the release repository."
+        return 1
+    fi
+    relative_path="${absolute_path#$canonical_root/}"
+    if ! git -C "$canonical_root" ls-files --error-unmatch -- "$relative_path" \
+        >/dev/null 2>&1; then
+        release_error "Upgrade evidence must be tracked by Git: $relative_path"
+        return 1
+    fi
+    if ! git -C "$canonical_root" diff --quiet -- "$relative_path" \
+          || ! git -C "$canonical_root" diff --cached --quiet -- "$relative_path"; then
+        release_error "Upgrade evidence must match its committed Git content."
+        return 1
+    fi
+    if [[ "$(grep -Fxc -- '- Evidence Schema: production-upgrade-v1' "$absolute_path")" != 1 \
+          || "$(grep -Fxc -- "- App: $expected_bundle_identifier $candidate_version ($candidate_build)" "$absolute_path")" != 1 \
+          || "$(grep -Fxc -- '- Signing: developer-id' "$absolute_path")" != 1 \
+          || "$(grep -Fxc -- "- Team ID: $expected_team_identifier" "$absolute_path")" != 1 \
+          || "$(grep -Fxc -- '- Result: FULL PASS' "$absolute_path")" != 1 ]]; then
+        release_error "Upgrade evidence does not match the production candidate and full-pass schema."
+        return 1
+    fi
+
+    candidate_source_commit="$(sed -n 's/^- Source Commit: //p' "$absolute_path")"
+    candidate_executable_hash="$(sed -n 's/^- Executable SHA-256: //p' "$absolute_path")"
+    candidate_arm64_code_directory_hash="$(sed -n 's/^- CodeDirectory CDHash arm64: //p' "$absolute_path")"
+    candidate_x86_64_code_directory_hash="$(sed -n 's/^- CodeDirectory CDHash x86_64: //p' "$absolute_path")"
+    staging_feed_url="$(sed -n 's/^- Staging Feed URL: //p' "$absolute_path")"
+    generated_utc="$(sed -n 's/^- UTC: //p' "$absolute_path")"
+    upgrade_source="$(sed -n 's/^- Upgrade Source: //p' "$absolute_path")"
+    upgrade_source_hash="$(sed -n 's/^- Upgrade Source Executable SHA-256: //p' "$absolute_path")"
+    upgrade_source_arm64_code_directory_hash="$(sed -n 's/^- Upgrade Source CodeDirectory CDHash arm64: //p' "$absolute_path")"
+    upgrade_source_x86_64_code_directory_hash="$(sed -n 's/^- Upgrade Source CodeDirectory CDHash x86_64: //p' "$absolute_path")"
+    if [[ "$candidate_source_commit" == *$'\n'* \
+          || "$candidate_executable_hash" == *$'\n'* \
+          || "$candidate_arm64_code_directory_hash" == *$'\n'* \
+          || "$candidate_x86_64_code_directory_hash" == *$'\n'* \
+          || "$staging_feed_url" == *$'\n'* \
+          || "$generated_utc" == *$'\n'* \
+          || "$upgrade_source" == *$'\n'* \
+          || "$upgrade_source_hash" == *$'\n'* ]] \
+          || ! matches_release_pattern "$candidate_source_commit" '^[0-9a-f]{40}$' \
+          || ! matches_release_pattern "$candidate_executable_hash" '^[0-9a-f]{64}$' \
+          || ! matches_release_pattern "$candidate_arm64_code_directory_hash" '^[0-9a-f]{40}$' \
+          || ! matches_release_pattern "$candidate_x86_64_code_directory_hash" '^[0-9a-f]{40}$' \
+          || [[ "$staging_feed_url" != "https://github.com/$expected_github_repository/releases/download/v$candidate_version/appcast.xml" ]] \
+          || ! matches_release_pattern "$upgrade_source_hash" '^[0-9a-f]{64}$'; then
+        release_error "Upgrade evidence has invalid release bindings."
+        return 1
+    fi
+    upgrade_source_version="${upgrade_source#$expected_bundle_identifier }"
+    upgrade_source_version="${upgrade_source_version% \(*}"
+    upgrade_source_build="${upgrade_source##* \(}"
+    upgrade_source_build="${upgrade_source_build%\)}"
+    if [[ "$upgrade_source" \
+          != "$expected_bundle_identifier $upgrade_source_version ($upgrade_source_build)" ]]; then
+        release_error "Upgrade source metadata is malformed."
+        return 1
+    fi
+    validate_bundle_metadata \
+        "$upgrade_source_version" \
+        "$upgrade_source_build" \
+        "$expected_bundle_identifier" || return 1
+    if [[ "$upgrade_source_version" == "$candidate_version" ]] \
+          || ! release_build_is_greater "$candidate_build" "$upgrade_source_build" \
+          || { [[ "$previous_build" != 0 ]] \
+              && [[ "$upgrade_source_build" != "$previous_build" ]]; }; then
+        release_error "Upgrade evidence must identify the tested older build."
+        return 1
+    fi
+    if [[ "$(grep -Fxc -- "- Upgrade Source Team ID: $expected_team_identifier" "$absolute_path")" != 1 ]] \
+          || ! matches_release_pattern "$upgrade_source_arm64_code_directory_hash" '^[0-9a-f]{40}$' \
+          || ! matches_release_pattern "$upgrade_source_x86_64_code_directory_hash" '^[0-9a-f]{40}$' \
+          || [[ "$(grep -Ec -- '^- Authority: Developer ID Application:' "$absolute_path")" != 1 ]] \
+          || [[ "$(grep -Ec -- '^- Upgrade Source Authority: Developer ID Application:' "$absolute_path")" != 1 ]] \
+          || [[ "$(grep -Ec -- '^- macOS: [0-9]+\.' "$absolute_path")" != 1 ]] \
+          || [[ "$(grep -Ec -- '^- Machine: (arm64|x86_64)$' "$absolute_path")" != 1 ]]; then
+        release_error "Upgrade evidence lacks machine or Developer ID continuity."
+        return 1
+    fi
+    for case_id in \
+        sparkle-update \
+        developer-id-continuity \
+        tcc-continuity \
+        keychain-continuity
+    do
+        if [[ "$(grep -Ec -- "^\\| $case_id — .* \\| PASS \\|" "$absolute_path")" != 1 ]]; then
+            release_error "Upgrade evidence case is not PASS: $case_id"
+            return 1
+        fi
+    done
+    generated_epoch="$(date -j -u -f '%Y-%m-%d %H:%M:%S' "$generated_utc" '+%s' 2>/dev/null)" || {
+        release_error "Upgrade evidence timestamp is invalid."
+        return 1
+    }
+    current_epoch="$(date -u '+%s')"
+    if (( generated_epoch > current_epoch + 300 \
+          || current_epoch - generated_epoch > 604800 )); then
+        release_error "Upgrade evidence must be generated within seven days of publication."
+        return 1
+    fi
+    current_commit="$(git -C "$canonical_root" rev-parse --verify 'HEAD^{commit}')" \
+        || return 1
+    git -C "$canonical_root" merge-base --is-ancestor \
+        "$candidate_source_commit" \
+        "$current_commit" || {
+        release_error "Upgrade evidence candidate is not an ancestor of the release commit."
+        return 1
+    }
+    changed_paths="$(git -C "$canonical_root" diff --name-only \
+        "$candidate_source_commit..$current_commit")" || return 1
+    if [[ "$changed_paths" != "$relative_path" ]]; then
+        release_error "Only the reviewed upgrade report may differ from its tested candidate commit."
+        return 1
+    fi
+    typeset -g REVIEWED_UPGRADE_EVIDENCE_RELATIVE_PATH="$relative_path"
+    typeset -g REVIEWED_UPGRADE_CANDIDATE_SOURCE_COMMIT="$candidate_source_commit"
+    typeset -g REVIEWED_UPGRADE_CANDIDATE_EXECUTABLE_SHA256="$candidate_executable_hash"
+    typeset -g REVIEWED_UPGRADE_CANDIDATE_ARM64_CODE_DIRECTORY_HASH="$candidate_arm64_code_directory_hash"
+    typeset -g REVIEWED_UPGRADE_CANDIDATE_X86_64_CODE_DIRECTORY_HASH="$candidate_x86_64_code_directory_hash"
+    typeset -g REVIEWED_UPGRADE_STAGING_FEED_URL="$staging_feed_url"
+}
+
+verify_reviewed_upgrade_candidate() {
+    local app="$1"
+    local actual_arm64_code_directory_hash
+    local actual_x86_64_code_directory_hash
+    local actual_executable_sha256
+
+    [[ -d "$app" && ! -L "$app" \
+       && -n "${REVIEWED_UPGRADE_CANDIDATE_ARM64_CODE_DIRECTORY_HASH:-}" \
+       && -n "${REVIEWED_UPGRADE_CANDIDATE_X86_64_CODE_DIRECTORY_HASH:-}" \
+       && -n "${REVIEWED_UPGRADE_CANDIDATE_EXECUTABLE_SHA256:-}" ]] || {
+        release_error "Reviewed upgrade candidate binding is unavailable."
+        return 1
+    }
+    actual_arm64_code_directory_hash="$(codesign -dvvv --arch arm64 "$app" 2>&1 | sed -n 's/^CDHash=//p')" || return 1
+    actual_x86_64_code_directory_hash="$(codesign -dvvv --arch x86_64 "$app" 2>&1 | sed -n 's/^CDHash=//p')" || return 1
+    actual_executable_sha256="$(shasum -a 256 "$app/Contents/MacOS/SpeakerApp" | awk '{print $1}')" || return 1
+    if [[ "$actual_executable_sha256" \
+          != "$REVIEWED_UPGRADE_CANDIDATE_EXECUTABLE_SHA256" \
+          || "$actual_arm64_code_directory_hash" \
+          != "$REVIEWED_UPGRADE_CANDIDATE_ARM64_CODE_DIRECTORY_HASH" \
+          || "$actual_x86_64_code_directory_hash" \
+          != "$REVIEWED_UPGRADE_CANDIDATE_X86_64_CODE_DIRECTORY_HASH" ]]; then
+        release_error "Final universal CodeDirectories differ from the old-version upgrade candidate."
+        return 1
+    fi
+}
+
 create_release_source_snapshot() {
     local root="$1"
     local destination="$2"
@@ -309,6 +509,42 @@ reviewed_release_archive_url_prefix() {
         return 1
     fi
     print -r -- "${REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX}v${version}/"
+}
+
+reviewed_github_release_asset_names() {
+    local archive_basename="$1"
+
+    if ! matches_release_pattern \
+        "$archive_basename" \
+        '^Speaker-[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*\.dmg$'; then
+        release_error "GitHub release archive basename is invalid."
+        return 1
+    fi
+    print -r -- "$archive_basename"
+    print -r -- "$archive_basename.sha256"
+    print -r -- appcast.xml
+}
+
+reviewed_release_promotion_state() {
+    local release_state="$1"
+    local expected_source_commit="$2"
+
+    if ! matches_release_pattern "$expected_source_commit" '^[0-9a-f]{40}$'; then
+        release_error "Promotion source commit is invalid."
+        return 1
+    fi
+    case "$release_state" in
+        $'false\ttrue\t'"$expected_source_commit")
+            print candidate
+            ;;
+        $'false\tfalse\t'"$expected_source_commit")
+            print promoted
+            ;;
+        *)
+            release_error "GitHub Release is not the reviewed candidate or its promoted state."
+            return 1
+            ;;
+    esac
 }
 
 load_reviewed_release_identity() {

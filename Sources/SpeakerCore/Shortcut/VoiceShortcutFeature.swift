@@ -45,14 +45,45 @@ package struct VoiceShortcutNotice: Equatable, Sendable {
         case retryPersistence
     }
 
-    package let message: String
-    package let level: Level
-    package let recovery: Recovery?
+    package enum FallbackReason: Equatable, Sendable {
+        case incompleteConfiguration
+        case reservedForCancellation
+        case editingConflict
+        case unsafeShortcut
+        case activationFailed(CustomShortcutRegistrationResult)
+    }
 
-    package init(message: String, level: Level, recovery: Recovery? = nil) {
-        self.message = message
-        self.level = level
-        self.recovery = recovery
+    package enum Kind: Equatable, Sendable {
+        case accessibilityRequired
+        case functionKeyActivationFailed(FunctionKeyMonitorStartResult)
+        case fellBackToFunctionKey(FallbackReason)
+        case fallbackUnavailable(
+            FallbackReason,
+            FunctionKeyMonitorStartResult
+        )
+        case persistenceFailed
+    }
+
+    package let kind: Kind
+
+    package var level: Level {
+        switch kind {
+        case .accessibilityRequired: .information
+        case .fellBackToFunctionKey: .warning
+        case .functionKeyActivationFailed,
+             .fallbackUnavailable,
+             .persistenceFailed: .error
+        }
+    }
+
+    package var recovery: Recovery? {
+        switch kind {
+        case .accessibilityRequired: .openAccessibilitySettings
+        case .functionKeyActivationFailed, .fallbackUnavailable:
+            .retryActivation
+        case .persistenceFailed: .retryPersistence
+        case .fellBackToFunctionKey: nil
+        }
     }
 }
 
@@ -71,7 +102,7 @@ package final class VoiceShortcutFeature: ObservableObject {
     @Published package private(set) var activation: VoiceShortcutActivation =
         .waitingForAccessibility(.functionKey)
     @Published package private(set) var notice: VoiceShortcutNotice?
-    @Published package private(set) var persistenceConfirmation: String?
+    @Published package private(set) var persistenceConfirmation: VoiceShortcutPreference?
 
     private let functionKeyMonitor: any FunctionKeyMonitoring
     private let customShortcutMonitor: any CustomShortcutMonitoring
@@ -85,9 +116,7 @@ package final class VoiceShortcutFeature: ObservableObject {
     private var failedPersistencePreference: VoiceShortcutPreference?
 
     private static let accessibilityNotice = VoiceShortcutNotice(
-        message: "需要辅助功能权限；授权后，已选择的快捷键会自动生效。",
-        level: .information,
-        recovery: .openAccessibilitySettings
+        kind: .accessibilityRequired
     )
 
     package convenience init(
@@ -177,9 +206,7 @@ package final class VoiceShortcutFeature: ObservableObject {
             guard result == .active else {
                 activation = .unavailable(.functionKey)
                 notice = VoiceShortcutNotice(
-                    message: functionKeyFailureMessage(result),
-                    level: .error,
-                    recovery: .retryActivation
+                    kind: .functionKeyActivationFailed(result)
                 )
                 if persist { persistLater(.functionKey) }
                 return
@@ -188,28 +215,28 @@ package final class VoiceShortcutFeature: ObservableObject {
             functionKeyMonitor.stop()
             guard let hotKey = choice.customHotKey else {
                 fallbackToFunctionKey(
-                    reason: "自定义快捷键配置不完整",
+                    reason: .incompleteConfiguration,
                     persist: true
                 )
                 return
             }
             guard !hotKey.isReservedForCancellation else {
                 fallbackToFunctionKey(
-                    reason: "Esc 保留用于取消当前语音输入",
+                    reason: .reservedForCancellation,
                     persist: true
                 )
                 return
             }
             guard !hotKey.conflictsWithCommonEditingShortcut else {
                 fallbackToFunctionKey(
-                    reason: "这个组合键可能与 macOS 或当前 App 的菜单命令冲突",
+                    reason: .editingConflict,
                     persist: persist
                 )
                 return
             }
             guard hotKey.isSafeForGlobalVoiceInput else {
                 fallbackToFunctionKey(
-                    reason: "请使用单独的左/右 ⌥、⌃、⇧，或安全的组合键",
+                    reason: .unsafeShortcut,
                     persist: persist
                 )
                 return
@@ -217,7 +244,7 @@ package final class VoiceShortcutFeature: ObservableObject {
             let result = customShortcutMonitor.register(hotKey)
             guard result == .active else {
                 fallbackToFunctionKey(
-                    reason: customShortcutFailureMessage(result),
+                    reason: .activationFailed(result),
                     persist: persist
                 )
                 return
@@ -250,55 +277,25 @@ package final class VoiceShortcutFeature: ObservableObject {
         }
     }
 
-    private func fallbackToFunctionKey(reason: String, persist: Bool) {
+    private func fallbackToFunctionKey(
+        reason: VoiceShortcutNotice.FallbackReason,
+        persist: Bool
+    ) {
         customShortcutMonitor.unregister()
         preference = .functionKey
         let result = functionKeyMonitor.start()
         if result == .active {
             activation = .active(.functionKey)
             notice = VoiceShortcutNotice(
-                message: "\(reason)，已继续使用 Fn。",
-                level: .warning
+                kind: .fellBackToFunctionKey(reason)
             )
         } else {
             activation = .unavailable(.functionKey)
             notice = VoiceShortcutNotice(
-                message: "\(reason)；\(functionKeyFailureMessage(result))",
-                level: .error,
-                recovery: .retryActivation
+                kind: .fallbackUnavailable(reason, result)
             )
         }
         if persist { persistLater(.functionKey) }
-    }
-
-    private func functionKeyFailureMessage(
-        _ result: FunctionKeyMonitorStartResult
-    ) -> String {
-        switch result {
-        case .active:
-            "Fn 快捷键已启用。"
-        case .eventTapUnavailable:
-            "无法创建 Fn 键的系统事件监听。"
-        case .runLoopSourceUnavailable:
-            "Fn 键监听无法接入系统事件循环。"
-        }
-    }
-
-    private func customShortcutFailureMessage(
-        _ result: CustomShortcutRegistrationResult
-    ) -> String {
-        switch result {
-        case .active:
-            "自定义快捷键已启用"
-        case .eventHandlerUnavailable:
-            "无法安装自定义快捷键事件处理"
-        case .hotKeyRegistrationUnavailable:
-            "系统未接受这个自定义快捷键"
-        case .shortcutEventTapUnavailable:
-            "无法创建自定义快捷键的系统事件监听"
-        case .shortcutRunLoopSourceUnavailable:
-            "自定义快捷键监听无法接入系统事件循环"
-        }
     }
 
     private func persistLater(_ choice: VoiceShortcutPreference) {
@@ -315,15 +312,13 @@ package final class VoiceShortcutFeature: ObservableObject {
                 let recoveredFromFailure = self.notice?.recovery == .retryPersistence
                 if recoveredFromFailure {
                     self.notice = nil
-                    self.persistenceConfirmation = "\(choice.displayName) 快捷键设置已保存。"
+                    self.persistenceConfirmation = choice
                 }
             } catch {
                 guard generation == self.persistenceGeneration else { return }
                 self.failedPersistencePreference = choice
                 self.notice = VoiceShortcutNotice(
-                    message: error.localizedDescription,
-                    level: .error,
-                    recovery: .retryPersistence
+                    kind: .persistenceFailed
                 )
             }
         }

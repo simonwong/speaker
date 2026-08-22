@@ -1,0 +1,71 @@
+import SpeakerCore
+
+package extension VoiceShortcutNotice {
+    var message: String {
+        switch kind {
+        case .accessibilityRequired:
+            "需要辅助功能权限；授权后，已选择的快捷键会自动生效。"
+        case let .functionKeyActivationFailed(result):
+            Self.functionKeyFailureMessage(result)
+        case let .fellBackToFunctionKey(reason):
+            "\(Self.fallbackReasonMessage(reason))，已继续使用 Fn。"
+        case let .fallbackUnavailable(reason, result):
+            "\(Self.fallbackReasonMessage(reason))；\(Self.functionKeyFailureMessage(result))"
+        case .persistenceFailed:
+            "无法保存快捷键设置"
+        }
+    }
+
+    private static func fallbackReasonMessage(
+        _ reason: FallbackReason
+    ) -> String {
+        switch reason {
+        case .incompleteConfiguration:
+            "自定义快捷键配置不完整"
+        case .reservedForCancellation:
+            "Esc 保留用于取消当前语音输入"
+        case .editingConflict:
+            "这个组合键可能与 macOS 或当前 App 的菜单命令冲突"
+        case .unsafeShortcut:
+            "请使用单独的左/右 ⌥、⌃、⇧，或安全的组合键"
+        case let .activationFailed(result):
+            customShortcutFailureMessage(result)
+        }
+    }
+
+    private static func functionKeyFailureMessage(
+        _ result: FunctionKeyMonitorStartResult
+    ) -> String {
+        switch result {
+        case .active:
+            "Fn 快捷键已启用。"
+        case .eventTapUnavailable:
+            "无法创建 Fn 键的系统事件监听。"
+        case .runLoopSourceUnavailable:
+            "Fn 键监听无法接入系统事件循环。"
+        }
+    }
+
+    private static func customShortcutFailureMessage(
+        _ result: CustomShortcutRegistrationResult
+    ) -> String {
+        switch result {
+        case .active:
+            "自定义快捷键已启用"
+        case .eventHandlerUnavailable:
+            "无法安装自定义快捷键事件处理"
+        case .hotKeyRegistrationUnavailable:
+            "系统未接受这个自定义快捷键"
+        case .shortcutEventTapUnavailable:
+            "无法创建自定义快捷键的系统事件监听"
+        case .shortcutRunLoopSourceUnavailable:
+            "自定义快捷键监听无法接入系统事件循环"
+        }
+    }
+}
+
+package extension VoiceShortcutPreference {
+    var persistenceConfirmationMessage: String {
+        "\(displayName) 快捷键设置已保存。"
+    }
+}

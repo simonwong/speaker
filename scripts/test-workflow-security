@@ -58,15 +58,28 @@ verify_production_release_publication() {
     local file="$1"
     local create_line
     local download_line
-    local publish_line
+    local promote_line
     local readback_line
+    local upgrade_gate_line
     local release_job
+    local stage_job
     local publish_job
 
-    release_job="$(sed -n '/^  release:/,/^  publish:/p' "$file")"
+    release_job="$(sed -n '/^  release:/,/^  stage:/p' "$file")"
+    stage_job="$(sed -n '/^  stage:/,/^  publish:/p' "$file")"
     publish_job="$(sed -n '/^  publish:/,$p' "$file")"
     [[ "$release_job" != *'contents: write'* ]] || {
         print -u2 "Build and signing job must not receive contents: write."
+        return 1
+    }
+    print -r -- "$stage_job" | grep -Eq '^    environment: production-staging$' \
+        && print -r -- "$stage_job" | grep -Eq '^      contents: write$' || {
+        print -u2 "Candidate staging must use scoped contents: write."
+        return 1
+    }
+    print -r -- "$stage_job" \
+        | grep -Fq "inputs.upgrade_evidence_file == ''" || {
+        print -u2 "Candidate staging must run only before upgrade evidence exists."
         return 1
     }
     print -r -- "$publish_job" | grep -Eq '^    permissions:$' \
@@ -74,13 +87,33 @@ verify_production_release_publication() {
         print -u2 "Production release job must have scoped contents: write."
         return 1
     }
+    print -r -- "$publish_job" \
+        | grep -Eq '^    environment: production-publication$' || {
+        print -u2 "Production publication must use its own reviewed environment."
+        return 1
+    }
+    [[ "$publish_job" != *'SPEAKER_SPARKLE_PRIVATE_KEY'* ]] || {
+        print -u2 "Production publication must not receive the Sparkle private key."
+        return 1
+    }
+    print -r -- "$publish_job" \
+        | grep -Fq "inputs.upgrade_evidence_file != '' && inputs.candidate_run_id != ''" || {
+        print -u2 "Production publication requires evidence and the candidate run ID."
+        return 1
+    }
     for contract in \
         'gh release create "$TAG"' \
         'gh release download "$TAG"' \
         'gh release edit "$TAG"' \
-        '--draft' \
-        '--draft=false' \
+        '--prerelease' \
+        '--prerelease=false' \
         '--latest' \
+        'run-id: ${{ inputs.candidate_run_id }}' \
+        'resolve_reviewed_upgrade_evidence' \
+        'reviewed_release_promotion_state' \
+        'verify_reviewed_upgrade_candidate' \
+        'SpeakerReleaseEvidenceProtector' \
+        '-evidence.zip.enc' \
         './scripts/verify-published-update'
     do
         grep -F -- "$contract" "$file" >/dev/null || {
@@ -89,17 +122,19 @@ verify_production_release_publication() {
         }
     done
     create_line="$(grep -nF 'gh release create "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
-    download_line="$(grep -nF 'gh release download "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
-    publish_line="$(grep -nF 'gh release edit "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
+    download_line="$(grep -nF 'gh release download "$TAG"' "$file" | tail -n 1 | cut -d: -f1)"
+    promote_line="$(grep -nF 'gh release edit "$TAG"' "$file" | head -n 1 | cut -d: -f1)"
     readback_line="$(grep -nF './scripts/verify-published-update' "$file" | head -n 1 | cut -d: -f1)"
-    (( create_line < download_line \
-        && download_line < publish_line \
-        && publish_line < readback_line )) || {
-        print -u2 "Production assets must be draft-verified before publish and public readback."
+    upgrade_gate_line="$(grep -nF 'resolve_reviewed_upgrade_evidence' "$file" | tail -n 1 | cut -d: -f1)"
+    (( create_line < upgrade_gate_line \
+        && upgrade_gate_line < download_line \
+        && download_line < promote_line \
+        && promote_line < readback_line )) || {
+        print -u2 "The staged candidate must be evidence-bound before exact-artifact promotion and public readback."
         return 1
     }
-    if grep -F -- '-evidence.zip#' "$file" >/dev/null; then
-        print -u2 "Protected release evidence must not be attached publicly."
+    if grep -Eq '^[[:space:]]+\.build/distribution/.*-evidence\.zip(\.sha256)?$' "$file"; then
+        print -u2 "Plaintext release evidence must not be retained by public-repo Actions."
         return 1
     fi
 }
