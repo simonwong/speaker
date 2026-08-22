@@ -3853,7 +3853,7 @@ struct SpeakerCoreSpecs {
             let target = DiscardingTargetCaptureFake(
                 snapshot: .init(id: UUID(), applicationName: "TextEdit")
             )
-            let history = SessionHistoryFake()
+            let history = BlockingSessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: target,
@@ -3868,11 +3868,21 @@ struct SpeakerCoreSpecs {
             await sessions.send(.cancel)
             await audio.failStop()
             await release.value
+            await history.unblock()
 
-            let outcome = await history.records.last?.outcome
+            let cancellationPersisted = await eventually(before: .seconds(1)) {
+                await history.records.last?.outcome.isCancelled == true
+            }
+
             let discardedCount = await target.discardedCount
-            try expect(outcome?.isCancelled == true)
-            try expect(discardedCount == 1)
+            try expect(
+                cancellationPersisted,
+                "expected User Cancellation to reach history after persistence resumed"
+            )
+            try expect(
+                discardedCount == 1,
+                "expected one discarded target, got \(discardedCount)"
+            )
         }
 
         await runAsync("cancel wins delivery commit gate before any text mutation", failures: &failures) {
@@ -9107,14 +9117,21 @@ private actor SessionHistoryFake: SessionHistoryRecording {
 
 private actor BlockingSessionHistoryFake: SessionHistoryRecording {
     private(set) var saveCallCount = 0
+    private(set) var records: [VoiceInputHistoryRecord] = []
     private var isBlocked = true
     private var continuations: [CheckedContinuation<Void, Never>] = []
 
     func save(_ record: VoiceInputHistoryRecord) async {
         saveCallCount += 1
-        guard isBlocked else { return }
-        await withCheckedContinuation { continuation in
-            continuations.append(continuation)
+        if isBlocked {
+            await withCheckedContinuation { continuation in
+                continuations.append(continuation)
+            }
+        }
+        if let index = records.firstIndex(where: { $0.sessionID == record.sessionID }) {
+            records[index] = record
+        } else {
+            records.append(record)
         }
     }
 
