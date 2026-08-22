@@ -99,26 +99,29 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
-    "https://speaker.example.com/" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 load_reviewed_release_identity "$TEST_ROOT"
 [[ "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER" == "com.example.speaker" ]]
 [[ "$REVIEWED_RELEASE_TEAM_IDENTIFIER" == "A1B2C3D4E5" ]]
 [[ "$REVIEWED_UPDATE_FEED_URL" \
-    == "https://updates.example.com/speaker/appcast.xml" ]]
+    == "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" ]]
 [[ "$REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX" \
-    == "https://updates.example.com/speaker/" ]]
-[[ "$REVIEWED_PRODUCT_URL" == "https://speaker.example.com/" ]]
+    == "https://github.com/simonwong/speaker/releases/download/" ]]
+[[ "$REVIEWED_PRODUCT_URL" == "https://github.com/simonwong/speaker" ]]
+[[ "$REVIEWED_GITHUB_REPOSITORY" == "simonwong/speaker" ]]
+[[ "$(reviewed_release_archive_url_prefix "1.2.3")" \
+    == "https://github.com/simonwong/speaker/releases/download/v1.2.3/" ]]
 [[ "$REVIEWED_UPDATE_PUBLIC_ED_KEY" \
     == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" ]]
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
-    $'https://speaker.example.com/\nSPEAKER_VERSION=Injected' \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    $'https://github.com/simonwong/speaker\nSPEAKER_VERSION=Injected' \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
     print -u2 "A multiline release identity was accepted."
@@ -127,9 +130,9 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
-    "https://speaker.example.com/" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 load_reviewed_release_identity "$TEST_ROOT"
 
@@ -465,9 +468,9 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "http://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
-    "https://speaker.example.com/" \
+    "http://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
     print -u2 "An insecure update feed URL was accepted."
@@ -477,9 +480,9 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://downloads.example.com/speaker/" \
-    "https://speaker.example.com/" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/attacker/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
     print -u2 "A mismatched update download prefix was accepted."
@@ -489,8 +492,8 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
     "http://speaker.example.com/" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
@@ -501,9 +504,9 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
-    "https://speaker.example.com/" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
     "dG9vLXNob3J0"
 if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
     print -u2 "An invalid Sparkle public key was accepted."
@@ -513,9 +516,9 @@ fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
-    "https://updates.example.com/speaker/appcast.xml" \
-    "https://updates.example.com/speaker/" \
-    "https://speaker.example.com/" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 if reject_release_identity_override \

@@ -64,6 +64,7 @@ validate_production_metadata \
     "$BUILD_NUMBER" \
     "$BUNDLE_IDENTIFIER" \
     "$EXPECTED_TEAM_ID"
+ARCHIVE_URL_PREFIX="$(reviewed_release_archive_url_prefix "$VERSION")"
 verify_release_source_tree_clean "$ROOT"
 verify_swiftpm_dependency_checkouts_clean "$ROOT"
 verify_release_candidate_history "$ROOT"
@@ -340,20 +341,13 @@ if [[ "$ACTUAL_UPDATE_PUBLIC_KEY" != "$REVIEWED_UPDATE_PUBLIC_ED_KEY" ]]; then
 fi
 
 mkdir -p "$APPCAST_WORK"
-setopt local_options null_glob
-for previous_archive in "$OUTPUT_DIR"/Speaker-*.dmg; do
-    ditto "$previous_archive" "$APPCAST_WORK/${previous_archive:t}"
-done
-if [[ -f "$APPCAST" ]]; then
-    ditto "$APPCAST" "$PENDING_APPCAST"
-fi
 ditto "$PENDING_DMG" "$APPCAST_WORK/$FINAL_BASENAME"
 NOTES_BASENAME="${FINAL_BASENAME:r}.${RELEASE_NOTES_FILE:e:l}"
 ditto "$RELEASE_NOTES_FILE" "$APPCAST_WORK/$NOTES_BASENAME"
 
 "$GENERATE_APPCAST" \
     --account "$SPARKLE_KEY_ACCOUNT" \
-    --download-url-prefix "$REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX" \
+    --download-url-prefix "$ARCHIVE_URL_PREFIX" \
     --link "$REVIEWED_PRODUCT_URL" \
     --versions "$BUILD_NUMBER" \
     --maximum-deltas 0 \
@@ -374,7 +368,7 @@ if ! grep -Fq -- "<sparkle:version>$BUILD_NUMBER</sparkle:version>" \
         "<sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>" \
         "$PENDING_APPCAST" \
     || ! grep -Fq -- \
-        "url=\"${REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX}${FINAL_BASENAME}\"" \
+        "url=\"${ARCHIVE_URL_PREFIX}${FINAL_BASENAME}\"" \
         "$PENDING_APPCAST"; then
     print -u2 "Generated appcast does not advertise the current reviewed release."
     exit 1

@@ -125,7 +125,7 @@ Onboarding has a separate debug capture entry point that renders the production 
 
 ## Software updates and release
 
-`SoftwareUpdateFeature` isolates update state and intents. A live Sparkle adapter exists only when the Developer ID identity, HTTPS feed, and Ed25519 public key are all valid. Development builds disable updates. Production distribution, notarization, appcast signing, public readback, and old-version upgrade evidence are release gates rather than application-scene responsibilities.
+`SoftwareUpdateFeature` isolates update state and intents. A live Sparkle adapter exists only when the Developer ID identity, GitHub Releases HTTPS feed, and Ed25519 public key are all valid. Development builds disable updates. The protected production workflow creates a draft release for `v<SemVer>`, verifies the exact public assets, publishes it as latest, and reads the signed channel back before succeeding. Distribution, notarization, appcast signing, publication, public readback, and old-version upgrade evidence are release gates rather than application-scene responsibilities.
 
 ## Invariants
 

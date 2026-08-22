@@ -574,6 +574,10 @@ private struct AutomaticUpdateSettingsRow: View {
         )
         .toggleStyle(.switch)
         .disabled(!model.state.isAvailable)
+
+        if let message = model.state.unavailableMessage {
+            SettingsNotice(text: message, color: .secondary)
+        }
     }
 }
 

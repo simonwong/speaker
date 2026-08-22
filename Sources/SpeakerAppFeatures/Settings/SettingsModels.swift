@@ -595,53 +595,105 @@ package final class DictionarySettingsModel: ObservableObject {
     }
 }
 
-@MainActor
-final class ShortcutRecorderModel: ObservableObject {
-    @Published private(set) var isRecording = false
-    @Published private(set) var notice: String?
-    private var monitor: Any?
+package struct ShortcutRecorderModifierPolicy {
+    private var candidate: CustomHotKey?
 
-    func start(onCapture: @escaping (CustomHotKey) -> Void) {
-        stop()
-        isRecording = true
-        notice = "请按下 ⌥ Space，或至少包含两个 ⌘、⌥、⌃ 的组合键。"
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            guard event.keyCode != UInt16(kVK_Escape) else {
-                self.stop()
-                return nil
+    package init() {}
+
+    package mutating func handle(
+        keyCode: UInt16,
+        flags: NSEvent.ModifierFlags
+    ) -> CustomHotKey? {
+        guard let hotKey = CustomHotKey.modifierOnly(keyCode: UInt32(keyCode)) else {
+            candidate = nil
+            return nil
+        }
+        let expectedFlag: NSEvent.ModifierFlags = switch Int(keyCode) {
+        case kVK_Option, kVK_RightOption: .option
+        case kVK_Control, kVK_RightControl: .control
+        case kVK_Shift, kVK_RightShift: .shift
+        default: []
+        }
+        let relevantFlags = flags.intersection([.command, .option, .control, .shift])
+        if flags.contains(expectedFlag) {
+            candidate = relevantFlags == expectedFlag ? hotKey : nil
+            return nil
+        }
+        defer { candidate = nil }
+        guard candidate == hotKey, relevantFlags.isEmpty else { return nil }
+        return hotKey
+    }
+
+    package mutating func reset() {
+        candidate = nil
+    }
+}
+
+package enum ShortcutRecorderInput {
+    case flagsChanged(keyCode: UInt16, flags: NSEvent.ModifierFlags)
+    case keyDown(
+        keyCode: UInt16,
+        flags: NSEvent.ModifierFlags,
+        charactersIgnoringModifiers: String?
+    )
+}
+
+package enum ShortcutRecorderDecision: Equatable {
+    case consume
+    case cancel
+    case capture(CustomHotKey)
+    case reject(String)
+}
+
+package struct ShortcutRecorderPolicy {
+    package static let recordingPrompt =
+        "请单独按下左/右 ⌥、⌃、⇧，或输入一个安全组合键。"
+
+    private var modifierPolicy = ShortcutRecorderModifierPolicy()
+
+    package init() {}
+
+    package mutating func handle(
+        _ input: ShortcutRecorderInput
+    ) -> ShortcutRecorderDecision {
+        switch input {
+        case let .flagsChanged(keyCode, flags):
+            if let hotKey = modifierPolicy.handle(keyCode: keyCode, flags: flags) {
+                return .capture(hotKey)
             }
-            let modifiers = Self.carbonModifiers(event.modifierFlags)
+            if [kVK_Command, kVK_RightCommand].contains(Int(keyCode)),
+               !flags.contains(.command)
+            {
+                return .reject("不支持单独使用 Command；请选择左/右 ⌥、⌃ 或 ⇧。")
+            }
+            return .consume
+        case let .keyDown(keyCode, flags, charactersIgnoringModifiers):
+            guard keyCode != UInt16(kVK_Escape) else { return .cancel }
+            let modifiers = Self.carbonModifiers(flags)
             guard modifiers != 0 else {
-                self.notice = "组合键必须包含至少一个修饰键。"
-                return nil
+                return .reject("组合键必须包含至少一个修饰键。")
             }
-            let displayName = Self.displayName(event: event)
             let hotKey = CustomHotKey(
-                keyCode: UInt32(event.keyCode),
+                keyCode: UInt32(keyCode),
                 modifiers: modifiers,
-                displayName: displayName
+                displayName: Self.displayName(
+                    keyCode: keyCode,
+                    flags: flags,
+                    charactersIgnoringModifiers: charactersIgnoringModifiers
+                )
             )
             guard !hotKey.conflictsWithCommonEditingShortcut else {
-                self.notice = "这个组合键是常用编辑命令，请换一个组合键。"
-                return nil
+                return .reject("这个组合键是常用编辑命令，请换一个组合键。")
             }
             guard hotKey.isSafeForGlobalVoiceInput else {
-                self.notice = "单个修饰键会干扰正常输入；请使用 ⌥ Space 或至少两个 ⌘、⌥、⌃ 修饰键。"
-                return nil
+                return .reject(Self.recordingPrompt)
             }
-            self.stop()
-            onCapture(hotKey)
-            return nil
+            return .capture(hotKey)
         }
     }
 
-    func stop() {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        monitor = nil
-        isRecording = false
+    package mutating func reset() {
+        modifierPolicy.reset()
     }
 
     private static func carbonModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
@@ -653,20 +705,75 @@ final class ShortcutRecorderModel: ObservableObject {
         return result
     }
 
-    private static func displayName(event: NSEvent) -> String {
-        let flags = event.modifierFlags
+    private static func displayName(
+        keyCode: UInt16,
+        flags: NSEvent.ModifierFlags,
+        charactersIgnoringModifiers: String?
+    ) -> String {
         var prefix = ""
         if flags.contains(.control) { prefix += "⌃" }
         if flags.contains(.option) { prefix += "⌥" }
         if flags.contains(.shift) { prefix += "⇧" }
         if flags.contains(.command) { prefix += "⌘" }
-        let key: String = switch event.keyCode {
-        case 36: "Return"
-        case 48: "Tab"
-        case 49: "Space"
-        case 53: "Esc"
-        default: event.charactersIgnoringModifiers?.uppercased() ?? "Key \(event.keyCode)"
+        let key: String = switch Int(keyCode) {
+        case kVK_Return: "Return"
+        case kVK_Tab: "Tab"
+        case kVK_Space: "Space"
+        case kVK_Escape: "Esc"
+        default: charactersIgnoringModifiers?.uppercased() ?? "Key \(keyCode)"
         }
         return prefix + key
+    }
+}
+
+@MainActor
+final class ShortcutRecorderModel: ObservableObject {
+    @Published private(set) var isRecording = false
+    @Published private(set) var notice: String?
+    private var monitor: Any?
+    private var policy = ShortcutRecorderPolicy()
+
+    func start(onCapture: @escaping (CustomHotKey) -> Void) {
+        stop()
+        isRecording = true
+        notice = ShortcutRecorderPolicy.recordingPrompt
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.flagsChanged, .keyDown]
+        ) { [weak self] event in
+            guard let self else { return event }
+            let input: ShortcutRecorderInput = if event.type == .flagsChanged {
+                .flagsChanged(
+                    keyCode: event.keyCode,
+                    flags: event.modifierFlags
+                )
+            } else {
+                .keyDown(
+                    keyCode: event.keyCode,
+                    flags: event.modifierFlags,
+                    charactersIgnoringModifiers: event.charactersIgnoringModifiers
+                )
+            }
+            switch self.policy.handle(input) {
+            case .consume:
+                break
+            case .cancel:
+                self.stop()
+            case let .capture(hotKey):
+                self.stop()
+                onCapture(hotKey)
+            case let .reject(message):
+                self.notice = message
+            }
+            return nil
+        }
+    }
+
+    func stop() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitor = nil
+        policy.reset()
+        isRecording = false
     }
 }

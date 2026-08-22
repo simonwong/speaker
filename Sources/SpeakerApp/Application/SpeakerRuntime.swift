@@ -62,6 +62,8 @@ final class SpeakerRuntime: ObservableObject {
     private let dataErasureIntentStore: SpeakerDataErasureIntentStore
     private let panel: VoiceInputPanelController
     private let permissionRefreshCoordinator: PermissionRefreshCoordinator
+    private let onboardingPermissionCoordinator:
+        OnboardingPermissionCoordinator
     private var started = false
     private var childStateCancellables = Set<AnyCancellable>()
     private let shortcutAnnouncementCoordinator: ShortcutAnnouncementCoordinator
@@ -319,6 +321,12 @@ final class SpeakerRuntime: ObservableObject {
             permissions: permissions,
             shortcut: shortcut
         )
+        onboardingPermissionCoordinator = OnboardingPermissionCoordinator(
+            permissions: permissions,
+            synchronize: { [permissionRefreshCoordinator] in
+                permissionRefreshCoordinator.refreshNow()
+            }
+        )
         shortcutAnnouncementCoordinator = ShortcutAnnouncementCoordinator(
             feature: shortcut,
             announce: Self.announceAccessibility
@@ -527,6 +535,10 @@ final class SpeakerRuntime: ObservableObject {
         synchronizePermissionAndShortcutState()
     }
 
+    func requestOnboardingPermission(_ permission: PermissionKind) async {
+        await onboardingPermissionCoordinator.request(permission)
+    }
+
     func copyDiagnostics() async {
         let historyStatus = await history.persistenceStatus()
         let latestRecord = await history.latestRecord()
@@ -592,7 +604,7 @@ final class SpeakerRuntime: ObservableObject {
         let controller = SpeakerOnboardingWindowController(
             permissions: permissions,
             doubao: doubaoSettings,
-            requestPermission: requestPermission,
+            requestPermission: requestOnboardingPermission,
             refreshPermissions: refreshPermissions,
             completion: { [weak self] in self?.completeOnboarding() }
         )

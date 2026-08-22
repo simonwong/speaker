@@ -1287,6 +1287,52 @@ struct SpeakerCoreSpecs {
             ).isSafeForGlobalVoiceInput)
         }
 
+        run("a selected physical Option Control or Shift key is a safe exclusive trigger", failures: &failures) {
+            let supportedKeyCodes: [UInt32] = [
+                UInt32(kVK_Option), UInt32(kVK_RightOption),
+                UInt32(kVK_Control), UInt32(kVK_RightControl),
+                UInt32(kVK_Shift), UInt32(kVK_RightShift),
+            ]
+            for keyCode in supportedKeyCodes {
+                guard let hotKey = CustomHotKey.modifierOnly(keyCode: keyCode) else {
+                    throw SpecFailure(message: "supported modifier was rejected")
+                }
+                try expect(hotKey.trigger == .modifierOnly(keyCode: keyCode))
+                try expect(hotKey.isModifierOnly)
+                try expect(hotKey.isSafeForGlobalVoiceInput)
+            }
+            try expect(
+                CustomHotKey.optionSpace.trigger
+                    == .keyChord(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey))
+            )
+            try expect(CustomHotKey.modifierOnly(keyCode: UInt32(kVK_Command)) == nil)
+            try expect(CustomHotKey.modifierOnly(keyCode: UInt32(kVK_RightCommand)) == nil)
+
+            guard let rightOption = CustomHotKey.modifierOnly(
+                keyCode: UInt32(kVK_RightOption)
+            ), var policy = ModifierOnlyFlagEventPolicy(hotKey: rightOption) else {
+                throw SpecFailure(message: "right Option policy was unavailable")
+            }
+            try expect(
+                policy.handle(
+                    keyCode: Int64(kVK_Option),
+                    flags: .maskAlternate
+                ) == .passThrough
+            )
+            try expect(
+                policy.handle(
+                    keyCode: Int64(kVK_RightOption),
+                    flags: .maskAlternate
+                ) == .consume(.pressed)
+            )
+            try expect(
+                policy.handle(
+                    keyCode: Int64(kVK_RightOption),
+                    flags: .maskAlternate
+                ) == .consume(.released)
+            )
+        }
+
         await runAsync("shortcut feature waits for Accessibility and activates the saved choice later", failures: &failures) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
@@ -1377,7 +1423,7 @@ struct SpeakerCoreSpecs {
             try expect(functionMonitor.startCount == 1)
             try expect(customMonitor.registeredKeys.isEmpty)
             try expect(
-                feature.notice?.message.contains("单个修饰键可能干扰正常输入")
+                feature.notice?.message.contains("请使用单独的左/右")
                     == true
             )
             let persistedFallback = await persistence.values
@@ -1573,13 +1619,13 @@ struct SpeakerCoreSpecs {
                         policy.handle(
                             keyCode: Int64(keyCode),
                             flags: modifier.union(.maskSecondaryFn)
-                        ) == nil
+                        ) == .passThrough
                     )
                     try expect(
                         policy.handle(
                             keyCode: Int64(keyCode),
                             flags: modifier
-                        ) == nil
+                        ) == .passThrough
                     )
                 }
             }
@@ -1588,13 +1634,13 @@ struct SpeakerCoreSpecs {
                 policy.handle(
                     keyCode: Int64(kVK_Function),
                     flags: .maskSecondaryFn
-                ) == .pressed
+                ) == .consume(.pressed)
             )
             try expect(
                 policy.handle(
                     keyCode: Int64(kVK_Function),
                     flags: []
-                ) == .released
+                ) == .consume(.released)
             )
         }
 

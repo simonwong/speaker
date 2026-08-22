@@ -87,9 +87,9 @@ the protected production workflow below.
 Resources/ReleaseIdentity.plist
   BundleIdentifier=<正式反向域名 Bundle ID>
   TeamIdentifier=<10 位 Apple Team ID>
-  UpdateFeedURL=<正式 HTTPS appcast.xml>
-  UpdateDownloadURLPrefix=<与 appcast 同目录且以 / 结尾>
-  ProductURL=<正式 HTTPS 产品页>
+  UpdateFeedURL=https://github.com/simonwong/speaker/releases/latest/download/appcast.xml
+  UpdateDownloadURLPrefix=https://github.com/simonwong/speaker/releases/download/
+  ProductURL=https://github.com/simonwong/speaker
   UpdatePublicEDKey=<Sparkle Ed25519 公钥>
 
 Resources/ReleaseCandidate.plist
@@ -135,9 +135,11 @@ P12 与 App Store Connect API `.p8` 以完整文件的 base64 保存；Sparkle s
 和 Sparkle 公私钥绑定，再用固定非敏感 TTS 样本执行完整 provider matrix。Matrix
 必须在本次 run 内生成，并与当前 commit、`Package.resolved` hash、version、build
 及四小时内的执行时间窗完全一致；任何 FAIL/SKIP 或开发文件凭据都会阻止
-`scripts/distribute`。任务结束后删除临时 Keychain 和 secret files。它只把 DMG、
-checksum、appcast 与 evidence archive 留作 90 天的受保护 artifact，不会自行上传
-更新站点或创建 Git tag；完成外部发布后仍须执行下文的公开地址回读门禁。
+`scripts/distribute`。任务结束后删除临时 Keychain 和 secret files。DMG、checksum、
+appcast 与 evidence archive 会作为 90 天的受保护 Actions artifact 留存。随后 workflow
+以 `v<SemVer>` 创建 GitHub draft Release，只附加 DMG、checksum 和签名 appcast；
+evidence archive 不公开。Workflow 从 draft 下载并逐字节复验三个公开制品后才设为
+latest，最后执行公开地址回读门禁。已有 release、tag 或仓库身份不匹配均 fail closed。
 
 然后运行：
 
@@ -160,7 +162,7 @@ checksum、appcast 与 evidence archive 留作 90 天的受保护 artifact，不
 
 整个正式流程由当前 shell 的文件描述符持有 macOS `lockf` 单一发布锁，不信任可伪造的环境标记；每次正式 build 使用独立 scratch，两个发布也不能并发晋升 feed，进程崩溃后内核会自动释放锁。晋升前会把制品名、DMG/checksum/新旧 appcast 的 SHA-256 和 `prepared` 状态持久写入 promotion journal；DMG、校验和与 appcast 全部落位并同步后才持久切换为 `committed`。普通失败或可处理信号会立即按 journal 恢复；若遭遇 `SIGKILL` 或断电，下一次拿到锁时会先清理带 owner-only Speaker marker 的遗留 pending（包括尝试卸载其固定 mountpoint），再恢复 `prepared` 状态，或校验并完成 `committed` 状态的清理。恢复对象 hash 不符、旧 feed 损坏、未知 pending 或 journal 被篡改时 fail closed 并保留证据，不会删除外来同名制品或猜测成功。任一步失败都会清理可证明属于本事务的 pending 制品；不会退回 ad-hoc 签名，也不会把未验证的 DMG 或 appcast 留在正式制品目录。同一个版本号和构建号的 DMG 或 checksum 一旦存在，脚本会直接拒绝覆盖；任何重发都必须增加 build number。
 
-对外上传时先发布 DMG 和 checksum，最后原子替换 `appcast.xml`，避免客户端先看到尚不可下载的版本。`Speaker-<version>-<build>-evidence.zip` 及其 checksum 以 `0600` 生成，应作为受保护 CI artifact 显式留存，不得使用 `distribution/*` 之类的 glob 默认公开，因为 Apple notarization log 可能包含团队和构建环境元数据。上传完成后在同一受保护发布环境执行：
+GitHub draft Release 是发布事务边界：DMG、checksum 与 `appcast.xml` 在 draft 中同时上传并复验，draft 对 Sparkle 的 `releases/latest/download/appcast.xml` 不可见；只有三者一致时才发布为 latest。`Speaker-<version>-<build>-evidence.zip` 及其 checksum 以 `0600` 生成，只作为受保护 CI artifact 显式留存，不得附加到 GitHub Release，因为 Apple notarization log 可能包含团队和构建环境元数据。发布后在同一受保护环境自动执行：
 
 ```bash
 SPEAKER_VERSION=1.0.0 \
@@ -186,4 +188,4 @@ SPEAKER_SPARKLE_KEY_ACCOUNT=<同一 account> \
 - VoiceOver、Reduce Motion、Increase Contrast 和多显示器浮层定位。
 - 历史查看、保留策略、清空、损坏恢复与卸载后本地数据边界。
 
-仓库已接入更新 feature、Sparkle live adapter 和发布/回读门禁；但在真实正式身份、更新域名以及“旧版 → 新版”实机更新矩阵完成前，不应把当前开发制品描述为已经具备可用的生产更新通道。
+仓库已接入更新 feature、Sparkle live adapter、GitHub Releases 发布和公开回读门禁；但在真实正式身份以及“旧版 → 新版”实机更新矩阵完成前，不应把当前开发制品描述为已经具备可用的生产更新通道。

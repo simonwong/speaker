@@ -49,10 +49,13 @@ package enum HistoryRecordStatus: Equatable, Sendable {
         }
     }
 
-    /// Successful deliveries stay quiet in the list; every other state earns
-    /// a trailing status icon on the row.
+    /// Delivery success and posted-but-unconfirmed delivery stay quiet in the
+    /// collapsed list. The latter remains visible in expanded diagnostics.
     package var showsStatusIcon: Bool {
-        self != .delivered
+        switch self {
+        case .delivered, .deliveryUnconfirmed: false
+        case .refinementFellBack, .pendingCopy, .failed: true
+        }
     }
 
     package var color: Color {

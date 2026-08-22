@@ -116,7 +116,7 @@ Sparkle 官方明确要求把更新私钥与承载下载文件的服务器隔离
 
 ```xml
 <key>SUFeedURL</key>
-<string>https://updates.example.invalid/speaker/appcast.xml</string>
+<string>https://github.com/simonwong/speaker/releases/latest/download/appcast.xml</string>
 <key>SUPublicEDKey</key>
 <string>BASE64_PRODUCTION_PUBLIC_KEY</string>
 <key>SUVerifyUpdateBeforeExtraction</key>
@@ -131,7 +131,7 @@ Sparkle 官方明确要求把更新私钥与承载下载文件的服务器隔离
 <false/>
 ```
 
-上面的域名与 key 只是结构示例，**不得原样进入制品**。
+上面的 GitHub feed 是已选择的生产通道；key 仍是结构示例，**不得原样进入制品**。
 
 `SUVerifyUpdateBeforeExtraction=YES` 让 Sparkle 在解压前验证更新制品。
 `SURequireSignedFeed=YES`（Sparkle 2.9+）要求验证 appcast 与外链 release
@@ -488,7 +488,7 @@ Gatekeeper、key rotation、权限提升和实际替换行为。
 
 ## 10. 最小实施顺序
 
-1. 确定并冻结正式 Bundle ID、Team ID、更新域名。
+1. 确定并冻结正式 Bundle ID、Team ID 与 GitHub Releases 更新仓库。
 2. 建立 Developer ID、Hardened Runtime、公证、staple 的可重复 release。
 3. 生成并备份生产 EdDSA key；把公钥加入发布清单。
 4. 精确加入 Sparkle 2.9.4，只依赖 `SpeakerApp`。
@@ -498,8 +498,8 @@ Gatekeeper、key rotation、权限提升和实际替换行为。
 8. 使用公证 DMG 建立 appcast，先只发布 full update。
 9. 从真实旧版测试自动/手动检查、无更新、网络断开、签名损坏、授权取消、
    App 不退出、安装重启和 hotfix。
-10. release gate 全通过后才允许上传 appcast；最后上传 appcast，避免客户端先看到
-    尚未完全可用的 release。
+10. release gate 全通过后才允许创建 GitHub draft Release；复验 draft 内的 DMG、
+    checksum 与 appcast 后才发布为 latest，再从公开 URL 回读验证。
 
 ## 官方资料索引
 
