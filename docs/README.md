@@ -1,28 +1,22 @@
 # Speaker Documentation
 
-This directory contains durable product, architecture, decision, research, and delivery documentation. Temporary exploration and completed implementation tickets do not belong here.
+Use this index to load only the branch relevant to the task. Durable decisions and evidence belong here; temporary exploration and completed implementation tickets do not.
 
-## Product contract
+## Product
 
-- [Voice input specification](specs/voice-input.md) defines the user-visible behavior, implementation decisions, test seams, and scope.
-- [Compatibility matrix](compatibility.md) defines the automated and real-machine evidence required for safe cross-application delivery.
-- [Production readiness](production-readiness.md) tracks the remaining release gates.
+- **Voice Input behavior or acceptance:** [`specs/voice-input.md`](specs/voice-input.md).
+- **Cross-application delivery evidence:** [`compatibility.md`](compatibility.md).
+- **Release gates and remaining evidence:** [`production-readiness.md`](production-readiness.md).
 
-## Architecture and decisions
+## Architecture
 
-- [Architecture](architecture.md) explains the current module shape, interfaces, seams, adapters, and invariants.
-- [Architecture decision records](adr/README.md) preserve decisions that future architecture work should not silently re-litigate.
+- **Module, interface, seam, adapter, or invariant changes:** [`architecture.md`](architecture.md).
+- **Reconsidering a load-bearing decision:** [`adr/README.md`](adr/README.md), then every relevant ADR.
+- **Provider or platform contract changes:** the dated pages under [`research/`](research/); recheck their primary sources before changing an adapter.
 
-## Research
+## Agent workflow
 
-- [macOS input and delivery](research/macos-input-and-delivery.md) records the platform limits behind shortcut capture and conservative delivery.
-- [Doubao streaming ASR](research/doubao-streaming-asr.md) records the credential, resource, and WebSocket contract used by Speaker.
-- [DeepSeek text refinement](research/deepseek-text-refinement.md) records the optional refinement contract and fallback rules.
-- [Secure updates](research/secure-update-mechanism.md) records the production update design.
-
-Research pages are dated evidence, not timeless provider contracts. Recheck their primary sources before changing provider or platform adapters.
-
-## Operations and agent guidance
-
-- [Release process](releasing.md) defines development installation and production distribution.
-- [`agents/`](agents/) contains repository workflow guidance for agents.
+- **Build, test, launch, bundle, provider smoke, or release:** [`agents/development.md`](agents/development.md).
+- **Domain vocabulary or ADR work:** [`agents/domain.md`](agents/domain.md).
+- **Issue publication or triage:** [`agents/issue-tracker.md`](agents/issue-tracker.md) and [`agents/triage-labels.md`](agents/triage-labels.md).
+- **Production distribution:** [`releasing.md`](releasing.md).
