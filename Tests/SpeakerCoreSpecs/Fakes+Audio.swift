@@ -11,49 +11,6 @@ func makeAudioStream(_ chunks: [Data]) -> AsyncStream<Data> {
     }
 }
 
-actor AudioCaptureFake: AudioCapturing {
-    let delaysStart: Bool
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-    private(set) var cancelCount = 0
-    private(set) var isActive = false
-    private var startContinuation: CheckedContinuation<Void, Never>?
-
-    init(delaysStart: Bool = false) {
-        self.delaysStart = delaysStart
-    }
-
-    func start() async throws {
-        startCount += 1
-        if delaysStart {
-            await withCheckedContinuation { continuation in
-                startContinuation = continuation
-            }
-        }
-        isActive = true
-    }
-
-    func resumeStart() {
-        startContinuation?.resume()
-        startContinuation = nil
-    }
-
-    func stop() async throws -> CapturedAudio {
-        stopCount += 1
-        isActive = false
-        return CapturedAudio(
-            data: Data([0x52, 0x49, 0x46, 0x46]),
-            duration: .seconds(1),
-            peakPower: -12
-        )
-    }
-
-    func cancel() async {
-        cancelCount += 1
-        isActive = false
-    }
-}
-
 actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
     AudioCaptureFailureProviding {
     private var continuation: AsyncStream<Data>.Continuation?
