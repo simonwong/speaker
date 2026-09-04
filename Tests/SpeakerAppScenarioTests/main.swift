@@ -2071,6 +2071,111 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.status == .configured)
         }
 
+        await runAsync(
+            "refinement settings save a custom mode through injected fakes",
+            failures: &failures
+        ) {
+            let settingsStore = ScenarioAppSettingsStore()
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: configuration,
+                settingsStore: settingsStore
+            )
+
+            await model.load()
+            try expect(model.hasStoredKey)
+
+            model.customName = "工作邮件"
+            model.customPrompt = ""
+            try expect(!model.canSaveCustomMode)
+
+            model.customPrompt = "整理成简洁的工作邮件。"
+            try expect(model.canSaveCustomMode)
+
+            await model.saveCustomMode()
+
+            let expectedMode = TextRefinementMode.custom(
+                name: "工作邮件",
+                prompt: "整理成简洁的工作邮件。"
+            )
+            try expect(model.mode == expectedMode)
+            let saved = await settingsStore.settings
+            try expect(
+                saved.savedCustomRefinement == RefinementPreference(mode: expectedMode)
+            )
+            try expect(saved.refinement == RefinementPreference(mode: expectedMode))
+            let currentMode = await configuration.currentRefinementMode()
+            try expect(currentMode == expectedMode)
+        }
+
+        await runAsync(
+            "custom mode cannot be saved without a stored DeepSeek key",
+            failures: &failures
+        ) {
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: false),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore()
+            )
+
+            await model.load()
+            model.customName = "工作邮件"
+            model.customPrompt = "整理成简洁的工作邮件。"
+
+            try expect(!model.hasStoredKey)
+            try expect(!model.canSaveCustomMode)
+        }
+
+        await runAsync(
+            "dictionary settings persist through the injected dictionary store",
+            failures: &failures
+        ) {
+            let store = ScenarioPersonalDictionaryStore(words: ["Speaker"])
+            let configuration = VoiceInputConfigurationController()
+            let model = DictionarySettingsModel(
+                store: store,
+                configuration: configuration
+            )
+
+            await model.load()
+            try expect(model.entries.map(\.word) == ["Speaker"])
+
+            model.draftWord = "豆包"
+            let added = await model.add()
+            try expect(added)
+
+            try expect(model.entries.map(\.word) == ["Speaker", "豆包"])
+            let persisted = await store.storedWords
+            try expect(persisted == ["Speaker", "豆包"])
+            let configured = await configuration.currentDictionary()
+            try expect(configured.entries.map(\.word) == ["Speaker", "豆包"])
+        }
+
+        await runAsync(
+            "history retention saves the policy and reports an unfinished cleanup",
+            failures: &failures
+        ) {
+            let history = ScenarioHistoryRetentionStore(appliesRetention: false)
+            let settingsStore = ScenarioAppSettingsStore()
+            let model = HistoryRetentionSettingsModel(
+                store: history,
+                settingsStore: settingsStore
+            )
+
+            await model.refresh()
+            try expect(model.retentionPolicy == .forever)
+
+            await model.setRetentionPolicy(.thirtyDays)
+
+            try expect(model.retentionPolicy == .thirtyDays)
+            let saved = await settingsStore.settings
+            try expect(saved.historyRetention == .thirtyDays)
+            let appliedPolicies = await history.appliedPolicies
+            try expect(appliedPolicies == [.thirtyDays])
+            try expect(model.notice != nil)
+        }
+
         run("recording takes priority over the menu bar permission warning", failures: &failures) {
             let activity = VoiceInputActivity.recording(VoiceInputSessionID())
             let permissions = PermissionSnapshot(
@@ -3323,6 +3428,159 @@ private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {
     func finishCheck(_ result: Result<String?, Error>) {
         checkContinuation?.resume(returning: result)
         checkContinuation = nil
+    }
+}
+
+/// An in-memory stand-in for `VersionedLocalAppSettingsStore`, proving the
+/// settings models depend on `AppSettingsStoring` rather than a file on disk.
+private actor ScenarioAppSettingsStore: AppSettingsStoring {
+    private(set) var settings: SpeakerAppSettings
+
+    init(settings: SpeakerAppSettings = .default) {
+        self.settings = settings
+    }
+
+    func load() -> AppSettingsLoadResult {
+        .loaded(settings)
+    }
+
+    @discardableResult
+    func updateRefinement(
+        _ refinement: RefinementPreference
+    ) -> SpeakerAppSettings {
+        settings.refinement = refinement
+        return settings
+    }
+
+    @discardableResult
+    func updateSavedCustomRefinement(
+        _ refinement: RefinementPreference
+    ) -> SpeakerAppSettings {
+        settings.savedCustomRefinement = refinement
+        return settings
+    }
+
+    @discardableResult
+    func updateRefinementPromptOverride(
+        _ promptOverride: String?,
+        for mode: TextRefinementMode
+    ) -> SpeakerAppSettings {
+        settings.refinementPromptOverrides[mode] = promptOverride
+        return settings
+    }
+
+    @discardableResult
+    func updateHistoryRetention(
+        _ policy: HistoryRetentionPolicy
+    ) -> SpeakerAppSettings {
+        settings.historyRetention = policy
+        return settings
+    }
+}
+
+private actor ScenarioDeepSeekSettingsService: DeepSeekSettingsServicing {
+    private var hasKey: Bool
+
+    init(hasKey: Bool) {
+        self.hasKey = hasKey
+    }
+
+    func hasAPIKey() -> Bool {
+        hasKey
+    }
+
+    func saveAPIKey(_ apiKey: String) {
+        hasKey = !apiKey.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ).isEmpty
+    }
+
+    func deleteAPIKey() {
+        hasKey = false
+    }
+
+    func checkConnection() -> String? {
+        "scenario-deepseek-request"
+    }
+}
+
+private actor ScenarioPersonalDictionaryStore: PersonalDictionaryStoring {
+    private var stored: PersonalDictionary
+
+    init(words: [String]) {
+        stored = (try? PersonalDictionary(
+            entries: words.map { DictionaryEntry(word: $0) }
+        )) ?? .empty
+    }
+
+    var storedWords: [String] {
+        stored.entries.map(\.word)
+    }
+
+    func load() -> PersonalDictionary {
+        stored
+    }
+
+    func save(_ dictionary: PersonalDictionary) {
+        stored = dictionary
+    }
+}
+
+/// A history store that records the retention policies it was asked to apply
+/// and can report an unfinished cleanup.
+private actor ScenarioHistoryRetentionStore: LocalSessionHistoryStoring {
+    private let appliesRetention: Bool
+    private var policy: HistoryRetentionPolicy = .forever
+    private var records: [VoiceInputHistoryRecord] = []
+    private(set) var appliedPolicies: [HistoryRetentionPolicy] = []
+
+    init(appliesRetention: Bool) {
+        self.appliesRetention = appliesRetention
+    }
+
+    func save(_ record: VoiceInputHistoryRecord) {
+        records.append(record)
+    }
+
+    func allRecords() -> [VoiceInputHistoryRecord] {
+        records
+    }
+
+    func record(sessionID: VoiceInputSessionID) -> VoiceInputHistoryRecord? {
+        records.first { $0.sessionID == sessionID }
+    }
+
+    @discardableResult
+    func delete(sessionID: VoiceInputSessionID) -> Bool {
+        let remaining = records.filter { $0.sessionID != sessionID }
+        defer { records = remaining }
+        return remaining.count != records.count
+    }
+
+    @discardableResult
+    func clear() -> Bool {
+        records = []
+        return true
+    }
+
+    func persistenceStatus() -> LocalHistoryPersistenceStatus {
+        LocalHistoryPersistenceStatus(recordCount: records.count, notice: nil)
+    }
+
+    func clearPersistenceNotice() {}
+
+    func currentRetentionPolicy() -> HistoryRetentionPolicy {
+        policy
+    }
+
+    @discardableResult
+    func applyRetentionPolicy(
+        _ policy: HistoryRetentionPolicy,
+        now: Date
+    ) -> Bool {
+        appliedPolicies.append(policy)
+        self.policy = policy
+        return appliesRetention
     }
 }
 
