@@ -1,0 +1,32 @@
+# Dependency update policy for Speaker.
+#
+# Sparkle is pinned with `exact: "2.9.4"` in Package.swift on purpose: the
+# release channel binds a reviewed Sparkle build. Dependabot still opens a PR
+# for a newer Sparkle; a maintainer reviews it and moves the exact pin.
+version: 2
+updates:
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "needs-triage"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "needs-triage"

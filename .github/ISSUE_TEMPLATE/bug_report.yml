@@ -1,0 +1,92 @@
+name: 缺陷报告
+description: 报告 Speaker 的错误行为、崩溃或识别送达失败。
+title: "[Bug] "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。**请不要在这里粘贴转录文字、音频文件或 API Key。**
+
+        Speaker 的会话历史可能包含你说过的内容，日志与截图也可能带出输入框里的
+        文字。提交前请确认所有内容都不包含个人语音内容与凭据，详见
+        [PRIVACY.md](https://github.com/simonwong/speaker/blob/main/PRIVACY.md)。
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      description: 必选。含有转录文字、音频或 API Key 的 issue 会被直接关闭。
+      options:
+        - label: 我确认本 issue 及其附件不包含转录文字、音频或 API Key。
+          required: true
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS 版本
+      description: 「关于本机」中的版本号，例如 14.6.1、15.5 或 26.0。
+      placeholder: "例如：15.5（Apple Silicon）"
+    validations:
+      required: true
+
+  - type: input
+    id: speaker-version
+    attributes:
+      label: Speaker 版本与构建号
+      description: Speaker「关于」页显示的版本 / 构建号。
+      placeholder: "例如：0.4.0 (1)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 脱敏诊断信息
+      description: >-
+        在 Speaker 主窗口的「关于」页点击复制诊断信息，然后粘贴到这里。
+        诊断信息只包含 App/系统版本、权限状态、快捷键、处理状态、provider 是否
+        已配置与历史存储状态，不含文字、音频或 API Key。
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序描述操作；涉及具体应用时写出应用名（如 TextEdit、Safari）。
+      placeholder: |
+        1. 在 TextEdit 中把光标放进正文
+        2. 按住全局快捷键说一句话
+        3. 松开快捷键
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+      description: 你认为 Speaker 应该发生什么。不要写出实际语音内容。
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: >-
+        实际发生了什么。可以描述错误提示的类型与出现位置；
+        如需引用界面文字，请先确认其中不含你的转录内容。
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 出现频率、是否可稳定复现、最近是否更换过麦克风或升级过系统等。
+    validations:
+      required: false

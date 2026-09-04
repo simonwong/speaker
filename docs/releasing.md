@@ -102,6 +102,11 @@ Resources/ReleaseCandidate.plist
 下一次候选必须把本次 build 写入 `PreviousPublishedBuildNumber`。环境中的版本、build、
 Bundle ID 与 Team ID 只能与这两份受审查文件完全相同，不能由 CI 临时替换。
 
+版本单一来源：`ReleaseCandidate.plist` 的 `Version` 必须与 `Resources/Info.plist` 的
+`CFBundleShortVersionString` 完全相同，`BuildNumber` 必须是严格大于
+`PreviousPublishedBuildNumber` 的正整数，否则 `scripts/distribute` 在读取候选清单时立即
+fail closed。
+
 `scripts/distribute` 的本地正式参数：
 
 ```text

@@ -706,6 +706,53 @@ load_reviewed_release_identity() {
     typeset -g REVIEWED_GITHUB_REPOSITORY="$github_repository"
 }
 
+verify_release_candidate_version_consistency() {
+    local root="$1"
+    local version="$2"
+    local build_number="$3"
+    local previous_build="$4"
+    local info_file="$root/Resources/Info.plist"
+    local bundle_short_version
+
+    if [[ ! -f "$info_file" || -L "$info_file" ]]; then
+        release_error "Bundle Info.plist is missing or unsafe: $info_file"
+        return 1
+    fi
+    if ! plutil -lint "$info_file" >/dev/null; then
+        release_error "Info.plist is not a valid property list."
+        return 1
+    fi
+    bundle_short_version="$(
+        /usr/libexec/PlistBuddy \
+            -c 'Print :CFBundleShortVersionString' \
+            "$info_file" 2>/dev/null
+    )" || {
+        release_error "Info.plist is missing CFBundleShortVersionString."
+        return 1
+    }
+    if ! release_value_is_single_line "$bundle_short_version"; then
+        release_error "CFBundleShortVersionString must be single-line."
+        return 1
+    fi
+    if [[ "$version" != "$bundle_short_version" ]]; then
+        release_error "Reviewed version $version must equal Info.plist CFBundleShortVersionString $bundle_short_version."
+        return 1
+    fi
+    if ! matches_release_pattern "$build_number" '^[1-9][0-9]*$'; then
+        release_error "Reviewed BuildNumber must be a positive integer: $build_number"
+        return 1
+    fi
+    if ! matches_release_pattern "$previous_build" '^(0|[1-9][0-9]*)$'; then
+        release_error "PreviousPublishedBuildNumber must be a non-negative integer."
+        return 1
+    fi
+    if [[ "$previous_build" != "0" ]] \
+          && ! release_build_is_greater "$build_number" "$previous_build"; then
+        release_error "Reviewed build $build_number must be strictly greater than published build $previous_build."
+        return 1
+    fi
+}
+
 load_reviewed_release_candidate() {
     local root="$1"
     local candidate_file="$root/Resources/ReleaseCandidate.plist"
@@ -756,6 +803,11 @@ load_reviewed_release_candidate() {
         release_error "Formal release candidate has not been reviewed."
         return 1
     fi
+    verify_release_candidate_version_consistency \
+        "$root" \
+        "$version" \
+        "$build_number" \
+        "$previous_build" || return 1
     validate_production_metadata \
         "$version" \
         "$build_number" \

@@ -80,6 +80,17 @@ write_identity() {
         "$TEST_ROOT/Resources/ReleaseIdentity.plist" >/dev/null
 }
 
+write_bundle_short_version() {
+    local root="$1"
+    local short_version="$2"
+    /usr/libexec/PlistBuddy \
+        -c 'Clear dict' \
+        -c 'Add :CFBundleIdentifier string com.local.speaker' \
+        -c "Add :CFBundleShortVersionString string $short_version" \
+        -c 'Add :CFBundleVersion string 1' \
+        "$root/Resources/Info.plist" >/dev/null
+}
+
 write_candidate() {
     local previous_build="$1"
     local version="$2"
@@ -146,6 +157,7 @@ write_identity \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 load_reviewed_release_identity "$TEST_ROOT"
 
+write_bundle_short_version "$TEST_ROOT" "1.2.3"
 write_candidate \
     "0" \
     "REPLACE_WITH_REVIEWED_VERSION" \
@@ -154,6 +166,20 @@ if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
     print -u2 "Placeholder release candidate was accepted."
     exit 1
 fi
+write_candidate "0" "1.2.4" "42"
+if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "A candidate version unequal to CFBundleShortVersionString was accepted."
+    exit 1
+fi
+write_candidate "0" "1.2.3" "0"
+if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "A non-positive candidate build number was accepted."
+    exit 1
+fi
+write_candidate "0" "1.2.3" "1"
+load_reviewed_release_candidate "$TEST_ROOT"
+[[ "$REVIEWED_RELEASE_VERSION" == "1.2.3" ]]
+[[ "$REVIEWED_RELEASE_BUILD_NUMBER" == "1" ]]
 write_candidate \
     "41" \
     $'1.2.3\nSPEAKER_BUILD_NUMBER=Injected' \
@@ -172,9 +198,15 @@ if reject_release_candidate_override "1.2.3" "41" 2>/dev/null; then
     print -u2 "A CI build override bypassed the reviewed candidate."
     exit 1
 fi
+write_bundle_short_version "$TEST_ROOT" "1.2.4"
 write_candidate "42" "1.2.4" "42"
 if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
     print -u2 "A reused published build number was accepted."
+    exit 1
+fi
+write_candidate "42" "1.2.4" "41"
+if load_reviewed_release_candidate "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "A candidate build older than the published build was accepted."
     exit 1
 fi
 write_candidate "42" "1.2.4" "43"
@@ -657,6 +689,7 @@ mkdir -p "$LEDGER_ROOT/Resources"
 git -C "$LEDGER_ROOT" init -q
 cp "$TEST_ROOT/Resources/ReleaseCandidate.plist" \
     "$LEDGER_ROOT/Resources/ReleaseCandidate.plist"
+cp "$TEST_ROOT/Resources/Info.plist" "$LEDGER_ROOT/Resources/Info.plist"
 git -C "$LEDGER_ROOT" add Resources/ReleaseCandidate.plist
 git -C "$LEDGER_ROOT" \
     -c user.name=Speaker \
