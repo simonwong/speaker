@@ -6,6 +6,8 @@ package enum BuiltInRefinementMode: String, CaseIterable, Equatable, Hashable, S
     case conciseCleanup
     case fullRewrite
 
+    /// Provider contract: these prompts are sent to DeepSeek verbatim and are
+    /// not user-facing copy, so they stay in SpeakerCore.
     package var defaultPrompt: String {
         return switch self {
         case .conciseCleanup:
@@ -40,6 +42,9 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         self != .defaultSmooth
     }
 
+    /// The mode's label. Built-in labels are written into Session Records
+    /// (`refinementModeName`) and diagnostics, so they are stable identifiers
+    /// rather than presentation copy; the custom label is the user's own name.
     public var displayName: String {
         switch self {
         case .defaultSmooth:
@@ -164,21 +169,6 @@ public enum TextRefinementModeValidationError: String, Error, Equatable, Sendabl
     case customNameTooLong
     case emptyCustomPrompt
     case customPromptTooLong
-}
-
-extension TextRefinementModeValidationError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .emptyCustomName:
-            "规则名称不能为空。"
-        case .customNameTooLong:
-            "规则名称不能超过 \(TextRefinementMode.maximumCustomNameLength) 个字符。"
-        case .emptyCustomPrompt:
-            "整理规则不能为空。"
-        case .customPromptTooLong:
-            "整理规则不能超过 \(TextRefinementMode.maximumCustomPromptLength) 个字符。"
-        }
-    }
 }
 
 public struct DeepSeekRefinementResult: Equatable, Sendable {

@@ -114,10 +114,10 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         await doubao.loadResource(rawValue: rawValue)
     }
 
-    func migrateCredentials() async -> String? {
-        guard let migratingCredentials else { return nil }
+    func migrateCredentials() async -> [ProviderID] {
+        guard let migratingCredentials else { return [] }
         await migratingCredentials.migrateAllProviders()
-        return await migratingCredentials.migrationNotice()
+        return await migratingCredentials.unmigratedProviders()
     }
 
     func migrateLegacyDictionary() async -> PersonalDictionaryMigrationOutcome? {

@@ -128,7 +128,7 @@ public enum VoiceInputActivity: Equatable, Sendable {
 public enum VoiceInputNotice: Equatable, Sendable {
     case copied
     case refinementFellBack(DeepSeekRefinementFailureKind?)
-    case persistenceFailure(String)
+    case persistenceFailure(LocalHistoryPersistenceNotice)
 }
 
 public struct VoiceInputPresentation: Equatable, Sendable {

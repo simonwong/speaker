@@ -111,9 +111,9 @@ enum CredentialStoreSpecs: CoreSpecDomain {
                 legacy: failingCleanup
             )
             let available = try await usableStore.apiKey(for: .doubao)
-            let migrationNotice = await usableStore.migrationNotice()
+            let unmigrated = await usableStore.unmigratedProviders()
             try expect(available == "keychain-key")
-            try expect(migrationNotice != nil)
+            try expect(unmigrated == [.doubao])
         }
 
         await runAsync("credential migration keeps a conflicting legacy key when primary already exists", failures: &failures) {
@@ -131,7 +131,7 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             let available = try await store.apiKey(for: .doubao)
             let primaryValue = try await primary.apiKey(for: .doubao)
             let legacyValue = try await legacy.apiKey(for: .doubao)
-            let notice = await store.migrationNotice()
+            let unmigrated = await store.unmigratedProviders()
 
             try expect(available == "keychain-key")
             try expect(primaryValue == "keychain-key")
@@ -139,7 +139,7 @@ enum CredentialStoreSpecs: CoreSpecDomain {
                 legacyValue == "different-legacy-key",
                 "a conflicting legacy credential was deleted"
             )
-            try expect(notice?.contains("doubao") == true)
+            try expect(unmigrated.contains(.doubao))
         }
 
         await runAsync("credential deletion keeps the primary key when legacy cleanup fails", failures: &failures) {
@@ -206,8 +206,8 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             try expect(plaintextValue == "plaintext-key")
 
             await store.migrateAllProviders()
-            let notice = await store.migrationNotice()
-            try expect(notice?.contains("doubao") == true)
+            let unmigrated = await store.unmigratedProviders()
+            try expect(unmigrated.contains(.doubao))
         }
 
         await runAsync("credential migration never cleans readable legacy data when another source cannot be inspected", failures: &failures) {

@@ -1228,7 +1228,7 @@ public actor VoiceInputSessions {
         sessionID: VoiceInputSessionID,
         token: UUID,
         terminalPresentation: TerminalHistoryPresentation?,
-        persistenceNotice: String?
+        persistenceNotice: LocalHistoryPersistenceNotice?
     ) {
         guard historyWrites.complete(sessionID: sessionID, token: token) else { return }
         guard let terminalPresentation,

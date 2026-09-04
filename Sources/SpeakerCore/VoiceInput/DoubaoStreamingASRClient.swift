@@ -24,6 +24,8 @@ public enum DoubaoStreamingResource: String, CaseIterable, Codable, Sendable {
 
     public static let `default` = DoubaoStreamingResource.model2Duration
 
+    /// Doubao's own product name for the resource. It identifies the billing
+    /// plan in diagnostics and settings and is not Speaker presentation copy.
     public var displayName: String {
         switch self {
         case .model2Duration: "流式模型 2.0 · 小时版"

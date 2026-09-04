@@ -65,16 +65,7 @@ package final class HistoryModel: ObservableObject {
         )
         let status = await store.persistenceStatus()
         totalRecordCount = status.recordCount
-        switch status.notice {
-        case let .corruptedDataPreserved(_, reason): notice = "已保留损坏的历史文件：\(reason)"
-        case let .corruptedRecordsSkipped(count): notice = "有 \(count) 条历史记录已损坏，已跳过；其他记录仍可使用。"
-        case let .privacyMigrationFailed(reason): notice = "旧版历史隐私清理未完成：\(reason)"
-        case let .writeFailed(reason): notice = "历史写入失败：\(reason)"
-        case let .recoveryArchivePruneFailed(reason):
-            notice = "旧的历史损坏备份未能清理：\(reason)"
-        case nil:
-            notice = nil
-        }
+        notice = status.notice.map(SpeakerCopy.History.pageNotice)
     }
 
     @discardableResult

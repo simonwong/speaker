@@ -8,10 +8,13 @@ import SpeakerCore
 /// when it arrives rather than when the session ends.
 public actor SessionHistoryFake: SessionHistoryRecording {
     public private(set) var records: [VoiceInputHistoryRecord] = []
-    public let failureNotice: String?
+    public let failureNotice: LocalHistoryPersistenceNotice?
     public let failureNoticeDelay: Duration?
 
-    public init(failureNotice: String? = nil, failureNoticeDelay: Duration? = nil) {
+    public init(
+        failureNotice: LocalHistoryPersistenceNotice? = nil,
+        failureNoticeDelay: Duration? = nil
+    ) {
         self.failureNotice = failureNotice
         self.failureNoticeDelay = failureNoticeDelay
     }
@@ -24,7 +27,7 @@ public actor SessionHistoryFake: SessionHistoryRecording {
         }
     }
 
-    public func persistenceFailureNotice() async -> String? {
+    public func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? {
         if let failureNoticeDelay {
             try? await Task.sleep(for: failureNoticeDelay)
         }

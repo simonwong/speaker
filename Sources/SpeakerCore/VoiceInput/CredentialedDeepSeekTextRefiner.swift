@@ -51,6 +51,7 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
         try await credentials.deleteAPIKey(for: .deepSeek)
     }
 
+    /// Provider contract: the probe text is sent to DeepSeek and never shown.
     public func checkConnection() async throws -> String? {
         try await refine(
             "连接检查。",

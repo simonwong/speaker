@@ -1157,8 +1157,17 @@ struct SpeakerAppScenarioSpecs {
                     == "DeepSeek 整理失败，已使用豆包结果。"
             )
             try expect(
-                VoiceInputNotice.persistenceFailure("会话历史写入失败")
-                    .userMessage == "会话历史写入失败"
+                VoiceInputNotice.persistenceFailure(.writeFailed(reason: "磁盘不可用"))
+                    .userMessage == "会话历史写入失败：磁盘不可用"
+            )
+            try expect(
+                VoiceInputNotice.persistenceFailure(
+                    .privacyMigrationFailed(reason: .databaseUnavailable)
+                ).userMessage == "旧版会话历史的隐私清理失败：本地历史数据库不可用。"
+            )
+            try expect(
+                VoiceInputNotice.persistenceFailure(.corruptedRecordsSkipped(count: 2))
+                    .userMessage == "有 2 条本地历史记录已损坏，其他记录仍可使用。"
             )
         }
 
@@ -3003,7 +3012,7 @@ struct SpeakerAppScenarioSpecs {
                 ),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(
-                    failureNotice: "会话历史写入失败：磁盘不可用",
+                    failureNotice: .writeFailed(reason: "磁盘不可用"),
                     failureNoticeDelay: .milliseconds(80)
                 )
             )
@@ -3113,7 +3122,7 @@ struct SpeakerAppScenarioSpecs {
         await runAsync("voice experience projects terminal persistence notices", failures: &failures) {
             let fixture = makeVoiceExperienceFixture(
                 history: SessionHistoryFake(
-                    failureNotice: "会话历史写入失败：磁盘不可用"
+                    failureNotice: .writeFailed(reason: "磁盘不可用")
                 )
             )
             let experience = fixture.experience

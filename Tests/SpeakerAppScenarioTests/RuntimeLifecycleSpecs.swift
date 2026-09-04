@@ -28,7 +28,7 @@ private final class StageGate {
 private final class StartupStagesFake: RuntimeStartupStages {
     var calls: [String] = []
     var settings: AppSettingsLoadResult = .loaded(.default)
-    var credentialsNotice: String?
+    var unmigratedProviders: [ProviderID] = []
     var legacyDictionary: PersonalDictionaryMigrationOutcome?
     var dictionaryNotice: String?
     var scrubSucceeds = true
@@ -48,9 +48,9 @@ private final class StartupStagesFake: RuntimeStartupStages {
         calls.append("loadDoubaoResource")
     }
 
-    func migrateCredentials() async -> String? {
+    func migrateCredentials() async -> [ProviderID] {
         calls.append("migrateCredentials")
-        return credentialsNotice
+        return unmigratedProviders
     }
 
     func migrateLegacyDictionary() async -> PersonalDictionaryMigrationOutcome? {
@@ -224,7 +224,7 @@ enum RuntimeLifecycleSpecs {
                     reason: .unsupportedVersion(9)
                 )
             )
-            stages.credentialsNotice = "credentials moved"
+            stages.unmigratedProviders = [.deepSeek, .doubao]
             stages.legacyDictionary = .failed
             stages.dictionaryNotice = "dictionary recovered"
             stages.legacyHistory = .legacyCorrupted(backupName: "history.corrupt-1.json")
@@ -238,7 +238,9 @@ enum RuntimeLifecycleSpecs {
             try expect(stages.calls == fullStartupOrder, "unexpected order \(stages.calls)")
             try expect(notices == [
                 SpeakerCopy.Startup.settingsRecovered(backupName: "settings.recovery-1.json"),
-                "credentials moved",
+                SpeakerCopy.Startup.credentialMigrationIncomplete(
+                    providers: [.deepSeek, .doubao]
+                )!,
                 SpeakerCopy.Startup.legacyDictionaryMigrationFailed,
                 "dictionary recovered",
                 SpeakerCopy.Startup.legacyHistoryNotice(

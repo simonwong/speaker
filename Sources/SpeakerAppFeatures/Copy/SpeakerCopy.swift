@@ -73,6 +73,27 @@ package enum SpeakerCopy {
             "设置文件已恢复为默认值，原文件保留在 \(backupName)。"
         }
 
+        package static func settingsLoadFailed(
+            _ failure: AppSettingsLoadFailure
+        ) -> String {
+            switch failure {
+            case .protectionFailed:
+                "无法保护设置文件权限，已停止加载本机设置。"
+            case let .readFailed(detail):
+                "无法安全读取设置文件，已停止加载：\(detail)"
+            case let .preservationFailed(detail):
+                "Settings could not be recovered: \(detail)"
+            }
+        }
+
+        package static func credentialMigrationIncomplete(
+            providers: [ProviderID]
+        ) -> String? {
+            guard !providers.isEmpty else { return nil }
+            let names = providers.map(\.rawValue).joined(separator: "、")
+            return "\(names) 的旧凭据尚未完成安全迁移；已保留可用的 Keychain 凭据，请在解锁 Mac 后重试。"
+        }
+
         package static func legacyDictionaryNotice(
             _ outcome: PersonalDictionaryMigrationOutcome
         ) -> String? {
@@ -102,6 +123,140 @@ package enum SpeakerCopy {
                 "旧版会话历史尚未满足安全迁移条件，原文件仍保留。"
             case .importRefused:
                 "旧版会话历史尚未完成迁移，原文件仍保留。"
+            }
+        }
+    }
+
+    /// Local history notices. The urgent sentence is shown from the menu bar
+    /// after a session; the page sentences are shown on the History page.
+    package enum History {
+        package static func reason(_ reason: LocalHistoryFailureReason) -> String {
+            switch reason {
+            case .databaseUnavailable:
+                "本地历史数据库不可用。"
+            case let .detail(detail):
+                detail
+            }
+        }
+
+        package static func urgentNotice(
+            _ notice: LocalHistoryPersistenceNotice
+        ) -> String {
+            switch notice {
+            case let .privacyMigrationFailed(failure):
+                "旧版会话历史的隐私清理失败：\(reason(failure))"
+            case let .writeFailed(detail):
+                "会话历史写入失败：\(detail)"
+            case let .corruptedRecordsSkipped(count):
+                "有 \(count) 条本地历史记录已损坏，其他记录仍可使用。"
+            case .corruptedDataPreserved, .recoveryArchivePruneFailed:
+                pageNotice(notice)
+            }
+        }
+
+        package static func pageNotice(
+            _ notice: LocalHistoryPersistenceNotice
+        ) -> String {
+            switch notice {
+            case let .corruptedDataPreserved(_, detail):
+                "已保留损坏的历史文件：\(detail)"
+            case let .corruptedRecordsSkipped(count):
+                "有 \(count) 条历史记录已损坏，已跳过；其他记录仍可使用。"
+            case let .privacyMigrationFailed(failure):
+                "旧版历史隐私清理未完成：\(reason(failure))"
+            case let .writeFailed(detail):
+                "历史写入失败：\(detail)"
+            case let .recoveryArchivePruneFailed(detail):
+                "旧的历史损坏备份未能清理：\(detail)"
+            }
+        }
+    }
+
+    /// One sentence per structured SpeakerCore failure. Errors SpeakerCore
+    /// does not own (system errors) fall back to their own description.
+    package enum Failure {
+        package static func message(for error: any Error) -> String {
+            switch error {
+            case let error as ProviderCredentialStoreError:
+                message(for: error)
+            case let error as AppSettingsStoreError:
+                message(for: error)
+            case let error as PersonalDictionaryStoreError:
+                message(for: error)
+            case let error as PersonalDictionaryValidationError:
+                message(for: error)
+            case let error as TextRefinementModeValidationError:
+                message(for: error)
+            default:
+                error.localizedDescription
+            }
+        }
+
+        package static func message(for error: ProviderCredentialStoreError) -> String {
+            switch error {
+            case .emptyAPIKey:
+                "API Key 不能为空。"
+            case .apiKeyTooLarge:
+                "API Key 超出本机凭据存储允许的大小。"
+            case .accessDenied:
+                "无法访问本机凭据存储。"
+            case .interactionUnavailable:
+                "本机凭据存储当前不可用，请解锁 Mac 后重试。"
+            case .malformedStoredValue:
+                "已保存的 API Key 无法读取，请删除后重新保存。"
+            case .conflictingStoredValues:
+                "检测到多个旧凭据来源保存了不同的 API Key，已停止自动迁移并保留原数据。"
+            case .storageUnavailable:
+                "保存 API Key 失败，请稍后重试。"
+            }
+        }
+
+        package static func message(for error: AppSettingsStoreError) -> String {
+            switch error {
+            case let .writeFailed(reason):
+                "无法保存 Speaker 设置：\(reason)"
+            case let .sourceUnreadable(failure):
+                "原设置文件无法安全读取，已保留原文件且拒绝覆盖："
+                    + Startup.settingsLoadFailed(failure)
+            }
+        }
+
+        package static func message(for error: PersonalDictionaryStoreError) -> String {
+            switch error {
+            case .readFailed:
+                "无法读取本机个人词库。"
+            case .writeFailed:
+                "无法保存本机个人词库。"
+            case .privacyProtectionFailed:
+                "无法把个人词库限制为仅当前用户可读，已停止加载。"
+            case .corruptionPreservationFailed:
+                "个人词库文件已损坏且无法保留副本，已停止加载。"
+            }
+        }
+
+        package static func message(for error: PersonalDictionaryValidationError) -> String {
+            error.issues.first.map(message(for:)) ?? "个人词库无效。"
+        }
+
+        package static func message(for issue: PersonalDictionaryValidationIssue) -> String {
+            switch issue {
+            case .emptyWord:
+                "词条不能为空。"
+            case let .duplicateWord(word, _):
+                "词条“\(word)”已存在。"
+            }
+        }
+
+        package static func message(for error: TextRefinementModeValidationError) -> String {
+            switch error {
+            case .emptyCustomName:
+                "规则名称不能为空。"
+            case .customNameTooLong:
+                "规则名称不能超过 \(TextRefinementMode.maximumCustomNameLength) 个字符。"
+            case .emptyCustomPrompt:
+                "整理规则不能为空。"
+            case .customPromptTooLong:
+                "整理规则不能超过 \(TextRefinementMode.maximumCustomPromptLength) 个字符。"
             }
         }
     }

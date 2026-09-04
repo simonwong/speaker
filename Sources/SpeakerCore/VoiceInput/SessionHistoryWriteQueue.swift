@@ -17,7 +17,7 @@ struct TerminalHistoryPresentation: Sendable {
 struct SessionHistoryWriteQueue {
     typealias Completion = @Sendable (
         _ token: UUID,
-        _ persistenceNotice: String?
+        _ persistenceNotice: LocalHistoryPersistenceNotice?
     ) async -> Void
 
     private var tasks: [VoiceInputSessionID: Task<Void, Never>] = [:]

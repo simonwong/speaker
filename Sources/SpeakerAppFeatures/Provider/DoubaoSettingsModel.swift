@@ -54,7 +54,7 @@ package final class DoubaoSettingsModel: ObservableObject {
             status = hasStoredKey ? .configured : .unconfigured
         } catch {
             guard token == generation, resource == selected else { return }
-            status = .failure(error.localizedDescription)
+            status = .failure(SpeakerCopy.Failure.message(for: error))
         }
     }
 
@@ -69,7 +69,7 @@ package final class DoubaoSettingsModel: ObservableObject {
             )
         } catch {
             guard token == generation else { return }
-            status = .failure(error.localizedDescription)
+            status = .failure(SpeakerCopy.Failure.message(for: error))
         }
     }
 
@@ -83,7 +83,7 @@ package final class DoubaoSettingsModel: ObservableObject {
             status = .configured
         } catch {
             guard token == generation else { return }
-            status = .failure(error.localizedDescription)
+            status = .failure(SpeakerCopy.Failure.message(for: error))
         }
     }
 
@@ -111,7 +111,7 @@ package final class DoubaoSettingsModel: ObservableObject {
             case let .failure(failure as DoubaoASRFailure):
                 status = .failure(Self.message(for: failure))
             case let .failure(error):
-                status = .failure(error.localizedDescription)
+                status = .failure(SpeakerCopy.Failure.message(for: error))
             }
         }
     }
@@ -126,7 +126,7 @@ package final class DoubaoSettingsModel: ObservableObject {
             status = .unconfigured
         } catch {
             guard token == generation else { return }
-            status = .failure(error.localizedDescription)
+            status = .failure(SpeakerCopy.Failure.message(for: error))
         }
     }
 

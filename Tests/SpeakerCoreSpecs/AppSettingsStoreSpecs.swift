@@ -163,15 +163,19 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             let result = await protected.load()
 
             try expect(result.settings == .default)
-            guard case let .recoveryFailed(_, reason) = result else {
+            guard case let .recoveryFailed(_, failure) = result else {
                 throw SpecFailure(message: "settings protection failure was hidden")
             }
-            try expect(reason.contains("文件权限"))
+            try expect(failure == .protectionFailed)
         }
 
-        run("app settings persistence errors have a user-facing description", failures: &failures) {
+        run("app settings persistence errors stay structured for presentation", failures: &failures) {
             let error = AppSettingsStoreError.writeFailed(reason: "disk unavailable")
-            try expect(error.localizedDescription == "无法保存 Speaker 设置：disk unavailable")
+            guard case let .writeFailed(reason) = error else {
+                throw SpecFailure(message: "write failure lost its reason")
+            }
+            try expect(reason == "disk unavailable")
+            try expect(!(error is any LocalizedError), "SpeakerCore must not own user-facing sentences")
         }
 
         await runAsync("corrupt app settings recover to defaults without overwriting evidence", failures: &failures) {

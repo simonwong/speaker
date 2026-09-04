@@ -210,8 +210,8 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
                 _ = try await store.updateLaunchAtLogin(true)
                 throw SpecFailure(message: "an update overwrote unreadable settings")
             } catch let error as AppSettingsStoreError {
-                guard case .writeFailed = error else {
-                    throw SpecFailure(message: "unexpected settings update error")
+                guard case .sourceUnreadable(.readFailed) = error else {
+                    throw SpecFailure(message: "unexpected settings update error \(error)")
                 }
             }
             let retainedAttributes = try FileManager.default.attributesOfItem(
