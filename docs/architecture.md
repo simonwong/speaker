@@ -109,7 +109,7 @@ File-backed sensitive data cross `OwnerOnlyFilePersistence`. The implementation 
 
 Credential migration treats the current Keychain service as primary and old Keychain or development files as legacy sources. Migration proceeds only when every legacy source is readable and all non-empty values agree. It writes and reads back the primary value before removing legacy sources. A conflict or inaccessible source preserves all data and emits only provider-level diagnostics.
 
-The persistence decision is recorded in [ADR-0004](adr/0004-protect-local-sensitive-data.md).
+The persistence decision is recorded in [ADR-0004](adr/0004-protect-local-sensitive-data.md), and the Session Record store's WAL, secure-delete, and checkpoint-convergence rationale in [ADR-0006](adr/0006-store-session-records-in-sqlite.md).
 
 ## Local data erasure
 
@@ -121,7 +121,7 @@ Both the main window and the system Settings scene replace writable controls whi
 
 ## UI verification seams
 
-Debug builds provide a visual-scenario entry point for the recording, processing, Pending Copy Result, and problem HUD states. It does not load the voice runtime and is absent from Release binaries. `VoiceInputPanelLayout` is the single source for panel classification and size; AppKit specifications cover every state transition and require the window and hosting content to converge together.
+Debug builds provide a visual-scenario entry point for the recording, processing, Pending Copy Result, and problem HUD states. It does not load the voice runtime and is absent from Release binaries. `VoiceInputPanelLayout` is the single source for panel classification and size; AppKit specifications cover every state transition and require the window and hosting content to converge together. Those specifications, like every other suite, are sequential `@main` executables sharing the `SpeakerSpecSupport` harness rather than XCTest bundles; see [ADR-0007](adr/0007-specify-behavior-through-sequential-executables.md).
 
 The HUD exposes real state rather than fabricated progress. Recording shows a red indicator, audio level, and explicit cancel action. Preparing shows a compact wave and the same cancel action. Waiting For Result widens the same pill to show the stage title; Esc and the cancel control keep their User Cancellation meaning. Reduce Motion, Increase Contrast, VoiceOver labels, and announcements are product behavior owned by the application feature module.
 
@@ -129,7 +129,7 @@ Onboarding has a separate debug capture entry point that renders the production 
 
 ## Software updates and release
 
-`SoftwareUpdateFeature` isolates update state and intents. A live Sparkle adapter exists only when the Developer ID identity, GitHub Releases HTTPS feed, and Ed25519 public key are all valid. Development builds disable updates. Production acceptance may inject only this repository's immutable `v<SemVer>` prerelease appcast through a launch argument; normal launches always use the stable latest feed. The production workflow signs once, publishes that exact DMG as a prerelease candidate, binds old-version evidence to it, then promotes the same release as latest and reads the signed channel back. The signing job owns private keys but no repository write permission; staging and publication jobs own scoped repository write permission and verify with only the reviewed public key. Distribution, notarization, appcast signing, exact-artifact promotion, public readback, and candidate-bound old-version upgrade evidence are release gates rather than application-scene responsibilities.
+`SoftwareUpdateFeature` isolates update state and intents. A live Sparkle adapter exists only when the Developer ID identity, GitHub Releases HTTPS feed, and Ed25519 public key are all valid. Development builds disable updates. Production acceptance may inject only this repository's immutable `v<SemVer>` prerelease appcast through a launch argument; normal launches always use the stable latest feed. The production workflow signs once, publishes that exact DMG as a prerelease candidate, binds old-version evidence to it, then promotes the same release as latest and reads the signed channel back. The signing job owns private keys but no repository write permission; staging and publication jobs own scoped repository write permission and verify with only the reviewed public key. Distribution, notarization, appcast signing, exact-artifact promotion, public readback, and candidate-bound old-version upgrade evidence are release gates rather than application-scene responsibilities. The update-channel decision, including why Developer ID signing, the HTTPS appcast, and Ed25519 verification are three independent checks, is recorded in [ADR-0005](adr/0005-deliver-updates-through-sparkle.md).
 
 ## Invariants
 
