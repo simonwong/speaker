@@ -19,6 +19,7 @@ struct SpeakerCoreSpecs {
         await SessionHistorySpecs.run(failures: &failures)
         await PersonalDictionarySpecs.run(failures: &failures)
         await OwnerOnlyPersistenceSpecs.run(failures: &failures)
+        await VersionedDocumentStoreSpecs.run(failures: &failures)
         await AppSettingsStoreSpecs.run(failures: &failures)
         await UsageStatisticsSpecs.run(failures: &failures)
 

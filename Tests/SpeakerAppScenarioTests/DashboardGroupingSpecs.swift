@@ -274,8 +274,8 @@ private struct DashboardClipboardFake: ClipboardWriting {
 private actor DashboardDictionaryStoreFake: PersonalDictionaryStoring {
     private var stored: PersonalDictionary = .empty
 
-    func load() -> PersonalDictionary {
-        stored
+    func load() -> PersonalDictionaryLoadResult {
+        PersonalDictionaryLoadResult(dictionary: stored)
     }
 
     func save(_ dictionary: PersonalDictionary) {

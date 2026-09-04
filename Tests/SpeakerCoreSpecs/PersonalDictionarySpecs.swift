@@ -89,7 +89,7 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             try legacyData.write(to: fileURL)
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
 
-            let dictionary = try await store.load()
+            let dictionary = try await store.load().dictionary
             let migratedData = try Data(contentsOf: fileURL)
             let migratedDocument = try JSONSerialization.jsonObject(with: migratedData)
                 as? [String: Any]
@@ -145,7 +145,7 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             ])
 
             try await store.save(dictionary)
-            let loaded = try await store.load()
+            let loaded = try await store.load().dictionary
             try expect(loaded == dictionary)
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             try expect(
@@ -175,12 +175,15 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             try JSONSerialization.data(withJSONObject: document).write(to: fileURL)
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
 
-            do {
-                _ = try await store.load()
-                throw SpecFailure(message: "whitespace-only v2 word was loaded")
-            } catch let error as PersonalDictionaryStoreError {
-                try expect(error == .corruptedData)
+            let result = try await store.load()
+            try expect(result.dictionary == .empty, "whitespace-only v2 word was loaded")
+            guard let recovery = result.recovery else {
+                throw SpecFailure(message: "whitespace-only v2 word was not treated as corruption")
             }
+            try expect(
+                FileManager.default.fileExists(atPath: recovery.backupURL.path),
+                "corrupt dictionary was not preserved beside the file"
+            )
         }
 
         await runAsync("personal dictionary refuses an unreadable oversized save and retains the old file", failures: &failures) {
@@ -203,7 +206,7 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             } catch let error as PersonalDictionaryStoreError {
                 try expect(error == .writeFailed)
             }
-            let reloaded = try await store.load()
+            let reloaded = try await store.load().dictionary
             try expect(
                 reloaded == retained,
                 "oversized dictionary replaced the readable file"
@@ -263,7 +266,7 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
                 )
             let migrated = try await VersionedJSONPersonalDictionaryStore(
                 fileURL: primaryURL
-            ).load()
+            ).load().dictionary
 
             try expect(outcome == .migrated)
             try expect(migrated == dictionary)
@@ -300,7 +303,7 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
                 )
             let retained = try await VersionedJSONPersonalDictionaryStore(
                 fileURL: primaryURL
-            ).load()
+            ).load().dictionary
 
             try expect(outcome == .primaryAlreadyExists)
             try expect(retained == primaryDictionary)

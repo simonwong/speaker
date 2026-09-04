@@ -554,7 +554,9 @@ package final class RefinementSettingsModel: ObservableObject {
 package final class DictionarySettingsModel: ObservableObject {
     @Published package var entries: [DictionaryEntry] = []
     @Published package var draftWord = ""
-    @Published private(set) var notice: String?
+    @Published package private(set) var notice: String?
+    /// Set when the last load preserved a corrupt dictionary file.
+    @Published package private(set) var recovery: PersonalDictionaryRecovery?
 
     private let store: any PersonalDictionaryStoring
     private let configuration: VoiceInputConfigurationController
@@ -588,15 +590,23 @@ package final class DictionarySettingsModel: ObservableObject {
 
     package func load() async {
         do {
-            let dictionary = try await store.load()
-            entries = dictionary.entries
-            await configuration.replaceDictionary(dictionary)
+            let result = try await store.load()
+            entries = result.dictionary.entries
+            await configuration.replaceDictionary(result.dictionary)
             allowsPersistence = true
-            notice = nil
+            recovery = result.recovery
+            notice = result.recovery.map(Self.recoveryNotice)
         } catch {
             allowsPersistence = false
+            recovery = nil
             notice = error.localizedDescription
         }
+    }
+
+    package static func recoveryNotice(
+        for recovery: PersonalDictionaryRecovery
+    ) -> String {
+        "个人词库文件已损坏，已从空词库继续；原文件保留在 \(recovery.backupURL.lastPathComponent)。"
     }
 
     @discardableResult
