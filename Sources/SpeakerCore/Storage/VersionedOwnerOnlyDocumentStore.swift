@@ -137,7 +137,7 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         do {
             try fileProtection.protect(fileURL)
         } catch {
-            return .failed(.protectionFailed(detail: Self.safeReason(for: error)))
+            return .failed(.protectionFailed(detail: PrivacySafeText.reason(for: error)))
         }
         let data: Data
         do {
@@ -149,14 +149,14 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
             }
             data = storedData
         } catch {
-            return .failed(.readFailed(detail: Self.safeReason(for: error)))
+            return .failed(.readFailed(detail: PrivacySafeText.reason(for: error)))
         }
 
         let version: Int
         do {
             version = try Self.readVersion(from: data, key: schema.versionKey)
         } catch {
-            return .corrupted(.malformed(detail: Self.safeReason(for: error)))
+            return .corrupted(.malformed(detail: PrivacySafeText.reason(for: error)))
         }
         guard let decode = schema.decoders[version] else {
             return .corrupted(.unsupportedVersion(version))
@@ -164,7 +164,7 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         do {
             return .decoded(try decode(data), version: version)
         } catch {
-            return .corrupted(.malformed(detail: Self.safeReason(for: error)))
+            return .corrupted(.malformed(detail: PrivacySafeText.reason(for: error)))
         }
     }
 
@@ -204,11 +204,6 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         }
     }
 
-    package static func safeReason(for error: Error) -> String {
-        let nsError = error as NSError
-        return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
-    }
-
     private func preserveCorruptFile(
         corruption: DocumentCorruption
     ) -> VersionedDocumentLoadOutcome<Document> {
@@ -222,7 +217,7 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         } catch {
             return .failed(.preservationFailed(
                 corruption: corruption,
-                detail: Self.safeReason(for: error)
+                detail: PrivacySafeText.reason(for: error)
             ))
         }
         pruneBackups(preserving: backupURL)
