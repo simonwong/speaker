@@ -1,26 +1,6 @@
 import Foundation
 import SpeakerAccuracyMetrics
-
-private enum SpecFailure: Error {
-    case failed(String)
-}
-
-private func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
-    guard condition() else { throw SpecFailure.failed(message) }
-}
-
-private func run(_ name: String, failures: inout [String], _ body: () throws -> Void) {
-    do {
-        try body()
-        print("PASS \(name)")
-    } catch let SpecFailure.failed(message) {
-        failures.append("\(name): \(message)")
-        print("FAIL \(name): \(message)")
-    } catch {
-        failures.append("\(name): \(error)")
-        print("FAIL \(name): \(error)")
-    }
-}
+import SpeakerSpecSupport
 
 private func manifestError(
     _ json: String,
@@ -77,6 +57,7 @@ private extension Data {
 
 @main
 private struct SpeakerAccuracyMetricsSpecs {
+    @MainActor
     static func main() {
         var failures: [String] = []
 
@@ -229,10 +210,6 @@ private struct SpeakerAccuracyMetricsSpecs {
             try expect(failure(wavData(frameCount: 0)) == .emptyData, "empty data chunk was accepted")
         }
 
-        guard failures.isEmpty else {
-            print("FAILED: \(failures.count) accuracy metrics spec(s)")
-            exit(1)
-        }
-        print("PASS: accuracy metrics, normalization, manifest, and WAV specs")
+        SpecSummary.finish(failures: failures, label: "accuracy metrics specs")
     }
 }

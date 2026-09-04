@@ -66,6 +66,10 @@ let package = Package(
         .target(name: "SpeakerProviderEvidence"),
         .target(name: "SpeakerAccuracyMetrics"),
         .target(
+            name: "SpeakerSpecSupport",
+            path: "Tests/SpeakerSpecSupport"
+        ),
+        .target(
             name: "SpeakerAppFeatures",
             dependencies: ["SpeakerCore"]
         ),
@@ -79,17 +83,17 @@ let package = Package(
         ),
         .executableTarget(
             name: "SpeakerCoreSpecs",
-            dependencies: ["SpeakerCore"],
+            dependencies: ["SpeakerCore", "SpeakerSpecSupport"],
             path: "Tests/SpeakerCoreSpecs"
         ),
         .executableTarget(
             name: "SpeakerAppScenarioSpecs",
-            dependencies: ["SpeakerCore", "SpeakerAppFeatures"],
+            dependencies: ["SpeakerCore", "SpeakerAppFeatures", "SpeakerSpecSupport"],
             path: "Tests/SpeakerAppScenarioTests"
         ),
         .executableTarget(
             name: "SpeakerAppUISpecs",
-            dependencies: ["SpeakerAppFeatures", "SpeakerCore"],
+            dependencies: ["SpeakerAppFeatures", "SpeakerCore", "SpeakerSpecSupport"],
             path: "Tests/SpeakerAppUISpecs"
         ),
         .executableTarget(
@@ -109,7 +113,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "SpeakerProviderEvidenceSpecs",
-            dependencies: ["SpeakerProviderEvidence"],
+            dependencies: ["SpeakerProviderEvidence", "SpeakerSpecSupport"],
             path: "Tests/SpeakerProviderEvidenceSpecs"
         ),
         .executableTarget(
@@ -123,7 +127,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "SpeakerAccuracyMetricsSpecs",
-            dependencies: ["SpeakerAccuracyMetrics"],
+            dependencies: ["SpeakerAccuracyMetrics", "SpeakerSpecSupport"],
             path: "Tests/SpeakerAccuracyMetricsSpecs"
         ),
         .executableTarget(

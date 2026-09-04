@@ -4,6 +4,7 @@ import AVFoundation
 import ApplicationServices
 @preconcurrency import Carbon
 import SpeakerCore
+import SpeakerSpecSupport
 import SQLite3
 
 @main
@@ -7881,14 +7882,7 @@ struct SpeakerCoreSpecs {
             try expect(streamed.totalSessionCount == 2)
         }
 
-        guard failures.isEmpty else {
-            for failure in failures {
-                FileHandle.standardError.write(Data("FAIL: \(failure)\n".utf8))
-            }
-            Darwin.exit(1)
-        }
-
-        print("PASS: \(SpecExecutionCounter.value) core specs")
+        SpecSummary.finish(failures: failures, label: "core specs")
     }
 }
 
@@ -9599,10 +9593,6 @@ private final class PermissionAccessStub: PermissionAccess {
     }
 }
 
-private struct SpecFailure: Error {
-    let message: String
-}
-
 private struct FileProtectionFailure: Error {}
 
 private func usageRecord(
@@ -9622,11 +9612,6 @@ private func usageRecord(
     )
 }
 
-@MainActor
-private enum SpecExecutionCounter {
-    static var value = 0
-}
-
 private extension VoiceInputActivity {
     var failure: VoiceInputFailure? {
         if case let .failed(_, failure) = self { failure } else { nil }
@@ -9638,15 +9623,6 @@ private extension VoiceInputActivity {
 
     var isRecordingFailed: Bool {
         if case .failed(_, .recordingFailed) = self { true } else { false }
-    }
-}
-
-private func expect(
-    _ condition: @autoclosure () -> Bool,
-    _ message: String = "expectation failed"
-) throws {
-    guard condition() else {
-        throw SpecFailure(message: message)
     }
 }
 
@@ -9811,38 +9787,6 @@ private func readHistoryPayload(from fileURL: URL) throws -> String {
     return String(decoding: Data(bytes: bytes, count: count), as: UTF8.self)
 }
 
-@MainActor
-private func run(
-    _ name: String,
-    failures: inout [String],
-    body: () throws -> Void
-) {
-    SpecExecutionCounter.value += 1
-    do {
-        try body()
-    } catch let failure as SpecFailure {
-        failures.append("\(name): \(failure.message)")
-    } catch {
-        failures.append("\(name): \(error)")
-    }
-}
-
-@MainActor
-private func runAsync(
-    _ name: String,
-    failures: inout [String],
-    body: () async throws -> Void
-) async {
-    SpecExecutionCounter.value += 1
-    do {
-        try await body()
-    } catch let failure as SpecFailure {
-        failures.append("\(name): \(failure.message)")
-    } catch {
-        failures.append("\(name): \(error)")
-    }
-}
-
 private func terminalPresentation(
     from stream: AsyncStream<VoiceInputPresentation>
 ) -> Task<VoiceInputPresentation?, Never> {
@@ -9879,19 +9823,3 @@ private func firstTerminalPresentation(
     }
 }
 
-@MainActor
-private func eventually(
-    before timeout: Duration,
-    pollEvery interval: Duration = .milliseconds(5),
-    condition: @MainActor () async -> Bool
-) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: timeout)
-    while clock.now < deadline {
-        if await condition() {
-            return true
-        }
-        try? await Task.sleep(for: interval)
-    }
-    return await condition()
-}

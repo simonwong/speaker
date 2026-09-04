@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SpeakerAppFeatures
 import SpeakerCore
+import SpeakerSpecSupport
 import SwiftUI
 
 @main
@@ -10,12 +11,10 @@ struct SpeakerAppUISpecs {
     static func main() {
         _ = NSApplication.shared.setActivationPolicy(.accessory)
         var failures: [String] = []
-        var executed = 0
 
         run(
             "voice input panel has a non-activating production configuration",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presenter = VoiceInputPanelPresenter { _ in Color.clear }
             defer { presenter.stop() }
@@ -36,8 +35,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "voice input panel keeps the hosting surface transparent outside the HUD",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
             let presenter = VoiceInputPanelPresenter { presentation in
@@ -76,8 +74,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "Reduce Transparency makes only the shaped HUD surface opaque",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
             let presenter = VoiceInputPanelPresenter { presentation in
@@ -109,8 +106,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "legacy HUD fallback keeps an active behind-window material",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
             let presenter = VoiceInputPanelPresenter { presentation in
@@ -135,8 +131,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "Liquid Glass HUD keeps an adaptive behind-window backing",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presentation = VoiceInputHUDContractFixture.recording.presentation
             let presenter = VoiceInputPanelPresenter { presentation in
@@ -161,8 +156,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "Increase Contrast strengthens the rendered HUD boundary",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let standard = try renderedHUDBitmap(increasedContrast: false)
             let increased = try renderedHUDBitmap(increasedContrast: true)
@@ -177,8 +171,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "Speaker menu bar artwork uses adaptive template rendering",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let fallback = SpeakerMenuBarIconArtwork.fallbackImage
             try expect(
@@ -219,8 +212,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "Speaker menu bar mark stays legible and stateful at status-item size",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var renderedStates: [Data] = []
             for (state, expectedLabel) in [
@@ -295,8 +287,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "Speaker identity tiles expose product identity only without adjacent text",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let named = NSHostingView(rootView:
                 SpeakerIdentityTile(size: 44, accessibility: .named)
@@ -346,8 +337,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "ordering the voice input panel does not activate or make it key",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let app = NSApplication.shared
             let wasActive = app.isActive
@@ -376,8 +366,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "every voice HUD transition applies the destination geometry",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presentations: [(VoiceInputOverlayPresentation, CGSize)] = [
                 (
@@ -425,8 +414,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "voice HUD presenter keeps a re-shown panel after stale dismissal",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var completeDismissal: (() -> Void)?
             let presenter = VoiceInputPanelPresenter(
@@ -456,8 +444,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "voice HUD presenter respects Reduce Motion during dismissal",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let animated = VoiceInputPanelPresenter(
                 reduceMotion: { false }
@@ -482,8 +469,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "every voice HUD presentation completes dismissal",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let presenter = VoiceInputPanelPresenter(
                 reduceMotion: { false },
@@ -503,8 +489,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "production voice HUD exposes labelled actionable controls",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             try verifyHUDControls(
                 fixture: .processing,
@@ -526,8 +511,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "dictionary chip exposes a labelled delete action",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let recorder = DictionaryActionRecorder()
             let hostingView = NSHostingView(rootView: DictionaryEntryChip(
@@ -563,8 +547,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "dictionary chip exposes omission and quality guidance",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let hostingView = NSHostingView(rootView: DictionaryEntryChip(
                 word: "1234567890",
@@ -600,8 +583,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "onboarding window remains usable on the available screen",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let visibleFrame = NSRect(
                 x: 0,
@@ -640,8 +622,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "main window keeps one minimum without changing its current geometry",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let window = NSWindow(
                 contentRect: NSRect(
@@ -679,8 +660,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "main window SwiftUI bridge applies the production minimum",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let window = NSWindow(
                 contentRect: NSRect(
@@ -718,8 +698,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "switching every main window tab preserves minimum and default geometry",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let selection = MainWindowSelectionFixture()
             let window = NSWindow(
@@ -765,8 +744,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "settings overview shows the top before explicit section navigation",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let navigation = SettingsNavigationModel()
             let window = NSWindow(
@@ -836,8 +814,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "main window tabs keep the native style without separators",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let selection = MainWindowSelectionFixture()
             let window = NSWindow(
@@ -891,8 +868,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "contribution heatmap lays out 52 Monday-first weeks with today in the final column",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
@@ -946,8 +922,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "contribution heatmap cells resize to fill the available width",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let compact = ContributionHeatmapLayout(
                 availableWidth: 480,
@@ -973,8 +948,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "empty usage summary yields a heatmap with no data",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let heatmap = ContributionHeatmap.build(
                 summary: .empty,
@@ -991,8 +965,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "usage presentation formats duration, keyboard savings and heatmap shades",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let duration = VoiceInputUsagePresentation.speakingDuration(
                 milliseconds: (14 * 3_600 + 22 * 60 + 8) * 1_000
@@ -1041,8 +1014,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "overview weekly characters include Monday through today only",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
@@ -1083,8 +1055,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "overview voiceprint fills the latest 18 calendar days",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
@@ -1133,8 +1104,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "history records are grouped by local day in reverse chronological order",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
@@ -1189,8 +1159,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "history list hides cancelled and textless records",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
@@ -1253,8 +1222,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "history rows present the four delivery states",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
@@ -1368,8 +1336,7 @@ struct SpeakerAppUISpecs {
 
         run(
             "history search matches retained text and delivery diagnostics without exposing target application",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let hiddenTranscriptID = VoiceInputSessionID()
             let bodyID = VoiceInputSessionID()
@@ -1433,16 +1400,7 @@ struct SpeakerAppUISpecs {
             )
         }
 
-        guard failures.isEmpty else {
-            for failure in failures {
-                FileHandle.standardError.write(
-                    Data("FAIL: \(failure)\n".utf8)
-                )
-            }
-            Darwin.exit(1)
-        }
-
-        print("PASS: \(executed) AppKit UI specs")
+        SpecSummary.finish(failures: failures, label: "AppKit UI specs")
     }
 }
 
@@ -1726,30 +1684,3 @@ private func verticalDistanceFromTop(_ scrollView: NSScrollView) -> CGFloat {
     return documentView.bounds.maxY - visibleRect.maxY
 }
 
-private struct SpecFailure: Error {
-    let message: String
-}
-
-private func expect(
-    _ condition: @autoclosure () -> Bool,
-    _ message: String = "expectation failed"
-) throws {
-    guard condition() else { throw SpecFailure(message: message) }
-}
-
-@MainActor
-private func run(
-    _ name: String,
-    failures: inout [String],
-    executed: inout Int,
-    body: () throws -> Void
-) {
-    executed += 1
-    do {
-        try body()
-    } catch let failure as SpecFailure {
-        failures.append("\(name): \(failure.message)")
-    } catch {
-        failures.append("\(name): \(error)")
-    }
-}
