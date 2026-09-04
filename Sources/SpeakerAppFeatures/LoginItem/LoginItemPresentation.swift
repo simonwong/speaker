@@ -14,6 +14,14 @@ package enum LoginItemRegistrationState: Equatable, Sendable {
 }
 
 package struct LoginItemPresentation: Equatable, Sendable {
+    package static let systemEnabledNotice =
+        "登录项已在系统设置中启用；关闭开关即可停用。"
+    package static let awaitingApprovalNotice =
+        "已请求登录时启动，需要在系统设置的“登录项”中批准。"
+    package static let registrationMissingNotice =
+        "登录时启动已在系统中关闭；打开开关可以重新启用。"
+    package static let unavailableNotice = "当前 Speaker 构建无法注册登录项。"
+
     package let registrationState: LoginItemRegistrationState
     package let isEnabled: Bool
     package let notice: String?
@@ -29,17 +37,17 @@ package struct LoginItemPresentation: Equatable, Sendable {
             isEnabled = true
             notice = desiredEnabled
                 ? nil
-                : "登录项已在系统设置中启用；关闭开关即可停用。"
+                : Self.systemEnabledNotice
             showsSystemSettingsButton = false
         case .requiresApproval:
             registrationState = .awaitingApproval
             isEnabled = true
-            notice = "已请求登录时启动，需要在系统设置的“登录项”中批准。"
+            notice = Self.awaitingApprovalNotice
             showsSystemSettingsButton = true
         case .notRegistered where desiredEnabled:
             registrationState = .registrationMissing
             isEnabled = false
-            notice = "登录时启动已在系统中关闭；打开开关可以重新启用。"
+            notice = Self.registrationMissingNotice
             showsSystemSettingsButton = false
         case .notRegistered:
             registrationState = .disabled
@@ -49,7 +57,7 @@ package struct LoginItemPresentation: Equatable, Sendable {
         case .notFound:
             registrationState = .unavailable
             isEnabled = false
-            notice = "当前 Speaker 构建无法注册登录项。"
+            notice = Self.unavailableNotice
             showsSystemSettingsButton = false
         }
     }

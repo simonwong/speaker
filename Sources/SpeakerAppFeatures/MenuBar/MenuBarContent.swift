@@ -80,9 +80,15 @@ package struct MenuBarContent: View {
             }
         case .refinementMode:
             Menu {
-                Button("默认顺滑") { Task { await refinement.select(.defaultSmooth) } }
-                Button("精简清理") { Task { await refinement.select(.conciseCleanup) } }
-                Button("完整重写") { Task { await refinement.select(.fullRewrite) } }
+                Button(SpeakerCopy.RefinementMode.defaultSmooth) {
+                    Task { await refinement.select(.defaultSmooth) }
+                }
+                Button(SpeakerCopy.RefinementMode.conciseCleanup) {
+                    Task { await refinement.select(.conciseCleanup) }
+                }
+                Button(SpeakerCopy.RefinementMode.fullRewrite) {
+                    Task { await refinement.select(.fullRewrite) }
+                }
                 if let customModeName = refinement.savedCustomModeName {
                     Button(customModeName) {
                         Task { await refinement.selectSavedCustomMode() }

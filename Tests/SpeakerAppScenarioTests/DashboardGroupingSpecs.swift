@@ -61,7 +61,11 @@ enum DashboardGroupingSpecs {
                 .sections(calendar: calendar)
                 .map(\.title)
             try expect(
-                titles == ["今天", "昨天", "7月17日"],
+                titles == [
+                    HistoryPresentation.todaySectionTitle,
+                    HistoryPresentation.yesterdaySectionTitle,
+                    "7月17日",
+                ],
                 "pinned grouping produced \(titles)"
             )
         }
@@ -94,11 +98,17 @@ enum DashboardGroupingSpecs {
 
             try expect(
                 sameDay.sections(calendar: calendar).map(\.title)
-                    == ["今天", "昨天"]
+                    == [
+                        HistoryPresentation.todaySectionTitle,
+                        HistoryPresentation.yesterdaySectionTitle,
+                    ]
             )
             try expect(
                 nextDay.sections(calendar: calendar).map(\.title)
-                    == ["昨天", "7月19日"],
+                    == [
+                        HistoryPresentation.yesterdaySectionTitle,
+                        "7月19日",
+                    ],
                 "the same records did not re-group when the state moved on"
             )
         }

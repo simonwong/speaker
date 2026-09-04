@@ -82,7 +82,7 @@ package final class HistoryModel: ObservableObject {
             )
             return false
         }
-        publishFeedback(.success, "文字已复制")
+        publishFeedback(.success, SpeakerCopy.Clipboard.textCopied)
         return true
     }
 
