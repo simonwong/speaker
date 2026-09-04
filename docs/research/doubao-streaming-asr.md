@@ -43,7 +43,8 @@ The upgrade carries the API Key, Resource ID, request/connect identifiers, and s
 
 - Microphone input is converted in memory to 16 kHz, 16-bit, mono PCM.
 - Audio is placed in a bounded stream and sent in paced chunks; no normal audio file is created.
-- ITN, punctuation, and semantic smoothing are enabled for Default Smoothing.
+- ITN and punctuation are enabled for every Refinement Mode. Doubao semantic smoothing is enabled only for Default Smoothing and disabled when DeepSeek will refine the confirmed Doubao Stage Result.
+- `audio.language` is not sent. `bigmodel_async` does not accept the field, and leaving it empty selects the server's default Chinese-English model; see [豆包流式 ASR 中英混说准确率控制](doubao-mixed-language-accuracy.md).
 - Personal Dictionary Entries accompany the request as direct hotwords at `request.corpus.context`; the exact shape and current capacity are recorded in [Doubao Direct Hotword Contract](doubao-hotwords.md).
 - Sender and receiver run concurrently so explicit provider errors can end recording early.
 - User Cancellation closes the local task and suppresses late frames or results. It does not claim that remote work or billing stopped.

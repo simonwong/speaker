@@ -27,35 +27,38 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     }
 
     public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
-        try await transcribe(audio, hotwords: [])
+        try await transcribe(
+            audio,
+            context: .init(hotwords: [], purpose: .defaultSmoothing)
+        )
     }
 
     public func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
         let pcm = try Self.pcm16LE(from: audio.data)
         return try await transcribe(
             Self.chunkStream(from: pcm),
-            hotwords: hotwords,
+            context: context,
             runtimeOperation: .voiceInput
         )
     }
 
     public func transcribe(
         _ audioChunks: AsyncStream<Data>,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
         try await transcribe(
             audioChunks,
-            hotwords: hotwords,
+            context: context,
             runtimeOperation: .voiceInput
         )
     }
 
     private func transcribe(
         _ audioChunks: AsyncStream<Data>,
-        hotwords: [String],
+        context: SpeechTranscriptionContext,
         runtimeOperation: VoiceProviderRuntimeOperation
     ) async throws -> TranscriptionResult {
         guard let apiKey = try await credentials.apiKey(for: .doubao) else {
@@ -66,7 +69,10 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
                 apiKey: apiKey,
                 resource: resource,
                 requestUserID: requestUserID(),
-                hotwords: hotwords
+                hotwords: context.hotwords,
+                options: .init(
+                    enableSemanticSmoothing: context.purpose == .defaultSmoothing
+                )
             ),
             connector: connector,
             runtimeDiagnostics: runtimeDiagnostics,
@@ -100,7 +106,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         do {
             return try await transcribe(
                 Self.chunkStream(from: Self.silentProbePCM),
-                hotwords: [],
+                context: .init(hotwords: [], purpose: .defaultSmoothing),
                 runtimeOperation: .connectionCheck
             ).providerRequestID
         } catch let failure as DoubaoASRFailure

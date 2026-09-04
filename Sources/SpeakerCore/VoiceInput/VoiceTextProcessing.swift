@@ -106,17 +106,35 @@ public protocol VoiceTextProcessing: Sendable {
     ) async throws -> VoiceTextProcessingResult
 }
 
+public enum SpeechTranscriptionPurpose: Equatable, Sendable {
+    case defaultSmoothing
+    case refinementSource
+}
+
+public struct SpeechTranscriptionContext: Equatable, Sendable {
+    public let hotwords: [String]
+    public let purpose: SpeechTranscriptionPurpose
+
+    public init(
+        hotwords: [String],
+        purpose: SpeechTranscriptionPurpose
+    ) {
+        self.hotwords = hotwords
+        self.purpose = purpose
+    }
+}
+
 public protocol ContextualSpeechTranscribing: SpeechTranscribing {
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult
 }
 
 public protocol StreamingContextualSpeechTranscribing: Sendable {
     func transcribe(
         _ audioChunks: AsyncStream<Data>,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult
 }
 
@@ -192,7 +210,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         do {
             doubaoResult = try await doubao.transcribe(
                 audio,
-                hotwords: snapshot.dictionaryContext.hotwords
+                context: Self.transcriptionContext(for: snapshot)
             )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
@@ -226,7 +244,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         do {
             doubaoResult = try await streamingDoubao.transcribe(
                 audioChunks,
-                hotwords: snapshot.dictionaryContext.hotwords
+                context: Self.transcriptionContext(for: snapshot)
             )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
@@ -240,6 +258,17 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             recordingDuration: nil,
             doubaoDuration: doubaoDuration,
             progress: progress
+        )
+    }
+
+    private static func transcriptionContext(
+        for snapshot: VoiceTextProcessingSnapshot
+    ) -> SpeechTranscriptionContext {
+        SpeechTranscriptionContext(
+            hotwords: snapshot.dictionaryContext.hotwords,
+            purpose: snapshot.refinementMode.requiresDeepSeek
+                ? .refinementSource
+                : .defaultSmoothing
         )
     }
 
