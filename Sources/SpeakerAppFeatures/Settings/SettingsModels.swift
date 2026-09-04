@@ -158,8 +158,8 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
 package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
     @Published package var apiKeyDraft = ""
-    @Published var customName = "我的模式"
-    @Published var customPrompt = ""
+    @Published package var customName = "我的模式"
+    @Published package var customPrompt = ""
     @Published package var promptDraft = ""
     @Published package private(set) var promptOverrides = RefinementPromptOverrides()
     @Published package private(set) var inspectedPromptMode: BuiltInRefinementMode?
@@ -171,17 +171,17 @@ package final class RefinementSettingsModel: ObservableObject {
     @Published private(set) var credentialNotice: String?
     @Published private(set) var notice: String?
 
-    private let service: CredentialedDeepSeekTextRefiner
+    private let service: any DeepSeekSettingsServicing
     private let configuration: VoiceInputConfigurationController
-    private let settingsStore: VersionedLocalAppSettingsStore
+    private let settingsStore: any AppSettingsStoring
     private var connectionGeneration = 0
     private var connectionTask: Task<Void, Never>?
     private var deferredMode: TextRefinementMode?
 
     package init(
-        service: CredentialedDeepSeekTextRefiner,
+        service: any DeepSeekSettingsServicing,
         configuration: VoiceInputConfigurationController,
-        settingsStore: VersionedLocalAppSettingsStore
+        settingsStore: any AppSettingsStoring
     ) {
         self.service = service
         self.configuration = configuration
@@ -200,6 +200,21 @@ package final class RefinementSettingsModel: ObservableObject {
             for: inspectedPromptMode,
             promptOverride: promptOverrides[inspectedPromptMode]
         )
+    }
+
+    /// The single save-enabled condition for Custom Mode; the card renders it
+    /// rather than recomputing the rule.
+    package var canSaveCustomMode: Bool {
+        hasStoredKey
+            && !customName
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            && customName.count <= TextRefinementMode.maximumCustomNameLength
+            && !customPrompt
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            && customPrompt.count
+                <= TextRefinementMode.maximumCustomPromptLength
     }
 
     package var savedCustomModeName: String? {
@@ -450,7 +465,7 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func saveCustomMode() async {
+    package func saveCustomMode() async {
         guard hasStoredKey else {
             notice = "请先保存 DeepSeek API Key，再保存并启用自定义规则。"
             return
@@ -541,12 +556,12 @@ package final class DictionarySettingsModel: ObservableObject {
     @Published package var draftWord = ""
     @Published private(set) var notice: String?
 
-    private let store: VersionedJSONPersonalDictionaryStore
+    private let store: any PersonalDictionaryStoring
     private let configuration: VoiceInputConfigurationController
     private var allowsPersistence = false
 
     package init(
-        store: VersionedJSONPersonalDictionaryStore,
+        store: any PersonalDictionaryStoring,
         configuration: VoiceInputConfigurationController
     ) {
         self.store = store

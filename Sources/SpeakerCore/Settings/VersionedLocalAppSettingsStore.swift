@@ -353,7 +353,35 @@ extension AppSettingsStoreError: LocalizedError {
     }
 }
 
-public actor VersionedLocalAppSettingsStore {
+/// The settings-writing seam the Settings feature models depend on. It carries
+/// only the operations those models call, so a specification can substitute a
+/// fake store without a file on disk.
+public protocol AppSettingsStoring: Sendable {
+    func load() async -> AppSettingsLoadResult
+
+    @discardableResult
+    func updateRefinement(
+        _ refinement: RefinementPreference
+    ) async throws -> SpeakerAppSettings
+
+    @discardableResult
+    func updateSavedCustomRefinement(
+        _ refinement: RefinementPreference
+    ) async throws -> SpeakerAppSettings
+
+    @discardableResult
+    func updateRefinementPromptOverride(
+        _ promptOverride: String?,
+        for mode: TextRefinementMode
+    ) async throws -> SpeakerAppSettings
+
+    @discardableResult
+    func updateHistoryRetention(
+        _ policy: HistoryRetentionPolicy
+    ) async throws -> SpeakerAppSettings
+}
+
+public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     public static let currentSchemaVersion = 1
     private static let maximumDocumentByteCount = 1 * 1_024 * 1_024
 

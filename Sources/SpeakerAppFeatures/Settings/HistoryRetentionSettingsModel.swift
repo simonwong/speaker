@@ -11,11 +11,11 @@ package final class HistoryRetentionSettingsModel: ObservableObject {
     @Published package private(set) var notice: String?
 
     private let store: any LocalSessionHistoryStoring
-    private let settingsStore: VersionedLocalAppSettingsStore
+    private let settingsStore: any AppSettingsStoring
 
     package init(
         store: any LocalSessionHistoryStoring,
-        settingsStore: VersionedLocalAppSettingsStore
+        settingsStore: any AppSettingsStoring
     ) {
         self.store = store
         self.settingsStore = settingsStore
