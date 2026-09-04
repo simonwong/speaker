@@ -2,19 +2,20 @@ import AppKit
 import SpeakerCore
 import SwiftUI
 
+/// A thin wrapper over the shared card surface. A card may be headless when
+/// its settings group title already names it.
 private struct SettingsCard<Content: View>: View {
-    let title: String
+    let title: String?
     let subtitle: String?
-    let icon: String
-    let tint: Color
+    let icon: String?
+    let tint: Color?
     let content: Content
-    @Environment(\.colorSchemeContrast) private var contrast
 
     init(
         _ title: String,
         subtitle: String? = nil,
         icon: String,
-        tint: Color = .accentColor,
+        tint: Color? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -24,39 +25,42 @@ private struct SettingsCard<Content: View>: View {
         self.content = content()
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 11) {
-                Image(systemName: icon)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 30, height: 30)
-                    .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+    init(@ViewBuilder content: () -> Content) {
+        title = nil
+        subtitle = nil
+        icon = nil
+        tint = nil
+        self.content = content()
+    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.headline)
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+    var body: some View {
+        VStack(
+            alignment: .leading,
+            spacing: SpeakerSurfaceMetrics.cardHeaderSpacing
+        ) {
+            if let title, let icon {
+                SpeakerCardHeader(
+                    title: title,
+                    subtitle: subtitle,
+                    icon: icon,
+                    tint: tint
+                )
             }
 
-            content
+            VStack(
+                alignment: .leading,
+                spacing: SpeakerSurfaceMetrics.rowSpacing
+            ) {
+                content
+            }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(
-                    Color.primary.opacity(contrast == .increased ? 0.32 : 0.07),
-                    lineWidth: contrast == .increased ? 1.5 : 1
-                )
-        }
-        .shadow(color: .black.opacity(0.025), radius: 8, y: 2)
+        .speakerCard(tint: tint)
+    }
+}
+
+private struct SettingsRowDivider: View {
+    var body: some View {
+        Divider().opacity(0.6)
     }
 }
 
@@ -78,13 +82,14 @@ package struct StatusBadge: View {
                 .foregroundStyle(contrast == .increased ? Color.primary : color)
         } icon: {
             Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(color)
         }
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .font(SpeakerTypography.footnote.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
             .background(
-                color.opacity(contrast == .increased ? 0.2 : 0.11),
+                color.opacity(contrast == .increased ? 0.2 : 0.12),
                 in: Capsule()
             )
             .overlay {
@@ -106,25 +111,38 @@ package struct SettingsNotice: View {
         self.color = color
     }
 
+    /// A neutral notice must not read as a coloured status, so `.secondary`
+    /// drops to the plain grey surface.
+    private var isNeutral: Bool { color == .secondary }
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            style: .continuous
+        )
+    }
+
     package var body: some View {
         Label {
             Text(text)
                 .foregroundStyle(contrast == .increased ? Color.primary : color)
         } icon: {
             Image(systemName: "info.circle.fill")
-                .foregroundStyle(color)
+                .foregroundStyle(isNeutral ? Color.secondary : color)
         }
-            .font(.caption)
+            .font(SpeakerTypography.caption)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
-                color.opacity(contrast == .increased ? 0.16 : 0.07),
-                in: RoundedRectangle(cornerRadius: 8)
+                isNeutral && contrast != .increased
+                    ? Color.primary.opacity(0.04)
+                    : color.opacity(contrast == .increased ? 0.16 : 0.07),
+                in: shape
             )
             .overlay {
                 if contrast == .increased {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(color.opacity(0.7), lineWidth: 1)
+                    shape.stroke(color.opacity(0.7), lineWidth: 1)
                 }
             }
             .textSelection(.enabled)
@@ -296,12 +314,10 @@ private struct SettingsOverviewView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(group.title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(
-                    group == .localData ? Color.red : Color.secondary
-                )
-                .padding(.leading, 6)
+            SpeakerSectionHeader(
+                group.title,
+                tint: group == .localData ? .red : .secondary
+            )
             content()
         }
     }
@@ -323,20 +339,12 @@ private struct SettingsOverviewView: View {
                 requestPermission: workspace.requestPermission
             )
         case .apiKeys:
-            VStack(spacing: 16) {
+            VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
                 DoubaoSettingsCard(model: workspace.doubao)
                 DeepSeekSettingsCard(model: workspace.refinement)
             }
-            Text("音频只发给豆包；文字仅在启用对应整理模式时发给 DeepSeek。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 6)
         case .refinement:
             RefinementSettingsPage(model: workspace.refinement)
-            Text("提示词仅在选择需要 DeepSeek 的整理模式时生效；默认顺滑没有提示词。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 6)
         case .general:
             GeneralSettingsPage(
                 loginItemSettings: workspace.loginItemSettings,
@@ -355,30 +363,36 @@ private struct ShortcutSettingsPage: View {
     let openPermissionSettings: () -> Void
 
     var body: some View {
-        VStack(spacing: 16) {
-            SettingsCard(
-                "语音输入快捷键",
-                subtitle: "长按时松开结束；短按时再次按下结束",
-                icon: "keyboard"
-            ) {
-                HStack(spacing: 16) {
+        VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
+            SettingsCard {
+                HStack(spacing: 14) {
                     Text(shortcut.preference.displayName)
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
-                        .padding(.horizontal, 16)
-                        .frame(minWidth: 78, minHeight: 44)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .frame(minWidth: 72, minHeight: 40)
+                        .background(
+                            Color.primary.opacity(0.06),
+                            in: RoundedRectangle(
+                                cornerRadius: SpeakerSurfaceMetrics
+                                    .controlCornerRadius,
+                                style: .continuous
+                            )
+                        )
                         .overlay {
-                            RoundedRectangle(cornerRadius: 9)
-                                .stroke(.separator.opacity(0.55), lineWidth: 1)
+                            RoundedRectangle(
+                                cornerRadius: SpeakerSurfaceMetrics
+                                    .controlCornerRadius,
+                                style: .continuous
+                            )
+                            .stroke(Color.primary.opacity(0.10), lineWidth: 1)
                         }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("快捷键状态")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(shortcutStatusText)
-                            .font(.subheadline.weight(.medium))
-                    }
+                    StatusBadge(
+                        text: shortcutStatusText,
+                        icon: shortcutStatusIcon,
+                        color: shortcutStatusColor
+                    )
 
                     Spacer()
 
@@ -406,11 +420,18 @@ private struct ShortcutSettingsPage: View {
                             .fill(.red)
                             .frame(width: 8, height: 8)
                         Text(notice)
-                            .font(.caption)
+                            .font(SpeakerTypography.caption)
                         Spacer()
                     }
                     .padding(10)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                    .background(
+                        Color.primary.opacity(0.04),
+                        in: RoundedRectangle(
+                            cornerRadius: SpeakerSurfaceMetrics
+                                .controlCornerRadius,
+                            style: .continuous
+                        )
+                    )
                 }
 
                 if let notice = shortcut.notice {
@@ -433,7 +454,7 @@ private struct ShortcutSettingsPage: View {
                     }
                 }
 
-                Divider()
+                SettingsRowDivider()
 
                 HStack(spacing: 12) {
                     GestureHint(
@@ -470,6 +491,22 @@ private struct ShortcutSettingsPage: View {
         }
     }
 
+    private var shortcutStatusIcon: String {
+        switch shortcut.activation {
+        case .active: "checkmark"
+        case .waitingForAccessibility, .unavailable: "exclamationmark"
+        case .stopped: "pause.fill"
+        }
+    }
+
+    private var shortcutStatusColor: Color {
+        switch shortcut.activation {
+        case .active: .green
+        case .waitingForAccessibility, .unavailable: .orange
+        case .stopped: .red
+        }
+    }
+
     private func noticeColor(_ level: VoiceShortcutNotice.Level) -> Color {
         switch level {
         case .information: .secondary
@@ -485,13 +522,11 @@ private struct GeneralSettingsPage: View {
     let softwareUpdate: SoftwareUpdateFeature
 
     var body: some View {
-        SettingsCard(
-            "通用",
-            subtitle: "启动、历史保存与软件更新",
-            icon: "switch.2"
-        ) {
+        SettingsCard {
             LaunchAtLoginSettingsRow(model: loginItemSettings)
+            SettingsRowDivider()
             HistoryRetentionSettingsRow(model: historyRetention)
+            SettingsRowDivider()
             AutomaticUpdateSettingsRow(model: softwareUpdate)
         }
     }
@@ -501,16 +536,19 @@ private struct LaunchAtLoginSettingsRow: View {
     @ObservedObject var model: LoginItemSettingsModel
 
     var body: some View {
-        Toggle(
-            "登录 Mac 时自动启动 Speaker",
-            isOn: Binding(
-                get: { model.isEnabled },
-                set: { enabled in
-                    Task { await model.setEnabled(enabled) }
-                }
+        SpeakerRow("登录时自动启动") {
+            Toggle(
+                "登录时自动启动",
+                isOn: Binding(
+                    get: { model.isEnabled },
+                    set: { enabled in
+                        Task { await model.setEnabled(enabled) }
+                    }
+                )
             )
-        )
-        .toggleStyle(.switch)
+            .toggleStyle(.switch)
+            .labelsHidden()
+        }
 
         if let notice = model.notice {
             SettingsNotice(text: notice, color: .orange)
@@ -521,8 +559,6 @@ private struct LaunchAtLoginSettingsRow: View {
             }
             .controlSize(.small)
         }
-
-        Divider()
     }
 }
 
@@ -531,9 +567,7 @@ private struct HistoryRetentionSettingsRow: View {
     @ObservedObject var model: HistoryRetentionSettingsModel
 
     var body: some View {
-        HStack {
-            Text("保存历史")
-            Spacer()
+        SpeakerRow("保存历史", detail: "历史只保存在本机") {
             Picker(
                 "保存历史",
                 selection: Binding(
@@ -563,17 +597,18 @@ private struct AutomaticUpdateSettingsRow: View {
     @ObservedObject var model: SoftwareUpdateFeature
 
     var body: some View {
-        Divider()
-
-        Toggle(
-            "自动检查更新",
-            isOn: Binding(
-                get: { model.state.automaticallyChecksForUpdates },
-                set: { model.setAutomaticallyChecksForUpdates($0) }
+        SpeakerRow("自动检查更新") {
+            Toggle(
+                "自动检查更新",
+                isOn: Binding(
+                    get: { model.state.automaticallyChecksForUpdates },
+                    set: { model.setAutomaticallyChecksForUpdates($0) }
+                )
             )
-        )
-        .toggleStyle(.switch)
-        .disabled(!model.state.isAvailable)
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .disabled(!model.state.isAvailable)
+        }
 
         if let message = model.state.unavailableMessage {
             SettingsNotice(text: message, color: .secondary)
@@ -734,30 +769,25 @@ private struct GitHubMark: Shape {
 
 package struct AboutView: View {
     let workspace: SettingsWorkspace
-    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(workspace: SettingsWorkspace) {
         self.workspace = workspace
     }
 
     package var body: some View {
-        ScrollView {
+        SpeakerPage {
             AboutSettingsPage(
                 softwareUpdate: workspace.softwareUpdate,
                 routeEffects: workspace.routeEffects
             )
-            .frame(maxWidth: 680)
-            .frame(maxWidth: .infinity)
-            .padding(
-                .horizontal,
-                mainWindowLayout.pageHorizontalPadding
-            )
-            .padding(.vertical, 28)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .task { await workspace.refresh() }
     }
 }
+
+private let speakerRepositoryURL = URL(
+    string: "https://github.com/simonwong/speaker"
+)!
 
 private struct AboutSettingsPage: View {
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
@@ -768,75 +798,115 @@ private struct AboutSettingsPage: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            SettingsCard(
-                AboutSection.privacyBoundary.title,
-                subtitle: "你应该清楚每一类数据会去哪里",
-                icon: AboutSection.privacyBoundary.icon
-            ) {
-                PrivacyBoundaryRow(
-                    icon: "waveform",
-                    title: "音频",
-                    detail: "录音只在内存中转换并发送到豆包，不保存到磁盘或历史。"
-                )
-                Divider()
-                PrivacyBoundaryRow(
-                    icon: "text.alignleft",
-                    title: "识别文字",
-                    detail: "豆包返回的识别文字保留在本机；仅当你启用需要 DeepSeek 的整理模式时，文字才会发送给 DeepSeek。"
-                )
-                Divider()
-                PrivacyBoundaryRow(
-                    icon: "clock.arrow.circlepath",
-                    title: "历史、设置与词库",
-                    detail: "只保存在这台 Mac 的当前用户目录；会话历史不包含音频或 API Key。"
-                )
-                Divider()
+        VStack(alignment: .leading, spacing: 0) {
+            identity
 
-                HStack {
-                    if let privacyPolicyURL = Self.privacyPolicyURL {
-                        Button("查看完整隐私说明") {
-                            routeEffects.openURL(privacyPolicyURL)
-                        }
-                    }
-                    Button("打开本地数据文件夹") {
-                        routeEffects.openURL(speakerApplicationSupportDirectory)
-                    }
-                    Spacer()
-                }
+            privacyBoundaryCard
+                .padding(.top, 24)
+
+            versionCard
+                .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
+        }
+    }
+
+    /// The identity block names the product; the version card owns updates and
+    /// the repository so neither fact appears twice on this page.
+    private var identity: some View {
+        HStack(spacing: 16) {
+            SpeakerIdentityTile(size: 64)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Speaker")
+                    .font(SpeakerTypography.pageTitle)
+                Text("按住快捷键说话，文字送达松开时所在的输入框。")
+                    .font(SpeakerTypography.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            SettingsCard(
-                AboutSection.version.title,
-                subtitle: versionText,
-                icon: AboutSection.version.icon
-            ) {
-                HStack {
-                    SpeakerIdentityTile(size: 30)
-                    Text("Speaker")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
+            Spacer(minLength: 12)
+        }
+    }
+
+    private var privacyBoundaryCard: some View {
+        SettingsCard(
+            AboutSection.privacyBoundary.title,
+            subtitle: "每一类数据去了哪里",
+            icon: AboutSection.privacyBoundary.icon
+        ) {
+            SpeakerRow(
+                "音频",
+                detail: "只在内存中转换并发送给豆包，不写入磁盘或历史。",
+                icon: "waveform"
+            )
+            SettingsRowDivider()
+            SpeakerRow(
+                "识别文字",
+                detail: "保留在本机；只有启用需要 DeepSeek 的整理模式时才会发送给 DeepSeek。",
+                icon: "text.alignleft"
+            )
+            SettingsRowDivider()
+            SpeakerRow(
+                "历史、设置与词库",
+                detail: "只保存在这台 Mac 的当前用户目录，不包含音频或 API Key。",
+                icon: "clock.arrow.circlepath"
+            )
+            SettingsRowDivider()
+
+            HStack {
+                if let privacyPolicyURL = Self.privacyPolicyURL {
+                    Button("查看完整隐私说明") {
+                        routeEffects.openURL(privacyPolicyURL)
+                    }
+                }
+                Button("打开本地数据文件夹") {
+                    routeEffects.openURL(speakerApplicationSupportDirectory)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private var versionCard: some View {
+        SettingsCard(
+            AboutSection.version.title,
+            subtitle: "更新与源码",
+            icon: AboutSection.version.icon
+        ) {
+            SpeakerRow("当前版本") {
+                HStack(spacing: 10) {
+                    Text(versionText)
+                        .font(SpeakerTypography.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+
                     Button("检查更新…") {
                         softwareUpdate.checkForUpdates()
                     }
                     .disabled(!softwareUpdate.state.canCheckForUpdates)
-                    Link(
-                        destination: URL(
-                            string: "https://github.com/simonwong/speaker"
-                        )!
-                    ) {
+                }
+            }
+
+            if let message = softwareUpdate.state.unavailableMessage {
+                SettingsNotice(text: message, color: .secondary)
+            }
+
+            SettingsRowDivider()
+
+            SpeakerRow("源码", detail: "github.com/simonwong/speaker") {
+                Link(destination: speakerRepositoryURL) {
+                    Label {
+                        Text("在 GitHub 查看")
+                            .font(SpeakerTypography.caption)
+                    } icon: {
                         GitHubMark()
                             .fill(Color.primary)
-                            .frame(width: 20, height: 20)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
+                            .frame(width: 14, height: 14)
                     }
-                    .accessibilityLabel("在 GitHub 查看 Speaker")
-                    .help("在 GitHub 查看 Speaker")
                 }
-                if let message = softwareUpdate.state.unavailableMessage {
-                    SettingsNotice(text: message, color: .secondary)
-                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("在 GitHub 查看 Speaker")
+                .help("在 GitHub 查看 Speaker")
             }
         }
     }
@@ -856,15 +926,15 @@ private struct LocalDataSettingsCard: View {
 
     var body: some View {
         SettingsCard(
-            SettingsGroup.localData.title,
-            subtitle: "完全清除这台 Mac 上由 Speaker 保存的数据",
+            "清除本地数据",
+            subtitle: "移除这台 Mac 上由 Speaker 保存的全部数据",
             icon: "externaldrive.badge.xmark",
             tint: .red
         ) {
             Text(
-                "清除 API Key、会话历史、个人词库、设置、缓存和登录项，然后退出 Speaker。系统中的麦克风与辅助功能授权不会被自动撤销。"
+                "包括 API Key、会话历史、个人词库、设置、缓存和登录项；完成后 Speaker 退出。系统的麦克风与辅助功能授权不会被撤销。"
             )
-            .font(.callout)
+            .font(SpeakerTypography.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
@@ -904,27 +974,6 @@ private struct LocalDataSettingsCard: View {
     }
 }
 
-private struct PrivacyBoundaryRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
 private struct GestureHint: View {
     let icon: String
     let title: String
@@ -933,14 +982,18 @@ private struct GestureHint: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: icon)
-                .foregroundStyle(.tint)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
                 .frame(width: 24, height: 24)
-                .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
+                .background(
+                    Color.primary.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(SpeakerTypography.caption.weight(.semibold))
                 Text(detail)
-                    .font(.caption2)
+                    .font(SpeakerTypography.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -962,29 +1015,25 @@ private struct PermissionSettingsPage: View {
     }
 
     var body: some View {
-        SettingsCard(
-            "系统权限",
-            subtitle: "只请求完成语音输入所必需的权限",
-            icon: "checkmark.shield"
-        ) {
+        SettingsCard {
             if let notice = signingMode.permissionIdentityNotice {
                 SettingsNotice(text: notice, color: .orange)
-                Divider()
+                SettingsRowDivider()
             }
 
             PermissionSettingsRow(
                 title: "麦克风",
-                explanation: "音频只在内存中流式处理，不会写入磁盘或历史。",
+                explanation: "音频只在内存中流式处理，不写入磁盘或历史。",
                 kind: .microphone,
                 state: permissions.snapshot.microphone,
                 requestPermission: requestPermission
             )
 
-            Divider()
+            SettingsRowDivider()
 
             PermissionSettingsRow(
                 title: "辅助功能",
-                explanation: "监听全局快捷键，并把文本安全送达到结束录音时的输入框。",
+                explanation: "监听全局快捷键，并把文字送达结束录音时的输入框。",
                 kind: .accessibility,
                 state: permissions.snapshot.accessibility,
                 requestPermission: requestPermission
@@ -1001,33 +1050,23 @@ private struct PermissionSettingsRow: View {
     let requestPermission: (PermissionKind) async -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(color)
-                .frame(width: 34, height: 34)
-                .background(color.opacity(0.1), in: Circle())
+        SpeakerRow(
+            title,
+            detail: explanation,
+            icon: icon,
+            iconTint: color
+        ) {
+            HStack(spacing: 10) {
+                StatusBadge(
+                    text: statusTitle,
+                    icon: statusIcon,
+                    color: color
+                )
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                Text(explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 16)
-
-            StatusBadge(
-                text: statusTitle,
-                icon: statusIcon,
-                color: color
-            )
-
-            if state != .granted, state != .restricted {
-                Button(buttonTitle) {
-                    Task { await requestPermission(kind) }
+                if state != .granted, state != .restricted {
+                    Button(buttonTitle) {
+                        Task { await requestPermission(kind) }
+                    }
                 }
             }
         }
@@ -1092,8 +1131,8 @@ private struct DoubaoSettingsCard: View {
 
     var body: some View {
         SettingsCard(
-            "豆包流式语音",
-            subtitle: "录音过程中实时转录，默认启用语义顺滑",
+            "豆包语音",
+            subtitle: "边说边转录，默认启用语义顺滑",
             icon: "waveform.badge.mic"
         ) {
             HStack {
@@ -1110,10 +1149,10 @@ private struct DoubaoSettingsCard: View {
                         string: "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default"
                     )!
                 )
-                .font(.caption)
+                .font(SpeakerTypography.caption)
             }
 
-            Divider()
+            SettingsRowDivider()
 
             if mode == .enterKey {
                 keyInput(
@@ -1121,10 +1160,7 @@ private struct DoubaoSettingsCard: View {
                     saveTitle: "保存 Key"
                 )
             } else {
-                HStack {
-                    Text("流式资源")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
+                SpeakerRow("流式资源", detail: "须与控制台已开通的套餐一致") {
                     Picker(
                         "流式资源",
                         selection: Binding(
@@ -1138,7 +1174,7 @@ private struct DoubaoSettingsCard: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 300, alignment: .trailing)
+                    .frame(maxWidth: 260, alignment: .trailing)
                 }
 
                 HStack(spacing: 10) {
@@ -1157,10 +1193,6 @@ private struct DoubaoSettingsCard: View {
                     }
                     .disabled(isChecking)
 
-                    Text("资源类型必须与控制台中已开通的套餐一致。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
                     Spacer()
 
                     Button("删除 Key", role: .destructive) {
@@ -1170,7 +1202,7 @@ private struct DoubaoSettingsCard: View {
 
                 if mode == .replacingKey {
                     keyInput(
-                        placeholder: "输入新 Key 以替换当前凭据",
+                        placeholder: "输入新 Key 替换当前凭据",
                         saveTitle: "保存"
                     )
                 }
@@ -1266,8 +1298,8 @@ private struct DeepSeekSettingsCard: View {
 
     var body: some View {
         SettingsCard(
-            "DeepSeek（可选）",
-            subtitle: "仅发送豆包转录文本和整理规则，不发送音频",
+            "DeepSeek · 可选",
+            subtitle: "只接收豆包转录文本与整理提示词，不接收音频",
             icon: "sparkles"
         ) {
             HStack {
@@ -1283,10 +1315,10 @@ private struct DeepSeekSettingsCard: View {
                         string: "https://platform.deepseek.com/api_keys"
                     )!
                 )
-                .font(.caption)
+                .font(SpeakerTypography.caption)
             }
 
-            Divider()
+            SettingsRowDivider()
 
             if mode == .enterKey {
                 keyInput(
@@ -1325,7 +1357,7 @@ private struct DeepSeekSettingsCard: View {
 
                 if mode == .replacingKey {
                     keyInput(
-                        placeholder: "输入新 Key 以替换当前凭据",
+                        placeholder: "输入新 Key 替换当前凭据",
                         saveTitle: "保存"
                     )
                 }
@@ -1405,10 +1437,10 @@ private struct RefinementSettingsPage: View {
     @ObservedObject var model: RefinementSettingsModel
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
             SettingsCard(
                 "整理模式",
-                subtitle: "默认顺滑不调用 DeepSeek；其他模式需要先验证 Key",
+                subtitle: "默认顺滑只用豆包；其他模式需要先验证 DeepSeek Key",
                 icon: "text.alignleft"
             ) {
                 LazyVGrid(
@@ -1444,13 +1476,13 @@ private struct RefinementSettingsPage: View {
                 ) {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $model.promptDraft)
-                            .font(.body)
+                            .font(SpeakerTypography.body)
                             .scrollContentBackground(.hidden)
                             .padding(8)
 
                         if model.promptDraft.isEmpty {
                             Text("输入该模式的整理提示词……")
-                                .font(.body)
+                                .font(SpeakerTypography.body)
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, 13)
                                 .padding(.vertical, 16)
@@ -1458,17 +1490,28 @@ private struct RefinementSettingsPage: View {
                         }
                     }
                     .frame(minHeight: 110)
-                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+                    .background(
+                        Color.primary.opacity(0.04),
+                        in: RoundedRectangle(
+                            cornerRadius: SpeakerSurfaceMetrics
+                                .controlCornerRadius,
+                            style: .continuous
+                        )
+                    )
                     .overlay {
-                        RoundedRectangle(cornerRadius: 9)
-                            .stroke(.separator.opacity(0.7), lineWidth: 1)
+                        RoundedRectangle(
+                            cornerRadius: SpeakerSurfaceMetrics
+                                .controlCornerRadius,
+                            style: .continuous
+                        )
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
                     }
 
                     HStack {
                         Text(
                             "\(model.promptDraft.count) / \(TextRefinementMode.maximumCustomPromptLength)"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(SpeakerTypography.footnote.monospacedDigit())
                         .foregroundStyle(
                             model.promptDraft.count
                                 > TextRefinementMode.maximumCustomPromptLength
@@ -1476,7 +1519,7 @@ private struct RefinementSettingsPage: View {
                                 : .secondary
                         )
                         Text(promptEditor.isOverridden ? "当前为自定义提示词" : "当前为内置提示词")
-                            .font(.caption)
+                            .font(SpeakerTypography.footnote)
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("恢复默认") {
@@ -1496,18 +1539,18 @@ private struct RefinementSettingsPage: View {
 
             if model.isEditingCustomMode || model.choice == .custom {
                 SettingsCard(
-                    "自定义整理规则",
-                    subtitle: "清楚描述希望保留、删除和重组的内容",
+                    "自定义模式",
+                    subtitle: "说清楚希望保留、删除和重组的内容",
                     icon: "slider.horizontal.3"
                 ) {
-                    TextField("规则名称", text: $model.customName)
+                    TextField("模式名称", text: $model.customName)
 
                     HStack {
                         Spacer()
                         Text(
                             "\(model.customName.count) / \(TextRefinementMode.maximumCustomNameLength)"
                         )
-                        .font(.caption.monospacedDigit())
+                        .font(SpeakerTypography.footnote.monospacedDigit())
                         .foregroundStyle(
                             model.customName.count > TextRefinementMode.maximumCustomNameLength
                                 ? Color.red
@@ -1517,13 +1560,13 @@ private struct RefinementSettingsPage: View {
 
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $model.customPrompt)
-                            .font(.body)
+                            .font(SpeakerTypography.body)
                             .scrollContentBackground(.hidden)
                             .padding(8)
 
                         if model.customPrompt.isEmpty {
                             Text("例如：整理成简洁的工作邮件，保留所有数字和专有名词……")
-                                .font(.body)
+                                .font(SpeakerTypography.body)
                                 .foregroundStyle(.tertiary)
                                 .padding(.horizontal, 13)
                                 .padding(.vertical, 16)
@@ -1531,15 +1574,26 @@ private struct RefinementSettingsPage: View {
                         }
                     }
                     .frame(minHeight: 130)
-                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 9))
+                    .background(
+                        Color.primary.opacity(0.04),
+                        in: RoundedRectangle(
+                            cornerRadius: SpeakerSurfaceMetrics
+                                .controlCornerRadius,
+                            style: .continuous
+                        )
+                    )
                     .overlay {
-                        RoundedRectangle(cornerRadius: 9)
-                            .stroke(.separator.opacity(0.7), lineWidth: 1)
+                        RoundedRectangle(
+                            cornerRadius: SpeakerSurfaceMetrics
+                                .controlCornerRadius,
+                            style: .continuous
+                        )
+                        .stroke(Color.primary.opacity(0.10), lineWidth: 1)
                     }
 
                     HStack {
                         Text("\(model.customPrompt.count) / 4000")
-                            .font(.caption.monospacedDigit())
+                            .font(SpeakerTypography.footnote.monospacedDigit())
                             .foregroundStyle(
                                 model.customPrompt.count > 4_000 ? Color.red : .secondary
                             )
@@ -1588,24 +1642,24 @@ private struct RefinementModeButton: View {
                         )
                 }
                 Text(choice.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(SpeakerTypography.bodyEmphasis)
                     .foregroundStyle(.primary)
                 Text(choice.subtitle)
-                    .font(.caption2)
+                    .font(SpeakerTypography.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
             }
             .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
             .background(
                 selected || inspected
-                    ? Color.accentColor.opacity(0.09)
-                    : Color.primary.opacity(0.025),
-                in: RoundedRectangle(cornerRadius: 10)
+                    ? Color.accentColor.opacity(0.10)
+                    : Color.primary.opacity(0.03),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(
                         selected || inspected
                             ? Color.accentColor.opacity(0.8)
@@ -1624,14 +1678,15 @@ private struct DictionarySettingsPage: View {
     var body: some View {
         SettingsCard(
             "个人词库",
-            subtitle: "添加人名、术语和产品名，提高豆包识别准确率",
+            subtitle: "人名、术语、产品名，让豆包更准确地认出它们",
             icon: "text.book.closed"
         ) {
             HStack(spacing: 8) {
                 TextField(
-                    "添加词条：人名、术语、产品名…回车添加",
+                    "输入词条，回车添加",
                     text: $model.draftWord
                 )
+                .textFieldStyle(.roundedBorder)
                 .onSubmit { Task { await model.add() } }
 
                 Button("添加") {
@@ -1805,25 +1860,14 @@ private struct DictionaryChipFlowLayout: Layout {
 
 package struct DictionaryTabView: View {
     @ObservedObject var model: DictionarySettingsModel
-    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(model: DictionarySettingsModel) {
         self.model = model
     }
 
     package var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                DictionarySettingsPage(model: model)
-            }
-            .frame(maxWidth: 680)
-            .frame(maxWidth: .infinity)
-            .padding(
-                .horizontal,
-                mainWindowLayout.pageHorizontalPadding
-            )
-            .padding(.vertical, 24)
+        SpeakerPage {
+            DictionarySettingsPage(model: model)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }

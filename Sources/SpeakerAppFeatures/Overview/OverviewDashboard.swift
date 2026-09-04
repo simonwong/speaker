@@ -3,6 +3,11 @@ import Foundation
 import SpeakerCore
 import SwiftUI
 
+private enum OverviewConstants {
+    /// The voiceprint row and its trailing note always describe the same span.
+    static let voiceprintDays = 18
+}
+
 /// The complete overview presentation surface. App composition supplies one
 /// usage snapshot; product copy, visual hierarchy, and motion policy stay here.
 package struct OverviewDashboard: View {
@@ -14,39 +19,23 @@ package struct OverviewDashboard: View {
     }
 
     package var body: some View {
-        GeometryReader { geometry in
-            let horizontalPadding = min(
-                60,
-                max(30, geometry.size.width * 0.06)
-            )
-            let now = Date()
+        let now = Date()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    OverviewHero(
-                        summary: summary,
-                        now: now,
-                        reduceMotion: reduceMotion
-                    )
-                    OverviewMetrics(summary: summary, now: now)
-                        .padding(.top, 38)
-                    Spacer(minLength: 36)
-                    OverviewHeatmap(
-                        summary: summary,
-                        now: now,
-                        reduceMotion: reduceMotion
-                    )
-                }
-                .frame(
-                    minHeight: max(0, geometry.size.height - 56),
-                    alignment: .top
-                )
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, 28)
-            }
+        SpeakerPage {
+            OverviewHero(
+                summary: summary,
+                now: now,
+                reduceMotion: reduceMotion
+            )
+            OverviewMetrics(summary: summary, now: now)
+                .padding(.top, 28)
+            OverviewHeatmapCard(
+                summary: summary,
+                now: now,
+                reduceMotion: reduceMotion
+            )
+            .padding(.top, 32)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
@@ -63,28 +52,26 @@ private struct OverviewHero: View {
         VoiceInputUsagePresentation.recentRecognizedCharacterCounts(
             summary: summary,
             now: now,
-            days: 18
+            days: OverviewConstants.voiceprintDays
         )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("说出的文字 · 累计")
-                .font(.system(size: 12, weight: .medium))
-                .tracking(3)
+            Text("累计说出")
+                .font(SpeakerTypography.sectionHeader)
+                .tracking(1)
                 .foregroundStyle(.secondary)
 
-            HStack(alignment: .lastTextBaseline, spacing: 10) {
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
                 Text(characterCount.formatted(.number.grouping(.automatic)))
-                    .font(.system(size: 76, weight: .semibold, design: .serif))
-                    .monospacedDigit()
+                    .font(SpeakerTypography.heroNumber)
                     .lineLimit(1)
                     .minimumScaleFactor(0.62)
                     .contentTransition(.numericText())
 
                 Text("字")
-                    .font(.system(size: 17, weight: .semibold))
-                    .tracking(1)
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 12)
@@ -93,19 +80,25 @@ private struct OverviewHero: View {
                 value: characterCount
             )
 
-            OverviewVoiceprint(
-                counts: voiceprintCounts,
-                reduceMotion: reduceMotion
-            )
-            .padding(.top, 15)
+            HStack(alignment: .center, spacing: 10) {
+                OverviewVoiceprint(
+                    counts: voiceprintCounts,
+                    reduceMotion: reduceMotion
+                )
+                Text("近 \(OverviewConstants.voiceprintDays) 天")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.top, 14)
 
             if summary.totalSessionCount == 0 {
-                Text("按住 Fn，说出第一句话。")
-                    .font(.system(size: 13))
+                Text("按住快捷键，说出第一句话。")
+                    .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 11)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
@@ -169,15 +162,15 @@ private struct OverviewMetrics: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            OverviewMetric(label: "说话时长", value: speakingValue)
+            OverviewMetric(label: "累计说话", value: speakingValue)
             MetricDivider(
                 horizontalPadding: mainWindowLayout.overviewMetricDividerPadding
             )
-            OverviewMetric(label: "少敲的键盘", value: keyboardSavedValue)
+            OverviewMetric(label: "省下的打字", value: keyboardSavedValue)
             MetricDivider(
                 horizontalPadding: mainWindowLayout.overviewMetricDividerPadding
             )
-            OverviewMetric(label: "本周", value: weeklyValue)
+            OverviewMetric(label: "本周说出", value: weeklyValue)
         }
     }
 
@@ -197,7 +190,9 @@ private struct OverviewMetrics: View {
             recognizedCharacterCount: summary.totalRecognizedCharacterCount
         )
         let formatted = String(format: "%.1f", hours)
-        return unit("约 ") + Text(formatted).font(Self.valueFont) + unit("小时")
+        return unit("约 ")
+            + Text(formatted).font(SpeakerTypography.metricNumber)
+            + unit("小时")
     }
 
     private var weeklyValue: Text {
@@ -207,22 +202,16 @@ private struct OverviewMetrics: View {
         )
         let formatted = count.formatted(.number.grouping(.automatic))
         return Text(count > 0 ? "+\(formatted)" : formatted)
-            .font(Self.valueFont) + unit("字")
+            .font(SpeakerTypography.metricNumber) + unit("字")
     }
 
-    private static let valueFont = Font.system(
-        size: 21,
-        weight: .semibold,
-        design: .serif
-    ).monospacedDigit()
-
     private func number(_ value: Int) -> Text {
-        Text("\(value)").font(Self.valueFont)
+        Text("\(value)").font(SpeakerTypography.metricNumber)
     }
 
     private func unit(_ text: String) -> Text {
         Text(text)
-            .font(.system(size: 12, weight: .semibold))
+            .font(SpeakerTypography.footnote.weight(.semibold))
             .foregroundStyle(.secondary)
     }
 }
@@ -232,13 +221,12 @@ private struct OverviewMetric: View {
     let value: Text
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
             value
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
             Text(label)
-                .font(.system(size: 11.5))
-                .tracking(0.5)
+                .font(SpeakerTypography.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -252,13 +240,13 @@ private struct MetricDivider: View {
     var body: some View {
         Rectangle()
             .fill(Color.primary.opacity(0.12))
-            .frame(width: 0.5, height: 43)
+            .frame(width: 0.5, height: 32)
             .padding(.horizontal, horizontalPadding)
             .accessibilityHidden(true)
     }
 }
 
-private struct OverviewHeatmap: View {
+private struct OverviewHeatmapCard: View {
     let summary: VoiceInputUsageSummary
     let now: Date
     let reduceMotion: Bool
@@ -268,16 +256,25 @@ private struct OverviewHeatmap: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             let heatmap = heatmap
+
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("每日说出 · 近 \(ContributionHeatmap.defaultWeekCount) 周")
+                    .font(SpeakerTypography.sectionHeader)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                HeatmapLegend()
+            }
+
             ContributionHeatmapGrid(
                 heatmap: heatmap,
                 reduceMotion: reduceMotion
             )
             .id(heatmap.hasData)
-            HeatmapLegend()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .speakerCard()
     }
 }
 
@@ -285,6 +282,7 @@ private enum HeatmapMetrics {
     static let gap = ContributionHeatmapLayout.gap
     static let corner: CGFloat = 3
     static let monthAxisHeight: CGFloat = 12
+    static let legendSwatch: CGFloat = 10
 }
 
 private struct ContributionHeatmapGrid: View {
@@ -322,7 +320,7 @@ private struct ContributionHeatmapGrid: View {
             ZStack(alignment: .topLeading) {
                 ForEach(heatmap.monthLabels, id: \.column) { label in
                     Text(label.text)
-                        .font(.system(size: 9.5))
+                        .font(SpeakerTypography.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize()
                         .offset(x: layout.leadingOffset(forColumn: label.column))
@@ -355,10 +353,16 @@ private struct HeatmapCellView: View {
     let column: Int
     let isPresented: Bool
     let reduceMotion: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         RoundedRectangle(cornerRadius: HeatmapMetrics.corner, style: .continuous)
-            .fill(HeatmapPalette.color(forLevel: cell.level))
+            .fill(
+                HeatmapPalette.color(
+                    forLevel: cell.level,
+                    colorScheme: colorScheme
+                )
+            )
             .aspectRatio(1, contentMode: .fit)
             .scaleEffect(reduceMotion || isPresented ? 1 : 0.55)
             .opacity(
@@ -385,34 +389,47 @@ private struct HeatmapCellView: View {
 }
 
 private struct HeatmapLegend: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack(spacing: 4) {
-            Spacer(minLength: 0)
             Text("少")
-                .font(.system(size: 10.5))
+                .font(SpeakerTypography.footnote)
                 .foregroundStyle(.secondary)
             ForEach(0 ... 4, id: \.self) { level in
                 RoundedRectangle(
                     cornerRadius: HeatmapMetrics.corner,
                     style: .continuous
                 )
-                .fill(HeatmapPalette.color(forLevel: level))
-                .frame(width: 11, height: 11)
+                .fill(
+                    HeatmapPalette.color(
+                        forLevel: level,
+                        colorScheme: colorScheme
+                    )
+                )
+                .frame(
+                    width: HeatmapMetrics.legendSwatch,
+                    height: HeatmapMetrics.legendSwatch
+                )
             }
             Text("多")
-                .font(.system(size: 10.5))
+                .font(SpeakerTypography.footnote)
                 .foregroundStyle(.secondary)
         }
+        .accessibilityHidden(true)
     }
 }
 
 private enum HeatmapPalette {
-    static func color(forLevel level: Int) -> Color {
+    static func color(forLevel level: Int, colorScheme: ColorScheme) -> Color {
         switch level {
-        case 1: SpeakerVisualIdentity.warmAccent.opacity(0.24)
-        case 2: SpeakerVisualIdentity.warmAccent.opacity(0.44)
-        case 3: SpeakerVisualIdentity.warmAccent.opacity(0.68)
-        case 4: SpeakerVisualIdentity.warmAccent.opacity(0.95)
+        case 1: SpeakerVisualIdentity.warmAccent.opacity(0.28)
+        case 2: SpeakerVisualIdentity.warmAccent.opacity(0.5)
+        case 3: SpeakerVisualIdentity.warmAccent.opacity(0.74)
+        case 4:
+            colorScheme == .dark
+                ? SpeakerVisualIdentity.warmAccent
+                : SpeakerVisualIdentity.warmAccentDeep
         default: Color.primary.opacity(0.06)
         }
     }

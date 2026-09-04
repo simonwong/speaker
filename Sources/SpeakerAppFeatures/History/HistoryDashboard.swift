@@ -75,6 +75,7 @@ package struct HistoryDashboard: View {
     @State private var expandedRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(
         state: HistoryDashboardState,
@@ -123,8 +124,9 @@ package struct HistoryDashboard: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
-                TextField("搜索历史记录…", text: $query)
+                TextField("搜索历史…", text: $query)
                     .textFieldStyle(.plain)
+                    .font(SpeakerTypography.body)
                     .onSubmit(actions.refresh)
                 if !query.isEmpty {
                     Button {
@@ -139,14 +141,20 @@ package struct HistoryDashboard: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: 32)
+            .frame(height: 30)
             .background(
-                Color.primary.opacity(0.055),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                Color.primary.opacity(0.05),
+                in: RoundedRectangle(
+                    cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+                    style: .continuous
+                )
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.primary.opacity(0.09), lineWidth: 0.5)
+                RoundedRectangle(
+                    cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+                    style: .continuous
+                )
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
             }
 
             Menu {
@@ -167,8 +175,10 @@ package struct HistoryDashboard: View {
             .help("刷新与清空历史")
             .accessibilityLabel("历史选项")
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+        .padding(.vertical, 10)
     }
 
     private var emptyState: some View {
@@ -181,7 +191,7 @@ package struct HistoryDashboard: View {
                 : "magnifyingglass",
             description: Text(
                 query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? "完成第一次语音输入后，会话记录会显示在这里。"
+                    ? "完成第一次语音输入后，记录会出现在这里。"
                     : "尝试缩短关键词，或清空搜索后查看全部记录。"
             )
         )
@@ -192,13 +202,18 @@ package struct HistoryDashboard: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(sections, id: \.day) { section in
-                    Text(section.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .tracking(0.4)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 20)
-                        .padding(.bottom, 8)
-                        .padding(.horizontal, 10)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(section.title)
+                            .font(SpeakerTypography.sectionHeader)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 12)
+                        Text("\(section.records.count) 条")
+                            .font(SpeakerTypography.footnote)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.top, 20)
+                    .padding(.bottom, 6)
+                    .padding(.horizontal, 8)
 
                     ForEach(
                         Array(section.records.enumerated()),
@@ -231,13 +246,15 @@ package struct HistoryDashboard: View {
                         if index < section.records.count - 1 {
                             Divider()
                                 .opacity(0.45)
-                                .padding(.leading, 72)
+                                .padding(.leading, 64)
                         }
                     }
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 20)
+            .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+            .padding(.bottom, SpeakerSurfaceMetrics.pageBottomPadding)
         }
     }
 
@@ -249,9 +266,10 @@ package struct HistoryDashboard: View {
                 feedback.message,
                 systemImage: feedback.kind.systemImage
             )
-            .font(.caption)
+            .font(SpeakerTypography.caption)
             .foregroundStyle(feedback.kind.color)
-            .padding(8)
+            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel(feedback.message)
         } else if let notice = state.notice {
@@ -260,9 +278,10 @@ package struct HistoryDashboard: View {
                 notice,
                 systemImage: "exclamationmark.circle.fill"
             )
-            .font(.caption)
+            .font(SpeakerTypography.caption)
             .foregroundStyle(.red)
-            .padding(8)
+            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -295,13 +314,14 @@ private struct HistoryRecordRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 Text(presentation.time)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(SpeakerTypography.mono)
                     .foregroundStyle(.secondary)
-                    .frame(width: 42, alignment: .leading)
+                    .frame(width: 44, alignment: .leading)
                     .padding(.top, 2)
 
                 Text(presentation.text)
-                    .font(.system(size: 12.5))
+                    .font(SpeakerTypography.body)
+                    .lineSpacing(2)
                     .lineLimit(isExpanded ? nil : 2)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -320,6 +340,8 @@ private struct HistoryRecordRow: View {
                         if presentation.canCopy {
                             Button(action: copy) {
                                 Image(systemName: "doc.on.doc")
+                                    .frame(width: 24, height: 24)
+                                    .contentShape(Rectangle())
                             }
                             .disabled(isBusy)
                             .help("复制")
@@ -329,6 +351,8 @@ private struct HistoryRecordRow: View {
                             confirmsDelete = true
                         } label: {
                             Image(systemName: "trash")
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
                         }
                         .disabled(isBusy)
                         .help("删除")
@@ -337,12 +361,11 @@ private struct HistoryRecordRow: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .padding(.top, 1)
                     .transition(.opacity)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
             .onTapGesture(perform: toggleDetails)
@@ -517,42 +540,6 @@ private struct HistoryExpandedRecord: View {
             .sorted { $0.key < $1.key }
             .map { "\($0.key) \($0.value) ms" }
             .joined(separator: " · ")
-    }
-
-    private var diagnosticsLine: String? {
-        var parts: [String] = []
-        if let providerRequestID = record.providerRequestID {
-            parts.append(
-                "\(record.transcriptionProvider ?? "转录提供商") 请求 ID：\(providerRequestID)"
-            )
-        }
-        if let deepSeekRequestID = record.deepSeekRequestID {
-            parts.append("DeepSeek 请求 ID：\(deepSeekRequestID)")
-        }
-        if let deliveryDiagnosticCode = record.deliveryDiagnosticCode {
-            parts.append("送达诊断：\(deliveryDiagnosticCode)")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-}
-
-private struct HistoryTextBlock: View {
-    let title: String
-    let text: String
-    let isPlaceholder: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            Text(text)
-                .foregroundStyle(isPlaceholder ? .secondary : .primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(
-                    Color.primary.opacity(0.04),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-        }
     }
 }
 
