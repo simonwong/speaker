@@ -58,6 +58,27 @@ The gate runs every step even after one fails, then prints a PASS/FAIL summary w
 
 For installer, release, or workflow changes, also inspect `.github/workflows/ci.yml` and run every directly relevant CI-only gate. `./scripts/test-install-rollback` is currently a CI-only gate and does not run inside `./scripts/test`. Such a change is test-complete only when the ordinary code gates and all directly relevant CI-only gates exit 0.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs two gating jobs so a pull request gets its specification verdict without waiting for a release build.
+
+| Job | Name | Contents |
+| --- | --- | --- |
+| `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
+| `verify` | `Test, build, and bundle` | `needs: specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, the retained release candidate, install rollback, and the reviewed release identity guard. |
+
+`Test, build, and bundle` is the required status check on `main`; renaming the `verify` job breaks branch protection until the required check is renamed to match. `development-prerelease` still `needs: verify`, so it runs only after both gating jobs pass.
+
+The `specifications` job caches `.build` through `actions/cache` under a key containing the `Package.resolved` hash, so a resolved dependency graph is compiled once and later runs restore it through the prefix restore key. The `verify` job does not restore that cache: `./scripts/bundle` builds the release into an isolated scratch path under `RUNNER_TEMP` on purpose. Every action in every workflow stays pinned to a full commit SHA, which `./scripts/test-workflow-security` enforces.
+
+Formatting is checked with the `swift-format` shipped with the toolchain against the repository-root `.swift-format` configuration:
+
+```bash
+swift format lint --strict --parallel --recursive Sources Tests
+```
+
+The tree is not formatted to that configuration yet, so the CI step carries `continue-on-error: true` and only reports findings. Reformatting the sources and making the step blocking is separate work; do not reformat unrelated files to silence it.
+
 Use `./scripts/build` for the ordinary debug App build. For a focused warnings gate, use:
 
 ```bash
