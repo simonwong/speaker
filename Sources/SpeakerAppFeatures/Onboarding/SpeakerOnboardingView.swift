@@ -1,115 +1,21 @@
 import AppKit
-import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
-@MainActor
-final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
-    private var window: NSWindow?
-    private let permissions: PermissionModel
-    private let doubao: DoubaoSettingsModel
-    private let requestPermission: (PermissionKind) async -> Void
-    private let refreshPermissions: () -> Void
-    private let completion: () -> Void
-
-    init(
-        permissions: PermissionModel,
-        doubao: DoubaoSettingsModel,
-        requestPermission: @escaping (PermissionKind) async -> Void,
-        refreshPermissions: @escaping () -> Void,
-        completion: @escaping () -> Void
-    ) {
-        self.permissions = permissions
-        self.doubao = doubao
-        self.requestPermission = requestPermission
-        self.refreshPermissions = refreshPermissions
-        self.completion = completion
-    }
-
-    func show() {
-        if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-        let content = SpeakerOnboardingView(
-            permissions: permissions,
-            doubao: doubao,
-            requestPermission: requestPermission,
-            refreshPermissions: refreshPermissions,
-            completion: completion
-        )
-        let visibleFrame = NSScreen.main?.visibleFrame
-            ?? NSRect(x: 0, y: 0, width: 640, height: 680)
-        let window = OnboardingWindowFactory.make(
-            visibleFrame: visibleFrame,
-            contentView: NSHostingView(rootView: content)
-        )
-        window.center()
-        window.delegate = self
-        self.window = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func close() {
-        window?.close()
-        window?.contentView = nil
-        window = nil
-    }
-
-#if DEBUG
-    func resizeDebug(to size: CGSize) {
-        let debugMinimum = CGSize(width: 360, height: 360)
-        window?.minSize = debugMinimum
-        window?.contentMinSize = debugMinimum
-        window?.setContentSize(size)
-        window?.center()
-    }
-
-    func captureDebugSnapshot(to url: URL) throws {
-        guard let contentView = window?.contentView else {
-            throw OnboardingSnapshotError.windowUnavailable
-        }
-        contentView.layoutSubtreeIfNeeded()
-        let bounds = contentView.bounds
-        guard let representation = contentView.bitmapImageRepForCachingDisplay(
-            in: bounds
-        ) else {
-            throw OnboardingSnapshotError.bitmapUnavailable
-        }
-        contentView.cacheDisplay(in: bounds, to: representation)
-        guard let data = representation.representation(
-            using: .png,
-            properties: [:]
-        ) else {
-            throw OnboardingSnapshotError.pngEncodingFailed
-        }
-        try data.write(to: url, options: .atomic)
-    }
-#endif
-}
-
-#if DEBUG
-private enum OnboardingSnapshotError: Error {
-    case windowUnavailable
-    case bitmapUnavailable
-    case pngEncodingFailed
-}
-#endif
-
-private struct SpeakerOnboardingView: View {
+package struct SpeakerOnboardingView: View {
     @ObservedObject var permissions: PermissionModel
     @ObservedObject var doubao: DoubaoSettingsModel
     let completion: () -> Void
     let requestPermission: (PermissionKind) async -> Void
     let refreshPermissions: () -> Void
+    let announce: AccessibilityAnnounce
 
-    init(
+    package init(
         permissions: PermissionModel,
         doubao: DoubaoSettingsModel,
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
+        announce: @escaping AccessibilityAnnounce,
         completion: @escaping () -> Void
     ) {
         self.permissions = permissions
@@ -117,6 +23,7 @@ private struct SpeakerOnboardingView: View {
         self.completion = completion
         self.requestPermission = requestPermission
         self.refreshPermissions = refreshPermissions
+        self.announce = announce
     }
 
     private var ready: Bool {
@@ -143,7 +50,7 @@ private struct SpeakerOnboardingView: View {
         )
     }
 
-    var body: some View {
+    package var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top, spacing: 14) {
@@ -495,18 +402,6 @@ private struct SpeakerOnboardingView: View {
         case .notDetermined: "\(name)权限尚未决定"
         case .restricted: "\(name)权限受系统或组织策略限制"
         }
-    }
-
-    private func announce(_ message: String) {
-        NSAccessibility.post(
-            element: NSApplication.shared,
-            notification: .announcementRequested,
-            userInfo: [
-                NSAccessibility.NotificationUserInfoKey.announcement: message,
-                NSAccessibility.NotificationUserInfoKey.priority:
-                    NSAccessibilityPriorityLevel.medium.rawValue,
-            ]
-        )
     }
 }
 
