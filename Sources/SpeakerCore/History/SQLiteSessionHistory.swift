@@ -1,237 +1,23 @@
 import Foundation
-import SQLite3
 
-private let sqliteTransient = unsafeBitCast(
-    -1,
-    to: sqlite3_destructor_type.self
-)
+/// The on-disk history format: one schema version and the payload codec.
+///
+/// The store writes payloads and the privacy migration rewrites them, so both
+/// cross the same encoder pair and compare against the same version.
+enum SQLiteHistorySchema {
+    static let version: Int32 = 1
 
-private final class SQLiteHistoryConnection: @unchecked Sendable {
-    static let schemaVersion: Int32 = 1
-
-    private(set) var raw: OpaquePointer?
-
-    init(fileURL: URL) throws {
-        try OwnerOnlyFilePersistence.protectExistingFile(at: fileURL)
-        var connection: OpaquePointer?
-        let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(fileURL.path, &connection, flags, nil) == SQLITE_OK,
-              let connection
-        else {
-            if let connection { sqlite3_close(connection) }
-            throw SQLiteHistoryError.openFailed
-        }
-        raw = connection
-        do {
-            try Self.execute("PRAGMA journal_mode=WAL", on: connection)
-            try Self.execute("PRAGMA synchronous=FULL", on: connection)
-            try Self.execute("PRAGMA secure_delete=ON", on: connection)
-            try Self.execute("PRAGMA busy_timeout=3000", on: connection)
-            try Self.execute(
-                """
-                CREATE TABLE IF NOT EXISTS history_records (
-                    session_id TEXT PRIMARY KEY NOT NULL,
-                    started_at REAL NOT NULL,
-                    payload BLOB NOT NULL,
-                    payload_schema INTEGER NOT NULL DEFAULT 1
-                )
-                """,
-                on: connection
-            )
-            try Self.execute(
-                "CREATE INDEX IF NOT EXISTS history_started_at ON history_records(started_at DESC)",
-                on: connection
-            )
-            try Self.execute(
-                """
-                CREATE TABLE IF NOT EXISTS history_metadata (
-                    key TEXT PRIMARY KEY NOT NULL,
-                    value INTEGER NOT NULL
-                )
-                """,
-                on: connection
-            )
-            if try !Self.table(
-                "history_records",
-                containsColumn: "payload_schema",
-                on: connection
-            ) {
-                try Self.execute(
-                    "ALTER TABLE history_records ADD COLUMN payload_schema INTEGER NOT NULL DEFAULT 1",
-                    on: connection
-                )
-            }
-            let userVersion = try Self.integerValue("PRAGMA user_version", on: connection)
-            guard userVersion <= Self.schemaVersion else {
-                throw SQLiteHistoryError.unsupportedSchema(userVersion)
-            }
-            if userVersion == 0 {
-                try Self.execute(
-                    "PRAGMA user_version=\(Self.schemaVersion)",
-                    on: connection
-                )
-            }
-            let integrity = try Self.textValue("PRAGMA quick_check(1)", on: connection)
-            guard integrity == "ok" else {
-                throw SQLiteHistoryError.integrityCheckFailed(integrity ?? "unknown")
-            }
-            try Self.protectDatabaseFiles(at: fileURL)
-        } catch {
-            sqlite3_close(connection)
-            throw error
-        }
+    static var payloadEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        return encoder
     }
 
-    deinit {
-        if let raw {
-            sqlite3_close(raw)
-        }
-    }
-
-    func close() throws {
-        guard let raw else { return }
-        let status = sqlite3_close(raw)
-        guard status == SQLITE_OK else {
-            throw SQLiteHistoryError.sqlite(
-                code: status,
-                message: Self.errorMessage(raw)
-            )
-        }
-        self.raw = nil
-    }
-
-    static func execute(_ sql: String, on connection: OpaquePointer) throws {
-        guard sqlite3_exec(connection, sql, nil, nil, nil) == SQLITE_OK else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-    }
-
-    static func integerValue(_ sql: String, on connection: OpaquePointer) throws -> Int32 {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK,
-              let statement
-        else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-        return sqlite3_column_int(statement, 0)
-    }
-
-    static func textValue(_ sql: String, on connection: OpaquePointer) throws -> String? {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK,
-              let statement
-        else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-        guard let value = sqlite3_column_text(statement, 0) else { return nil }
-        return String(cString: value)
-    }
-
-    static func table(
-        _ tableName: String,
-        containsColumn columnName: String,
-        on connection: OpaquePointer
-    ) throws -> Bool {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            connection,
-            "PRAGMA table_info(\(tableName))",
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK, let statement else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-        defer { sqlite3_finalize(statement) }
-        var status = sqlite3_step(statement)
-        while status == SQLITE_ROW {
-            if let value = sqlite3_column_text(statement, 1),
-               String(cString: value) == columnName {
-                return true
-            }
-            status = sqlite3_step(statement)
-        }
-        guard status == SQLITE_DONE else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(connection),
-                message: errorMessage(connection)
-            )
-        }
-        return false
-    }
-
-    static func protectDatabaseFiles(at fileURL: URL) throws {
-        for suffix in ["", "-wal", "-shm", "-journal"] {
-            try OwnerOnlyFilePersistence.protectExistingFile(
-                at: URL(fileURLWithPath: fileURL.path + suffix)
-            )
-        }
-    }
-
-    static func errorMessage(_ connection: OpaquePointer) -> String {
-        sqlite3_errmsg(connection).map(String.init(cString:)) ?? "unknown sqlite error"
-    }
-}
-
-private enum SQLiteHistoryError: Error {
-    case openFailed
-    case sqlite(code: Int32, message: String)
-    case encoding
-    case integrityCheckFailed(String)
-    case unsupportedSchema(Int32)
-
-    var isRecoverableCorruption: Bool {
-        switch self {
-        case let .sqlite(code, _):
-            code == SQLITE_CORRUPT || code == SQLITE_NOTADB
-        case .integrityCheckFailed:
-            true
-        case .openFailed, .encoding, .unsupportedSchema:
-            false
-        }
-    }
-}
-
-extension SQLiteHistoryError: PrivacySafeDescribing {
-    var privacySafeDescription: String {
-        switch self {
-        case let .sqlite(_, message):
-            message
-        case .openFailed:
-            "Unable to open the local history database."
-        case .encoding:
-            "A local history record could not be decoded."
-        case let .integrityCheckFailed(message):
-            "The local history database failed its integrity check: \(message)"
-        case let .unsupportedSchema(version):
-            "The local history database uses unsupported schema version \(version)."
-        }
+    static var payloadDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        return decoder
     }
 }
 
@@ -239,11 +25,17 @@ extension SQLiteHistoryError: PrivacySafeDescribing {
 /// update is one SQLite upsert instead of a rewrite of the entire history.
 /// `secure_delete`, WAL truncation on destructive operations, owner-only file
 /// permissions, age retention and a hard row cap define its privacy boundary.
+///
+/// It owns Session Record reads and writes, retention, interrupted-session
+/// reconciliation, and WAL convergence. `SQLiteConnection` owns every call into
+/// SQLite, `SQLiteHistoryPrivacyMigration` the legacy provider-message scrub,
+/// and `SQLiteHistoryCorruptionRecovery` the preserved evidence of a damaged
+/// database.
 public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     public static let defaultMaximumRecordCount = 10_000
 
     private let fileURL: URL
-    private var connection: SQLiteHistoryConnection?
+    private var connection: SQLiteConnection?
     private let maximumRecordCount: Int
     private var retentionPolicy: HistoryRetentionPolicy
     private var notice: LocalHistoryPersistenceNotice?
@@ -258,16 +50,17 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         self.fileURL = fileURL
         self.retentionPolicy = retentionPolicy
         self.maximumRecordCount = max(1, maximumRecordCount)
-        var pruning = Self.pruneRecoveryArtifacts(for: fileURL)
-        var resolvedConnection: SQLiteHistoryConnection?
+        var pruning = SQLiteHistoryCorruptionRecovery.pruneRecoveryArtifacts(for: fileURL)
+        var resolvedConnection: SQLiteConnection?
         var resolvedNotice: LocalHistoryPersistenceNotice?
         do {
-            resolvedConnection = try SQLiteHistoryConnection(fileURL: fileURL)
+            resolvedConnection = try Self.openStore(at: fileURL)
         } catch let error as SQLiteHistoryError where error.isRecoverableCorruption {
             do {
-                let preserved = try Self.preserveCorruptedDatabase(at: fileURL)
+                let preserved = try SQLiteHistoryCorruptionRecovery
+                    .preserveCorruptedDatabase(at: fileURL)
                 pruning = preserved.pruning
-                resolvedConnection = try SQLiteHistoryConnection(fileURL: fileURL)
+                resolvedConnection = try Self.openStore(at: fileURL)
                 resolvedNotice = .corruptedDataPreserved(
                     backupURL: preserved.backupURL,
                     reason: PrivacySafeText.reason(for: error)
@@ -287,12 +80,12 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         }
         connection = resolvedConnection
         notice = resolvedNotice
-        if resolvedNotice == nil, let db = resolvedConnection?.raw {
+        if resolvedNotice == nil, let resolvedConnection {
             do {
                 // A process may have terminated after committing a destructive
                 // transaction but before truncating WAL. Reconcile that gap at
                 // every clean open before the store is used.
-                try Self.truncateCheckpoint(db, fileURL: fileURL)
+                try resolvedConnection.truncateCheckpoint()
             } catch {
                 notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             }
@@ -313,7 +106,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     }
 
     public func save(_ record: VoiceInputHistoryRecord) async {
-        guard let db = connection?.raw else { return }
+        guard let connection = openConnection else { return }
         guard SessionHistoryRecordPolicy.shouldRetain(record) else {
             if !loadRecords(
                 whereClause: "WHERE session_id = ?",
@@ -330,22 +123,24 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 ).isEmpty
         else { return }
         do {
-            let payload = try Self.encoder.encode(HistoryRecordV1(record))
+            let payload = try SQLiteHistorySchema.payloadEncoder.encode(
+                HistoryRecordV1(record)
+            )
             let pruned: Bool
-            try beginTransaction(db)
+            try connection.beginImmediateTransaction()
             do {
-                try upsert(record, payload: payload, db: db)
-                pruned = try prune(now: Date(), db: db)
-                try commitTransaction(db)
+                try upsert(record, payload: payload, on: connection)
+                pruned = try prune(now: Date(), on: connection)
+                try connection.commitTransaction()
             } catch {
-                rollbackTransaction(db)
+                connection.rollbackTransaction()
                 throw error
             }
             destructiveCheckpointPending = destructiveCheckpointPending || pruned
             if destructiveCheckpointPending {
-                try checkpoint(db)
+                try checkpoint(connection)
             }
-            try protectSQLiteFiles()
+            try connection.protectDatabaseFiles()
             clearOperationalNotice()
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
         } catch {
@@ -362,26 +157,20 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     /// with an unknown schema or an undecodable payload are skipped, matching how
     /// `loadRecords` treats them.
     public func usageStatistics() async -> VoiceInputUsageSummary {
-        guard let db = connection?.raw else { return .empty }
+        guard let connection = openConnection else { return .empty }
         var accumulator = VoiceInputUsageAccumulator()
         do {
-            let statement = try prepare(
-                "SELECT payload, payload_schema FROM history_records",
-                db: db
+            let statement = try connection.prepare(
+                "SELECT payload, payload_schema FROM history_records"
             )
-            defer { sqlite3_finalize(statement) }
-            var stepStatus = sqlite3_step(statement)
-            while stepStatus == SQLITE_ROW {
-                defer { stepStatus = sqlite3_step(statement) }
-                guard sqlite3_column_int(statement, 1)
-                        == SQLiteHistoryConnection.schemaVersion,
-                      let bytes = sqlite3_column_blob(statement, 0)
+            defer { statement.finalize() }
+            while try statement.step() {
+                guard statement.int32(at: 1) == SQLiteHistorySchema.version,
+                      let payload = statement.blob(at: 0)
                 else { continue }
-                let count = Int(sqlite3_column_bytes(statement, 0))
-                let data = Data(bytes: bytes, count: count)
-                guard let stored = try? Self.decoder.decode(
+                guard let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
                     HistoryRecordV1.self,
-                    from: data
+                    from: payload
                 ), let record = try? stored.domainRecord else { continue }
                 guard SessionHistoryRecordPolicy.shouldRetain(record)
                 else { continue }
@@ -401,28 +190,27 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     }
 
     public func delete(sessionID: VoiceInputSessionID) async -> Bool {
-        guard let db = connection?.raw else { return false }
+        guard let connection = openConnection else { return false }
         do {
-            try beginTransaction(db)
+            try connection.beginImmediateTransaction()
             let deleted: Bool
             do {
-                let statement = try prepare(
-                    "DELETE FROM history_records WHERE session_id = ?",
-                    db: db
+                let statement = try connection.prepare(
+                    "DELETE FROM history_records WHERE session_id = ?"
                 )
-                defer { sqlite3_finalize(statement) }
-                try bind(sessionID.rawValue.uuidString, at: 1, to: statement, db: db)
-                try stepDone(statement, db: db)
-                deleted = sqlite3_changes(db) > 0
-                try commitTransaction(db)
+                defer { statement.finalize() }
+                try statement.bind(sessionID.rawValue.uuidString, at: 1)
+                try statement.stepDone()
+                deleted = connection.changeCount > 0
+                try connection.commitTransaction()
             } catch {
-                rollbackTransaction(db)
+                connection.rollbackTransaction()
                 throw error
             }
             guard deleted else { return false }
             destructiveCheckpointPending = true
-            try checkpoint(db)
-            try protectSQLiteFiles()
+            try checkpoint(connection)
+            try connection.protectDatabaseFiles()
             clearOperationalNotice()
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
@@ -433,18 +221,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     }
 
     public func clear() async -> Bool {
-        guard let db = connection?.raw else { return false }
+        guard let connection = openConnection else { return false }
         do {
-            try SQLiteHistoryConnection.execute("DELETE FROM history_records", on: db)
+            try connection.execute("DELETE FROM history_records")
             destructiveCheckpointPending = true
-            try checkpoint(db)
-            try SQLiteHistoryConnection.execute("VACUUM", on: db)
+            try checkpoint(connection)
+            try connection.execute("VACUUM")
             // VACUUM can write a fresh transaction while WAL mode is active.
             // Truncate again so a user-requested clear leaves no stale pages
             // behind in the sidecar.
-            try checkpoint(db)
-            try protectSQLiteFiles()
-            try removeLegacyRecoveryArtifacts()
+            try checkpoint(connection)
+            try connection.protectDatabaseFiles()
+            try SQLiteHistoryCorruptionRecovery.removeLegacyArtifacts(around: fileURL)
             notice = nil
             privacyMigrationFailureReason = nil
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
@@ -462,12 +250,12 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     /// database would make the result impossible to verify.
     public func closeForErasure() async -> Bool {
         guard let connection else { return true }
-        guard let db = connection.raw else {
+        guard connection.isOpen else {
             self.connection = nil
             return true
         }
         do {
-            try checkpoint(db)
+            try checkpoint(connection)
             try connection.close()
             self.connection = nil
             return true
@@ -482,50 +270,20 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     /// or user context, so only structured provider metadata is retained.
     @discardableResult
     public func scrubUntrustedProviderMessages() async -> Bool {
-        guard let db = connection?.raw else {
+        guard let connection = openConnection else {
             privacyMigrationFailureReason = .databaseUnavailable
             return false
         }
         do {
-            let plan = try privacyScrubPlan(db: db)
-            let completedVersion = try privacyScrubVersion(db: db)
-            let requiresPhysicalSanitization = plan.hasChanges
-                || completedVersion < Self.currentPrivacyScrubVersion
-
-            if plan.hasChanges {
-                try beginTransaction(db)
-                do {
-                    for rewrite in plan.rewrites {
-                        try rewritePayload(
-                            rewrite.payload,
-                            sessionID: rewrite.sessionID,
-                            db: db
-                        )
-                    }
-                    for sessionID in plan.deletions {
-                        try deleteRow(sessionID: sessionID, db: db)
-                    }
-                    try commitTransaction(db)
-                } catch {
-                    rollbackTransaction(db)
-                    throw error
-                }
-            }
-
-            if requiresPhysicalSanitization {
-                try checkpoint(db)
-                try SQLiteHistoryConnection.execute("VACUUM", on: db)
-                try checkpoint(db)
-                try markPrivacyScrubCompleted(db: db)
-                try checkpoint(db)
-            }
-
-            try verifyPrivacyScrub(db: db)
-            try protectSQLiteFiles()
+            let outcome = try SQLiteHistoryPrivacyMigration.scrubUntrustedProviderMessages(
+                on: connection,
+                checkpoint: { try checkpoint(connection) }
+            )
+            try connection.protectDatabaseFiles()
             privacyMigrationFailureReason = nil
-            if plan.corruptedDeletionCount > 0 {
+            if outcome.corruptedRecordCount > 0 {
                 notice = .corruptedRecordsSkipped(
-                    count: plan.corruptedDeletionCount
+                    count: outcome.corruptedRecordCount
                 )
             } else {
                 clearOperationalNotice()
@@ -549,7 +307,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     /// provider connection, target snapshot, or delivery transaction.
     @discardableResult
     public func reconcileInterruptedSessions() async -> Int? {
-        guard let db = connection?.raw else { return nil }
+        guard let connection = openConnection else { return nil }
         let interrupted = loadRecords(
             whereClause: nil,
             binding: nil
@@ -557,24 +315,24 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         guard !interrupted.isEmpty else { return 0 }
 
         do {
-            try beginTransaction(db)
+            try connection.beginImmediateTransaction()
             do {
                 for record in interrupted {
                     try upsert(
                         record,
-                        payload: Self.encoder.encode(
+                        payload: SQLiteHistorySchema.payloadEncoder.encode(
                             HistoryRecordV1(record)
                         ),
-                        db: db
+                        on: connection
                     )
                 }
-                try commitTransaction(db)
+                try connection.commitTransaction()
             } catch {
-                rollbackTransaction(db)
+                connection.rollbackTransaction()
                 throw error
             }
-            try checkpoint(db)
-            try protectSQLiteFiles()
+            try checkpoint(connection)
+            try connection.protectDatabaseFiles()
             clearOperationalNotice()
             NotificationCenter.default.post(
                 name: .speakerHistoryDidChange,
@@ -614,7 +372,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         _ policy: HistoryRetentionPolicy,
         now: Date = Date()
     ) async -> Bool {
-        guard let db = connection?.raw else { return false }
+        guard let connection = openConnection else { return false }
         // The policy is user intent and governs every later save even when
         // immediate cleanup cannot finish. A transaction may commit before a
         // WAL checkpoint reports busy, so pretending to roll the policy back
@@ -622,17 +380,17 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         retentionPolicy = policy
         do {
             let pruned: Bool
-            try beginTransaction(db)
+            try connection.beginImmediateTransaction()
             do {
-                pruned = try prune(now: now, db: db)
-                try commitTransaction(db)
+                pruned = try prune(now: now, on: connection)
+                try connection.commitTransaction()
             } catch {
-                rollbackTransaction(db)
+                connection.rollbackTransaction()
                 throw error
             }
             destructiveCheckpointPending = destructiveCheckpointPending || pruned
-            try checkpoint(db)
-            try protectSQLiteFiles()
+            try checkpoint(connection)
+            try connection.protectDatabaseFiles()
             clearOperationalNotice()
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
@@ -643,7 +401,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     }
 
     public func importLegacyRecords(_ records: [VoiceInputHistoryRecord]) async -> Bool {
-        guard let db = connection?.raw else { return false }
+        guard let connection = openConnection else { return false }
         do {
             let now = Date()
             var merged = Dictionary(
@@ -660,29 +418,33 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 now: now
             )
             let pruned: Bool
-            try beginTransaction(db)
+            try connection.beginImmediateTransaction()
             do {
                 for record in expected {
                     try upsert(
                         record,
-                        payload: Self.encoder.encode(HistoryRecordV1(record)),
-                        db: db
+                        payload: SQLiteHistorySchema.payloadEncoder.encode(
+                            HistoryRecordV1(record)
+                        ),
+                        on: connection
                     )
                 }
-                pruned = try prune(now: now, db: db)
-                try commitTransaction(db)
+                pruned = try prune(now: now, on: connection)
+                try connection.commitTransaction()
             } catch {
-                rollbackTransaction(db)
+                connection.rollbackTransaction()
                 throw error
             }
             destructiveCheckpointPending = destructiveCheckpointPending || pruned
-            try checkpoint(db)
-            try protectSQLiteFiles()
+            try checkpoint(connection)
+            try connection.protectDatabaseFiles()
             for expectedRecord in expected {
-                let expectedPayload = try Self.encoder.encode(HistoryRecordV1(expectedRecord))
+                let expectedPayload = try SQLiteHistorySchema.payloadEncoder.encode(
+                    HistoryRecordV1(expectedRecord)
+                )
                 guard try storedPayload(
                     sessionID: expectedRecord.sessionID,
-                    db: db
+                    on: connection
                 ) == expectedPayload else {
                     throw SQLiteHistoryError.encoding
                 }
@@ -696,33 +458,90 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         }
     }
 
+    /// The live handle, or `nil` once opening failed or erasure closed it.
+    private var openConnection: SQLiteConnection? {
+        guard let connection, connection.isOpen else { return nil }
+        return connection
+    }
+
+    private static func openStore(at fileURL: URL) throws -> SQLiteConnection {
+        let connection = try SQLiteConnection(fileURL: fileURL)
+        do {
+            try createSchema(on: connection)
+            try connection.protectDatabaseFiles()
+        } catch {
+            connection.closeIgnoringFailure()
+            throw error
+        }
+        return connection
+    }
+
+    private static func createSchema(on connection: SQLiteConnection) throws {
+        try connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS history_records (
+                session_id TEXT PRIMARY KEY NOT NULL,
+                started_at REAL NOT NULL,
+                payload BLOB NOT NULL,
+                payload_schema INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        try connection.execute(
+            "CREATE INDEX IF NOT EXISTS history_started_at ON history_records(started_at DESC)"
+        )
+        try connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS history_metadata (
+                key TEXT PRIMARY KEY NOT NULL,
+                value INTEGER NOT NULL
+            )
+            """
+        )
+        if try !connection.table("history_records", containsColumn: "payload_schema") {
+            try connection.execute(
+                "ALTER TABLE history_records ADD COLUMN payload_schema INTEGER NOT NULL DEFAULT 1"
+            )
+        }
+        let userVersion = try connection.integerValue("PRAGMA user_version")
+        guard userVersion <= SQLiteHistorySchema.version else {
+            throw SQLiteHistoryError.unsupportedSchema(userVersion)
+        }
+        if userVersion == 0 {
+            try connection.execute("PRAGMA user_version=\(SQLiteHistorySchema.version)")
+        }
+        let integrity = try connection.textValue("PRAGMA quick_check(1)")
+        guard integrity == "ok" else {
+            throw SQLiteHistoryError.integrityCheckFailed(integrity ?? "unknown")
+        }
+    }
+
     private func loadRecords(
         whereClause: String?,
         binding: String?
     ) -> [VoiceInputHistoryRecord] {
-        guard let db = connection?.raw else { return [] }
+        guard let connection = openConnection else { return [] }
         do {
             let sql = "SELECT payload, payload_schema FROM history_records \(whereClause ?? "") ORDER BY started_at DESC, session_id DESC"
-            let statement = try prepare(sql, db: db)
-            defer { sqlite3_finalize(statement) }
-            if let binding { try bind(binding, at: 1, to: statement, db: db) }
+            let statement = try connection.prepare(sql)
+            defer { statement.finalize() }
+            if let binding { try statement.bind(binding, at: 1) }
             var records: [VoiceInputHistoryRecord] = []
-            var stepStatus = sqlite3_step(statement)
             var corruptedRecordCount = 0
-            while stepStatus == SQLITE_ROW {
-                guard sqlite3_column_int(statement, 1) == SQLiteHistoryConnection.schemaVersion else {
+            while try statement.step() {
+                guard statement.int32(at: 1) == SQLiteHistorySchema.version else {
                     corruptedRecordCount += 1
-                    stepStatus = sqlite3_step(statement)
                     continue
                 }
-                guard let bytes = sqlite3_column_blob(statement, 0) else {
+                guard let payload = statement.blob(at: 0) else {
                     throw SQLiteHistoryError.encoding
                 }
-                let count = Int(sqlite3_column_bytes(statement, 0))
-                let data = Data(bytes: bytes, count: count)
                 do {
                     records.append(
-                        try Self.decoder.decode(HistoryRecordV1.self, from: data).domainRecord
+                        try SQLiteHistorySchema.payloadDecoder.decode(
+                            HistoryRecordV1.self,
+                            from: payload
+                        ).domainRecord
                     )
                 } catch {
                     // One malformed payload must not hide every healthy session.
@@ -730,13 +549,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     // persistence notice until the user clears or exports it.
                     corruptedRecordCount += 1
                 }
-                stepStatus = sqlite3_step(statement)
-            }
-            guard stepStatus == SQLITE_DONE else {
-                throw SQLiteHistoryError.sqlite(
-                    code: sqlite3_extended_errcode(db),
-                    message: SQLiteHistoryConnection.errorMessage(db)
-                )
             }
             if corruptedRecordCount > 0 {
                 notice = .corruptedRecordsSkipped(count: corruptedRecordCount)
@@ -750,25 +562,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     private func storedPayload(
         sessionID: VoiceInputSessionID,
-        db: OpaquePointer
+        on connection: SQLiteConnection
     ) throws -> Data? {
-        let statement = try prepare(
-            "SELECT payload FROM history_records WHERE session_id = ?",
-            db: db
+        let statement = try connection.prepare(
+            "SELECT payload FROM history_records WHERE session_id = ?"
         )
-        defer { sqlite3_finalize(statement) }
-        try bind(sessionID.rawValue.uuidString, at: 1, to: statement, db: db)
-        let status = sqlite3_step(statement)
-        if status == SQLITE_DONE { return nil }
-        guard status == SQLITE_ROW,
-              let bytes = sqlite3_column_blob(statement, 0)
-        else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
+        defer { statement.finalize() }
+        try statement.bind(sessionID.rawValue.uuidString, at: 1)
+        guard try statement.step() else { return nil }
+        guard let payload = statement.blob(at: 0) else {
+            throw connection.lastError()
         }
-        return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+        return payload
     }
 
     private static func interruptedRecord(
@@ -828,24 +633,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         )
     }
 
-    private struct PrivacyScrubPlan {
-        struct Rewrite {
-            let sessionID: String
-            let payload: Data
-        }
-
-        var rewrites: [Rewrite] = []
-        var deletions: [String] = []
-        var corruptedDeletionCount = 0
-
-        var hasChanges: Bool {
-            !rewrites.isEmpty || !deletions.isEmpty
-        }
-    }
-
-    private static let currentPrivacyScrubVersion: Int32 = 1
-    private static let privacyScrubMetadataKey = "provider_message_scrub"
-
     private var visibleNotice: LocalHistoryPersistenceNotice? {
         if let privacyMigrationFailureReason {
             return .privacyMigrationFailed(
@@ -855,182 +642,16 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         return notice
     }
 
-    private func privacyScrubPlan(
-        db: OpaquePointer
-    ) throws -> PrivacyScrubPlan {
-        let statement = try prepare(
-            """
-            SELECT session_id, payload, payload_schema
-            FROM history_records
-            """,
-            db: db
-        )
-        defer { sqlite3_finalize(statement) }
-
-        var plan = PrivacyScrubPlan()
-        var stepStatus = sqlite3_step(statement)
-        while stepStatus == SQLITE_ROW {
-            guard let sessionIDBytes = sqlite3_column_text(statement, 0) else {
-                throw SQLiteHistoryError.encoding
-            }
-            let sessionID = String(cString: sessionIDBytes)
-            guard sqlite3_column_int(statement, 2)
-                    == SQLiteHistoryConnection.schemaVersion,
-                  let payloadBytes = sqlite3_column_blob(statement, 1)
-            else {
-                plan.deletions.append(sessionID)
-                plan.corruptedDeletionCount += 1
-                stepStatus = sqlite3_step(statement)
-                continue
-            }
-
-            let payload = Data(
-                bytes: payloadBytes,
-                count: Int(sqlite3_column_bytes(statement, 1))
-            )
-            guard var object = try? JSONSerialization.jsonObject(
-                with: payload
-            ) as? [String: Any] else {
-                plan.deletions.append(sessionID)
-                plan.corruptedDeletionCount += 1
-                stepStatus = sqlite3_step(statement)
-                continue
-            }
-
-            let containedUntrustedText =
-                object.keys.contains("providerMessage")
-                || object.keys.contains("refinementFailureMessage")
-            object.removeValue(forKey: "providerMessage")
-            object.removeValue(forKey: "refinementFailureMessage")
-
-            guard let sanitizedPayload = try? JSONSerialization.data(
-                withJSONObject: object,
-                options: [.sortedKeys]
-            ), let stored = try? Self.decoder.decode(
-                HistoryRecordV1.self,
-                from: sanitizedPayload
-            ), let record = try? stored.domainRecord else {
-                plan.deletions.append(sessionID)
-                plan.corruptedDeletionCount += 1
-                stepStatus = sqlite3_step(statement)
-                continue
-            }
-
-            guard SessionHistoryRecordPolicy.shouldRetain(record) else {
-                plan.deletions.append(sessionID)
-                stepStatus = sqlite3_step(statement)
-                continue
-            }
-
-            if containedUntrustedText {
-                plan.rewrites.append(.init(
-                    sessionID: sessionID,
-                    payload: sanitizedPayload
-                ))
-            }
-            stepStatus = sqlite3_step(statement)
-        }
-        guard stepStatus == SQLITE_DONE else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-        return plan
-    }
-
-    private func verifyPrivacyScrub(db: OpaquePointer) throws {
-        let verification = try privacyScrubPlan(db: db)
-        guard !verification.hasChanges else {
-            throw SQLiteHistoryError.encoding
-        }
-    }
-
-    private func rewritePayload(
-        _ payload: Data,
-        sessionID: String,
-        db: OpaquePointer
-    ) throws {
-        let statement = try prepare(
-            "UPDATE history_records SET payload = ? WHERE session_id = ?",
-            db: db
-        )
-        defer { sqlite3_finalize(statement) }
-        try bind(payload, at: 1, to: statement, db: db)
-        try bind(sessionID, at: 2, to: statement, db: db)
-        try stepDone(statement, db: db)
-    }
-
-    private func deleteRow(
-        sessionID: String,
-        db: OpaquePointer
-    ) throws {
-        let statement = try prepare(
-            "DELETE FROM history_records WHERE session_id = ?",
-            db: db
-        )
-        defer { sqlite3_finalize(statement) }
-        try bind(sessionID, at: 1, to: statement, db: db)
-        try stepDone(statement, db: db)
-    }
-
-    private func privacyScrubVersion(db: OpaquePointer) throws -> Int32 {
-        let statement = try prepare(
-            "SELECT value FROM history_metadata WHERE key = ?",
-            db: db
-        )
-        defer { sqlite3_finalize(statement) }
-        try bind(
-            Self.privacyScrubMetadataKey,
-            at: 1,
-            to: statement,
-            db: db
-        )
-        let status = sqlite3_step(statement)
-        if status == SQLITE_DONE { return 0 }
-        guard status == SQLITE_ROW else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-        return sqlite3_column_int(statement, 0)
-    }
-
-    private func markPrivacyScrubCompleted(db: OpaquePointer) throws {
-        let statement = try prepare(
-            """
-            INSERT INTO history_metadata(key, value)
-            VALUES(?, ?)
-            ON CONFLICT(key) DO UPDATE SET value=excluded.value
-            """,
-            db: db
-        )
-        defer { sqlite3_finalize(statement) }
-        try bind(
-            Self.privacyScrubMetadataKey,
-            at: 1,
-            to: statement,
-            db: db
-        )
-        sqlite3_bind_int(
-            statement,
-            2,
-            Self.currentPrivacyScrubVersion
-        )
-        try stepDone(statement, db: db)
-    }
-
     private func count() -> Int {
-        guard let db = connection?.raw,
-              let statement = try? prepare("SELECT COUNT(*) FROM history_records", db: db)
+        guard let connection = openConnection,
+              let statement = try? connection.prepare("SELECT COUNT(*) FROM history_records")
         else { return 0 }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
-        return Int(sqlite3_column_int64(statement, 0))
+        defer { statement.finalize() }
+        guard (try? statement.step()) == true else { return 0 }
+        return Int(statement.int64(at: 0))
     }
 
-    private func prune(now: Date, db: OpaquePointer) throws -> Bool {
+    private func prune(now: Date, on connection: SQLiteConnection) throws -> Bool {
         var deletedRecord = false
         if let days = retentionPolicy.maximumAgeDays,
            let cutoff = Calendar(identifier: .gregorian).date(
@@ -1038,16 +659,15 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                value: -days,
                to: now
            ) {
-            let statement = try prepare(
-                "DELETE FROM history_records WHERE started_at < ?",
-                db: db
+            let statement = try connection.prepare(
+                "DELETE FROM history_records WHERE started_at < ?"
             )
-            sqlite3_bind_double(statement, 1, cutoff.timeIntervalSince1970)
-            defer { sqlite3_finalize(statement) }
-            try stepDone(statement, db: db)
-            deletedRecord = sqlite3_changes(db) > 0
+            statement.bind(cutoff.timeIntervalSince1970, at: 1)
+            defer { statement.finalize() }
+            try statement.stepDone()
+            deletedRecord = connection.changeCount > 0
         }
-        let capStatement = try prepare(
+        let capStatement = try connection.prepare(
             """
             DELETE FROM history_records
             WHERE session_id IN (
@@ -1055,69 +675,25 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 ORDER BY started_at DESC, session_id DESC
                 LIMIT -1 OFFSET ?
             )
-            """,
-            db: db
+            """
         )
-        sqlite3_bind_int64(capStatement, 1, Int64(maximumRecordCount))
-        defer { sqlite3_finalize(capStatement) }
-        try stepDone(capStatement, db: db)
-        return deletedRecord || sqlite3_changes(db) > 0
+        capStatement.bind(Int64(maximumRecordCount), at: 1)
+        defer { capStatement.finalize() }
+        try capStatement.stepDone()
+        return deletedRecord || connection.changeCount > 0
     }
 
-    private func checkpoint(_ db: OpaquePointer) throws {
-        try Self.truncateCheckpoint(db, fileURL: fileURL)
+    private func checkpoint(_ connection: SQLiteConnection) throws {
+        try connection.truncateCheckpoint()
         destructiveCheckpointPending = false
-    }
-
-    private static func truncateCheckpoint(
-        _ db: OpaquePointer,
-        fileURL: URL
-    ) throws {
-        var logFrameCount: Int32 = -1
-        var checkpointedFrameCount: Int32 = -1
-        let result = sqlite3_wal_checkpoint_v2(
-            db,
-            nil,
-            SQLITE_CHECKPOINT_TRUNCATE,
-            &logFrameCount,
-            &checkpointedFrameCount
-        )
-        guard result == SQLITE_OK else {
-            throw SQLiteHistoryError.sqlite(
-                code: result,
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-        let walURL = URL(fileURLWithPath: fileURL.path + "-wal")
-        if let attributes = try? FileManager.default.attributesOfItem(atPath: walURL.path),
-           let size = attributes[.size] as? NSNumber,
-           size.int64Value != 0
-        {
-            throw SQLiteHistoryError.sqlite(
-                code: SQLITE_BUSY,
-                message: "The local history write-ahead log is still in use."
-            )
-        }
-    }
-
-    private func beginTransaction(_ db: OpaquePointer) throws {
-        try SQLiteHistoryConnection.execute("BEGIN IMMEDIATE", on: db)
-    }
-
-    private func commitTransaction(_ db: OpaquePointer) throws {
-        try SQLiteHistoryConnection.execute("COMMIT", on: db)
-    }
-
-    private func rollbackTransaction(_ db: OpaquePointer) {
-        try? SQLiteHistoryConnection.execute("ROLLBACK", on: db)
     }
 
     private func upsert(
         _ record: VoiceInputHistoryRecord,
         payload: Data,
-        db: OpaquePointer
+        on connection: SQLiteConnection
     ) throws {
-        let statement = try prepare(
+        let statement = try connection.prepare(
             """
             INSERT INTO history_records(session_id, started_at, payload, payload_schema)
             VALUES(?, ?, ?, 1)
@@ -1125,202 +701,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 started_at=excluded.started_at,
                 payload=excluded.payload,
                 payload_schema=excluded.payload_schema
-            """,
-            db: db
+            """
         )
-        defer { sqlite3_finalize(statement) }
-        try bind(record.sessionID.rawValue.uuidString, at: 1, to: statement, db: db)
-        sqlite3_bind_double(statement, 2, record.startedAt.timeIntervalSince1970)
-        try bind(payload, at: 3, to: statement, db: db)
-        try stepDone(statement, db: db)
-    }
-
-    private func prepare(_ sql: String, db: OpaquePointer) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
-              let statement
-        else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-        return statement
-    }
-
-    private func bind(
-        _ value: String,
-        at index: Int32,
-        to statement: OpaquePointer,
-        db: OpaquePointer
-    ) throws {
-        guard sqlite3_bind_text(statement, index, value, -1, sqliteTransient) == SQLITE_OK else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-    }
-
-    private func bind(
-        _ value: Data,
-        at index: Int32,
-        to statement: OpaquePointer,
-        db: OpaquePointer
-    ) throws {
-        let status = value.withUnsafeBytes { buffer in
-            sqlite3_bind_blob(
-                statement,
-                index,
-                buffer.baseAddress,
-                Int32(buffer.count),
-                sqliteTransient
-            )
-        }
-        guard status == SQLITE_OK else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-    }
-
-    private func stepDone(_ statement: OpaquePointer, db: OpaquePointer) throws {
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw SQLiteHistoryError.sqlite(
-                code: sqlite3_extended_errcode(db),
-                message: SQLiteHistoryConnection.errorMessage(db)
-            )
-        }
-    }
-
-    private func removeLegacyRecoveryArtifacts() throws {
-        let directory = fileURL.deletingLastPathComponent()
-        let candidates = try FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        for candidate in candidates {
-            let name = candidate.lastPathComponent
-            if name == "history.json"
-                || name.hasPrefix("history.corrupt-")
-                || name.hasPrefix("history.migrated-")
-            {
-                try FileManager.default.removeItem(at: candidate)
-            }
-        }
-    }
-
-    private func protectSQLiteFiles() throws {
-        try SQLiteHistoryConnection.protectDatabaseFiles(at: fileURL)
+        defer { statement.finalize() }
+        try statement.bind(record.sessionID.rawValue.uuidString, at: 1)
+        statement.bind(record.startedAt.timeIntervalSince1970, at: 2)
+        try statement.bind(payload, at: 3)
+        try statement.stepDone()
     }
 
     private func clearOperationalNotice() {
         if case .writeFailed = notice {
             notice = nil
         }
-    }
-
-    private static var encoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .millisecondsSince1970
-        return encoder
-    }
-
-    private static var decoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-        return decoder
-    }
-
-    private static func preserveCorruptedDatabase(
-        at fileURL: URL
-    ) throws -> (backupURL: URL, pruning: RecoveryArchivePruneSummary) {
-        let fileManager = FileManager.default
-        let parent = fileURL.deletingLastPathComponent()
-        try fileManager.createDirectory(
-            at: parent,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try fileManager.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: parent.path
-        )
-        let backupDirectory = parent.appendingPathComponent(
-            "history.corrupt-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try fileManager.createDirectory(
-            at: backupDirectory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        do {
-            var preservedAnyFile = false
-            for suffix in ["", "-wal", "-shm", "-journal"] {
-                let source = URL(fileURLWithPath: fileURL.path + suffix)
-                guard fileManager.fileExists(atPath: source.path) else { continue }
-                let destination = backupDirectory.appendingPathComponent(
-                    fileURL.lastPathComponent + suffix,
-                    isDirectory: false
-                )
-                try fileManager.moveItem(at: source, to: destination)
-                try OwnerOnlyFilePersistence.protectExistingFile(at: destination)
-                preservedAnyFile = true
-            }
-            guard preservedAnyFile else {
-                throw SQLiteHistoryError.openFailed
-            }
-            return (
-                backupURL: backupDirectory,
-                pruning: pruneRecoveryArtifacts(
-                    for: fileURL,
-                    preserving: backupDirectory
-                )
-            )
-        } catch {
-            // Do not leave a half-moved recovery set. Restore anything that was
-            // already moved before surfacing the failure. If even one restore
-            // cannot complete, keep the recovery directory: deleting it here
-            // could destroy the only remaining copy of a user's history.
-            var restoredEveryCandidate = true
-            if let candidates = try? fileManager.contentsOfDirectory(
-                at: backupDirectory,
-                includingPropertiesForKeys: nil
-            ) {
-                for candidate in candidates {
-                    let destination = parent.appendingPathComponent(candidate.lastPathComponent)
-                    if !fileManager.fileExists(atPath: destination.path) {
-                        do {
-                            try fileManager.moveItem(at: candidate, to: destination)
-                        } catch {
-                            restoredEveryCandidate = false
-                        }
-                    } else {
-                        restoredEveryCandidate = false
-                    }
-                }
-            } else {
-                restoredEveryCandidate = false
-            }
-            if restoredEveryCandidate {
-                try? fileManager.removeItem(at: backupDirectory)
-            }
-            throw error
-        }
-    }
-
-    private static func pruneRecoveryArtifacts(
-        for fileURL: URL,
-        preserving preservedURL: URL? = nil
-    ) -> RecoveryArchivePruneSummary {
-        RecoveryArchivePruner.pruneFlatDirectories(
-            in: fileURL.deletingLastPathComponent(),
-            prefix: "history.corrupt-",
-            preserving: preservedURL
-        )
     }
 }
