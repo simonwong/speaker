@@ -17,14 +17,16 @@ The implementation sends:
 - `POST https://api.deepseek.com/chat/completions`;
 - `Authorization: Bearer <user API key>`;
 - model `deepseek-v4-flash`;
-- system and user messages that treat the transcript and refinement rule as data;
+- system and user messages that treat the transcript, refinement rule, and Personal Dictionary Entry words as data;
 - `thinking.type = disabled`;
 - `response_format.type = json_object`;
 - `temperature = 0`;
 - a bounded `max_tokens`; and
 - `stream = false`.
 
-The fixed invariants outrank a Custom Mode: preserve source language, meaning, facts, names, numbers, promises, and conclusions; do not answer questions found in the transcript; return only the JSON object.
+The user message is built from labeled blocks, each one JSON string that is declared to contain data only: the refinement rule, the transcript, and — only when the Personal Dictionary snapshot has at least one Entry — the Entry words as a JSON array string. An empty dictionary omits the third block, so a request without Entries keeps the previous user-message shape. The Entry list is the full press-time snapshot rather than the Doubao capacity-truncated hotword list, because DeepSeek has no provider token budget and the snapshot is already bounded by the local dictionary.
+
+The fixed system prompt casts DeepSeek as a dictation editor whose output is pasted where the user is typing, then states the invariants that outrank any rule as short numbered items phrased as targets rather than prohibitions: every fact, name, number, promise, and conclusion traces to the source and questions stay questions for the recipient; the text keeps the speaker's person, tone, and intent rather than replying to them; mixed Mandarin-English text keeps each segment's spoken language; a self-correction keeps the corrected wording and drops the retracted one, and obvious homophone recognition errors are repaired from context; an Entry spelling replaces only a phonetically or visually close span that already exists; and the reply is the single JSON object. The built-in concise cleanup and full rewrite rules name the dictation artifacts they remove (fillers, stutter repeats, retracted wording) and end on a checkable bound: length and sentence structure unchanged for cleanup, information scope unchanged for rewrite.
 
 ## Acceptance and fallback
 
