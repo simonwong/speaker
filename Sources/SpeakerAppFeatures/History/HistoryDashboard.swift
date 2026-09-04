@@ -520,19 +520,12 @@ private struct HistoryExpandedRecord: View {
         String(format: "%.1f 秒", Double(max(0, milliseconds)) / 1_000)
     }
 
-    private var refinementPlaceholder: String {
-        record.refinementStatus
-            == DeepSeekRefinementStatus.userAcceptedDoubao.rawValue
-            ? "已由用户改用豆包文本"
-            : "无"
-    }
+    private var refinementPlaceholder: String { "无" }
 
     private var showsRefinementBlock: Bool {
         record.deepSeekText != nil
             || record.refinementStatus
                 == DeepSeekRefinementStatus.fellBack.rawValue
-            || record.refinementStatus
-                == DeepSeekRefinementStatus.userAcceptedDoubao.rawValue
     }
 
     private var stageDurationsLine: String {

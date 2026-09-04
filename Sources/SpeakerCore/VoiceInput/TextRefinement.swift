@@ -222,10 +222,6 @@ public enum DeepSeekRefinementStatus: String, Equatable, Sendable {
     case notRequested
     case succeeded
     case fellBack
-    /// The user chose the confirmed Doubao Stage Result while DeepSeek
-    /// refinement was still pending. The selected Refinement Mode is kept on
-    /// the Session Record; no DeepSeek text was applied.
-    case userAcceptedDoubao
 }
 
 public struct TextRefinementOutcome: Equatable, Sendable {
