@@ -1709,6 +1709,36 @@ struct SpeakerCoreSpecs {
             try expect(!mode.diagnosticKind.contains("客户甲"))
         }
 
+        run("audio capture environment contains no free-text fields", failures: &failures) {
+            let secret = "private device and raw error detail"
+            let failure = AudioCaptureVoiceProcessingFailure.classify(
+                NSError(
+                    domain: secret,
+                    code: 77,
+                    userInfo: [NSLocalizedDescriptionKey: secret]
+                )
+            )
+            let snapshot = AudioCaptureEnvironmentSnapshot(
+                voiceProcessingRequested: true,
+                voiceProcessingActive: false,
+                voiceProcessingEnableFailure: failure,
+                automaticGainControlEnabled: false,
+                preferredMicrophoneMode: .voiceIsolation,
+                activeMicrophoneMode: .standard
+            )
+
+            func containsFreeText(_ value: Any) -> Bool {
+                if value is String { return true }
+                return Mirror(reflecting: value).children.contains {
+                    containsFreeText($0.value)
+                }
+            }
+
+            try expect(failure == .other)
+            try expect(!containsFreeText(snapshot))
+            try expect(!String(describing: snapshot).contains(secret))
+        }
+
         run("microphone denial is distinct from an unknown recording-device failure", failures: &failures) {
             let denied = VoiceInputProblem(
                 audioCaptureError: .microphonePermissionDenied

@@ -1143,6 +1143,66 @@ struct SpeakerAppScenarioSpecs {
         }
 
         run(
+            "diagnostic report renders audio capture environment and unknown fallbacks",
+            failures: &failures,
+            executed: &executed
+        ) {
+            func report(
+                _ environment: AudioCaptureEnvironmentSnapshot?
+            ) -> String {
+                SpeakerDiagnosticReport.make(from: .init(
+                    version: "1.2.3",
+                    build: "45",
+                    sourceRevision: "abc123",
+                    bundleIdentifier: "com.example.speaker",
+                    signingMode: "development",
+                    operatingSystem: "macOS test",
+                    credentialStorage: "keychain",
+                    accessibility: .granted,
+                    microphone: .granted,
+                    shortcut: "Fn",
+                    activity: "idle",
+                    refinement: "defaultSmooth",
+                    doubaoConfigured: true,
+                    doubaoResource: "volc.bigasr.sauc.duration",
+                    deepSeekConfigured: false,
+                    deepSeekVerified: false,
+                    historyRecordCount: 0,
+                    historyPersistence: "none",
+                    audioCaptureEnvironment: environment,
+                    latestRecord: nil
+                ))
+            }
+
+            let current = report(.init(
+                voiceProcessingRequested: true,
+                voiceProcessingActive: false,
+                voiceProcessingEnableFailure: .audioSystem,
+                automaticGainControlEnabled: false,
+                preferredMicrophoneMode: .voiceIsolation,
+                activeMicrophoneMode: .standard
+            ))
+            try expect(current.contains("audioCaptureVoiceProcessingRequested: true"))
+            try expect(current.contains("audioCaptureVoiceProcessingActive: false"))
+            try expect(current.contains("audioCaptureVoiceProcessingEnableFailure: audioSystem"))
+            try expect(current.contains("audioCaptureAGCEnabled: false"))
+            try expect(current.contains("audioCapturePreferredMicrophoneMode: voiceIsolation"))
+            try expect(current.contains("audioCaptureActiveMicrophoneMode: standard"))
+
+            let unavailable = report(nil)
+            for key in [
+                "audioCaptureVoiceProcessingRequested",
+                "audioCaptureVoiceProcessingActive",
+                "audioCaptureVoiceProcessingEnableFailure",
+                "audioCaptureAGCEnabled",
+                "audioCapturePreferredMicrophoneMode",
+                "audioCaptureActiveMicrophoneMode",
+            ] {
+                try expect(unavailable.contains("\(key): unknown"))
+            }
+        }
+
+        run(
             "diagnostic report includes latest structured failure evidence without user content",
             failures: &failures,
             executed: &executed

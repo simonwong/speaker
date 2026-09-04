@@ -27,6 +27,7 @@ package enum SpeakerDiagnosticReport {
         package let deepSeekVerified: Bool
         package let historyRecordCount: Int
         package let historyPersistence: String
+        package let audioCaptureEnvironment: AudioCaptureEnvironmentSnapshot?
         package let activeProvider: VoiceProviderRuntimeSnapshot?
         package let latestRecord: VoiceInputHistoryRecord?
 
@@ -49,6 +50,7 @@ package enum SpeakerDiagnosticReport {
             deepSeekVerified: Bool,
             historyRecordCount: Int,
             historyPersistence: String,
+            audioCaptureEnvironment: AudioCaptureEnvironmentSnapshot? = nil,
             activeProvider: VoiceProviderRuntimeSnapshot? = nil,
             latestRecord: VoiceInputHistoryRecord?
         ) {
@@ -70,6 +72,7 @@ package enum SpeakerDiagnosticReport {
             self.deepSeekVerified = deepSeekVerified
             self.historyRecordCount = historyRecordCount
             self.historyPersistence = historyPersistence
+            self.audioCaptureEnvironment = audioCaptureEnvironment
             self.activeProvider = activeProvider
             self.latestRecord = latestRecord
         }
@@ -96,6 +99,33 @@ package enum SpeakerDiagnosticReport {
             "historyRecords: \(max(0, snapshot.historyRecordCount))",
             "historyPersistence: \(clean(snapshot.historyPersistence))",
         ]
+
+        let capture = snapshot.audioCaptureEnvironment
+        let voiceProcessingFailure = capture.map {
+            $0.voiceProcessingEnableFailure?.rawValue ?? "none"
+        } ?? "unknown"
+        let preferredMicrophoneMode =
+            capture?.preferredMicrophoneMode.rawValue ?? "unknown"
+        let activeMicrophoneMode =
+            capture?.activeMicrophoneMode.rawValue ?? "unknown"
+        lines.append(
+            "audioCaptureVoiceProcessingRequested: \(boolean(capture?.voiceProcessingRequested))"
+        )
+        lines.append(
+            "audioCaptureVoiceProcessingActive: \(boolean(capture?.voiceProcessingActive))"
+        )
+        lines.append(
+            "audioCaptureVoiceProcessingEnableFailure: \(voiceProcessingFailure)"
+        )
+        lines.append(
+            "audioCaptureAGCEnabled: \(boolean(capture?.automaticGainControlEnabled))"
+        )
+        lines.append(
+            "audioCapturePreferredMicrophoneMode: \(preferredMicrophoneMode)"
+        )
+        lines.append(
+            "audioCaptureActiveMicrophoneMode: \(activeMicrophoneMode)"
+        )
 
         if let active = snapshot.activeProvider {
             lines.append(
@@ -203,6 +233,10 @@ package enum SpeakerDiagnosticReport {
             .sorted { $0.0 < $1.0 }
             .map { "\($0.0)=\($0.1)" }
             .joined(separator: ",")
+    }
+
+    private static func boolean(_ value: Bool?) -> String {
+        value.map(String.init) ?? "unknown"
     }
 
     private static func outcomeCode(
