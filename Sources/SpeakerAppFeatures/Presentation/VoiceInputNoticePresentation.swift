@@ -16,8 +16,8 @@ package extension VoiceInputNotice {
             default:
                 "DeepSeek 整理失败，已使用豆包结果。"
             }
-        case let .persistenceFailure(message):
-            message
+        case let .persistenceFailure(notice):
+            SpeakerCopy.History.urgentNotice(notice)
         }
     }
 }

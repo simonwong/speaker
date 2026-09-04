@@ -46,10 +46,17 @@ public struct LocalHistoryPersistenceStatus: Equatable, Sendable {
     }
 }
 
+/// Why the local history store could not finish its privacy migration.
+public enum LocalHistoryFailureReason: Equatable, Sendable {
+    case databaseUnavailable
+    /// A privacy-safe technical detail already free of user or provider text.
+    case detail(String)
+}
+
 public enum LocalHistoryPersistenceNotice: Equatable, Sendable {
     case corruptedDataPreserved(backupURL: URL, reason: String)
     case corruptedRecordsSkipped(count: Int)
-    case privacyMigrationFailed(reason: String)
+    case privacyMigrationFailed(reason: LocalHistoryFailureReason)
     case writeFailed(reason: String)
     /// Preserved corruption evidence could not be pruned back inside its
     /// budget, so the store's directory keeps growing until it is cleared.
@@ -125,7 +132,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
             )
         case let .failed(.protectionFailed(detail)):
             storedRecords = []
-            notice = .privacyMigrationFailed(reason: detail)
+            notice = .privacyMigrationFailed(reason: .detail(detail))
         case let .failed(.readFailed(detail)):
             storedRecords = []
             notice = .writeFailed(
@@ -287,9 +294,9 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         )
     }
 
-    public func persistenceFailureNotice() async -> String? {
-        guard case let .writeFailed(reason) = notice else { return nil }
-        return "会话历史写入失败：\(reason)"
+    public func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? {
+        guard case .writeFailed = notice else { return nil }
+        return notice
     }
 
     /// Notices remain visible across later successful writes so the UI cannot
@@ -534,6 +541,8 @@ package struct HistoryOutcomeV1: Codable {
                 }
                 return .delivered(
                     try requiredSessionID(),
+                    // Legacy records predate the application-name field; the
+                    // placeholder is part of the on-disk decoding contract.
                     applicationName: applicationName ?? "当前输入框",
                     text: text
                 )

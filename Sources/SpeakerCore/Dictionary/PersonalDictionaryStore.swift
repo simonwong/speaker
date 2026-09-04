@@ -9,21 +9,6 @@ public enum PersonalDictionaryStoreError: Error, Equatable, Sendable {
     case corruptionPreservationFailed
 }
 
-extension PersonalDictionaryStoreError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .readFailed:
-            "无法读取本机个人词库。"
-        case .writeFailed:
-            "无法保存本机个人词库。"
-        case .privacyProtectionFailed:
-            "无法把个人词库限制为仅当前用户可读，已停止加载。"
-        case .corruptionPreservationFailed:
-            "个人词库文件已损坏且无法保留副本，已停止加载。"
-        }
-    }
-}
-
 /// A corrupt Personal Dictionary file that was moved aside before loading
 /// continued from an empty dictionary.
 public struct PersonalDictionaryRecovery: Equatable, Sendable {

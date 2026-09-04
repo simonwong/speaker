@@ -27,8 +27,9 @@ package protocol RuntimeStartupStages: AnyObject {
     func loadSettings() async -> AppSettingsLoadResult
     func loadDoubaoResource(rawValue: String?) async
     /// Migrates provider credentials into the current store. Returns the
-    /// notice the migration wants shown, or nil when nothing needs saying.
-    func migrateCredentials() async -> String?
+    /// providers whose legacy credential is still unmigrated, or an empty
+    /// array when nothing needs saying.
+    func migrateCredentials() async -> [ProviderID]
     /// Moves the legacy Personal Dictionary file, or nil when no legacy
     /// location exists.
     func migrateLegacyDictionary() async -> PersonalDictionaryMigrationOutcome?
@@ -103,15 +104,17 @@ package final class RuntimeStartupSequence {
             publish(SpeakerCopy.Startup.settingsRecovered(
                 backupName: recovery.backupURL.lastPathComponent
             ))
-        case let .recoveryFailed(_, reason):
-            publish(reason)
+        case let .recoveryFailed(_, failure):
+            publish(SpeakerCopy.Startup.settingsLoadFailed(failure))
         case .defaults, .loaded:
             break
         }
         let settings = loadedSettings.settings
         await stages.loadDoubaoResource(rawValue: settings.doubaoResourceID)
         guard !Task.isCancelled else { return }
-        if let notice = await stages.migrateCredentials() {
+        if let notice = SpeakerCopy.Startup.credentialMigrationIncomplete(
+            providers: await stages.migrateCredentials()
+        ) {
             publish(notice)
         }
         guard !Task.isCancelled else { return }

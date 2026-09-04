@@ -462,7 +462,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
                 originalValue: nil,
                 processID: target.processID,
                 applicationName: runningApplication?.localizedName
-                    ?? "未知应用"
+                    ?? Self.unknownApplicationName
             ))
         }
 
@@ -521,9 +521,13 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             selection: selection,
             originalValue: originalValue,
             processID: target.processID,
-            applicationName: runningApplication?.localizedName ?? "未知应用"
+            applicationName: runningApplication?.localizedName ?? Self.unknownApplicationName
         ))
     }
+
+    /// Stored in Session Records as the Input Target's application name when
+    /// macOS reports none, so it is a persisted label rather than copy.
+    static let unknownApplicationName = "未知应用"
 
     package func secureInputEnabled() async -> Bool {
         IsSecureEventInputEnabled()

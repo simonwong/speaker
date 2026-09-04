@@ -320,11 +320,19 @@ public struct AppSettingsRecovery: Equatable, Sendable {
     }
 }
 
+/// Why the settings file could not be loaded or recovered. Details are the
+/// privacy-safe reasons the document store already produced.
+public enum AppSettingsLoadFailure: Equatable, Sendable {
+    case protectionFailed
+    case readFailed(detail: String)
+    case preservationFailed(detail: String)
+}
+
 public enum AppSettingsLoadResult: Equatable, Sendable {
     case defaults(SpeakerAppSettings)
     case loaded(SpeakerAppSettings)
     case recovered(SpeakerAppSettings, recovery: AppSettingsRecovery)
-    case recoveryFailed(SpeakerAppSettings, reason: String)
+    case recoveryFailed(SpeakerAppSettings, failure: AppSettingsLoadFailure)
 
     public var settings: SpeakerAppSettings {
         switch self {
@@ -337,17 +345,12 @@ public enum AppSettingsLoadResult: Equatable, Sendable {
     }
 }
 
+/// Structured settings-write failures; SpeakerAppFeatures renders the sentence.
 public enum AppSettingsStoreError: Error, Equatable, Sendable {
     case writeFailed(reason: String)
-}
-
-extension AppSettingsStoreError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case let .writeFailed(reason):
-            "无法保存 Speaker 设置：\(reason)"
-        }
-    }
+    /// The existing file could not be read safely, so it was kept and the
+    /// write refused rather than overwriting it.
+    case sourceUnreadable(AppSettingsLoadFailure)
 }
 
 /// The settings-writing seam the Settings feature models depend on. It carries
@@ -439,20 +442,11 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
                 recovery: AppSettingsRecovery(backupURL: backupURL, reason: corruption)
             )
         case .failed(.protectionFailed):
-            return .recoveryFailed(
-                .default,
-                reason: "无法保护设置文件权限，已停止加载本机设置。"
-            )
+            return .recoveryFailed(.default, failure: .protectionFailed)
         case let .failed(.readFailed(detail)):
-            return .recoveryFailed(
-                .default,
-                reason: "无法安全读取设置文件，已停止加载：\(detail)"
-            )
+            return .recoveryFailed(.default, failure: .readFailed(detail: detail))
         case let .failed(.preservationFailed(_, detail)):
-            return .recoveryFailed(
-                .default,
-                reason: "Settings could not be recovered: \(detail)"
-            )
+            return .recoveryFailed(.default, failure: .preservationFailed(detail: detail))
         }
     }
 
@@ -546,12 +540,10 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
 
     private func settingsForUpdate() throws -> SpeakerAppSettings {
         let result = load()
-        guard case let .recoveryFailed(_, reason) = result else {
+        guard case let .recoveryFailed(_, failure) = result else {
             return result.settings
         }
-        throw AppSettingsStoreError.writeFailed(
-            reason: "原设置文件无法安全读取，已保留原文件且拒绝覆盖：\(reason)"
-        )
+        throw AppSettingsStoreError.sourceUnreadable(failure)
     }
 }
 

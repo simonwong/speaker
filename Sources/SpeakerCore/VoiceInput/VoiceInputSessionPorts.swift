@@ -61,9 +61,9 @@ public protocol ClipboardWriting: Sendable {
 
 public protocol SessionHistoryRecording: Sendable {
     func save(_ record: VoiceInputHistoryRecord) async
-    func persistenceFailureNotice() async -> String?
+    func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice?
 }
 
 public extension SessionHistoryRecording {
-    func persistenceFailureNotice() async -> String? { nil }
+    func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? { nil }
 }

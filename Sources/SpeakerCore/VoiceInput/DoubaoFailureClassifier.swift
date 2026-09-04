@@ -163,6 +163,8 @@ package enum DoubaoFailureClassifier {
         }
     }
 
+    // Provider contract: these substrings match Doubao's own error messages
+    // when no structured code is available; they are never shown to the user.
     private static func messageLooksLikeCredentialFailure(_ message: String) -> Bool {
         message.contains("api key")
             || message.contains("apikey")

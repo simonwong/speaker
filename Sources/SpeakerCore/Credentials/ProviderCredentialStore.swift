@@ -16,27 +16,6 @@ public enum ProviderCredentialStoreError: Error, Equatable, Sendable {
     case storageUnavailable
 }
 
-extension ProviderCredentialStoreError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .emptyAPIKey:
-            "API Key 不能为空。"
-        case .apiKeyTooLarge:
-            "API Key 超出本机凭据存储允许的大小。"
-        case .accessDenied:
-            "无法访问本机凭据存储。"
-        case .interactionUnavailable:
-            "本机凭据存储当前不可用，请解锁 Mac 后重试。"
-        case .malformedStoredValue:
-            "已保存的 API Key 无法读取，请删除后重新保存。"
-        case .conflictingStoredValues:
-            "检测到多个旧凭据来源保存了不同的 API Key，已停止自动迁移并保留原数据。"
-        case .storageUnavailable:
-            "保存 API Key 失败，请稍后重试。"
-        }
-    }
-}
-
 public protocol ProviderCredentialStoring: Sendable {
     func save(apiKey: String, for provider: ProviderID) async throws
     func apiKey(for provider: ProviderID) async throws -> String?
@@ -330,13 +309,11 @@ public actor MigratingProviderCredentialStore: ProviderCredentialStoring {
         }
     }
 
-    public func migrationNotice() -> String? {
-        guard !cleanupFailures.isEmpty else { return nil }
-        let providers = cleanupFailures.keys
-            .map(\.rawValue)
-            .sorted()
-            .joined(separator: "、")
-        return "\(providers) 的旧凭据尚未完成安全迁移；已保留可用的 Keychain 凭据，请在解锁 Mac 后重试。"
+    /// Providers whose legacy credential could not be cleaned up after the
+    /// Keychain copy was confirmed, sorted by raw identifier. Empty when the
+    /// migration finished cleanly. SpeakerAppFeatures renders the notice.
+    public func unmigratedProviders() -> [ProviderID] {
+        cleanupFailures.keys.sorted { $0.rawValue < $1.rawValue }
     }
 
     private func cleanLegacyIfMatchingPrimaryBestEffort(

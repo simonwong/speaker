@@ -644,12 +644,12 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 transcriber: SpeechTranscriberFake(text: "仍可使用"),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
-                history: SessionHistoryFake(failureNotice: "会话历史写入失败：磁盘不可用")
+                history: SessionHistoryFake(failureNotice: .writeFailed(reason: "磁盘不可用"))
             )
             let noticePresentation = Task<VoiceInputPresentation?, Never> {
                 for await presentation in await sessions.observe() {
                     if presentation.notice
-                        == .persistenceFailure("会话历史写入失败：磁盘不可用")
+                        == .persistenceFailure(.writeFailed(reason: "磁盘不可用"))
                     {
                         return presentation
                     }
@@ -661,7 +661,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let presentation = await noticePresentation.value
             try expect(
                 presentation?.notice
-                    == .persistenceFailure("会话历史写入失败：磁盘不可用")
+                    == .persistenceFailure(.writeFailed(reason: "磁盘不可用"))
             )
             try expect(presentation?.activity.pendingText == "仍可使用")
         }

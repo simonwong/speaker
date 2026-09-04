@@ -40,7 +40,7 @@ package final class HistoryRetentionSettingsModel: ObservableObject {
             }
             notice = nil
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 }

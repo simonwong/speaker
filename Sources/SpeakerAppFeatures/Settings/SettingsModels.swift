@@ -227,7 +227,7 @@ package final class RefinementSettingsModel: ObservableObject {
         do {
             hasStoredKey = try await service.hasAPIKey()
         } catch {
-            credentialNotice = error.localizedDescription
+            credentialNotice = SpeakerCopy.Failure.message(for: error)
         }
 
         let loadedSettings = await settingsStore.load().settings
@@ -258,7 +258,7 @@ package final class RefinementSettingsModel: ObservableObject {
                 notice = nil
             }
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -285,7 +285,7 @@ package final class RefinementSettingsModel: ObservableObject {
             notice = nil
         } catch {
             connectionGeneration &+= 1
-            credentialNotice = error.localizedDescription
+            credentialNotice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -303,7 +303,7 @@ package final class RefinementSettingsModel: ObservableObject {
             await select(.defaultSmooth)
         } catch {
             connectionGeneration &+= 1
-            credentialNotice = error.localizedDescription
+            credentialNotice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -343,7 +343,7 @@ package final class RefinementSettingsModel: ObservableObject {
                 )
             case let .failure(error):
                 isConnectionVerified = false
-                connectionFailure = error.localizedDescription
+                connectionFailure = SpeakerCopy.Failure.message(for: error)
             }
         }
     }
@@ -399,7 +399,7 @@ package final class RefinementSettingsModel: ObservableObject {
                 try await persistSelection(mode)
             }
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -420,7 +420,7 @@ package final class RefinementSettingsModel: ObservableObject {
             syncPromptDraft()
             notice = nil
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -439,7 +439,7 @@ package final class RefinementSettingsModel: ObservableObject {
             syncPromptDraft()
             notice = nil
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -489,7 +489,7 @@ package final class RefinementSettingsModel: ObservableObject {
             notice = nil
             try await persistSelection(customMode)
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -510,7 +510,7 @@ package final class RefinementSettingsModel: ObservableObject {
             notice = nil
             try await persistSelection(customMode)
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -599,7 +599,7 @@ package final class DictionarySettingsModel: ObservableObject {
         } catch {
             allowsPersistence = false
             recovery = nil
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
@@ -645,7 +645,7 @@ package final class DictionarySettingsModel: ObservableObject {
             notice = nil
             return true
         } catch {
-            notice = error.localizedDescription
+            notice = SpeakerCopy.Failure.message(for: error)
             return false
         }
     }

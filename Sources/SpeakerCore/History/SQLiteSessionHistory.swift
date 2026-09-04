@@ -247,7 +247,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     private let maximumRecordCount: Int
     private var retentionPolicy: HistoryRetentionPolicy
     private var notice: LocalHistoryPersistenceNotice?
-    private var privacyMigrationFailureReason: String?
+    private var privacyMigrationFailureReason: LocalHistoryFailureReason?
     private var destructiveCheckpointPending = false
 
     public init(
@@ -483,7 +483,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     @discardableResult
     public func scrubUntrustedProviderMessages() async -> Bool {
         guard let db = connection?.raw else {
-            privacyMigrationFailureReason = "本地历史数据库不可用。"
+            privacyMigrationFailureReason = .databaseUnavailable
             return false
         }
         do {
@@ -532,7 +532,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             }
             return true
         } catch {
-            privacyMigrationFailureReason = PrivacySafeText.reason(for: error)
+            privacyMigrationFailureReason = .detail(PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -587,14 +587,14 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         }
     }
 
-    public func persistenceFailureNotice() async -> String? {
+    public func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? {
         switch visibleNotice {
         case let .privacyMigrationFailed(reason):
-            return "旧版会话历史的隐私清理失败：\(reason)"
+            return .privacyMigrationFailed(reason: reason)
         case let .writeFailed(reason):
-            return "会话历史写入失败：\(reason)"
+            return .writeFailed(reason: reason)
         case let .corruptedRecordsSkipped(count):
-            return "有 \(count) 条本地历史记录已损坏，其他记录仍可使用。"
+            return .corruptedRecordsSkipped(count: count)
         // Preserved evidence and an unpruned archive directory are both
         // reported through the History page instead of this urgent surface.
         case .corruptedDataPreserved, .recoveryArchivePruneFailed, nil:

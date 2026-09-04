@@ -63,28 +63,11 @@ public enum PersonalDictionaryValidationIssue: Equatable, Sendable {
     case duplicateWord(word: String, entryIDs: [UUID])
 }
 
-extension PersonalDictionaryValidationIssue: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .emptyWord:
-            "词条不能为空。"
-        case let .duplicateWord(word, _):
-            "词条“\(word)”已存在。"
-        }
-    }
-}
-
 public struct PersonalDictionaryValidationError: Error, Equatable, Sendable {
     public let issues: [PersonalDictionaryValidationIssue]
 
     public init(issues: [PersonalDictionaryValidationIssue]) {
         self.issues = issues
-    }
-}
-
-extension PersonalDictionaryValidationError: LocalizedError {
-    public var errorDescription: String? {
-        issues.first?.errorDescription ?? "个人词库无效。"
     }
 }
 
