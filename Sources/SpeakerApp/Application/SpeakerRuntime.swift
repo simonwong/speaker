@@ -24,6 +24,8 @@ final class SpeakerRuntime: ObservableObject {
     private let globalInteraction: GlobalVoiceInteractionRouter
     private let providerRuntimeDiagnostics:
         VoiceProviderRuntimeDiagnostics
+    private let audioCaptureEnvironmentSource:
+        any AudioCaptureEnvironmentProviding
 
     private(set) lazy var settingsWorkspace = SettingsWorkspace(
         navigation: settingsNavigation,
@@ -202,6 +204,7 @@ final class SpeakerRuntime: ObservableObject {
         )
         permissions = PermissionModel(access: SystemPermissionAccess())
         let audio = AVAudioCapture()
+        audioCaptureEnvironmentSource = audio
         let targets = AccessibilityInputTargets()
         let legacyHistoryFileURL = VersionedLocalSessionHistory.defaultFileURL()
         self.legacyHistoryFileURL = legacyHistoryFileURL
@@ -546,6 +549,8 @@ final class SpeakerRuntime: ObservableObject {
         let latestRecord = await history.latestRecord()
         let activeProvider =
             await providerRuntimeDiagnostics.activeSnapshot()
+        let audioCaptureEnvironment =
+            await audioCaptureEnvironmentSource.captureEnvironmentSnapshot()
         let buildIdentity = SpeakerBuildIdentity.current
         let credentialStorage = Bundle.main.object(
             forInfoDictionaryKey: "SpeakerCredentialStorage"
@@ -582,6 +587,7 @@ final class SpeakerRuntime: ObservableObject {
             deepSeekVerified: refinementSettings.isConnectionVerified,
             historyRecordCount: historyStatus.recordCount,
             historyPersistence: historyNotice,
+            audioCaptureEnvironment: audioCaptureEnvironment,
             activeProvider: activeProvider,
             latestRecord: latestRecord
         ))

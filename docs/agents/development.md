@@ -39,6 +39,10 @@ Use `./scripts/build` for the ordinary debug App build. For a focused warnings g
 
 A build check is complete only when the relevant configuration exits 0 without warnings.
 
+## Audio capture environment acceptance
+
+Use a real Mac for capture-environment acceptance. Start and end one Voice Input Session so the live recorder refreshes its snapshot, then use About to copy diagnostics. Confirm `audioCaptureVoiceProcessingRequested` is `true`; inspect `audioCaptureVoiceProcessingActive` and `audioCaptureVoiceProcessingEnableFailure` to distinguish active processing from the raw-capture fallback. Compare `audioCapturePreferredMicrophoneMode` with the mode selected in Control Center and `audioCaptureActiveMicrophoneMode` with the mode actually active for the current route. Record `audioCaptureAGCEnabled` as observed evidence only; Speaker does not change AGC. Values are `unknown` until live capture has supplied them.
+
 ## Launch, bundle, and local install
 
 Every command that bundles or launches Speaker must keep one stable local code identity:

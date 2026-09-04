@@ -15,6 +15,61 @@ public enum AudioCaptureError: Error, Equatable, Sendable {
     case deviceConfigurationChanged
 }
 
+public enum AudioCaptureVoiceProcessingFailure: String, Equatable, Sendable {
+    case audioSystem
+    case mediaServices
+    case other
+
+    package static func classify(
+        _ error: any Error
+    ) -> AudioCaptureVoiceProcessingFailure {
+        switch (error as NSError).domain {
+        case NSOSStatusErrorDomain, "com.apple.coreaudio.avfaudio":
+            .audioSystem
+        case "AVFoundationErrorDomain":
+            .mediaServices
+        default:
+            .other
+        }
+    }
+}
+
+public enum AudioCaptureMicrophoneMode: String, Equatable, Sendable {
+    case standard
+    case wideSpectrum
+    case voiceIsolation
+    case unknown
+}
+
+public struct AudioCaptureEnvironmentSnapshot: Equatable, Sendable {
+    public let voiceProcessingRequested: Bool
+    public let voiceProcessingActive: Bool
+    public let voiceProcessingEnableFailure: AudioCaptureVoiceProcessingFailure?
+    public let automaticGainControlEnabled: Bool
+    public let preferredMicrophoneMode: AudioCaptureMicrophoneMode
+    public let activeMicrophoneMode: AudioCaptureMicrophoneMode
+
+    public init(
+        voiceProcessingRequested: Bool,
+        voiceProcessingActive: Bool,
+        voiceProcessingEnableFailure: AudioCaptureVoiceProcessingFailure?,
+        automaticGainControlEnabled: Bool,
+        preferredMicrophoneMode: AudioCaptureMicrophoneMode,
+        activeMicrophoneMode: AudioCaptureMicrophoneMode
+    ) {
+        self.voiceProcessingRequested = voiceProcessingRequested
+        self.voiceProcessingActive = voiceProcessingActive
+        self.voiceProcessingEnableFailure = voiceProcessingEnableFailure
+        self.automaticGainControlEnabled = automaticGainControlEnabled
+        self.preferredMicrophoneMode = preferredMicrophoneMode
+        self.activeMicrophoneMode = activeMicrophoneMode
+    }
+}
+
+public protocol AudioCaptureEnvironmentProviding: Sendable {
+    func captureEnvironmentSnapshot() async -> AudioCaptureEnvironmentSnapshot?
+}
+
 package enum AudioCaptureQualityPolicy {
     /// Peak amplitude below this boundary is effectively digital silence.
     ///
@@ -37,7 +92,7 @@ package enum AudioCaptureQualityPolicy {
 }
 
 public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
-    AudioCaptureFailureProviding {
+    AudioCaptureFailureProviding, AudioCaptureEnvironmentProviding {
     /// Caps audio waiting to be consumed by the provider transport. This is a
     /// memory/resource boundary, not a deadline: healthy consumers keep the
     /// buffer close to empty regardless of recording duration.
@@ -50,6 +105,7 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
     private var meterTask: Task<Void, Never>?
     private var configurationObserver: NSObjectProtocol?
     private var activeRuntimeFailure: AudioCaptureError?
+    private var latestEnvironmentSnapshot: AudioCaptureEnvironmentSnapshot?
     private var telemetryObservers: [
         UUID: AsyncStream<RecordingTelemetry>.Continuation
     ] = [:]
@@ -91,6 +147,17 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        let voiceProcessingFailure: AudioCaptureVoiceProcessingFailure?
+        do {
+            try input.setVoiceProcessingEnabled(true)
+            voiceProcessingFailure = nil
+        } catch {
+            voiceProcessingFailure = .classify(error)
+        }
+        refreshCaptureEnvironment(
+            input: input,
+            voiceProcessingFailure: voiceProcessingFailure
+        )
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0,
               let outputFormat = AVAudioFormat(
@@ -124,6 +191,10 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         do {
             engine.prepare()
             try engine.start()
+            refreshCaptureEnvironment(
+                input: input,
+                voiceProcessingFailure: voiceProcessingFailure
+            )
         } catch {
             input.removeTap(onBus: 0)
             audioStream.finish()
@@ -234,6 +305,10 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         return stream
     }
 
+    public func captureEnvironmentSnapshot() -> AudioCaptureEnvironmentSnapshot? {
+        latestEnvironmentSnapshot
+    }
+
     private func sampleMeters() {
         guard let bridge, let recordingStartedAt else { return }
         let metrics = bridge.metrics()
@@ -269,6 +344,39 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
             NotificationCenter.default.removeObserver(configurationObserver)
         }
         configurationObserver = nil
+    }
+
+    private func refreshCaptureEnvironment(
+        input: AVAudioInputNode,
+        voiceProcessingFailure: AudioCaptureVoiceProcessingFailure?
+    ) {
+        latestEnvironmentSnapshot = AudioCaptureEnvironmentSnapshot(
+            voiceProcessingRequested: true,
+            voiceProcessingActive: input.isVoiceProcessingEnabled,
+            voiceProcessingEnableFailure: voiceProcessingFailure,
+            automaticGainControlEnabled: input.isVoiceProcessingAGCEnabled,
+            preferredMicrophoneMode: Self.microphoneMode(
+                AVCaptureDevice.preferredMicrophoneMode
+            ),
+            activeMicrophoneMode: Self.microphoneMode(
+                AVCaptureDevice.activeMicrophoneMode
+            )
+        )
+    }
+
+    private static func microphoneMode(
+        _ mode: AVCaptureDevice.MicrophoneMode
+    ) -> AudioCaptureMicrophoneMode {
+        switch mode {
+        case .standard:
+            .standard
+        case .wideSpectrum:
+            .wideSpectrum
+        case .voiceIsolation:
+            .voiceIsolation
+        @unknown default:
+            .unknown
+        }
     }
 
     private static func milliseconds(_ duration: Duration) -> Int {
