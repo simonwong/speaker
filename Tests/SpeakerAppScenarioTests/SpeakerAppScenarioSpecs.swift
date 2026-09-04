@@ -3186,6 +3186,8 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
+        await RuntimeLifecycleSpecs.run(failures: &failures)
+
         SpecSummary.finish(failures: failures, label: "app scenario specs")
     }
 

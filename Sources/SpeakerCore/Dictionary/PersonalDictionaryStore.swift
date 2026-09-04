@@ -60,7 +60,7 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         let canonicalTerm: String
     }
 
-    public let fileURL: URL
+    public nonisolated let fileURL: URL
     private let fileProtection: LocalFileProtection
 
     public init(fileURL: URL) {

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakerCore
 
 /// The one home for user-visible sentences more than one surface shows.
 ///
@@ -44,6 +45,55 @@ package enum SpeakerCopy {
                 "清除结果未通过验证，Speaker 没有报告成功；请重试。"
             case .io:
                 "部分本地数据无法删除，请关闭可能占用文件的程序后重试。"
+            }
+        }
+    }
+
+    /// Notices the startup sequence publishes about recovered or migrated
+    /// local data. Wording lives here so the runtime only dispatches.
+    package enum Startup {
+        package static let historyPrivacyScrubIncomplete =
+            "旧版会话历史的隐私清理未完成；Speaker 已保留明确错误供你处理。"
+        package static let interruptedSessionsNotReconciled =
+            "上次运行中断的会话历史未能完成恢复，请在“关于”中复制诊断信息。"
+        package static let legacyDictionaryCleanupFailed =
+            "个人词库已迁移，但旧版词库文件未能删除。"
+        package static let legacyDictionaryMigrationFailed =
+            "旧版个人词库未能迁移，原文件仍保留。"
+
+        package static func settingsRecovered(backupName: String) -> String {
+            "设置文件已恢复为默认值，原文件保留在 \(backupName)。"
+        }
+
+        package static func legacyDictionaryNotice(
+            _ outcome: PersonalDictionaryMigrationOutcome
+        ) -> String? {
+            switch outcome {
+            case .notNeeded, .primaryAlreadyExists, .migrated:
+                nil
+            case .migratedLegacyCleanupFailed:
+                legacyDictionaryCleanupFailed
+            case .failed:
+                legacyDictionaryMigrationFailed
+            }
+        }
+
+        package static func legacyHistoryNotice(
+            _ outcome: LegacyHistoryMigrationOutcome
+        ) -> String? {
+            switch outcome {
+            case .notNeeded, .migrated:
+                nil
+            case .migratedLegacyFileRemains:
+                "会话历史已迁移，但旧版 history.json 未能删除。"
+            case let .legacyCorrupted(backupName):
+                "旧版历史文件损坏，已保留为 \(backupName)。"
+            case .legacyProtectionFailed:
+                "旧版会话历史的文件权限无法收紧，已停止迁移并保留原文件。"
+            case .legacyNotReady:
+                "旧版会话历史尚未满足安全迁移条件，原文件仍保留。"
+            case .importRefused:
+                "旧版会话历史尚未完成迁移，原文件仍保留。"
             }
         }
     }
