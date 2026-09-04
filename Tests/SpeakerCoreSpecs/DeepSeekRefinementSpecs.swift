@@ -507,7 +507,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 )
             }
             let started = await eventually(
-                before: .milliseconds(300)
+                before: .seconds(2)
             ) {
                 probe.didStart
             }
@@ -523,7 +523,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 try expect(failure.kind == .cancelled)
             }
             let stopped = await eventually(
-                before: .milliseconds(300)
+                before: .seconds(2)
             ) {
                 probe.didStop
             }

@@ -953,7 +953,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 await system.shutdown()
                 await secondCompletion.markComplete()
             }
-            for _ in 0..<20 { await Task.yield() }
+            await settle()
             let firstCompletedEarly = await firstCompletion.isComplete
             let secondCompletedEarly = await secondCompletion.isComplete
 
@@ -1025,7 +1025,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 await system.shutdown()
                 await completion.markComplete()
             }
-            for _ in 0..<20 { await Task.yield() }
+            await settle()
             let completedDuringPreparation = await completion.isComplete
             try expect(!completedDuringPreparation)
 
@@ -1095,7 +1095,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 await sessions.shutdown()
                 await completion.markComplete()
             }
-            let completed = await eventually(before: .milliseconds(300)) {
+            let completed = await eventually(before: .seconds(2)) {
                 await completion.isComplete
             }
             await shutdown.value

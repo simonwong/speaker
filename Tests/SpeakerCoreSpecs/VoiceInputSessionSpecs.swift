@@ -140,14 +140,20 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
         }
 
         await runAsync("recorder start failure preserves preparation timing", failures: &failures) {
+            let clock = ManualVoiceInputClock()
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
-                audioCapture: DelayedFailingStartAudioCapture(),
+                audioCapture: DelayedFailingStartAudioCapture(
+                    clock: clock,
+                    startDelay: .milliseconds(20)
+                ),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
                 transcriber: SpeechTranscriberFake(text: "unused"),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
-                history: history
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                clock: clock
             )
 
             await sessions.send(.pressed)
@@ -155,8 +161,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             let record = await history.records.last
             try expect(record?.outcome.isRecordingFailed == true)
-            try expect((record?.durationMilliseconds ?? 0) > 0)
-            try expect((record?.stageDurationsMilliseconds["preparing"] ?? 0) > 0)
+            try expect(record?.durationMilliseconds == 20)
+            try expect(record?.stageDurationsMilliseconds["preparing"] == 20)
         }
 
         await runAsync("missing target waits for explicit copy", failures: &failures) {
@@ -565,14 +571,10 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             let result = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
-            let clock = ContinuousClock()
-            let deadline = clock.now.advanced(by: .seconds(1))
-            var record = await history.records.first
-            while record?.outcome.pendingCopyReason != .secureTarget,
-                  clock.now < deadline {
-                try? await Task.sleep(for: .milliseconds(5))
-                record = await history.records.first
+            _ = await eventually(before: .seconds(2)) {
+                await history.records.first?.outcome.pendingCopyReason == .secureTarget
             }
+            let record = await history.records.first
             try expect(
                 result?.activity.pendingCopyReason == .secureTarget,
                 "secure-target terminal presentation was missing"
@@ -700,7 +702,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             await sessions.send(.released)
 
             let result = await terminal.value
-            let persisted = await eventually(before: .milliseconds(300)) {
+            let persisted = await eventually(before: .seconds(2)) {
                 await history.records.first?.deliveryDiagnosticCode != nil
             }
             let record = await history.records.first
@@ -740,7 +742,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             let result = await terminal.value
             let persisted = await eventually(
-                before: .milliseconds(300)
+                before: .seconds(2)
             ) {
                 await history.records.first?
                     .deliveryDiagnosticCode != nil
@@ -988,13 +990,13 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             dispatcher.send(.pressed, at: 3_000_000_000)
             dispatcher.send(.released, at: 3_050_000_000)
-            try? await Task.sleep(for: .milliseconds(30))
+            await settle()
             let startCountDuringProcessing = await audio.startCount
             try expect(startCountDuringProcessing == 1)
 
             await transcriber.resume()
             _ = await terminal.value
-            try? await Task.sleep(for: .milliseconds(30))
+            await settle()
             let startCountAfterProcessing = await audio.startCount
             try expect(
                 startCountAfterProcessing == 1,
@@ -1003,10 +1005,11 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             await sessions.send(.dismissResult)
             dispatcher.send(.pressed, at: 4_000_000_000)
-            try? await Task.sleep(for: .milliseconds(50))
-            let restartedCount = await audio.startCount
+            let restarted = await eventually(before: .seconds(2)) {
+                await audio.startCount == 2
+            }
             try expect(
-                restartedCount == 2,
+                restarted,
                 "the gesture did not reset after rejecting a processing-time press"
             )
             await dispatcher.shutdown()
@@ -1033,7 +1036,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 await releaseCompleted.markComplete()
             }
             while await transcriber.callCount == 0 { await Task.yield() }
-            try? await Task.sleep(for: .milliseconds(120))
+            await settle()
 
             let completedWithoutProviderResult = await releaseCompleted.isComplete
             var currentPresentation: VoiceInputPresentation?
@@ -1061,7 +1064,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             "recording deadline starts only after audio capture succeeds",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let audio = AudioCaptureFake(delaysStart: true)
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
@@ -1071,21 +1074,19 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
 
             let press = Task { await sessions.send(.pressed) }
             while await audio.startCount == 0 { await Task.yield() }
-            for _ in 0..<10 { await Task.yield() }
-            let preparingRequestCount = await deadline.requestCount
+            await settle()
+            let preparingRequestCount = clock.sleepRequestCount
             try expect(preparingRequestCount == 0)
 
             await audio.resumeStart()
             await press.value
-            await deadline.waitUntilStarted()
-            let recordingRequestCount = await deadline.requestCount
+            await clock.waitUntilSleepRequestCount(1)
+            let recordingRequestCount = clock.sleepRequestCount
             try expect(recordingRequestCount == 1)
             await sessions.shutdown()
         }

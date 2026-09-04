@@ -10,7 +10,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "recording safety limit stops capture and provider without delivery",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let audio = StreamingAudioCaptureFake()
             let processor = StreamingVoiceTextProcessorFake()
             let target = TargetCaptureFake(
@@ -26,9 +26,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let terminal = terminalPresentation(from: await sessions.observe())
             let triggerTerminations = await sessions.observeTriggerTerminations()
@@ -38,17 +36,17 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             }
 
             await sessions.send(.pressed, triggerSequence: 41)
-            await deadline.waitUntilStarted()
-            let requestedDuration = await deadline.requestedDuration
+            await clock.waitUntilSleepRequestCount(1)
+            let requestedDuration = clock.sleepRequests.last
             try expect(requestedDuration == .seconds(600))
 
-            await deadline.fire()
+            clock.advance(by: .seconds(600))
             let presentation = await terminal.value
             let terminatedSequence = await triggerTermination.value
-            let providerCancelled = await eventually(before: .milliseconds(300)) {
+            let providerCancelled = await eventually(before: .seconds(2)) {
                 await processor.cancellationCount == 1
             }
-            let finalRecordReady = await eventually(before: .milliseconds(300)) {
+            let finalRecordReady = await eventually(before: .seconds(2)) {
                 await history.records.last?.outcome.failure
                     == .recordingLimitReached
             }
@@ -100,7 +98,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "release before the recording limit preserves one normal delivery",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let delivery = TextDeliveryFake(result: .delivered)
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -116,22 +114,20 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
 
             await sessions.send(.pressed)
-            await deadline.waitUntilStarted()
+            await clock.waitUntilSleepRequestCount(1)
             await sessions.send(.released)
-            await deadline.waitUntilCancelled()
+            await clock.waitUntilCancelledSleepCount(1)
 
             let deliveredTexts = await delivery.deliveredTexts
-            let finalRecordReady = await eventually(before: .milliseconds(300)) {
+            let finalRecordReady = await eventually(before: .seconds(2)) {
                 await history.records.last?.outcome.isDelivered == true
             }
             let record = await history.records.last
-            let deadlineCancellationCount = await deadline.cancellationCount
+            let deadlineCancellationCount = clock.cancelledSleepCount
             try expect(
                 deliveredTexts == ["流式结果"],
                 "normal delivery texts were \(deliveredTexts)"
@@ -150,7 +146,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "late release and provider result cannot replace a limit failure",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let processor = LateCompletingStreamingProcessor()
             let target = TargetCaptureFake(
                 result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
@@ -165,9 +161,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
@@ -175,14 +169,16 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             await processor.waitUntilStarted()
             // Streaming can begin before the deadline is armed; firing an
             // unarmed deadline is a no-op and the case would wait forever.
-            await deadline.waitUntilStarted()
-            await deadline.fire()
+            await clock.waitUntilSleepRequestCount(1)
+            clock.advance(by: .seconds(600))
             let limitPresentation = await terminal.value
             while await processor.cancellationCount == 0 { await Task.yield() }
 
             await sessions.send(.released)
             await processor.complete()
-            try? await Task.sleep(for: .milliseconds(20))
+            // Shutdown joins every task the late result could still reach, so
+            // the assertions below see the session's final state.
+            await sessions.shutdown()
 
             let record = await history.records.last
             let deliveredTexts = await delivery.deliveredTexts
@@ -199,7 +195,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "user cancellation and provider failure invalidate recording deadlines",
             failures: &failures
         ) {
-            let cancellationDeadline = ControlledRecordingDeadline()
+            let cancellationClock = ManualVoiceInputClock()
             let cancellationHistory = SessionHistoryFake()
             let cancellationSessions = VoiceInputSessions(
                 audioCapture: StreamingAudioCaptureFake(),
@@ -209,22 +205,20 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: cancellationHistory,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await cancellationDeadline.sleep(for: duration)
-                }
+                clock: cancellationClock
             )
             let cancelledTerminal = terminalPresentation(
                 from: await cancellationSessions.observe()
             )
 
             await cancellationSessions.send(.pressed)
-            await cancellationDeadline.waitUntilStarted()
+            await cancellationClock.waitUntilSleepRequestCount(1)
             await cancellationSessions.send(.cancel)
             let cancelledPresentation = await cancelledTerminal.value
-            await cancellationDeadline.waitUntilCancelled()
-            await cancellationDeadline.fire()
+            await cancellationClock.waitUntilCancelledSleepCount(1)
+            cancellationClock.advance(by: .seconds(600))
             let cancellationRecordReady = await eventually(
-                before: .milliseconds(300)
+                before: .seconds(2)
             ) {
                 await cancellationHistory.records.count == 1
             }
@@ -238,7 +232,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                     != .recordingLimitReached
             )
 
-            let providerDeadline = ControlledRecordingDeadline()
+            let providerClock = ManualVoiceInputClock()
             let provider = ManuallyFailingStreamingProcessor()
             let providerHistory = SessionHistoryFake()
             let providerSessions = VoiceInputSessions(
@@ -249,22 +243,20 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: providerHistory,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await providerDeadline.sleep(for: duration)
-                }
+                clock: providerClock
             )
             let providerTerminal = terminalPresentation(
                 from: await providerSessions.observe()
             )
 
             await providerSessions.send(.pressed)
-            await providerDeadline.waitUntilStarted()
+            await providerClock.waitUntilSleepRequestCount(1)
             await provider.waitUntilStarted()
             await provider.fail()
             let providerPresentation = await providerTerminal.value
-            await providerDeadline.waitUntilCancelled()
-            await providerDeadline.fire()
-            let providerRecordReady = await eventually(before: .milliseconds(300)) {
+            await providerClock.waitUntilCancelledSleepCount(1)
+            providerClock.advance(by: .seconds(600))
+            let providerRecordReady = await eventually(before: .seconds(2)) {
                 await providerHistory.records.count == 1
             }
             let providerRecords = await providerHistory.records
@@ -285,7 +277,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "a cancelled old deadline cannot affect a newer recording",
             failures: &failures
         ) {
-            let deadline = StubbornRecordingDeadline()
+            let clock = ManualVoiceInputClock(honoursCancellation: false)
             let audio = StreamingAudioCaptureFake()
             let target = TargetCaptureFake(
                 result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
@@ -300,51 +292,38 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
 
             await sessions.send(.pressed)
-            await deadline.waitUntilRequestCount(1)
+            await clock.waitUntilSleepRequestCount(1)
             await sessions.send(.released)
-            let firstRecordReady = await eventually(before: .milliseconds(300)) {
+            let firstRecordReady = await eventually(before: .seconds(2)) {
                 await history.records.count == 1
             }
             try expect(firstRecordReady, "first session did not finish normally")
 
             await sessions.send(.pressed)
-            await deadline.waitUntilRequestCount(2)
+            await clock.waitUntilSleepRequestCount(2)
             let secondTerminal = terminalPresentation(from: await sessions.observe())
-            await deadline.fire(requestID: 0)
-            for _ in 0..<20 { await Task.yield() }
 
-            let cancelCountBeforeCurrentDeadline = await audio.cancelCount
-            let captureCountBeforeCurrentDeadline = await target.captureCount
-            let recordsBeforeCurrentDeadline = await history.records
-            try expect(
-                cancelCountBeforeCurrentDeadline == 0,
-                "stale deadline cancelled audio \(cancelCountBeforeCurrentDeadline) times"
-            )
-            try expect(
-                captureCountBeforeCurrentDeadline == 1,
-                "stale deadline changed target captures to \(captureCountBeforeCurrentDeadline)"
-            )
-            try expect(
-                recordsBeforeCurrentDeadline.count == 2,
-                "stale deadline changed history count to \(recordsBeforeCurrentDeadline.count)"
-            )
-            try expect(
-                recordsBeforeCurrentDeadline.last?.outcome.isRecording == true,
-                "stale deadline replaced the newer Recording outcome"
-            )
+            // The first session's deadline was cancelled, but the stubborn
+            // clock kept it suspended. Wake it ten seconds into the second
+            // recording: a stale wake-up that wrongly ended that recording
+            // would leave a ten-second record instead of the ten-minute one
+            // the real deadline produces below.
+            clock.advance(by: .seconds(10))
+            let staleResumed = clock.resume(sleepRequest: 0)
+            try expect(staleResumed, "the cancelled deadline was not left suspended")
 
-            await deadline.fire(requestID: 1)
+            clock.advance(by: .seconds(590))
             let secondPresentation = await secondTerminal.value
-            let secondRecordReady = await eventually(before: .milliseconds(300)) {
-                await history.records.count == 2
+            let secondRecordReady = await eventually(before: .seconds(2)) {
+                await history.records.last?.outcome.failure == .recordingLimitReached
             }
             let finalRecords = await history.records
+            let cancelCount = await audio.cancelCount
+            let captureCount = await target.captureCount
             try expect(
                 secondPresentation?.activity.failure == .recordingLimitReached,
                 "current deadline produced \(String(describing: secondPresentation?.activity))"
@@ -355,16 +334,18 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 "current deadline produced \(finalRecords.count) total records"
             )
             try expect(
-                finalRecords.last?.outcome.failure == .recordingLimitReached,
-                "current deadline history was \(String(describing: finalRecords.last?.outcome))"
+                finalRecords.last?.durationMilliseconds == 600_000,
+                "stale deadline ended the recording after \(String(describing: finalRecords.last?.durationMilliseconds)) ms"
             )
+            try expect(cancelCount == 1, "audio was cancelled \(cancelCount) times")
+            try expect(captureCount == 1, "target captures changed to \(captureCount)")
         }
 
         await runAsync(
             "shutdown does not wait for a cancelled provider after the limit",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let provider = LateCompletingStreamingProcessor()
             let delivery = TextDeliveryFake(result: .delivered)
             let history = SessionHistoryFake()
@@ -376,19 +357,17 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let terminal = terminalPresentation(from: await sessions.observe())
             let shutdownCompletion = CompletionFlag()
 
             await sessions.send(.pressed)
             await provider.waitUntilStarted()
-            await deadline.waitUntilStarted()
-            await deadline.fire()
+            await clock.waitUntilSleepRequestCount(1)
+            clock.advance(by: .seconds(600))
             let limitPresentation = await terminal.value
-            let recordReady = await eventually(before: .milliseconds(300)) {
+            let recordReady = await eventually(before: .seconds(2)) {
                 await history.records.last?.outcome.failure
                     == .recordingLimitReached
             }
@@ -397,7 +376,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 await sessions.shutdown()
                 await shutdownCompletion.markComplete()
             }
-            let shutdownFinished = await eventually(before: .milliseconds(300)) {
+            let shutdownFinished = await eventually(before: .seconds(2)) {
                 await shutdownCompletion.isComplete
             }
             if !shutdownFinished {
@@ -405,7 +384,6 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             }
             await shutdown.value
             await provider.complete()
-            for _ in 0..<20 { await Task.yield() }
 
             let records = await history.records
             let deliveredTexts = await delivery.deliveredTexts
@@ -426,7 +404,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "deadline termination resets the global tap gesture for another session",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let audio = StreamingAudioCaptureFake()
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
@@ -436,23 +414,21 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
             let terminal = terminalPresentation(from: await sessions.observe())
 
             dispatcher.send(.pressed, at: 1_000_000_000)
             dispatcher.send(.released, at: 1_050_000_000)
-            await deadline.waitUntilRequestCount(1)
-            await deadline.fire()
+            await clock.waitUntilSleepRequestCount(1)
+            clock.advance(by: .seconds(600))
             _ = await terminal.value
             await Task.yield()
 
             dispatcher.send(.pressed, at: 2_000_000_000)
             dispatcher.send(.released, at: 2_050_000_000)
-            let restarted = await eventually(before: .milliseconds(300)) {
+            let restarted = await eventually(before: .seconds(2)) {
                 await audio.startCount == 2
             }
 
@@ -464,7 +440,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "shutdown and capture failure cancel the recording deadline",
             failures: &failures
         ) {
-            let shutdownDeadline = ControlledRecordingDeadline()
+            let shutdownClock = ManualVoiceInputClock()
             let shutdownAudio = AudioCaptureFake()
             let shutdownSessions = VoiceInputSessions(
                 audioCapture: shutdownAudio,
@@ -474,19 +450,17 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await shutdownDeadline.sleep(for: duration)
-                }
+                clock: shutdownClock
             )
 
             await shutdownSessions.send(.pressed)
-            await shutdownDeadline.waitUntilStarted()
+            await shutdownClock.waitUntilSleepRequestCount(1)
             await shutdownSessions.shutdown()
-            await shutdownDeadline.waitUntilCancelled()
+            await shutdownClock.waitUntilCancelledSleepCount(1)
             let shutdownCancelCount = await shutdownAudio.cancelCount
             try expect(shutdownCancelCount == 1)
 
-            let failureDeadline = ControlledRecordingDeadline()
+            let failureClock = ManualVoiceInputClock()
             let failureAudio = StreamingAudioCaptureFake()
             let failureSessions = VoiceInputSessions(
                 audioCapture: failureAudio,
@@ -496,21 +470,19 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await failureDeadline.sleep(for: duration)
-                }
+                clock: failureClock
             )
             let failureTerminal = terminalPresentation(
                 from: await failureSessions.observe()
             )
 
             await failureSessions.send(.pressed)
-            await failureDeadline.waitUntilStarted()
+            await failureClock.waitUntilSleepRequestCount(1)
             await failureAudio.emitFailure(.deviceConfigurationChanged)
             let failurePresentation = await failureTerminal.value
-            await failureDeadline.waitUntilCancelled()
+            await failureClock.waitUntilCancelledSleepCount(1)
             let failureDeadlineCancellationCount =
-                await failureDeadline.cancellationCount
+                failureClock.cancelledSleepCount
 
             try expect(failurePresentation?.activity.failure == .audioDeviceChanged)
             try expect(failureDeadlineCancellationCount == 1)
@@ -520,7 +492,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "shutdown awaits recording-limit cleanup and durable history queueing",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let audio = BlockingCancelAudioCapture()
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -531,21 +503,19 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let shutdownCompletion = CompletionFlag()
 
             await sessions.send(.pressed)
-            await deadline.waitUntilStarted()
-            await deadline.fire()
+            await clock.waitUntilSleepRequestCount(1)
+            clock.advance(by: .seconds(600))
             await audio.waitUntilCancelStarted()
             let shutdown = Task {
                 await sessions.shutdown()
                 await shutdownCompletion.markComplete()
             }
-            for _ in 0..<20 { await Task.yield() }
+            await settle()
             let completedBeforeCancelFinished = await shutdownCompletion.isComplete
             try expect(!completedBeforeCancelFinished)
 
@@ -562,7 +532,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             "shutdown awaits provider-failure cleanup and durable history queueing",
             failures: &failures
         ) {
-            let deadline = ControlledRecordingDeadline()
+            let clock = ManualVoiceInputClock()
             let audio = BlockingCancelAudioCapture()
             let provider = ManuallyFailingStreamingProcessor()
             let history = SessionHistoryFake()
@@ -574,15 +544,13 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history,
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let terminal = terminalPresentation(from: await sessions.observe())
             let shutdownCompletion = CompletionFlag()
 
             await sessions.send(.pressed)
-            await deadline.waitUntilStarted()
+            await clock.waitUntilSleepRequestCount(1)
             await provider.waitUntilStarted()
             await provider.fail()
             let providerFailure = await terminal.value
@@ -591,7 +559,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 await sessions.shutdown()
                 await shutdownCompletion.markComplete()
             }
-            for _ in 0..<20 { await Task.yield() }
+            await settle()
             let completedBeforeCancelFinished = await shutdownCompletion.isComplete
             try expect(!completedBeforeCancelFinished)
 
@@ -634,7 +602,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 await completion.markComplete()
             }
 
-            let completed = await eventually(before: .milliseconds(300)) {
+            let completed = await eventually(before: .seconds(2)) {
                 await completion.isComplete
             }
             await shutdown.value
@@ -702,7 +670,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 await sessions.shutdown()
                 await shutdownCompletion.markComplete()
             }
-            for _ in 0..<20 { await Task.yield() }
+            await settle()
             let completedBeforeRestore = await shutdownCompletion.isComplete
 
             try expect(requestedDuration == .milliseconds(500))
@@ -741,14 +709,15 @@ enum RecordingLimitSpecs: CoreSpecDomain {
 
             dispatcher.send(.pressed, at: 3_000_000_000)
             dispatcher.send(.released, at: 3_050_000_000)
-            try? await Task.sleep(for: .milliseconds(30))
+            await settle()
             await sessions.send(.dismissResult)
 
             dispatcher.send(.pressed, at: 4_000_000_000)
-            try? await Task.sleep(for: .milliseconds(50))
-            let restartedCount = await audio.startCount
+            let restarted = await eventually(before: .seconds(2)) {
+                await audio.startCount == 2
+            }
             try expect(
-                restartedCount == 2,
+                restarted,
                 "pending-copy rejection left the shortcut gesture latched"
             )
             await dispatcher.shutdown()
@@ -826,7 +795,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 await dispatcher.shutdown()
                 await completion.markComplete()
             }
-            try? await Task.sleep(for: .milliseconds(20))
+            await settle()
             let completedPrematurely = await completion.isComplete
             try expect(completedPrematurely == false)
 
@@ -836,6 +805,69 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let saveCallCount = await history.saveCallCount
             try expect(completedAfterFlush)
             try expect(saveCallCount >= 2)
+        }
+
+        await runAsync("shutdown flushes a history write enqueued while an earlier one is still pending", failures: &failures) {
+            let history = BlockingSessionHistoryFake()
+            let transcriber = SpeechTranscriberFake(
+                text: "unused",
+                delaysResponse: true
+            )
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                transcriber: transcriber,
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history
+            )
+
+            // Session one completes while every history write stays blocked.
+            await sessions.send(.pressed)
+            let firstRelease = Task { await sessions.send(.released) }
+            while await transcriber.callCount == 0 { await Task.yield() }
+            await transcriber.resume()
+            await firstRelease.value
+            await sessions.send(.dismissResult)
+
+            // Session two is still with the provider when shutdown begins.
+            await sessions.send(.pressed)
+            let secondRelease = Task { await sessions.send(.released) }
+            while await transcriber.callCount < 2 { await Task.yield() }
+
+            let completion = CompletionFlag()
+            let shutdown = Task {
+                await sessions.shutdown()
+                await completion.markComplete()
+            }
+            // Let shutdown cancel the provider request before releasing it, so
+            // session two settles as cancelled rather than racing to deliver.
+            let providerCancelled = await eventually(before: .seconds(2)) {
+                await transcriber.cancellationCount == 1
+            }
+            try expect(providerCancelled, "shutdown did not cancel the in-flight provider request")
+            await transcriber.resume()
+            await secondRelease.value
+            await settle()
+            let completedBeforeFlush = await completion.isComplete
+
+            // Shutdown's cancellation of session two queued one more write
+            // behind the blocked ones; it must reach storage before shutdown
+            // returns.
+            await history.unblock()
+            await shutdown.value
+            let records = await history.records
+            try expect(!completedBeforeFlush, "shutdown returned while history writes were pending")
+            try expect(
+                records.count == 2,
+                "\(records.count) sessions reached history before shutdown returned"
+            )
+            try expect(
+                records.last?.outcome.isCancelled == true,
+                "the write queued during shutdown did not reach history: \(String(describing: records.last?.outcome))"
+            )
         }
 
         await runAsync("queued trigger cancel preempts an in-flight provider request", failures: &failures) {

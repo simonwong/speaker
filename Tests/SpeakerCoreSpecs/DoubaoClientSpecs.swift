@@ -180,8 +180,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 return result
             }
 
-            try? await Task.sleep(for: .milliseconds(50))
-            let completedWithoutExternalCancellation = await completion.isComplete
+            let completedWithoutExternalCancellation = await eventually(before: .seconds(2)) {
+                await completion.isComplete
+            }
             if !completedWithoutExternalCancellation {
                 // Clean up the deliberately non-cooperative fake so a red test
                 // reports normally instead of leaving the suite suspended.
@@ -221,7 +222,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 if await probe.takeFirstChunk() {
                     return Data([1, 2])
                 }
-                try? await Task.sleep(for: .seconds(10))
+                try? await suspendUntilCancelled()
                 return nil
             })
             let request = Task {
@@ -232,6 +233,8 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
 
             request.cancel()
+            let finished = await finishes(request, before: .seconds(2))
+            try expect(finished, "cancellation did not end the Doubao request")
             do {
                 _ = try await request.value
                 throw SpecFailure(message: "cancelled Doubao request succeeded")
@@ -279,7 +282,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 )
             }
             let reachedAwaitingFinal = await eventually(
-                before: .milliseconds(300)
+                before: .seconds(2)
             ) {
                 await diagnostics.activeSnapshot()?.phase
                     == .awaitingFinal
@@ -297,9 +300,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(snapshot?.httpStatusCode == 101)
 
             request.cancel()
-            _ = try? await request.value
+            let finished = await finishes(request, before: .seconds(2))
+            try expect(finished, "cancellation did not end the Doubao request")
             let cleared = await eventually(
-                before: .milliseconds(300)
+                before: .seconds(2)
             ) {
                 await diagnostics.activeSnapshot() == nil
             }
@@ -327,7 +331,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                     makeAudioStream([Data([1, 2])])
                 )
             }
-            let sendStarted = await eventually(before: .milliseconds(300)) {
+            let sendStarted = await eventually(before: .seconds(2)) {
                 await connection.sendAttemptCount == 1
             }
             let snapshot = await diagnostics.activeSnapshot()
@@ -336,7 +340,8 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(snapshot?.phase == .connecting)
 
             request.cancel()
-            _ = try? await request.value
+            let finished = await finishes(request, before: .seconds(2))
+            try expect(finished, "cancellation did not end the Doubao request")
         }
 
         await runAsync("Doubao response metadata cannot advance the audio transport phase", failures: &failures) {

@@ -89,7 +89,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await sessions.send(.cancel)
             let terminal = await firstTerminalPresentation(
                 from: stream,
-                before: .milliseconds(300)
+                before: .seconds(2)
             )
 
             try expect(terminal?.activity.isCancelled == true)
@@ -121,7 +121,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             await delivery.finish(with: .delivered)
             await release.value
-            let recordReady = await eventually(before: .milliseconds(300)) {
+            let recordReady = await eventually(before: .seconds(2)) {
                 await history.records.last?.outcome.isTerminal == true
             }
             let record = await history.records.last
@@ -207,7 +207,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await sessions.send(.cancel)
             let terminal = await firstTerminalPresentation(
                 from: stream,
-                before: .milliseconds(300)
+                before: .seconds(2)
             )
             await release.value
 
@@ -310,7 +310,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await sessions.send(.released)
             let terminal = await firstTerminalPresentation(
                 from: presentations,
-                before: .milliseconds(300)
+                before: .seconds(2)
             )
 
             if case let .failed(_, failure) = terminal?.activity {
@@ -342,7 +342,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await sessions.send(.pressed)
             let terminal = await firstTerminalPresentation(
                 from: stream,
-                before: .milliseconds(300)
+                before: .seconds(2)
             )
 
             if case let .failed(_, failure) = terminal?.activity {
@@ -374,15 +374,16 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             dispatcher.send(.released, at: 1_050_000_000)
             _ = await firstTerminalPresentation(
                 from: presentations,
-                before: .milliseconds(300)
+                before: .seconds(2)
             )
 
             // The first press after the failure must start a new session; it
             // must not be consumed as the stale latch's stop gesture.
             dispatcher.send(.pressed, at: 2_000_000_000)
-            try? await Task.sleep(for: .milliseconds(30))
-            let startCount = await audio.startCount
-            try expect(startCount == 2)
+            let restarted = await eventually(before: .seconds(2)) {
+                await audio.startCount == 2
+            }
+            try expect(restarted, "the press after the failure did not start a new session")
             await dispatcher.shutdown()
         }
 
@@ -403,7 +404,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await audio.emitFailure(.deviceConfigurationChanged)
             let terminal = await firstTerminalPresentation(
                 from: stream,
-                before: .milliseconds(300)
+                before: .seconds(2)
             )
 
             if case let .failed(_, failure) = terminal?.activity {
@@ -411,10 +412,18 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             } else {
                 throw SpecFailure(message: "device change did not close the recording")
             }
-            let cancelCount = await audio.cancelCount
+            // The terminal presentation is published before recorder cleanup
+            // and the history write, so wait for both rather than sampling.
+            let audioCancelled = await eventually(before: .seconds(2)) {
+                await audio.cancelCount == 1
+            }
+            let recordReady = await eventually(before: .seconds(2)) {
+                await history.records.last?.providerErrorCode
+                    == "audio.device_configuration_changed"
+            }
             let record = await history.records.last
-            try expect(cancelCount == 1)
-            try expect(record?.providerErrorCode == "audio.device_configuration_changed")
+            try expect(audioCancelled, "device change did not cancel the recorder once")
+            try expect(recordReady, "device change did not reach history")
             try expect(record?.transcriptionProvider == "local")
         }
     }
