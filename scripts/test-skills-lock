@@ -1,0 +1,58 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+LOCK="$ROOT/skills-lock.json"
+SKILL_ROOT="$ROOT/.agents/skills"
+LINK_ROOT="$ROOT/.claude/skills"
+
+fail() {
+    print -u2 "test-skills-lock: $1"
+    exit 1
+}
+
+[[ -f "$LOCK" ]] || fail "skills-lock.json is missing."
+
+# `plutil -lint` only accepts property lists, so a conversion is the syntax
+# check: JSON that cannot be parsed makes this fail.
+/usr/bin/plutil -convert xml1 -o /dev/null -- "$LOCK" >/dev/null 2>&1 \
+    || fail "skills-lock.json is not valid JSON."
+
+VERSION="$(
+    /usr/bin/plutil -extract version raw -o - -- "$LOCK" 2>/dev/null
+)" || fail "skills-lock.json declares no version."
+[[ "$VERSION" == "1" ]] \
+    || fail "Unsupported skills-lock.json version: $VERSION"
+
+LOCKED_OUTPUT="$(
+    /usr/bin/plutil -extract skills raw -o - -- "$LOCK" 2>/dev/null
+)" || fail "skills-lock.json declares no skills object."
+
+typeset -a LOCKED_SKILLS
+LOCKED_SKILLS=("${(@f)LOCKED_OUTPUT}")
+LOCKED_SKILLS=("${(@)LOCKED_SKILLS:#}")
+(( ${#LOCKED_SKILLS} > 0 )) || fail "skills-lock.json locks no skills."
+
+for NAME in "${LOCKED_SKILLS[@]}"; do
+    [[ "$NAME" != *[^A-Za-z0-9_-]* ]] \
+        || fail "Unsafe locked skill name: $NAME"
+    /usr/bin/plutil -extract "skills.$NAME.skillPath" raw -o - -- "$LOCK" \
+        >/dev/null 2>&1 \
+        || fail "Locked skill records no skillPath: $NAME"
+    [[ -d "$SKILL_ROOT/$NAME" ]] \
+        || fail "Locked skill has no directory: .agents/skills/$NAME"
+    [[ -f "$SKILL_ROOT/$NAME/SKILL.md" ]] \
+        || fail "Locked skill has no SKILL.md: .agents/skills/$NAME/SKILL.md"
+    [[ -e "$LINK_ROOT/$NAME" ]] \
+        || fail "Locked skill is not exposed at .claude/skills/$NAME"
+done
+
+for DIRECTORY in "$SKILL_ROOT"/*(N/); do
+    NAME="${DIRECTORY:t}"
+    (( ${LOCKED_SKILLS[(I)$NAME]} > 0 )) \
+        || fail "Skill directory is absent from skills-lock.json: $NAME"
+done
+
+print "PASS: skills-lock.json matches ${#LOCKED_SKILLS} skill directories"
