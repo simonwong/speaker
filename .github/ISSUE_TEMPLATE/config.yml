@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 隐私说明
+    url: https://github.com/simonwong/speaker/blob/main/PRIVACY.md
+    about: 提交前请先阅读：不要在 issue 中粘贴转录文字、音频或 API Key。
+  - name: 使用与安装文档
+    url: https://github.com/simonwong/speaker/blob/main/README.zh-CN.md
+    about: 安装、权限授予与发布渠道的说明。
