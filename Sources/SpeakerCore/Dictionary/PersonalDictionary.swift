@@ -32,6 +32,23 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public enum DictionaryEntryQualityHint: Equatable, Sendable {
+    case none
+    case tooLong
+    case singleCharacter
+}
+
+public enum DictionaryEntryQualityPolicy {
+    public static func hint(for word: String) -> DictionaryEntryQualityHint {
+        let length = word
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .count
+        if length >= 10 { return .tooLong }
+        if length == 1 { return .singleCharacter }
+        return .none
+    }
+}
+
 extension DictionaryEntry {
     static func stableOrder(_ lhs: DictionaryEntry, _ rhs: DictionaryEntry) -> Bool {
         let lhsKey = DictionaryTermKey(lhs.word).value

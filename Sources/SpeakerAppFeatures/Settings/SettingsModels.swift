@@ -537,8 +537,8 @@ package final class RefinementSettingsModel: ObservableObject {
 
 @MainActor
 package final class DictionarySettingsModel: ObservableObject {
-    @Published var entries: [DictionaryEntry] = []
-    @Published var draftWord = ""
+    @Published package var entries: [DictionaryEntry] = []
+    @Published package var draftWord = ""
     @Published private(set) var notice: String?
 
     private let store: VersionedJSONPersonalDictionaryStore
@@ -551,6 +551,24 @@ package final class DictionarySettingsModel: ObservableObject {
     ) {
         self.store = store
         self.configuration = configuration
+    }
+
+    package var sentEntryCount: Int {
+        requestContext.hotwords.count
+    }
+
+    package var sendingCountText: String {
+        "\(sentEntryCount)/\(DictionaryProviderCapacity.doubao.maximumHotwordCount) 条会发送给豆包"
+    }
+
+    package var omittedEntryIDs: Set<UUID> {
+        Set(requestContext.omissions.map(\.entryID))
+    }
+
+    package func qualityHint(
+        for entry: DictionaryEntry
+    ) -> DictionaryEntryQualityHint {
+        DictionaryEntryQualityPolicy.hint(for: entry.word)
     }
 
     package func load() async {
@@ -566,14 +584,27 @@ package final class DictionarySettingsModel: ObservableObject {
         }
     }
 
-    func add() async {
-        let entry = DictionaryEntry(word: draftWord)
-        guard await save(entries + [entry]) else { return }
+    @discardableResult
+    package func add() async -> Bool {
+        guard await add(word: draftWord) else { return false }
         draftWord = ""
+        return true
     }
 
-    func delete(_ id: UUID) async {
+    @discardableResult
+    package func add(word: String) async -> Bool {
+        let entry = DictionaryEntry(word: word)
+        return await save(entries + [entry])
+    }
+
+    package func delete(_ id: UUID) async {
         _ = await save(entries.filter { $0.id != id })
+    }
+
+    private var requestContext: DictionaryRequestContext {
+        DictionaryRequestContextBuilder.makeContext(
+            from: PersonalDictionarySnapshot(entries: entries)
+        )
     }
 
     private func save(_ candidate: [DictionaryEntry]) async -> Bool {

@@ -562,6 +562,43 @@ struct SpeakerAppUISpecs {
         }
 
         run(
+            "dictionary chip exposes omission and quality guidance",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let hostingView = NSHostingView(rootView: DictionaryEntryChip(
+                word: "1234567890",
+                isOmitted: true,
+                qualityHint: .tooLong,
+                onDelete: {}
+            ))
+            hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 80)
+            let window = NSWindow(
+                contentRect: NSRect(x: -10_000, y: -10_000, width: 320, height: 80),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = hostingView
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let labels = accessibilityLabels(in: hostingView)
+
+            try expect(
+                labels.contains { $0.contains("不会发送") },
+                "dictionary omission guidance is not exposed; found \(labels)"
+            )
+            try expect(
+                labels.contains { $0.contains("建议少于 10 个字符") },
+                "dictionary quality guidance is not exposed; found \(labels)"
+            )
+        }
+
+        run(
             "onboarding window remains usable on the available screen",
             failures: &failures,
             executed: &executed

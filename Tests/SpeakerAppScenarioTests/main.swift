@@ -1692,6 +1692,122 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
+            "dictionary settings exposes provider capacity and saves a hinted Entry",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-dictionary-capacity-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedJSONPersonalDictionaryStore(
+                fileURL: directory.appendingPathComponent("dictionary.json")
+            )
+            let initialEntries = (1...100).map {
+                DictionaryEntry(word: "Entry \($0)")
+            }
+            try await store.save(PersonalDictionary(entries: initialEntries))
+            let configuration = VoiceInputConfigurationController()
+            let model = DictionarySettingsModel(
+                store: store,
+                configuration: configuration
+            )
+
+            await model.load()
+            model.draftWord = "1234567890"
+            await model.add()
+
+            try expect(model.entries.count == 101)
+            try expect(model.sentEntryCount == 100)
+            try expect(model.sendingCountText == "100/100 条会发送给豆包")
+            try expect(model.omittedEntryIDs == Set([model.entries[100].id]))
+            try expect(model.qualityHint(for: model.entries[100]) == .tooLong)
+            let persisted = try await store.load()
+            try expect(persisted.entries.last?.word == "1234567890")
+        }
+
+        await runAsync(
+            "history adds an edited candidate through the shared Personal Dictionary model",
+            failures: &failures,
+            executed: &executed
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-history-dictionary-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedJSONPersonalDictionaryStore(
+                fileURL: directory.appendingPathComponent("dictionary.json")
+            )
+            let configuration = VoiceInputConfigurationController()
+            let dictionary = DictionarySettingsModel(
+                store: store,
+                configuration: configuration
+            )
+            await dictionary.load()
+            let sessionID = VoiceInputSessionID()
+            let record = VoiceInputHistoryRecord(
+                sessionID: sessionID,
+                startedAt: Date(timeIntervalSince1970: 1),
+                applicationName: nil,
+                transcription: "Use SpeakerBeta today",
+                finalText: "Use SpeakerBeta today",
+                outcome: .pendingCopy(
+                    sessionID,
+                    text: "Use SpeakerBeta today",
+                    reason: .missingTarget
+                )
+            )
+            let retainedRecord = record
+            let composer = HistoryDictionaryEntryComposerState(
+                transcription: record.transcription
+            )
+            try expect(composer?.candidates.contains("SpeakerBeta") == true)
+
+            let added = await HistoryDictionaryEntryAddition.perform(
+                word: "  SpeakerBetaFixed  ",
+                using: dictionary
+            )
+
+            try expect(added.kind == .success)
+            try expect(record == retainedRecord)
+            let persisted = try await store.load()
+            try expect(persisted.entries.map(\.word) == ["SpeakerBetaFixed"])
+            let configured = await configuration.currentDictionary()
+            try expect(configured.entries.map(\.word) == ["SpeakerBetaFixed"])
+
+            let duplicate = await HistoryDictionaryEntryAddition.perform(
+                word: "speakerbetafixed",
+                using: dictionary
+            )
+            try expect(duplicate.kind == .warning)
+            try expect(duplicate.message.contains("已存在"))
+            let afterDuplicate = try await store.load()
+            try expect(afterDuplicate.entries.count == 1)
+
+            let noTextSessionID = VoiceInputSessionID()
+            let noTextRecord = VoiceInputHistoryRecord(
+                sessionID: noTextSessionID,
+                startedAt: Date(timeIntervalSince1970: 2),
+                applicationName: nil,
+                transcription: nil,
+                finalText: nil,
+                outcome: .cancelled(noTextSessionID)
+            )
+            try expect(
+                HistoryDictionaryEntryComposerState(
+                    transcription: noTextRecord.transcription
+                ) == nil
+            )
+            try expect(
+                HistoryDictionaryEntryComposerState(transcription: "  \n") == nil
+            )
+        }
+
+        await runAsync(
             "built-in prompts stay inspectable and editable without a DeepSeek key",
             failures: &failures,
             executed: &executed
