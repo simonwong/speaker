@@ -263,7 +263,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(for: error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -295,7 +295,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
             try documents.write(try Self.encoder.encode(document))
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(for: error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -317,11 +317,6 @@ private extension VersionedLocalSessionHistory {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         return decoder
-    }
-
-    static func safeReason(for error: Error) -> String {
-        VersionedOwnerOnlyDocumentStore<[VoiceInputHistoryRecord]>
-            .safeReason(for: error)
     }
 }
 

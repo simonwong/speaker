@@ -218,6 +218,23 @@ private enum SQLiteHistoryError: Error {
     }
 }
 
+extension SQLiteHistoryError: PrivacySafeDescribing {
+    var privacySafeDescription: String {
+        switch self {
+        case let .sqlite(_, message):
+            message
+        case .openFailed:
+            "Unable to open the local history database."
+        case .encoding:
+            "A local history record could not be decoded."
+        case let .integrityCheckFailed(message):
+            "The local history database failed its integrity check: \(message)"
+        case let .unsupportedSchema(version):
+            "The local history database uses unsupported schema version \(version)."
+        }
+    }
+}
+
 /// Incremental, crash-safe production history store. Each meaningful session
 /// update is one SQLite upsert instead of a rewrite of the entire history.
 /// `secure_delete`, WAL truncation on destructive operations, owner-only file
@@ -252,13 +269,13 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 resolvedConnection = try SQLiteHistoryConnection(fileURL: fileURL)
                 resolvedNotice = .corruptedDataPreserved(
                     backupURL: backupURL,
-                    reason: Self.safeReason(error)
+                    reason: PrivacySafeText.reason(for: error)
                 )
             } catch {
-                resolvedNotice = .writeFailed(reason: Self.safeReason(error))
+                resolvedNotice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             }
         } catch {
-            resolvedNotice = .writeFailed(reason: Self.safeReason(error))
+            resolvedNotice = .writeFailed(reason: PrivacySafeText.reason(for: error))
         }
         connection = resolvedConnection
         notice = resolvedNotice
@@ -269,7 +286,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 // every clean open before the store is used.
                 try Self.truncateCheckpoint(db, fileURL: fileURL)
             } catch {
-                notice = .writeFailed(reason: Self.safeReason(error))
+                notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             }
         }
     }
@@ -324,7 +341,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             clearOperationalNotice()
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
         }
     }
 
@@ -402,7 +419,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -425,7 +442,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -447,7 +464,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             self.connection = nil
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -507,7 +524,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             }
             return true
         } catch {
-            privacyMigrationFailureReason = Self.safeReason(error)
+            privacyMigrationFailureReason = PrivacySafeText.reason(for: error)
             return false
         }
     }
@@ -557,7 +574,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             )
             return interrupted.count
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return nil
         }
     }
@@ -610,7 +627,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -664,7 +681,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             NotificationCenter.default.post(name: .speakerHistoryDidChange, object: nil)
             return true
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return false
         }
     }
@@ -716,7 +733,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             }
             return records
         } catch {
-            notice = .writeFailed(reason: Self.safeReason(error))
+            notice = .writeFailed(reason: PrivacySafeText.reason(for: error))
             return []
         }
     }
@@ -1288,23 +1305,5 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             prefix: "history.corrupt-",
             preserving: preservedURL
         )
-    }
-
-    private static func safeReason(_ error: Error) -> String {
-        switch error {
-        case let SQLiteHistoryError.sqlite(_, message):
-            return message
-        case SQLiteHistoryError.openFailed:
-            return "Unable to open the local history database."
-        case SQLiteHistoryError.encoding:
-            return "A local history record could not be decoded."
-        case let SQLiteHistoryError.integrityCheckFailed(message):
-            return "The local history database failed its integrity check: \(message)"
-        case let SQLiteHistoryError.unsupportedSchema(version):
-            return "The local history database uses unsupported schema version \(version)."
-        default:
-            let nsError = error as NSError
-            return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
-        }
     }
 }

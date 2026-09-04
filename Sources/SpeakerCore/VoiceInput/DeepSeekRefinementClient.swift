@@ -268,7 +268,7 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
         } catch let failure as DeepSeekRefinementFailure {
             throw failure
         } catch {
-            throw DeepSeekRefinementFailure(kind: .network, message: Self.safeNetworkMessage(error))
+            throw DeepSeekRefinementFailure(kind: .network, message: PrivacySafeText.networkMessage(for: error))
         }
 
         guard !Task.isCancelled else {
@@ -496,10 +496,5 @@ public actor DeepSeekRefinementClient: DeepSeekTextRefining {
             httpStatusCode: statusCode,
             providerRequestID: providerRequestID
         )
-    }
-
-    private static func safeNetworkMessage(_ error: Error) -> String? {
-        guard let urlError = error as? URLError else { return nil }
-        return String(describing: urlError.code)
     }
 }

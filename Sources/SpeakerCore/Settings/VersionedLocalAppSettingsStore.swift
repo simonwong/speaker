@@ -465,8 +465,7 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
             try documents.write(try Self.encoder.encode(document))
         } catch {
             throw AppSettingsStoreError.writeFailed(
-                reason: VersionedOwnerOnlyDocumentStore<SpeakerAppSettings>
-                    .safeReason(for: error)
+                reason: PrivacySafeText.reason(for: error)
             )
         }
     }

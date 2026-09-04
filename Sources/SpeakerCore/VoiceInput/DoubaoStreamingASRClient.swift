@@ -846,7 +846,7 @@ public actor DoubaoStreamingASRClient {
                 metadata: metadata
             ),
             providerRequestID: metadata.providerRequestID ?? fallbackRequestID,
-            message: metadata.providerMessage ?? safeNetworkMessage(error)
+            message: metadata.providerMessage ?? PrivacySafeText.networkMessage(for: error)
         )
     }
 
@@ -907,10 +907,5 @@ public actor DoubaoStreamingASRClient {
             || message.contains("too many")
             || message.contains("qps")
             || message.contains("限流")
-    }
-
-    private static func safeNetworkMessage(_ error: Error) -> String? {
-        guard let urlError = error as? URLError else { return nil }
-        return String(describing: urlError.code)
     }
 }

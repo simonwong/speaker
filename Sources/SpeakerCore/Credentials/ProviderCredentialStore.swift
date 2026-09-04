@@ -325,7 +325,7 @@ public actor MigratingProviderCredentialStore: ProviderCredentialStoring {
             do {
                 _ = try await apiKey(for: provider)
             } catch {
-                cleanupFailures[provider] = Self.safeReason(error)
+                cleanupFailures[provider] = PrivacySafeText.reason(for: error)
             }
         }
     }
@@ -349,8 +349,8 @@ public actor MigratingProviderCredentialStore: ProviderCredentialStoring {
                 return
             }
             guard legacyValue == primaryValue else {
-                cleanupFailures[provider] = Self.safeReason(
-                    ProviderCredentialStoreError.conflictingStoredValues
+                cleanupFailures[provider] = PrivacySafeText.reason(
+                    for: ProviderCredentialStoreError.conflictingStoredValues
                 )
                 return
             }
@@ -360,13 +360,8 @@ public actor MigratingProviderCredentialStore: ProviderCredentialStoring {
             }
             cleanupFailures[provider] = nil
         } catch {
-            cleanupFailures[provider] = Self.safeReason(error)
+            cleanupFailures[provider] = PrivacySafeText.reason(for: error)
         }
-    }
-
-    private static func safeReason(_ error: Error) -> String {
-        let nsError = error as NSError
-        return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
     }
 }
 
