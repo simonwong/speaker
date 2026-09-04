@@ -1781,7 +1781,7 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(model.entries.count == 101)
             try expect(model.sentEntryCount == 100)
-            try expect(model.sendingCountText == "100/100 条会发送给豆包")
+            try expect(model.sendingCountText == "100/100 条")
             try expect(model.omittedEntryIDs == Set([model.entries[100].id]))
             try expect(model.qualityHint(for: model.entries[100]) == .tooLong)
             let persisted = try await store.load()
