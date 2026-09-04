@@ -37,5 +37,8 @@ case "$command" in
         ;;
 esac
 
+# The environment reaches SpeakerProviderSmoke unchanged. Callers rely on this
+# to set SPEAKER_PROVIDER_SMOKE_NO_NETWORK=1, which makes the tool refuse every
+# provider connection. Never sanitise or reset the environment here.
 exec /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
     SpeakerProviderSmoke "$@"

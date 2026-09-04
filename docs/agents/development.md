@@ -6,6 +6,8 @@ Read this page before provider smoke or acceptance, building, testing, launching
 
 `./scripts/provider-smoke doubao|deepseek` uses the key saved by Speaker. `./scripts/provider-smoke matrix --confirm-paid-requests ...` makes billed requests; obtain explicit approval before running it. Redact credentials, audio, transcript text, raw provider messages, and auth headers from captured evidence.
 
+Setting `SPEAKER_PROVIDER_SMOKE_NO_NETWORK=1` makes the tool refuse every connection probe and matrix run right after argument parsing, before any provider client exists, printing one line naming the guard and exiting `78`. `scripts/test-provider-smoke-contract` exports it for every invocation it makes, so `./scripts/test` can never issue a billed request; leave it unset only for an approved real run.
+
 A provider check is complete only when the requested provider and scenario report a terminal verdict; a connection-only probe is not transcription or refinement acceptance evidence.
 
 ## Offline accuracy evaluation
