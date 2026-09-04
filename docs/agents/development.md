@@ -40,6 +40,8 @@ Use the tightest relevant specification executable while iterating:
 
 These are sequential `@main` executables. They are `executableTarget`s only, not package products, so no product build links them — `./scripts/build`, the warnings gate, and CI all pass `--product SpeakerApp` — while `swift run <name>` still builds and runs them. A bare `swift build` compiles every target in the root package, spec executables included; that is SwiftPM behavior, not a product declaration. Their `run`/`runAsync`, `expect`, `expectThrows`, `eventually`, and end-of-run summary come from the shared `SpeakerSpecSupport` library target; do not redefine them per executable. Every executable accepts an optional case-name filter after the executable name: the words are joined and matched case-insensitively against case names, only matching cases run, and the summary reports how many were skipped. A filter that matches nothing exits with status 2.
 
+`SpeakerCoreSpecs` is split by domain: `Tests/SpeakerCoreSpecs/SpeakerCoreSpecs.swift` is the `@main` driver, each `<Domain>Specs.swift` exposes `enum <Domain>Specs: CoreSpecDomain` with one `run(failures:)`, and shared doubles live in the `Fakes+<Area>.swift`, `Fixtures.swift`, and `Helpers+SQLite.swift` files. Add a new case to the domain file it belongs to and register a new domain in the driver. When a run goes silent, rerun it with `SPEAKER_SPEC_TRACE=1`: the harness then writes each case name to stderr as it starts, so the last line names the case that hangs.
+
 ```bash
 ./scripts/swiftw run --disable-sandbox SpeakerCoreSpecs input target is frozen
 ```
