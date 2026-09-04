@@ -1,0 +1,69 @@
+import Foundation
+
+public protocol AudioCapturing: Sendable {
+    func start() async throws
+    func stop() async throws -> CapturedAudio
+    func cancel() async
+}
+
+public protocol AudioChunkStreaming: Sendable {
+    func audioChunks() async -> AsyncStream<Data>
+}
+
+public protocol AudioCaptureTelemetryProviding: Sendable {
+    func observeTelemetry() async -> AsyncStream<RecordingTelemetry>
+}
+
+public protocol AudioCaptureFailureProviding: Sendable {
+    func observeFailures() async -> AsyncStream<AudioCaptureError>
+}
+
+public protocol InputTargetCapturing: Sendable {
+    func capture() async -> InputTargetCaptureResult
+    func capture(
+        matching hint: InputTargetCaptureHint
+    ) async -> InputTargetCaptureResult
+}
+
+public extension InputTargetCapturing {
+    func capture(
+        matching hint: InputTargetCaptureHint
+    ) async -> InputTargetCaptureResult {
+        await capture()
+    }
+}
+
+public protocol InputTargetDiscarding: Sendable {
+    func discard(_ target: InputTargetSnapshot) async
+}
+
+public protocol SpeechTranscribing: Sendable {
+    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult
+}
+
+public protocol TextDelivering: Sendable {
+    func deliver(
+        _ text: String,
+        to target: InputTargetSnapshot,
+        commitGate: DeliveryCommitGate
+    ) async -> DeliveryOutcome
+    func shutdown() async
+}
+
+public extension TextDelivering {
+    func shutdown() async {}
+}
+
+public protocol ClipboardWriting: Sendable {
+    @discardableResult
+    func copy(_ text: String) async -> Bool
+}
+
+public protocol SessionHistoryRecording: Sendable {
+    func save(_ record: VoiceInputHistoryRecord) async
+    func persistenceFailureNotice() async -> String?
+}
+
+public extension SessionHistoryRecording {
+    func persistenceFailureNotice() async -> String? { nil }
+}
