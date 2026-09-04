@@ -18,20 +18,23 @@ package struct SettingsOverviewScrollView<SectionContent: View>: View {
     package var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(
+                    alignment: .leading,
+                    spacing: SpeakerSurfaceMetrics.sectionSpacing
+                ) {
                     ForEach(SettingsGroup.allCases) { group in
                         sectionContent(group)
                             .id(SettingsPresentationTarget.section(group))
                     }
                 }
-                .frame(maxWidth: 680)
+                .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
                 .frame(maxWidth: .infinity)
                 .padding(
                     .horizontal,
                     mainWindowLayout.pageHorizontalPadding
                 )
-                .padding(.top, 24)
-                .padding(.bottom, 28)
+                .padding(.top, SpeakerSurfaceMetrics.pageTopPadding)
+                .padding(.bottom, SpeakerSurfaceMetrics.pageBottomPadding)
                 .id(SettingsPresentationTarget.top)
             }
             .onChange(of: navigation.presentationRequest) { _, request in

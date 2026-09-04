@@ -8,6 +8,13 @@ package enum SpeakerVisualIdentity {
         green: 0.87,
         blue: 0.71
     )
+    /// One step deeper than `warmAccent`, for the small filled areas that need
+    /// more contrast against a light window ground.
+    package static let warmAccentDeep = Color(
+        red: 0.86,
+        green: 0.70,
+        blue: 0.46
+    )
     package static let iconSurfaceTop = Color(
         red: 0.13,
         green: 0.13,

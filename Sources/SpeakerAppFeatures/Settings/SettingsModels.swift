@@ -158,7 +158,7 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
 package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
     @Published package var apiKeyDraft = ""
-    @Published var customName = "我的整理规则"
+    @Published var customName = "我的模式"
     @Published var customPrompt = ""
     @Published package var promptDraft = ""
     @Published package private(set) var promptOverrides = RefinementPromptOverrides()
