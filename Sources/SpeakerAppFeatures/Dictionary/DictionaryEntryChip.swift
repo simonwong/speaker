@@ -84,6 +84,7 @@ package struct DictionaryEntryChip: View {
                     Circle()
                         .fill(Color.primary.opacity(isHovered ? 0.10 : 0))
                     Image(systemName: "xmark")
+                        // A glyph centred in a fixed 20pt hit circle.
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.primary)
                         .opacity(isHovered ? 1 : 0.35)
@@ -94,8 +95,9 @@ package struct DictionaryEntryChip: View {
             .contentShape(Circle())
             .accessibilityHidden(true)
             .overlay {
-                DictionaryDeleteAccessibilityAction(
+                AccessibilityButtonBridge(
                     label: "删除词条 \(word)",
+                    hint: "删除这个个人词库词条",
                     action: onDelete
                 )
             }
@@ -128,22 +130,6 @@ private extension DictionaryEntryQualityHint {
         case .singleCharacter:
             ("单字效果可能较弱", "text.badge.exclamationmark")
         }
-    }
-}
-
-private struct DictionaryDeleteAccessibilityAction: NSViewRepresentable {
-    let label: String
-    let action: () -> Void
-
-    func makeNSView(context: Context) -> DictionaryDeleteAccessibilityActionView {
-        DictionaryDeleteAccessibilityActionView(label: label, action: action)
-    }
-
-    func updateNSView(
-        _ view: DictionaryDeleteAccessibilityActionView,
-        context: Context
-    ) {
-        view.update(label: label, action: action)
     }
 }
 
@@ -181,42 +167,5 @@ private final class DictionaryEntryStatusAccessibilityView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         nil
-    }
-}
-
-@MainActor
-private final class DictionaryDeleteAccessibilityActionView:
-    NSView,
-    @preconcurrency NSAccessibilityButton
-{
-    private var accessibilityAction: () -> Void
-
-    init(label: String, action: @escaping () -> Void) {
-        accessibilityAction = action
-        super.init(frame: .zero)
-        update(label: label, action: action)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func update(label: String, action: @escaping () -> Void) {
-        accessibilityAction = action
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel(label)
-        setAccessibilityHelp("删除这个个人词库词条")
-        setAccessibilityEnabled(true)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        accessibilityAction()
-        return true
     }
 }

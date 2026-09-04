@@ -30,7 +30,10 @@ struct SpeakerApp: App {
                 refreshPermissions: runtime.refreshPermissions
             )
         } label: {
-            SpeakerMenuBarLabel(state: menuBarIconState)
+            MenuBarStatusLabel(
+                voiceInput: runtime.voiceInput,
+                permissions: runtime.permissions
+            )
         }
         .menuBarExtraStyle(.menu)
 
@@ -55,13 +58,6 @@ struct SpeakerApp: App {
         .defaultSize(
             width: MainWindowLayout.preferredContentSize.width,
             height: MainWindowLayout.preferredContentSize.height
-        )
-    }
-
-    private var menuBarIconState: MenuBarIconState {
-        MenuBarPresentation.iconState(
-            isRecording: runtime.voiceInput.state.isRecording,
-            permissions: runtime.permissions.snapshot
         )
     }
 }

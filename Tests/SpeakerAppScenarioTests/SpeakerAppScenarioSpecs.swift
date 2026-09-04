@@ -3187,6 +3187,7 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await RuntimeLifecycleSpecs.run(failures: &failures)
+        await DashboardGroupingSpecs.run(failures: &failures)
 
         SpecSummary.finish(failures: failures, label: "app scenario specs")
     }

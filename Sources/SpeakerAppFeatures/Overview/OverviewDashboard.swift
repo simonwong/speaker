@@ -8,18 +8,32 @@ private enum OverviewConstants {
     static let voiceprintDays = 18
 }
 
+/// One overview snapshot: the usage totals and the moment they describe. The
+/// reference date travels with the state so week, voiceprint, and heatmap
+/// windows stay pinned instead of reading the wall clock while rendering.
+package struct OverviewDashboardState: Equatable, Sendable {
+    package let summary: VoiceInputUsageSummary
+    package let referenceDate: Date
+
+    package init(summary: VoiceInputUsageSummary, referenceDate: Date) {
+        self.summary = summary
+        self.referenceDate = referenceDate
+    }
+}
+
 /// The complete overview presentation surface. App composition supplies one
 /// usage snapshot; product copy, visual hierarchy, and motion policy stay here.
 package struct OverviewDashboard: View {
-    let summary: VoiceInputUsageSummary
+    let state: OverviewDashboardState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    package init(summary: VoiceInputUsageSummary) {
-        self.summary = summary
+    package init(state: OverviewDashboardState) {
+        self.state = state
     }
 
     package var body: some View {
-        let now = Date()
+        let summary = state.summary
+        let now = state.referenceDate
 
         SpeakerPage {
             OverviewHero(
@@ -43,6 +57,8 @@ private struct OverviewHero: View {
     let summary: VoiceInputUsageSummary
     let now: Date
     let reduceMotion: Bool
+    @ScaledMetric(relativeTo: .largeTitle)
+    private var heroNumberSize = SpeakerTypography.heroNumberBaseSize
 
     private var characterCount: Int {
         max(0, summary.totalRecognizedCharacterCount)
@@ -65,13 +81,13 @@ private struct OverviewHero: View {
 
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 Text(characterCount.formatted(.number.grouping(.automatic)))
-                    .font(SpeakerTypography.heroNumber)
+                    .font(SpeakerTypography.heroNumber(size: heroNumberSize))
                     .lineLimit(1)
                     .minimumScaleFactor(0.62)
                     .contentTransition(.numericText())
 
                 Text("字")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 12)

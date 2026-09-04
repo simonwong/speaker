@@ -72,7 +72,6 @@ struct DictionarySettingsPage: View {
                 Text(model.sendingCountText)
             } icon: {
                 Image(systemName: "paperplane.fill")
-                    .font(.system(size: 11))
             }
             .font(SpeakerTypography.footnote.weight(.medium))
             .foregroundStyle(hasOmittedEntries ? Color.orange : Color.secondary)

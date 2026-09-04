@@ -27,19 +27,35 @@ package struct HistoryDashboardState: Equatable, Sendable {
     package let notice: String?
     package let feedback: HistoryDashboardFeedback?
     package let isBusy: Bool
+    /// The moment the snapshot was taken. Day grouping reads it instead of the
+    /// wall clock, so 今天 and 昨天 stay pinned to the state a specification
+    /// hands the view.
+    package let referenceDate: Date
 
     package init(
         records: [VoiceInputHistoryRecord],
         totalRecordCount: Int,
         notice: String?,
         feedback: HistoryDashboardFeedback?,
-        isBusy: Bool
+        isBusy: Bool,
+        referenceDate: Date
     ) {
         self.records = records
         self.totalRecordCount = totalRecordCount
         self.notice = notice
         self.feedback = feedback
         self.isBusy = isBusy
+        self.referenceDate = referenceDate
+    }
+
+    package func sections(
+        calendar: Calendar = .current
+    ) -> [HistoryDaySection] {
+        HistoryPresentation.sections(
+            records: records,
+            now: referenceDate,
+            calendar: calendar
+        )
     }
 }
 
@@ -168,7 +184,7 @@ package struct HistoryDashboard: View {
                 .disabled(state.totalRecordCount == 0)
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 16))
+                    .font(.title3)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -287,10 +303,7 @@ package struct HistoryDashboard: View {
     }
 
     private var sections: [HistoryDaySection] {
-        HistoryPresentation.sections(
-            records: state.records,
-            now: Date()
-        )
+        state.sections()
     }
 }
 
@@ -328,7 +341,7 @@ private struct HistoryRecordRow: View {
 
                 if presentation.status.showsStatusIcon {
                     Image(systemName: presentation.status.icon)
-                        .font(.system(size: 13))
+                        .font(SpeakerTypography.body)
                         .foregroundStyle(presentation.status.color)
                         .padding(.top, 2)
                         .help(presentation.status.label)
@@ -359,7 +372,7 @@ private struct HistoryRecordRow: View {
                         .accessibilityLabel("删除")
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(SpeakerTypography.body)
                     .foregroundStyle(.secondary)
                     .transition(.opacity)
                 }
