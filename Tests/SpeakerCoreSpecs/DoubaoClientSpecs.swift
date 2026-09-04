@@ -6,7 +6,9 @@ import SpeakerSpecSupport
 enum DoubaoClientSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("Doubao WebSocket uses streaming headers and binary frames", failures: &failures) {
+        await runAsync(
+            "Doubao WebSocket uses streaming headers and binary frames", failures: &failures
+        ) {
             let requestID = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
             let connection = DoubaoWebSocketConnectionFake(
                 responses: [makeDoubaoServerResponse(text: "  你好，世界。  ", isFinal: true)],
@@ -45,9 +47,13 @@ enum DoubaoClientSpecs: CoreSpecDomain {
 
             try expect(request.url == DoubaoStreamingASRConfiguration.defaultEndpoint)
             try expect(request.value(forHTTPHeaderField: "X-Api-Key") == "test-api-key")
-            try expect(request.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.seedasr.sauc.duration")
-            try expect(request.value(forHTTPHeaderField: "X-Api-Request-Id") == requestID.uuidString)
-            try expect(request.value(forHTTPHeaderField: "X-Api-Connect-Id") == requestID.uuidString)
+            try expect(
+                request.value(forHTTPHeaderField: "X-Api-Resource-Id")
+                    == "volc.seedasr.sauc.duration")
+            try expect(
+                request.value(forHTTPHeaderField: "X-Api-Request-Id") == requestID.uuidString)
+            try expect(
+                request.value(forHTTPHeaderField: "X-Api-Connect-Id") == requestID.uuidString)
             try expect(request.value(forHTTPHeaderField: "X-Api-Sequence") == "-1")
             try expect(recognition?["enable_itn"] as? Bool == true)
             try expect(recognition?["enable_punc"] as? Bool == true)
@@ -63,7 +69,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(result == .init(text: "你好，世界。", providerRequestID: "log-12"))
         }
 
-        await runAsync("Doubao disables semantic smoothing while keeping written form and punctuation", failures: &failures) {
+        await runAsync(
+            "Doubao disables semantic smoothing while keeping written form and punctuation",
+            failures: &failures
+        ) {
             let connection = DoubaoWebSocketConnectionFake(
                 responses: [makeDoubaoServerResponse(text: "你好，世界。", isFinal: true)],
                 metadata: .init(httpStatusCode: 101, providerRequestID: "log-ddc-off")
@@ -88,9 +97,12 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(recognition?["enable_punc"] as? Bool == true)
         }
 
-        await runAsync("Doubao provider errors interrupt audio that is still being recorded", failures: &failures) {
+        await runAsync(
+            "Doubao provider errors interrupt audio that is still being recorded",
+            failures: &failures
+        ) {
             let connection = DoubaoWebSocketConnectionFake(
-                responses: [makeDoubaoServerError(code: 45000001, message: "invalid api key")],
+                responses: [makeDoubaoServerError(code: 45_000_001, message: "invalid api key")],
                 metadata: .init(httpStatusCode: 101, providerRequestID: "early-error-log")
             )
             let client = DoubaoStreamingASRClient(
@@ -115,13 +127,16 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(closeCount == 1)
         }
 
-        await runAsync("Doubao provider errors outrank send failures caused by closing the socket", failures: &failures) {
+        await runAsync(
+            "Doubao provider errors outrank send failures caused by closing the socket",
+            failures: &failures
+        ) {
             let connection = DoubaoWebSocketConnectionFake(
                 responses: [
                     makeDoubaoServerError(
                         code: 45_000_001,
                         message: "resource not activated"
-                    ),
+                    )
                 ],
                 metadata: .init(
                     httpStatusCode: 101,
@@ -153,7 +168,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("Doubao send failures close a receive that ignores task cancellation", failures: &failures) {
+        await runAsync(
+            "Doubao send failures close a receive that ignores task cancellation",
+            failures: &failures
+        ) {
             let connection = DoubaoWebSocketConnectionFake(
                 responses: [],
                 failingSendIndex: 1,
@@ -170,9 +188,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let request = Task {
                 let result: Result<TranscriptionResult, Error>
                 do {
-                    result = .success(try await client.transcribe(
-                        makeAudioStream([Data([1, 2])])
-                    ))
+                    result = .success(
+                        try await client.transcribe(
+                            makeAudioStream([Data([1, 2])])
+                        ))
                 } catch {
                     result = .failure(error)
                 }
@@ -194,7 +213,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 completedWithoutExternalCancellation,
                 "send failure waited forever for a receive that ignores Task cancellation"
             )
-            if case let .failure(failure as DoubaoASRFailure) = result {
+            if case .failure(let failure as DoubaoASRFailure) = result {
                 try expect(failure.kind == .network)
             } else {
                 throw SpecFailure(message: "send failure did not become a Doubao network problem")
@@ -252,7 +271,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("Doubao runtime diagnostics report the exact active transport phase", failures: &failures) {
+        await runAsync(
+            "Doubao runtime diagnostics report the exact active transport phase",
+            failures: &failures
+        ) {
             let requestID = UUID(
                 uuidString: "00000000-0000-0000-0000-000000000099"
             )!
@@ -310,7 +332,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(cleared)
         }
 
-        await runAsync("Doubao diagnostics stay connecting until the first WebSocket send succeeds", failures: &failures) {
+        await runAsync(
+            "Doubao diagnostics stay connecting until the first WebSocket send succeeds",
+            failures: &failures
+        ) {
             let diagnostics = VoiceProviderRuntimeDiagnostics()
             let connection = DoubaoWebSocketConnectionFake(
                 responses: [],
@@ -344,7 +369,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(finished, "cancellation did not end the Doubao request")
         }
 
-        await runAsync("Doubao response metadata cannot advance the audio transport phase", failures: &failures) {
+        await runAsync(
+            "Doubao response metadata cannot advance the audio transport phase", failures: &failures
+        ) {
             let diagnostics = VoiceProviderRuntimeDiagnostics()
             await diagnostics.beginDoubao(
                 requestID: "request-early-response",
@@ -384,7 +411,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("Doubao silent error frame validates a credential connection probe", failures: &failures) {
+        await runAsync(
+            "Doubao silent error frame validates a credential connection probe", failures: &failures
+        ) {
             let credentials = ProviderCredentialStoreFake(
                 values: [.doubao: "valid-key"]
             )
@@ -393,7 +422,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                     makeDoubaoServerError(
                         code: 20_000_003,
                         message: "no speech detected"
-                    ),
+                    )
                 ],
                 metadata: .init(
                     httpStatusCode: 101,
@@ -411,7 +440,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(requestID == "silent-probe-request")
         }
 
-        await runAsync("Doubao distinguishes inactive resource from bad credential", failures: &failures) {
+        await runAsync(
+            "Doubao distinguishes inactive resource from bad credential", failures: &failures
+        ) {
             let inactive = makeDoubaoClient(responses: [
                 makeDoubaoServerError(code: 45_000_001, message: "resource not activated")
             ])
@@ -434,7 +465,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("Doubao preserves a remote WebSocket close code as structured diagnostics", failures: &failures) {
+        await runAsync(
+            "Doubao preserves a remote WebSocket close code as structured diagnostics",
+            failures: &failures
+        ) {
             let client = makeDoubaoClient(
                 receiveError: URLError(.networkConnectionLost),
                 metadata: .init(
@@ -460,7 +494,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("Doubao classifies URL transport failures without raw error text", failures: &failures) {
+        await runAsync(
+            "Doubao classifies URL transport failures without raw error text", failures: &failures
+        ) {
             let client = makeDoubaoClient(
                 receiveError: URLError(.cannotFindHost)
             )
@@ -478,7 +514,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("Doubao classifies connection setup failures before a socket exists", failures: &failures) {
+        await runAsync(
+            "Doubao classifies connection setup failures before a socket exists",
+            failures: &failures
+        ) {
             let client = DoubaoStreamingASRClient(
                 configuration: .init(
                     apiKey: "test-api-key",
@@ -504,7 +543,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("credential-backed Doubao transcriber loads the current stored value", failures: &failures) {
+        await runAsync(
+            "credential-backed Doubao transcriber loads the current stored value",
+            failures: &failures
+        ) {
             let credentials = ProviderCredentialStoreFake(values: [.doubao: "first-key"])
             let connection = DoubaoWebSocketConnectionFake(
                 responses: [makeDoubaoServerResponse(text: "第一条", isFinal: true)]
@@ -522,15 +564,19 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let fullRequest = try DoubaoStreamingFrameCodec.decode(
                 sentFrames[0]
             )
-            let body = try JSONSerialization.jsonObject(
-                with: fullRequest.payload
-            ) as? [String: Any]
+            let body =
+                try JSONSerialization.jsonObject(
+                    with: fullRequest.payload
+                ) as? [String: Any]
             let user = body?["user"] as? [String: Any]
             try expect(firstRequest.value(forHTTPHeaderField: "X-Api-Key") == "first-key")
             try expect(user?["uid"] as? String == "request-user-1")
         }
 
-        await runAsync("credential-backed Doubao transcriber maps transcription purpose to semantic smoothing", failures: &failures) {
+        await runAsync(
+            "credential-backed Doubao transcriber maps transcription purpose to semantic smoothing",
+            failures: &failures
+        ) {
             func smoothingFlag(
                 for purpose: SpeechTranscriptionPurpose
             ) async throws -> (ddc: Bool?, itn: Bool?, punctuation: Bool?) {
@@ -549,9 +595,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 )
                 let frames = await connection.sentFrames
                 let fullRequest = try DoubaoStreamingFrameCodec.decode(frames[0])
-                let body = try JSONSerialization.jsonObject(
-                    with: fullRequest.payload
-                ) as? [String: Any]
+                let body =
+                    try JSONSerialization.jsonObject(
+                        with: fullRequest.payload
+                    ) as? [String: Any]
                 let recognition = body?["request"] as? [String: Any]
                 return (
                     recognition?["enable_ddc"] as? Bool,
@@ -569,7 +616,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(refinementSource.punctuation == true)
         }
 
-        await runAsync("credential-backed Doubao transcriber fails before network when unconfigured", failures: &failures) {
+        await runAsync(
+            "credential-backed Doubao transcriber fails before network when unconfigured",
+            failures: &failures
+        ) {
             let credentials = ProviderCredentialStoreFake()
             let connection = DoubaoWebSocketConnectionFake(responses: [])
             let connector = DoubaoWebSocketConnectorFake(connection: connection)
@@ -588,7 +638,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("Doubao failure becomes stable user state and diagnostic history", failures: &failures) {
+        await runAsync(
+            "Doubao failure becomes stable user state and diagnostic history", failures: &failures
+        ) {
             let history = SessionHistoryFake()
             let target = DiscardingTargetCaptureFake(
                 snapshot: .init(id: UUID(), applicationName: "TextEdit")
@@ -596,16 +648,17 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: target,
-                textProcessor: FailingVoiceTextProcessor(failure: .init(
-                    userFailure: .providerNotConfigured,
-                    providerDiagnostic: .init(
-                        provider: "doubao",
-                        requestID: "provider-log-id",
-                        code: "invalidCredential",
-                        statusCode: "401",
-                        message: "invalid api key"
-                    )
-                )),
+                textProcessor: FailingVoiceTextProcessor(
+                    failure: .init(
+                        userFailure: .providerNotConfigured,
+                        providerDiagnostic: .init(
+                            provider: "doubao",
+                            requestID: "provider-log-id",
+                            code: "invalidCredential",
+                            statusCode: "401",
+                            message: "invalid api key"
+                        )
+                    )),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -618,7 +671,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let presentation = await terminal.value
             await sessions.shutdown()
             let record = await history.records.first
-            if case let .failed(_, failure) = presentation?.activity {
+            if case .failed(_, let failure) = presentation?.activity {
                 try expect(failure == .providerNotConfigured)
             } else {
                 throw SpecFailure(message: "provider failure did not reach terminal UI state")
@@ -637,7 +690,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(discardedCount == 1)
         }
 
-        await runAsync("history persistence failure is visible on the terminal session", failures: &failures) {
+        await runAsync(
+            "history persistence failure is visible on the terminal session", failures: &failures
+        ) {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
@@ -666,7 +721,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(presentation?.activity.pendingText == "仍可使用")
         }
 
-        await runAsync("voice text processing owns Doubao failure normalization", failures: &failures) {
+        await runAsync(
+            "voice text processing owns Doubao failure normalization", failures: &failures
+        ) {
             let cases: [(DoubaoASRFailureKind, VoiceInputFailure)] = [
                 (.invalidCredential, .providerAuthenticationFailed),
                 (.silence, .noSpeechDetected),
@@ -686,10 +743,11 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             for (kind, expectedFailure) in cases {
                 let processor = DefaultVoiceTextProcessor(
                     configuration: VoiceInputConfigurationController(),
-                    doubao: DoubaoFailureTranscriber(failure: .init(
-                        kind: kind,
-                        providerRequestID: "doubao-mapping-log"
-                    )),
+                    doubao: DoubaoFailureTranscriber(
+                        failure: .init(
+                            kind: kind,
+                            providerRequestID: "doubao-mapping-log"
+                        )),
                     refinement: OptionalTextRefinementPipeline(
                         refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused")))
                     )
@@ -699,17 +757,21 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                     throw SpecFailure(message: "\(kind.rawValue) escaped the processing seam")
                 } catch let failure as VoiceTextProcessingFailure {
                     try expect(failure.userFailure == expectedFailure)
-                    try expect(failure.providerDiagnostic == .init(
-                        provider: "doubao",
-                        operation: .transcription,
-                        requestID: "doubao-mapping-log",
-                        code: kind.rawValue
-                    ))
+                    try expect(
+                        failure.providerDiagnostic
+                            == .init(
+                                provider: "doubao",
+                                operation: .transcription,
+                                requestID: "doubao-mapping-log",
+                                code: kind.rawValue
+                            ))
                 }
             }
         }
 
-        await runAsync("credential-store failures remain actionable provider diagnostics", failures: &failures) {
+        await runAsync(
+            "credential-store failures remain actionable provider diagnostics", failures: &failures
+        ) {
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(),
                 doubao: CredentialFailureTranscriber(error: .interactionUnavailable),
@@ -722,12 +784,14 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 throw SpecFailure(message: "credential-store failure escaped the processing seam")
             } catch let failure as VoiceTextProcessingFailure {
                 try expect(failure.userFailure == .providerCredentialUnavailable)
-                try expect(failure.providerDiagnostic == .init(
-                    provider: "doubao",
-                    operation: .credentialAccess,
-                    requestID: nil,
-                    code: "credential.interactionUnavailable"
-                ))
+                try expect(
+                    failure.providerDiagnostic
+                        == .init(
+                            provider: "doubao",
+                            operation: .credentialAccess,
+                            requestID: nil,
+                            code: "credential.interactionUnavailable"
+                        ))
             }
         }
     }

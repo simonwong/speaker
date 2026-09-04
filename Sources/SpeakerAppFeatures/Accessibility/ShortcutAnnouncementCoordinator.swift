@@ -21,7 +21,7 @@ package final class ShortcutAnnouncementCoordinator {
             .removeDuplicates()
             .dropFirst()
             .compactMap { activation -> String? in
-                guard case let .active(preference) = activation else { return nil }
+                guard case .active(let preference) = activation else { return nil }
                 return preference.activationAnnouncement
             }
             .sink(receiveValue: announce)

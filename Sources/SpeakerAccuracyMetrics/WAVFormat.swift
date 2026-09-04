@@ -16,10 +16,12 @@ extension WAVFormatError: CustomStringConvertible {
         switch self {
         case .notRIFFWave: "not a RIFF/WAVE file"
         case .missingFormatChunk: "missing fmt chunk"
-        case let .unsupportedEncoding(format): "unsupported encoding \(format); expected PCM (1)"
-        case let .unsupportedChannelCount(channels): "unsupported channel count \(channels); expected mono"
-        case let .unsupportedSampleRate(rate): "unsupported sample rate \(rate) Hz; expected 16000 Hz"
-        case let .unsupportedBitDepth(bits): "unsupported bit depth \(bits); expected 16-bit"
+        case .unsupportedEncoding(let format): "unsupported encoding \(format); expected PCM (1)"
+        case .unsupportedChannelCount(let channels):
+            "unsupported channel count \(channels); expected mono"
+        case .unsupportedSampleRate(let rate):
+            "unsupported sample rate \(rate) Hz; expected 16000 Hz"
+        case .unsupportedBitDepth(let bits): "unsupported bit depth \(bits); expected 16-bit"
         case .missingDataChunk: "missing data chunk"
         case .emptyData: "data chunk is empty"
         }
@@ -39,8 +41,8 @@ public struct PCM16MonoWAV: Equatable, Sendable {
 
     public static func parse(_ data: Data) throws -> PCM16MonoWAV {
         guard data.count >= 12,
-              string(data, 0..<4) == "RIFF",
-              string(data, 8..<12) == "WAVE"
+            string(data, 0..<4) == "RIFF",
+            string(data, 8..<12) == "WAVE"
         else { throw WAVFormatError.notRIFFWave }
 
         var offset = 12
@@ -57,10 +59,16 @@ public struct PCM16MonoWAV: Equatable, Sendable {
                 let channels = uint16(data, bodyStart + 2)
                 let sampleRate = uint32(data, bodyStart + 4)
                 let bitsPerSample = uint16(data, bodyStart + 14)
-                guard audioFormat == 1 else { throw WAVFormatError.unsupportedEncoding(audioFormat) }
+                guard audioFormat == 1 else {
+                    throw WAVFormatError.unsupportedEncoding(audioFormat)
+                }
                 guard channels == 1 else { throw WAVFormatError.unsupportedChannelCount(channels) }
-                guard sampleRate == Self.sampleRate else { throw WAVFormatError.unsupportedSampleRate(sampleRate) }
-                guard bitsPerSample == 16 else { throw WAVFormatError.unsupportedBitDepth(bitsPerSample) }
+                guard sampleRate == Self.sampleRate else {
+                    throw WAVFormatError.unsupportedSampleRate(sampleRate)
+                }
+                guard bitsPerSample == 16 else {
+                    throw WAVFormatError.unsupportedBitDepth(bitsPerSample)
+                }
                 sawFormat = true
             } else if chunkID == "data" {
                 guard sawFormat else { throw WAVFormatError.missingFormatChunk }

@@ -1,5 +1,5 @@
-import Foundation
 import ApplicationServices
+import Foundation
 import SpeakerCore
 import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
@@ -20,7 +20,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             guard case .unavailable(.accessibilityPermissionMissing) = capture
             else {
                 throw SpecFailure(
-                    message: "missing Accessibility permission was misreported as a target capability"
+                    message:
+                        "missing Accessibility permission was misreported as a target capability"
                 )
             }
         }
@@ -32,16 +33,20 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
             let targets = AccessibilityInputTargets(system: system)
 
-            guard case .writable = await targets.capture(
-                expectedProcessID: 42
-            ) else {
+            guard
+                case .writable = await targets.capture(
+                    expectedProcessID: 42
+                )
+            else {
                 throw SpecFailure(
                     message: "the exact expected process was rejected"
                 )
             }
         }
 
-        await runAsync("AX capture rejects a focused target from another process", failures: &failures) {
+        await runAsync(
+            "AX capture rejects a focused target from another process", failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 processID: 84,
                 valueResponses: []
@@ -68,7 +73,7 @@ enum InputTargetSpecs: CoreSpecDomain {
 
             let capture = system.captureReleaseProcess()
 
-            guard case let .process(processID) = capture else {
+            guard case .process(let processID) = capture else {
                 throw SpecFailure(
                     message: "release callback did not preserve the frontmost process"
                 )
@@ -129,7 +134,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake target was not captured")
             }
 
@@ -159,10 +164,11 @@ enum InputTargetSpecs: CoreSpecDomain {
             let targets = AccessibilityInputTargets(
                 system: system,
                 releaseCapture: {
-                    .target(.init(
-                        reference: releasedField,
-                        processID: 42
-                    ))
+                    .target(
+                        .init(
+                            reference: releasedField,
+                            processID: 42
+                        ))
                 }
             )
             guard let hint = targets.releaseCaptureHint() else {
@@ -193,10 +199,11 @@ enum InputTargetSpecs: CoreSpecDomain {
             let targets = AccessibilityInputTargets(
                 system: system,
                 releaseCapture: {
-                    .target(.init(
-                        reference: staleField,
-                        processID: 42
-                    ))
+                    .target(
+                        .init(
+                            reference: staleField,
+                            processID: 42
+                        ))
                 }
             )
             guard let hint = targets.releaseCaptureHint() else {
@@ -219,7 +226,10 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("AX accepted insertion is not downgraded by stale immediate readback", failures: &failures) {
+        await runAsync(
+            "AX accepted insertion is not downgraded by stale immediate readback",
+            failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -229,7 +239,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -245,7 +255,10 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("paste without a receipt is committed without inviting manual duplication", failures: &failures) {
+        await runAsync(
+            "paste without a receipt is committed without inviting manual duplication",
+            failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -253,7 +266,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -263,7 +276,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 commitGate: DeliveryCommitGate()
             )
 
-            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+            guard case .pasteCommandPosted(let diagnostic) = outcome else {
                 throw SpecFailure(
                     message: "posted paste was exposed as retryable Pending Copy"
                 )
@@ -271,7 +284,10 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(diagnostic.code == "pasteReceipt.unconfirmed")
         }
 
-        await runAsync("normalized pasted text remains unconfirmed instead of inviting duplicate copy", failures: &failures) {
+        await runAsync(
+            "normalized pasted text remains unconfirmed instead of inviting duplicate copy",
+            failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -280,7 +296,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -290,7 +306,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 commitGate: DeliveryCommitGate()
             )
 
-            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+            guard case .pasteCommandPosted(let diagnostic) = outcome else {
                 throw SpecFailure(
                     message: "normalized paste invited duplicate delivery"
                 )
@@ -298,7 +314,9 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(diagnostic.code == "pasteReceipt.unconfirmed")
         }
 
-        await runAsync("unchanged AX selection proceeds through transactional paste", failures: &failures) {
+        await runAsync(
+            "unchanged AX selection proceeds through transactional paste", failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -307,7 +325,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -331,14 +349,14 @@ enum InputTargetSpecs: CoreSpecDomain {
         ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
-                    .success("Hello"),
+                    .success("Hello")
                 ],
                 selectionResponses: [
-                    .success(NSRange(location: 0, length: 0)),
+                    .success(NSRange(location: 0, length: 0))
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -361,7 +379,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 valueResponses: [.success("User edited this")]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -380,12 +398,15 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(pastePosts == 0)
         }
 
-        await runAsync("AX value IPC failure is reported as an unresponsive target instead of a focus change", failures: &failures) {
+        await runAsync(
+            "AX value IPC failure is reported as an unresponsive target instead of a focus change",
+            failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [.failure(.cannotComplete)]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -403,13 +424,16 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(pastePosts == 0)
         }
 
-        await runAsync("AX role and security IPC failures preserve their exact diagnostic stage", failures: &failures) {
+        await runAsync(
+            "AX role and security IPC failures preserve their exact diagnostic stage",
+            failures: &failures
+        ) {
             let securitySystem = AccessibilityTargetSystemFake(
                 valueResponses: [],
                 subroleResponses: [.failure(.cannotComplete)]
             )
             let securityTargets = AccessibilityInputTargets(system: securitySystem)
-            guard case let .writable(securityTarget) = await securityTargets.capture()
+            guard case .writable(let securityTarget) = await securityTargets.capture()
             else {
                 throw SpecFailure(message: "security fake target was not captured")
             }
@@ -432,7 +456,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 roleResponses: [.failure(.cannotComplete)]
             )
             let roleTargets = AccessibilityInputTargets(system: roleSystem)
-            guard case let .writable(roleTarget) = await roleTargets.capture()
+            guard case .writable(let roleTarget) = await roleTargets.capture()
             else {
                 throw SpecFailure(message: "role fake target was not captured")
             }
@@ -451,13 +475,15 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("AX selection and focus IPC failures are not called user edits", failures: &failures) {
+        await runAsync(
+            "AX selection and focus IPC failures are not called user edits", failures: &failures
+        ) {
             let selectionSystem = AccessibilityTargetSystemFake(
                 valueResponses: [.success("Hello")],
                 selectionResponses: [.failure(.cannotComplete)]
             )
             let selectionTargets = AccessibilityInputTargets(system: selectionSystem)
-            guard case let .writable(selectionTarget) = await selectionTargets.capture()
+            guard case .writable(let selectionTarget) = await selectionTargets.capture()
             else {
                 throw SpecFailure(message: "selection fake target was not captured")
             }
@@ -480,7 +506,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 focusResponses: [.failure(.cannotComplete)]
             )
             let focusTargets = AccessibilityInputTargets(system: focusSystem)
-            guard case let .writable(focusTarget) = await focusTargets.capture()
+            guard case .writable(let focusTarget) = await focusTargets.capture()
             else {
                 throw SpecFailure(message: "focus fake target was not captured")
             }
@@ -499,7 +525,9 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("frontmost exact AX target can use receipt-verified paste fallback", failures: &failures) {
+        await runAsync(
+            "frontmost exact AX target can use receipt-verified paste fallback", failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -508,7 +536,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -537,7 +565,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 roleResponses: [.success("AXGroup")]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(
                     message: "contenteditable-style target was rejected during capture"
                 )
@@ -550,7 +578,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
             let pastePosts = await system.pasteCallCount
 
-            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+            guard case .pasteCommandPosted(let diagnostic) = outcome else {
                 throw SpecFailure(
                     message: "paste-only contenteditable claimed a target receipt"
                 )
@@ -574,7 +602,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 roleResponses: [.success("AXWindow")]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "window-scoped target was rejected")
             }
 
@@ -585,7 +613,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             )
 
             let pasteCallCount = await system.pasteCallCount
-            guard case let .pasteCommandPosted(diagnostic) = outcome else {
+            guard case .pasteCommandPosted(let diagnostic) = outcome else {
                 throw SpecFailure(
                     message: "window-scoped paste claimed a target receipt"
                 )
@@ -598,24 +626,27 @@ enum InputTargetSpecs: CoreSpecDomain {
             "paste transaction restores only while its ownership evidence matches",
             failures: &failures
         ) {
-            try expect(PasteboardDeliveryTransaction.ownsPasteboard(
-                currentChangeCount: 12,
-                currentMarker: "speaker-transaction",
-                ownedChangeCount: 12,
-                marker: "speaker-transaction"
-            ))
-            try expect(!PasteboardDeliveryTransaction.ownsPasteboard(
-                currentChangeCount: 13,
-                currentMarker: "speaker-transaction",
-                ownedChangeCount: 12,
-                marker: "speaker-transaction"
-            ))
-            try expect(!PasteboardDeliveryTransaction.ownsPasteboard(
-                currentChangeCount: 12,
-                currentMarker: "new-user-copy",
-                ownedChangeCount: 12,
-                marker: "speaker-transaction"
-            ))
+            try expect(
+                PasteboardDeliveryTransaction.ownsPasteboard(
+                    currentChangeCount: 12,
+                    currentMarker: "speaker-transaction",
+                    ownedChangeCount: 12,
+                    marker: "speaker-transaction"
+                ))
+            try expect(
+                !PasteboardDeliveryTransaction.ownsPasteboard(
+                    currentChangeCount: 13,
+                    currentMarker: "speaker-transaction",
+                    ownedChangeCount: 12,
+                    marker: "speaker-transaction"
+                ))
+            try expect(
+                !PasteboardDeliveryTransaction.ownsPasteboard(
+                    currentChangeCount: 12,
+                    currentMarker: "new-user-copy",
+                    ownedChangeCount: 12,
+                    marker: "speaker-transaction"
+                ))
         }
 
         run(
@@ -624,12 +655,13 @@ enum InputTargetSpecs: CoreSpecDomain {
         ) {
             let plan = PasteCommandEventPlan.standard
             try expect(plan.sourceStateID == .combinedSessionState)
-            try expect(plan.transitions == [
-                .commandDown,
-                .vDown,
-                .vUp,
-                .commandUp,
-            ])
+            try expect(
+                plan.transitions == [
+                    .commandDown,
+                    .vDown,
+                    .vUp,
+                    .commandUp,
+                ])
         }
 
         await runAsync(
@@ -735,7 +767,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let externalItems = [
-                ["public.utf8-plain-text": Data("external".utf8)],
+                ["public.utf8-plain-text": Data("external".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(
                 items: [["public.png": Data([1, 2, 3])]],
@@ -767,7 +799,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let originalItems = [
-                ["public.utf8-plain-text": Data("original".utf8)],
+                ["public.utf8-plain-text": Data("original".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(
                 items: originalItems,
@@ -859,7 +891,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let externalItems = [
-                ["public.utf8-plain-text": Data("external".utf8)],
+                ["public.utf8-plain-text": Data("external".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(
                 items: [["public.png": Data([1, 2, 3])]]
@@ -904,10 +936,10 @@ enum InputTargetSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let originalItems = [
-                ["public.png": Data([1, 2, 3])],
+                ["public.png": Data([1, 2, 3])]
             ]
             let externalItems = [
-                ["public.utf8-plain-text": Data("external".utf8)],
+                ["public.utf8-plain-text": Data("external".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
             let sleeper = ControlledPasteboardRestoreSleep()
@@ -982,7 +1014,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let originalItems = [
-                ["public.png": Data([1, 2, 3])],
+                ["public.png": Data([1, 2, 3])]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
             let preparation = ControlledPasteboardPreparation()
@@ -1047,7 +1079,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let originalItems = [
-                ["public.rtf": Data([1, 2, 3])],
+                ["public.rtf": Data([1, 2, 3])]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
             let sleeper = ControlledPasteboardRestoreSleep()
@@ -1114,7 +1146,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 valueResponses: [.success("Hello")]
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
@@ -1135,7 +1167,9 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(pastePosts == 0)
         }
 
-        await runAsync("rejected paste fallback retains its exact delivery boundary", failures: &failures) {
+        await runAsync(
+            "rejected paste fallback retains its exact delivery boundary", failures: &failures
+        ) {
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -1144,7 +1178,7 @@ enum InputTargetSpecs: CoreSpecDomain {
                 pasteResult: .eventFailed
             )
             let targets = AccessibilityInputTargets(system: system)
-            guard case let .writable(target) = await targets.capture() else {
+            guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 

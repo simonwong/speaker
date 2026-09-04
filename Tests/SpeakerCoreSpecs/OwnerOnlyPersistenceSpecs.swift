@@ -5,7 +5,8 @@ import SpeakerSpecSupport
 enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("owner-only settings never follow a symbolic-link file", failures: &failures) {
+        await runAsync("owner-only settings never follow a symbolic-link file", failures: &failures)
+        {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-settings-symlink-\(UUID().uuidString)",
@@ -40,7 +41,10 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             try expect(destination == targetURL.path)
         }
 
-        await runAsync("owner-only dictionary and credentials never follow symbolic-link files", failures: &failures) {
+        await runAsync(
+            "owner-only dictionary and credentials never follow symbolic-link files",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-sensitive-symlink-\(UUID().uuidString)",
@@ -55,7 +59,7 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             let dictionaryTarget = directory.appendingPathComponent("dictionary-target.json")
             let dictionaryLink = directory.appendingPathComponent("dictionary.json")
             let expectedDictionary = try PersonalDictionary(entries: [
-                .init(word: "private-term"),
+                .init(word: "private-term")
             ])
             try await VersionedJSONPersonalDictionaryStore(fileURL: dictionaryTarget)
                 .save(expectedDictionary)
@@ -88,7 +92,10 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("owner-only persistence never writes through a symbolic-link directory", failures: &failures) {
+        await runAsync(
+            "owner-only persistence never writes through a symbolic-link directory",
+            failures: &failures
+        ) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-directory-symlink-\(UUID().uuidString)",
@@ -127,7 +134,8 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             }
             try expect(
                 !FileManager.default.fileExists(
-                    atPath: outsideDirectory
+                    atPath:
+                        outsideDirectory
                         .appendingPathComponent("settings.json")
                         .path
                 )
@@ -154,7 +162,10 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("settings reject non-regular and oversized files without moving evidence", failures: &failures) {
+        await runAsync(
+            "settings reject non-regular and oversized files without moving evidence",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-settings-file-boundary-\(UUID().uuidString)",
@@ -223,7 +234,8 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             )
         }
 
-        run("recovery archives retain only recent bounded no-follow evidence", failures: &failures) {
+        run("recovery archives retain only recent bounded no-follow evidence", failures: &failures)
+        {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-recovery-budget-spec-\(UUID().uuidString)",
@@ -276,9 +288,11 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             let old = root.appendingPathComponent("history.corrupt-old.json")
             try OwnerOnlyFilePersistence.write(Data("old".utf8), to: old)
             try FileManager.default.setAttributes(
-                [.modificationDate: now.addingTimeInterval(
-                    -RecoveryArchivePruner.maximumAge - 60
-                )],
+                [
+                    .modificationDate: now.addingTimeInterval(
+                        -RecoveryArchivePruner.maximumAge - 60
+                    )
+                ],
                 ofItemAtPath: old.path
             )
             let current = root.appendingPathComponent("history.corrupt-current.json")
@@ -321,7 +335,9 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             try expect(!directoryNames.contains("history.corrupt-4"))
         }
 
-        run("recovery archive pruning reports the archives it could not remove", failures: &failures) {
+        run(
+            "recovery archive pruning reports the archives it could not remove", failures: &failures
+        ) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-recovery-prune-failure-spec-\(UUID().uuidString)",
@@ -355,7 +371,8 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             // and the caller has to be told rather than left to assume the
             // directory shrank.
             for index in 3..<5 {
-                let path = root
+                let path =
+                    root
                     .appendingPathComponent("settings.recovery-\(index).json")
                     .path
                 try FileManager.default.setAttributes(

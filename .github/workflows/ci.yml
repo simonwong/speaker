@@ -62,12 +62,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-
 
-      # The repository is not formatted to this configuration yet, so the check
-      # reports findings without failing the job. Reformatting the tree and
-      # making this step blocking lands in a later ticket; this one only adds
-      # the check and the root .swift-format configuration.
+      # The tree is formatted to the root .swift-format configuration, so this
+      # check is blocking.
       - name: Check Swift formatting
-        continue-on-error: true
         run: swift format lint --strict --parallel --recursive Sources Tests
 
       - name: Run deterministic specifications

@@ -118,7 +118,7 @@ package struct HistoryDashboard: View {
         }
         .onChange(of: state.records.map(\.sessionID)) { _, ids in
             guard let expandedRecordID,
-                  !ids.contains(expandedRecordID)
+                !ids.contains(expandedRecordID)
             else { return }
             self.expandedRecordID = nil
         }
@@ -248,8 +248,9 @@ package struct HistoryDashboard: View {
                                         ? nil
                                         : .easeOut(duration: 0.18)
                                 ) {
-                                    expandedRecordID = expandedRecordID
-                                        == record.sessionID
+                                    expandedRecordID =
+                                        expandedRecordID
+                                            == record.sessionID
                                         ? nil
                                         : record.sessionID
                                 }
@@ -549,8 +550,8 @@ private struct HistoryExpandedRecord: View {
     }
 }
 
-private extension HistoryDashboardFeedback.Kind {
-    var systemImage: String {
+extension HistoryDashboardFeedback.Kind {
+    fileprivate var systemImage: String {
         switch self {
         case .information: "info.circle.fill"
         case .success: "checkmark.circle.fill"
@@ -559,7 +560,7 @@ private extension HistoryDashboardFeedback.Kind {
         }
     }
 
-    var color: Color {
+    fileprivate var color: Color {
         switch self {
         case .information: .secondary
         case .success: .green

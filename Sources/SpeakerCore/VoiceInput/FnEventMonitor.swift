@@ -140,17 +140,20 @@ package final class FnEventMonitor {
         guard tap == nil else { return .active }
 
         let box = FnEventTapBox(target: target)
-        let mask = eventMask(for: .flagsChanged)
+        let mask =
+            eventMask(for: .flagsChanged)
             | eventMask(for: .keyDown)
             | eventMask(for: .keyUp)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: fnEventTapCallback,
-            userInfo: Unmanaged.passUnretained(box).toOpaque()
-        ) else {
+        guard
+            let tap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: mask,
+                callback: fnEventTapCallback,
+                userInfo: Unmanaged.passUnretained(box).toOpaque()
+            )
+        else {
             return .eventTapUnavailable
         }
 
@@ -223,7 +226,7 @@ private final class FnEventTapBox: @unchecked Sendable {
                 keyCode: event.getIntegerValueField(.keyboardEventKeycode),
                 flags: event.flags
             )
-            guard case let .consume(trigger) = disposition else { return false }
+            guard case .consume(let trigger) = disposition else { return false }
             switch trigger {
             case .pressed:
                 guard !IsSecureEventInputEnabled() else { return true }
@@ -266,8 +269,8 @@ private final class FnEventTapBox: @unchecked Sendable {
         timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
         timer.setEventHandler { [weak self] in
             guard let self,
-                  self.functionKeyPolicy.isDown,
-                  self.didEmitPress
+                self.functionKeyPolicy.isDown,
+                self.didEmitPress
             else { return }
             guard IsSecureEventInputEnabled() else { return }
             self.didEmitPress = false

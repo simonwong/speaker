@@ -5,14 +5,19 @@ import SpeakerSpecSupport
 enum AudioStreamSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("PCM streaming emits consecutive chunks without crashing", failures: &failures) {
+        await runAsync(
+            "PCM streaming emits consecutive chunks without crashing", failures: &failures
+        ) {
             var buffer = PCMChunkBuffer(chunkSize: 6_400)
             let chunks = buffer.append(Data(repeating: 1, count: 12_800))
             try expect(chunks.count == 2)
             try expect(chunks.allSatisfy { $0.count == 6_400 })
         }
 
-        await runAsync("audio stream terminates instead of silently dropping when its byte budget is exhausted", failures: &failures) {
+        await runAsync(
+            "audio stream terminates instead of silently dropping when its byte budget is exhausted",
+            failures: &failures
+        ) {
             let exhaustion = LockedCounter()
             let buffer = BoundedAudioChunkStream(
                 maximumBufferedBytes: 12,

@@ -9,10 +9,11 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
         await runAsync("hold and release delivers deterministic transcript", failures: &failures) {
             let audio = AudioCaptureFake()
             let targets = TargetCaptureFake(
-                result: .writable(.init(
-                    id: UUID(),
-                    applicationName: "TextEdit"
-                ))
+                result: .writable(
+                    .init(
+                        id: UUID(),
+                        applicationName: "TextEdit"
+                    ))
             )
             let transcriber = SpeechTranscriberFake(text: "你好，SwiftUI。")
             let delivery = TextDeliveryFake(result: .delivered)
@@ -85,7 +86,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("release during recorder startup still completes once", failures: &failures) {
+        await runAsync("release during recorder startup still completes once", failures: &failures)
+        {
             let audio = AudioCaptureFake(delaysStart: true)
             let targets = TargetCaptureFake(
                 result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
@@ -116,7 +118,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(deliveredTexts == ["短按也不会丢。"])
         }
 
-        await runAsync("cancel during recorder startup cleans late recording", failures: &failures) {
+        await runAsync("cancel during recorder startup cleans late recording", failures: &failures)
+        {
             let audio = AudioCaptureFake(delaysStart: true)
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
@@ -237,7 +240,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let replaced = Task { () -> VoiceInputPresentation? in
                 for await presentation in await sessions.observe() {
                     if presentation.activity.pendingCopyReason == nil,
-                       presentation.activity != .idle {
+                        presentation.activity != .idle
+                    {
                         return presentation
                     }
                 }
@@ -258,7 +262,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             await sessions.send(.cancel)
         }
 
-        await runAsync("dismiss pending copy hides without changing clipboard", failures: &failures) {
+        await runAsync("dismiss pending copy hides without changing clipboard", failures: &failures)
+        {
             let clipboard = ClipboardFake()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -287,7 +292,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(copiedTexts.isEmpty)
         }
 
-        await runAsync("failed clipboard write keeps the result visible for retry", failures: &failures) {
+        await runAsync(
+            "failed clipboard write keeps the result visible for retry", failures: &failures
+        ) {
             let clipboard = ClipboardFake(succeeds: false)
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -315,7 +322,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(presentation?.activity.pendingText == "必须保留。")
         }
 
-        await runAsync("failed system copy restores every prior pasteboard representation", failures: &failures) {
+        await runAsync(
+            "failed system copy restores every prior pasteboard representation", failures: &failures
+        ) {
             let originalItems = [
                 [
                     "public.utf8-plain-text": Data("original text".utf8),
@@ -360,9 +369,11 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let pasteboard = ClipboardPasteboardFake(
                 items: originalItems,
                 replacementWriteSucceeds: false,
-                failedReplacementItems: [[
-                    "public.utf8-plain-text": Data("partial replacement".utf8),
-                ]]
+                failedReplacementItems: [
+                    [
+                        "public.utf8-plain-text": Data("partial replacement".utf8)
+                    ]
+                ]
             )
             let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
 
@@ -372,9 +383,11 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(pasteboard.items == originalItems)
         }
 
-        await runAsync("system clipboard reports success only after exact readback", failures: &failures) {
+        await runAsync(
+            "system clipboard reports success only after exact readback", failures: &failures
+        ) {
             let originalItems = [
-                ["public.utf8-plain-text": Data("original".utf8)],
+                ["public.utf8-plain-text": Data("original".utf8)]
             ]
             let stalePasteboard = ClipboardPasteboardFake(
                 items: originalItems,
@@ -399,9 +412,11 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("system copy preserves a newer external clipboard owner", failures: &failures) {
+        await runAsync(
+            "system copy preserves a newer external clipboard owner", failures: &failures
+        ) {
             let externalItems = [
-                ["public.utf8-plain-text": Data("new external copy".utf8)],
+                ["public.utf8-plain-text": Data("new external copy".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(
                 items: [["public.png": Data([0x89, 0x50])]],
@@ -415,64 +430,67 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(pasteboard.items == externalItems)
         }
 
-        await runAsync("unsafe system clipboard snapshots fail before mutation", failures: &failures) {
+        await runAsync(
+            "unsafe system clipboard snapshots fail before mutation", failures: &failures
+        ) {
             let oneItem = [["type.a": Data([1, 2, 3, 4])]]
-            let cases: [(
-                items: [[String: Data]],
-                unreadableTypes: Set<String>,
-                budget: PasteboardSnapshotBudget
-            )] = [
-                (
-                    oneItem,
-                    [],
-                    .init(
-                        maximumItemCount: 0,
-                        maximumRepresentationCount: 1,
-                        maximumBytesPerRepresentation: 4,
-                        maximumTotalBytes: 4
-                    )
-                ),
-                (
-                    oneItem,
-                    [],
-                    .init(
-                        maximumItemCount: 1,
-                        maximumRepresentationCount: 0,
-                        maximumBytesPerRepresentation: 4,
-                        maximumTotalBytes: 4
-                    )
-                ),
-                (
-                    oneItem,
-                    [],
-                    .init(
-                        maximumItemCount: 1,
-                        maximumRepresentationCount: 1,
-                        maximumBytesPerRepresentation: 3,
-                        maximumTotalBytes: 4
-                    )
-                ),
-                (
-                    oneItem,
-                    [],
-                    .init(
-                        maximumItemCount: 1,
-                        maximumRepresentationCount: 1,
-                        maximumBytesPerRepresentation: 4,
-                        maximumTotalBytes: 3
-                    )
-                ),
-                (
-                    oneItem,
-                    ["type.a"],
-                    .init(
-                        maximumItemCount: 1,
-                        maximumRepresentationCount: 1,
-                        maximumBytesPerRepresentation: 4,
-                        maximumTotalBytes: 4
-                    )
-                ),
-            ]
+            let cases:
+                [(
+                    items: [[String: Data]],
+                    unreadableTypes: Set<String>,
+                    budget: PasteboardSnapshotBudget
+                )] = [
+                    (
+                        oneItem,
+                        [],
+                        .init(
+                            maximumItemCount: 0,
+                            maximumRepresentationCount: 1,
+                            maximumBytesPerRepresentation: 4,
+                            maximumTotalBytes: 4
+                        )
+                    ),
+                    (
+                        oneItem,
+                        [],
+                        .init(
+                            maximumItemCount: 1,
+                            maximumRepresentationCount: 0,
+                            maximumBytesPerRepresentation: 4,
+                            maximumTotalBytes: 4
+                        )
+                    ),
+                    (
+                        oneItem,
+                        [],
+                        .init(
+                            maximumItemCount: 1,
+                            maximumRepresentationCount: 1,
+                            maximumBytesPerRepresentation: 3,
+                            maximumTotalBytes: 4
+                        )
+                    ),
+                    (
+                        oneItem,
+                        [],
+                        .init(
+                            maximumItemCount: 1,
+                            maximumRepresentationCount: 1,
+                            maximumBytesPerRepresentation: 4,
+                            maximumTotalBytes: 3
+                        )
+                    ),
+                    (
+                        oneItem,
+                        ["type.a"],
+                        .init(
+                            maximumItemCount: 1,
+                            maximumRepresentationCount: 1,
+                            maximumBytesPerRepresentation: 4,
+                            maximumTotalBytes: 4
+                        )
+                    ),
+                ]
 
             for testCase in cases {
                 let pasteboard = ClipboardPasteboardFake(
@@ -513,10 +531,12 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(!itemResult)
             try expect(tooManyItems.itemTypesReadCount == 0)
 
-            let tooManyRepresentations = ClipboardPasteboardFake(items: [[
-                "type.a": Data([1]),
-                "type.b": Data([2]),
-            ]])
+            let tooManyRepresentations = ClipboardPasteboardFake(items: [
+                [
+                    "type.a": Data([1]),
+                    "type.b": Data([2]),
+                ]
+            ])
             let representationBoundedWriter = SystemClipboardWriter(
                 pasteboard: tooManyRepresentations.access,
                 snapshotBudget: .init(
@@ -535,7 +555,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(tooManyRepresentations.clearCount == 0)
         }
 
-        await runAsync("system clipboard snapshot accepts exact resource limits", failures: &failures) {
+        await runAsync(
+            "system clipboard snapshot accepts exact resource limits", failures: &failures
+        ) {
             let pasteboard = ClipboardPasteboardFake(
                 items: [["type.a": Data([1, 2, 3, 4])]]
             )
@@ -677,7 +699,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("posted paste finishes without exposing retryable manual copy", failures: &failures) {
+        await runAsync(
+            "posted paste finishes without exposing retryable manual copy", failures: &failures
+        ) {
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -905,7 +929,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             await dispatcher.shutdown()
         }
 
-        await runAsync("global trigger dispatcher supports tap-to-start and tap-to-stop", failures: &failures) {
+        await runAsync(
+            "global trigger dispatcher supports tap-to-start and tap-to-stop", failures: &failures
+        ) {
             let audio = AudioCaptureFake()
             let delivery = TextDeliveryFake(result: .delivered)
             let sessions = VoiceInputSessions(
@@ -938,7 +964,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(deliveredTexts == ["顺序正确。"])
         }
 
-        await runAsync("terminal result is published before blocked history persistence", failures: &failures) {
+        await runAsync(
+            "terminal result is published before blocked history persistence", failures: &failures
+        ) {
             let history = BlockingSessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -964,7 +992,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             await shutdown.value
         }
 
-        await runAsync("processing-time shortcut presses are rejected instead of delayed", failures: &failures) {
+        await runAsync(
+            "processing-time shortcut presses are rejected instead of delayed", failures: &failures
+        ) {
             let audio = AudioCaptureFake()
             let transcriber = SpeechTranscriberFake(
                 text: "处理完成",
@@ -1015,7 +1045,10 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             await dispatcher.shutdown()
         }
 
-        await runAsync("provider processing has no business timeout and remains cancellable", failures: &failures) {
+        await runAsync(
+            "provider processing has no business timeout and remains cancellable",
+            failures: &failures
+        ) {
             let transcriber = SpeechTranscriberFake(
                 text: "late result",
                 delaysResponse: true

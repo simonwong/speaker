@@ -35,7 +35,8 @@ package struct LoginItemPresentation: Equatable, Sendable {
         case .enabled:
             registrationState = .enabled
             isEnabled = true
-            notice = desiredEnabled
+            notice =
+                desiredEnabled
                 ? nil
                 : Self.systemEnabledNotice
             showsSystemSettingsButton = false

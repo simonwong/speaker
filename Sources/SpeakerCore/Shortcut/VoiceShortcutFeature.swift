@@ -27,7 +27,7 @@ package enum VoiceShortcutActivation: Equatable, Sendable {
     case stopped
 
     package var activePreference: VoiceShortcutPreference? {
-        guard case let .active(preference) = self else { return nil }
+        guard case .active(let preference) = self else { return nil }
         return preference
     }
 }
@@ -71,8 +71,9 @@ package struct VoiceShortcutNotice: Equatable, Sendable {
         case .accessibilityRequired: .information
         case .fellBackToFunctionKey: .warning
         case .functionKeyActivationFailed,
-             .fallbackUnavailable,
-             .persistenceFailed: .error
+            .fallbackUnavailable,
+            .persistenceFailed:
+            .error
         }
     }
 

@@ -5,7 +5,8 @@ import SpeakerSpecSupport
 enum AudioCaptureSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        run("provider diagnostics remove controls and cap untrusted messages", failures: &failures) {
+        run("provider diagnostics remove controls and cap untrusted messages", failures: &failures)
+        {
             let diagnostic = VoiceProviderDiagnostic(
                 provider: "doubao\nspoofed",
                 requestID: " request\t123 ",
@@ -56,7 +57,10 @@ enum AudioCaptureSpecs: CoreSpecDomain {
             try expect(!String(describing: snapshot).contains(secret))
         }
 
-        run("microphone denial is distinct from an unknown recording-device failure", failures: &failures) {
+        run(
+            "microphone denial is distinct from an unknown recording-device failure",
+            failures: &failures
+        ) {
             let denied = VoiceInputProblem(
                 audioCaptureError: .microphonePermissionDenied
             )
@@ -92,7 +96,9 @@ enum AudioCaptureSpecs: CoreSpecDomain {
             }
         }
 
-        run("provider networking does not persist cookies credentials or cache", failures: &failures) {
+        run(
+            "provider networking does not persist cookies credentials or cache", failures: &failures
+        ) {
             let configuration = ProviderURLSessionFactory.ephemeralConfiguration()
             try expect(configuration.urlCache == nil)
             try expect(configuration.httpCookieStorage == nil)
@@ -108,10 +114,12 @@ enum AudioCaptureSpecs: CoreSpecDomain {
 
             let model = PermissionModel(access: access)
 
-            try expect(model.snapshot == .init(
-                accessibility: .denied,
-                microphone: .notDetermined
-            ))
+            try expect(
+                model.snapshot
+                    == .init(
+                        accessibility: .denied,
+                        microphone: .notDetermined
+                    ))
             try expect(!model.snapshot.allGranted)
         }
 
@@ -124,14 +132,17 @@ enum AudioCaptureSpecs: CoreSpecDomain {
 
             model.refresh()
 
-            try expect(model.snapshot == .init(
-                accessibility: .granted,
-                microphone: .granted
-            ))
+            try expect(
+                model.snapshot
+                    == .init(
+                        accessibility: .granted,
+                        microphone: .granted
+                    ))
             try expect(model.snapshot.allGranted)
         }
 
-        run("restricted microphone authorization remains distinct from denial", failures: &failures) {
+        run("restricted microphone authorization remains distinct from denial", failures: &failures)
+        {
             try expect(
                 SystemPermissionAccess.microphoneState(for: .restricted)
                     == .restricted
@@ -187,13 +198,16 @@ enum AudioCaptureSpecs: CoreSpecDomain {
             await model.request(.accessibility)
 
             try expect(access.requestedPermissions == [.accessibility])
-            try expect(model.snapshot == .init(
-                accessibility: .granted,
-                microphone: .granted
-            ))
+            try expect(
+                model.snapshot
+                    == .init(
+                        accessibility: .granted,
+                        microphone: .granted
+                    ))
         }
 
-        await runAsync("first launch requests an undetermined microphone once", failures: &failures) {
+        await runAsync("first launch requests an undetermined microphone once", failures: &failures)
+        {
             let access = PermissionAccessStub(
                 snapshot: .init(accessibility: .denied, microphone: .notDetermined)
             )
@@ -221,7 +235,9 @@ enum AudioCaptureSpecs: CoreSpecDomain {
             try expect(access.requestedPermissions.isEmpty)
         }
 
-        await runAsync("first launch requests missing accessibility for the active bundle", failures: &failures) {
+        await runAsync(
+            "first launch requests missing accessibility for the active bundle", failures: &failures
+        ) {
             let access = PermissionAccessStub(
                 snapshot: .init(accessibility: .denied, microphone: .granted)
             )

@@ -74,7 +74,7 @@ package enum DoubaoFailureClassifier {
         default fallback: DoubaoASRFailureKind
     ) -> DoubaoASRFailureKind {
         switch classify(code: code) {
-        case let .known(kind):
+        case .known(let kind):
             return kind
         case .sharedParameterError:
             return messageFallback(message, default: .invalidRequest)
@@ -175,7 +175,8 @@ package enum DoubaoFailureClassifier {
     }
 
     private static func messageLooksLikeResourceFailure(_ message: String) -> Bool {
-        (message.contains("resource") && (message.contains("not") || message.contains("permission")))
+        (message.contains("resource")
+            && (message.contains("not") || message.contains("permission")))
             || message.contains("not activated")
             || message.contains("未开通")
             || message.contains("无权限")

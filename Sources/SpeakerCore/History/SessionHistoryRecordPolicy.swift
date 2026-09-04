@@ -69,9 +69,10 @@ package enum SessionHistoryRecordPolicy {
             )
         }
         let retainedRecords = records.filter(shouldRetain)
-        let ageFiltered = cutoff.map { cutoff in
-            retainedRecords.filter { $0.startedAt >= cutoff }
-        } ?? retainedRecords
+        let ageFiltered =
+            cutoff.map { cutoff in
+                retainedRecords.filter { $0.startedAt >= cutoff }
+            } ?? retainedRecords
         return Array(sort(ageFiltered).prefix(max(1, maximumCount)))
     }
 }

@@ -101,9 +101,10 @@ package enum SpeakerDiagnosticReport {
         ]
 
         let capture = snapshot.audioCaptureEnvironment
-        let voiceProcessingFailure = capture.map {
-            $0.voiceProcessingEnableFailure?.rawValue ?? "none"
-        } ?? "unknown"
+        let voiceProcessingFailure =
+            capture.map {
+                $0.voiceProcessingEnableFailure?.rawValue ?? "none"
+            } ?? "unknown"
         let preferredMicrophoneMode =
             capture?.preferredMicrophoneMode.rawValue ?? "unknown"
         let activeMicrophoneMode =
@@ -228,7 +229,8 @@ package enum SpeakerDiagnosticReport {
         _ durations: [String: Int]
     ) -> String? {
         guard !durations.isEmpty else { return nil }
-        return durations
+        return
+            durations
             .map { (clean($0.key), max(0, $0.value)) }
             .sorted { $0.0 < $1.0 }
             .map { "\($0.0)=\($0.1)" }
@@ -246,11 +248,11 @@ package enum SpeakerDiagnosticReport {
         case .idle: "idle"
         case .preparing: "preparing"
         case .recording: "recording"
-        case let .processing(_, stage, _): "processing.\(stage)"
+        case .processing(_, let stage, _): "processing.\(stage)"
         case .delivered: "delivered"
-        case let .pendingCopy(_, _, reason): "pendingCopy.\(reason.rawValue)"
+        case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
         case .cancelled: "cancelled"
-        case let .failed(_, failure): "failed.\(failure.rawValue)"
+        case .failed(_, let failure): "failed.\(failure.rawValue)"
         }
     }
 
@@ -265,7 +267,8 @@ package enum SpeakerDiagnosticReport {
                 ? " "
                 : String(scalar)
         }.joined()
-        let collapsed = sanitized
+        let collapsed =
+            sanitized
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
         guard !collapsed.isEmpty else { return nil }

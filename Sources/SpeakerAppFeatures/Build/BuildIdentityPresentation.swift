@@ -25,7 +25,7 @@ package struct SpeakerBuildIdentity: Equatable, Sendable {
 
     private static func displayValue(_ value: String?) -> String {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty
+            !value.isEmpty
         else { return "—" }
         return value
     }
@@ -133,9 +133,9 @@ package enum SpeakerSigningMode: Equatable, Sendable {
         switch self {
         case .developmentAdHoc:
             return """
-            当前是本机开发签名。重新构建后，macOS 可能要求重新授予麦克风和辅助功能权限；\
-            如果列表中已有 Speaker，请先移除旧项，再添加当前安装的 Speaker.app。
-            """
+                当前是本机开发签名。重新构建后，macOS 可能要求重新授予麦克风和辅助功能权限；\
+                如果列表中已有 Speaker，请先移除旧项，再添加当前安装的 Speaker.app。
+                """
         case .unknown:
             return "当前构建的签名身份无法确认，麦克风和辅助功能授权可能无法跨版本保持。"
         case .developmentSigned:
@@ -159,9 +159,9 @@ package struct DeliverySmokeLaunchRequest: Equatable, Sendable {
         signingMode: SpeakerSigningMode
     ) {
         guard signingMode.permitsLocalDeliverySmoke,
-              let reportIndex = arguments.firstIndex(
+            let reportIndex = arguments.firstIndex(
                 of: "--speaker-delivery-smoke-report"
-              ), arguments.indices.contains(reportIndex + 1)
+            ), arguments.indices.contains(reportIndex + 1)
         else {
             return nil
         }
@@ -171,18 +171,21 @@ package struct DeliverySmokeLaunchRequest: Equatable, Sendable {
         let exercisesVoiceSession = arguments.contains(
             "--speaker-delivery-smoke-session"
         )
-        let usesFrontmostTarget = captureOnly || arguments.contains(
-            "--speaker-delivery-smoke-frontmost"
-        )
+        let usesFrontmostTarget =
+            captureOnly
+            || arguments.contains(
+                "--speaker-delivery-smoke-frontmost"
+            )
         let processID: Int32?
         if usesFrontmostTarget {
             processID = nil
         } else {
-            guard let processIndex = arguments.firstIndex(
-                of: "--speaker-delivery-smoke-pid"
-            ), arguments.indices.contains(processIndex + 1),
-                  let parsedProcessID = Int32(arguments[processIndex + 1]),
-                  parsedProcessID > 0
+            guard
+                let processIndex = arguments.firstIndex(
+                    of: "--speaker-delivery-smoke-pid"
+                ), arguments.indices.contains(processIndex + 1),
+                let parsedProcessID = Int32(arguments[processIndex + 1]),
+                parsedProcessID > 0
             else { return nil }
             processID = parsedProcessID
         }
@@ -193,16 +196,17 @@ package struct DeliverySmokeLaunchRequest: Equatable, Sendable {
             .standardizedFileURL
         let temporaryRoot = reportDirectory.deletingLastPathComponent().path
         guard ["/private/tmp", "/tmp"].contains(temporaryRoot),
-              reportDirectory.lastPathComponent.hasPrefix(
-                  "speaker-delivery-smoke-"
-              ),
-              reportURL.lastPathComponent == "report.txt"
+            reportDirectory.lastPathComponent.hasPrefix(
+                "speaker-delivery-smoke-"
+            ),
+            reportURL.lastPathComponent == "report.txt"
         else {
             return nil
         }
-        let triggerURL = arguments.contains(
-            "--speaker-delivery-smoke-trigger"
-        ) ? reportDirectory.appendingPathComponent("trigger.txt") : nil
+        let triggerURL =
+            arguments.contains(
+                "--speaker-delivery-smoke-trigger"
+            ) ? reportDirectory.appendingPathComponent("trigger.txt") : nil
         self.processID = processID
         self.reportURL = reportURL
         self.captureOnly = captureOnly

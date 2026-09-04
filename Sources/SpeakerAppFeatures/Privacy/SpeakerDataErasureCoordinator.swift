@@ -146,7 +146,7 @@ package final class SpeakerDataErasureCoordinator: ObservableObject {
         operationTask = task
         let outcome = await task.value
         operationTask = nil
-        if case let .incomplete(failure) = outcome {
+        if case .incomplete(let failure) = outcome {
             state = .failed(failure)
         }
         return outcome
@@ -155,44 +155,45 @@ package final class SpeakerDataErasureCoordinator: ObservableObject {
     private static func perform(
         using dependencies: SpeakerDataErasureDependencies
     ) async -> SpeakerDataErasureOutcome {
-        let strictStages: [(
-            SpeakerDataErasureStage,
-            Set<SpeakerDataClass>,
-            SpeakerDataErasureDependencies.Operation
-        )] = [
-            (.intent, Set(SpeakerDataClass.allCases), dependencies.persistIntent),
-            (.runtime, Set(SpeakerDataClass.allCases), dependencies.quiesceRuntime),
-            (
-                .loginItem,
-                Set(SpeakerDataClass.allCases),
-                dependencies.eraseLoginItem
-            ),
-            (
-                .credentials,
-                [
-                    .providerCredentials,
-                    .history,
-                    .settings,
-                    .dictionary,
-                    .preferences,
-                    .legacyData,
-                    .caches,
-                ],
-                dependencies.eraseProviderCredentials
-            ),
-            (
-                .historyClose,
-                [
-                    .history,
-                    .settings,
-                    .dictionary,
-                    .preferences,
-                    .legacyData,
-                    .caches,
-                ],
-                dependencies.closeHistory
-            ),
-        ]
+        let strictStages:
+            [(
+                SpeakerDataErasureStage,
+                Set<SpeakerDataClass>,
+                SpeakerDataErasureDependencies.Operation
+            )] = [
+                (.intent, Set(SpeakerDataClass.allCases), dependencies.persistIntent),
+                (.runtime, Set(SpeakerDataClass.allCases), dependencies.quiesceRuntime),
+                (
+                    .loginItem,
+                    Set(SpeakerDataClass.allCases),
+                    dependencies.eraseLoginItem
+                ),
+                (
+                    .credentials,
+                    [
+                        .providerCredentials,
+                        .history,
+                        .settings,
+                        .dictionary,
+                        .preferences,
+                        .legacyData,
+                        .caches,
+                    ],
+                    dependencies.eraseProviderCredentials
+                ),
+                (
+                    .historyClose,
+                    [
+                        .history,
+                        .settings,
+                        .dictionary,
+                        .preferences,
+                        .legacyData,
+                        .caches,
+                    ],
+                    dependencies.closeHistory
+                ),
+            ]
 
         for (stage, remaining, operation) in strictStages {
             if let issue = await issue(for: stage, operation: operation) {
@@ -205,19 +206,20 @@ package final class SpeakerDataErasureCoordinator: ObservableObject {
             }
         }
 
-        let independentStages: [(
-            SpeakerDataErasureStage,
-            SpeakerDataClass,
-            SpeakerDataErasureDependencies.Operation
-        )] = [
-            (
-                .applicationSupport,
-                .settings,
-                dependencies.eraseApplicationSupport
-            ),
-            (.legacyData, .legacyData, dependencies.eraseLegacyData),
-            (.caches, .caches, dependencies.eraseCaches),
-        ]
+        let independentStages:
+            [(
+                SpeakerDataErasureStage,
+                SpeakerDataClass,
+                SpeakerDataErasureDependencies.Operation
+            )] = [
+                (
+                    .applicationSupport,
+                    .settings,
+                    dependencies.eraseApplicationSupport
+                ),
+                (.legacyData, .legacyData, dependencies.eraseLegacyData),
+                (.caches, .caches, dependencies.eraseCaches),
+            ]
         var issues: [SpeakerDataErasureIssue] = []
         var remaining: Set<SpeakerDataClass> = []
         for (stage, dataClass, operation) in independentStages {

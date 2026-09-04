@@ -27,10 +27,11 @@ struct MainWindowVisibilityBridge: NSViewRepresentable {
     final class Coordinator: NSObject {
         private lazy var feature = MainWindowVisibilityFeature {
             policy in
-            let appKitPolicy: NSApplication.ActivationPolicy = switch policy {
-            case .accessory: .accessory
-            case .regular: .regular
-            }
+            let appKitPolicy: NSApplication.ActivationPolicy =
+                switch policy {
+                case .accessory: .accessory
+                case .regular: .regular
+                }
             guard NSApp.activationPolicy() != appKitPolicy else { return }
             NSApp.setActivationPolicy(appKitPolicy)
         }

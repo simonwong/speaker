@@ -14,12 +14,13 @@ enum DashboardGroupingSpecs {
             failures: &failures
         ) {
             let calendar = shanghaiCalendar()
-            let pinned = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 20, hour: 15
-            ))!
+            let pinned = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 20, hour: 15
+                ))!
             let model = makeHistoryModel(
                 records: [
-                    record(startedAt: pinned.addingTimeInterval(-3_600)),
+                    record(startedAt: pinned.addingTimeInterval(-3_600))
                 ],
                 now: pinned
             )
@@ -38,20 +39,27 @@ enum DashboardGroupingSpecs {
             failures: &failures
         ) {
             let calendar = shanghaiCalendar()
-            let pinned = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 20, hour: 15
-            ))!
+            let pinned = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 20, hour: 15
+                ))!
             let model = makeHistoryModel(
                 records: [
-                    record(startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 20, hour: 9
-                    ))!),
-                    record(startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 19, hour: 20
-                    ))!),
-                    record(startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 17, hour: 10
-                    ))!),
+                    record(
+                        startedAt: calendar.date(
+                            from: DateComponents(
+                                year: 2026, month: 7, day: 20, hour: 9
+                            ))!),
+                    record(
+                        startedAt: calendar.date(
+                            from: DateComponents(
+                                year: 2026, month: 7, day: 19, hour: 20
+                            ))!),
+                    record(
+                        startedAt: calendar.date(
+                            from: DateComponents(
+                                year: 2026, month: 7, day: 17, hour: 10
+                            ))!),
                 ],
                 now: pinned
             )
@@ -76,24 +84,30 @@ enum DashboardGroupingSpecs {
         ) {
             let calendar = shanghaiCalendar()
             let records = [
-                record(startedAt: calendar.date(from: DateComponents(
-                    year: 2026, month: 7, day: 20, hour: 9
-                ))!),
-                record(startedAt: calendar.date(from: DateComponents(
-                    year: 2026, month: 7, day: 19, hour: 20
-                ))!),
+                record(
+                    startedAt: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: 20, hour: 9
+                        ))!),
+                record(
+                    startedAt: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: 19, hour: 20
+                        ))!),
             ]
             let sameDay = dashboardState(
                 records: records,
-                referenceDate: calendar.date(from: DateComponents(
-                    year: 2026, month: 7, day: 20, hour: 23, minute: 59
-                ))!
+                referenceDate: calendar.date(
+                    from: DateComponents(
+                        year: 2026, month: 7, day: 20, hour: 23, minute: 59
+                    ))!
             )
             let nextDay = dashboardState(
                 records: records,
-                referenceDate: calendar.date(from: DateComponents(
-                    year: 2026, month: 7, day: 21, hour: 0, minute: 1
-                ))!
+                referenceDate: calendar.date(
+                    from: DateComponents(
+                        year: 2026, month: 7, day: 21, hour: 0, minute: 1
+                    ))!
             )
 
             try expect(
@@ -118,9 +132,10 @@ enum DashboardGroupingSpecs {
             failures: &failures
         ) {
             let calendar = shanghaiCalendar()
-            let pinned = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 20, hour: 15
-            ))!
+            let pinned = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 20, hour: 15
+                ))!
             let today = calendar.startOfDay(for: pinned)
             let store = DashboardHistoryStoreFake(
                 records: [],
@@ -134,7 +149,7 @@ enum DashboardGroupingSpecs {
                             recognizedCharacterCount: 1_000,
                             speakingMilliseconds: 0,
                             sessionCount: 1
-                        ),
+                        )
                     ]
                 )
             )

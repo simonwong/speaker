@@ -88,10 +88,11 @@ struct SpeakerAppUISpecs {
             defer { presenter.stop() }
             presenter.present(presentation)
             let image = try presenter.renderedBitmap()
-            let centerAlpha = image.colorAt(
-                x: image.pixelsWide / 2,
-                y: image.pixelsHigh / 2
-            )?.alphaComponent ?? 0
+            let centerAlpha =
+                image.colorAt(
+                    x: image.pixelsWide / 2,
+                    y: image.pixelsHigh / 2
+                )?.alphaComponent ?? 0
             let cornerAlpha = image.colorAt(x: 0, y: 0)?.alphaComponent ?? 1
 
             try expect(
@@ -179,14 +180,15 @@ struct SpeakerAppUISpecs {
                 "menu bar fallback was not a template image"
             )
             guard let fallbackData = fallback.tiffRepresentation,
-                  let fallbackBitmap = NSBitmapImageRep(data: fallbackData)
+                let fallbackBitmap = NSBitmapImageRep(data: fallbackData)
             else {
                 throw SpecFailure(message: "could not render menu bar fallback")
             }
             let fallbackVisiblePixels = (0..<fallbackBitmap.pixelsHigh).reduce(0) { count, y in
-                count + (0..<fallbackBitmap.pixelsWide).filter { x in
-                    (fallbackBitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.08
-                }.count
+                count
+                    + (0..<fallbackBitmap.pixelsWide).filter { x in
+                        (fallbackBitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.08
+                    }.count
             }
             try expect(
                 fallbackVisiblePixels >= 12,
@@ -220,8 +222,9 @@ struct SpeakerAppUISpecs {
                 (.recording, "Speaker，正在录音"),
                 (.needsPermission, "Speaker，需要完成权限设置"),
             ] {
-                let hostingView = NSHostingView(rootView:
-                    SpeakerMenuBarLabel(state: state)
+                let hostingView = NSHostingView(
+                    rootView:
+                        SpeakerMenuBarLabel(state: state)
                         .frame(width: 20, height: 18)
                 )
                 hostingView.frame = NSRect(x: 0, y: 0, width: 20, height: 18)
@@ -231,9 +234,11 @@ struct SpeakerAppUISpecs {
                     "\(state) mark did not expose \(expectedLabel)"
                 )
 
-                guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(
-                    in: hostingView.bounds
-                ) else {
+                guard
+                    let bitmap = hostingView.bitmapImageRepForCachingDisplay(
+                        in: hostingView.bounds
+                    )
+                else {
                     throw SpecFailure(message: "could not render menu bar mark")
                 }
                 hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
@@ -241,7 +246,7 @@ struct SpeakerAppUISpecs {
                 let visiblePixels = (0..<bitmap.pixelsHigh).flatMap { y in
                     (0..<bitmap.pixelsWide).compactMap { x -> NSPoint? in
                         guard let color = bitmap.colorAt(x: x, y: y),
-                              color.alphaComponent > 0.08
+                            color.alphaComponent > 0.08
                         else { return nil }
                         return NSPoint(x: x, y: y)
                     }
@@ -253,7 +258,7 @@ struct SpeakerAppUISpecs {
                 let visibleX = visiblePixels.map(\.x)
                 let visibleY = visiblePixels.map(\.y)
                 guard let minX = visibleX.min(), let maxX = visibleX.max(),
-                      let minY = visibleY.min(), let maxY = visibleY.max()
+                    let minY = visibleY.min(), let maxY = visibleY.max()
                 else {
                     throw SpecFailure(message: "menu bar mark rendered no bounds")
                 }
@@ -289,8 +294,9 @@ struct SpeakerAppUISpecs {
             "Speaker identity tiles expose product identity only without adjacent text",
             failures: &failures
         ) {
-            let named = NSHostingView(rootView:
-                SpeakerIdentityTile(size: 44, accessibility: .named)
+            let named = NSHostingView(
+                rootView:
+                    SpeakerIdentityTile(size: 44, accessibility: .named)
             )
             named.frame = NSRect(x: 0, y: 0, width: 44, height: 44)
             let namedWindow = NSWindow(
@@ -301,8 +307,9 @@ struct SpeakerAppUISpecs {
             )
             namedWindow.contentView = named
 
-            let redundant = NSHostingView(rootView:
-                SpeakerIdentityTile(size: 30, accessibility: .hidden)
+            let redundant = NSHostingView(
+                rootView:
+                    SpeakerIdentityTile(size: 30, accessibility: .hidden)
             )
             redundant.frame = NSRect(x: 0, y: 0, width: 30, height: 30)
             let redundantWindow = NSWindow(
@@ -514,10 +521,11 @@ struct SpeakerAppUISpecs {
             failures: &failures
         ) {
             let recorder = DictionaryActionRecorder()
-            let hostingView = NSHostingView(rootView: DictionaryEntryChip(
-                word: "Speaker",
-                onDelete: recorder.record
-            ))
+            let hostingView = NSHostingView(
+                rootView: DictionaryEntryChip(
+                    word: "Speaker",
+                    onDelete: recorder.record
+                ))
             hostingView.frame = NSRect(x: 0, y: 0, width: 180, height: 60)
             let window = NSWindow(
                 contentRect: NSRect(x: -10_000, y: -10_000, width: 180, height: 60),
@@ -549,12 +557,13 @@ struct SpeakerAppUISpecs {
             "dictionary chip exposes omission and quality guidance",
             failures: &failures
         ) {
-            let hostingView = NSHostingView(rootView: DictionaryEntryChip(
-                word: "1234567890",
-                isOmitted: true,
-                qualityHint: .tooLong,
-                onDelete: {}
-            ))
+            let hostingView = NSHostingView(
+                rootView: DictionaryEntryChip(
+                    word: "1234567890",
+                    isOmitted: true,
+                    qualityHint: .tooLong,
+                    onDelete: {}
+                ))
             hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: 80)
             let window = NSWindow(
                 contentRect: NSRect(x: -10_000, y: -10_000, width: 320, height: 80),
@@ -787,16 +796,18 @@ struct SpeakerAppUISpecs {
                 )
             )
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            guard let explicitScrollView = firstScrollView(
-                in: window.contentView
-            ) else {
+            guard
+                let explicitScrollView = firstScrollView(
+                    in: window.contentView
+                )
+            else {
                 throw SpecFailure(
                     message: "explicit settings fixture has no scroll view"
                 )
             }
             let deadline = Date().addingTimeInterval(1)
             while verticalDistanceFromTop(explicitScrollView) < 100,
-                  Date() < deadline
+                Date() < deadline
             {
                 RunLoop.current.run(
                     until: min(deadline, Date().addingTimeInterval(0.01))
@@ -839,9 +850,10 @@ struct SpeakerAppUISpecs {
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
 
             guard let frameView = window.contentView?.superview,
-                  let tabs = segmentedControls(in: frameView).first(where: {
-                      $0.segmentCount == MainWindowTab.allCases.count
-                  }) else {
+                let tabs = segmentedControls(in: frameView).first(where: {
+                    $0.segmentCount == MainWindowTab.allCases.count
+                })
+            else {
                 throw SpecFailure(
                     message: "top tabs were replaced with a custom control"
                 )
@@ -851,10 +863,12 @@ struct SpeakerAppUISpecs {
                 "top tabs changed the native automatic style"
             )
             guard let mask = tabs.superview?.layer?.mask as? CAShapeLayer,
-                  let path = mask.path else {
+                let path = mask.path
+            else {
                 throw SpecFailure(message: "top tab separators were still visible")
             }
-            let segmentWidth = tabs.superview!.bounds.width
+            let segmentWidth =
+                tabs.superview!.bounds.width
                 / CGFloat(tabs.segmentCount)
             try expect(
                 path.contains(CGPoint(x: segmentWidth / 2, y: 10)),
@@ -872,20 +886,23 @@ struct SpeakerAppUISpecs {
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let now = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 19, hour: 15
-            ))!
+            let now = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 19, hour: 15
+                ))!
             let today = calendar.startOfDay(for: now)
             let summary = VoiceInputUsageSummary(
                 totalRecognizedCharacterCount: 1_000,
                 totalSpeakingMilliseconds: 60_000,
                 totalSessionCount: 1,
-                daily: [VoiceInputDailyUsage(
-                    day: today,
-                    recognizedCharacterCount: 1_000,
-                    speakingMilliseconds: 60_000,
-                    sessionCount: 1
-                )]
+                daily: [
+                    VoiceInputDailyUsage(
+                        day: today,
+                        recognizedCharacterCount: 1_000,
+                        speakingMilliseconds: 60_000,
+                        sessionCount: 1
+                    )
+                ]
             )
             let heatmap = ContributionHeatmap.build(
                 summary: summary,
@@ -994,14 +1011,17 @@ struct SpeakerAppUISpecs {
             try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 400) == 2)
             try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 899) == 2)
             try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 900) == 3)
-            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 1_499) == 3)
-            try expect(VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 1_500) == 4)
+            try expect(
+                VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 1_499) == 3)
+            try expect(
+                VoiceInputUsagePresentation.heatmapLevel(recognizedCharacterCount: 1_500) == 4)
 
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let date = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 9
-            ))!
+            let date = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 9
+                ))!
             let description = VoiceInputUsagePresentation.heatmapCellDescription(
                 date: date,
                 recognizedCharacterCount: 1_204,
@@ -1018,9 +1038,10 @@ struct SpeakerAppUISpecs {
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let now = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 19, hour: 15
-            ))!
+            let now = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 19, hour: 15
+                ))!
             let daily = [
                 (12, 9_999),
                 (13, 400),
@@ -1029,9 +1050,10 @@ struct SpeakerAppUISpecs {
                 (20, 7_777),
             ].map { day, count in
                 VoiceInputDailyUsage(
-                    day: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: day
-                    ))!,
+                    day: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: day
+                        ))!,
                     recognizedCharacterCount: count,
                     speakingMilliseconds: 0,
                     sessionCount: 1
@@ -1059,9 +1081,10 @@ struct SpeakerAppUISpecs {
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let now = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 19, hour: 15
-            ))!
+            let now = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 19, hour: 15
+                ))!
             let daily = [
                 (1, 111),
                 (2, 200),
@@ -1070,9 +1093,10 @@ struct SpeakerAppUISpecs {
                 (20, 2_000),
             ].map { day, count in
                 VoiceInputDailyUsage(
-                    day: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: day
-                    ))!,
+                    day: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: day
+                        ))!,
                     recognizedCharacterCount: count,
                     speakingMilliseconds: 0,
                     sessionCount: 1
@@ -1091,7 +1115,8 @@ struct SpeakerAppUISpecs {
                 1_800,
                 1_900,
             ]
-            let counts = VoiceInputUsagePresentation
+            let counts =
+                VoiceInputUsagePresentation
                 .recentRecognizedCharacterCounts(
                     summary: summary,
                     now: now,
@@ -1108,9 +1133,10 @@ struct SpeakerAppUISpecs {
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let now = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 20, hour: 15
-            ))!
+            let now = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 20, hour: 15
+                ))!
             let todayMorningID = VoiceInputSessionID()
             let todayAfternoonID = VoiceInputSessionID()
             let yesterdayID = VoiceInputSessionID()
@@ -1118,27 +1144,31 @@ struct SpeakerAppUISpecs {
             let records = [
                 makeHistoryRecord(
                     id: olderID,
-                    startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 17, hour: 10
-                    ))!
+                    startedAt: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: 17, hour: 10
+                        ))!
                 ),
                 makeHistoryRecord(
                     id: todayMorningID,
-                    startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 20, hour: 9
-                    ))!
+                    startedAt: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: 20, hour: 9
+                        ))!
                 ),
                 makeHistoryRecord(
                     id: yesterdayID,
-                    startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 19, hour: 20
-                    ))!
+                    startedAt: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: 19, hour: 20
+                        ))!
                 ),
                 makeHistoryRecord(
                     id: todayAfternoonID,
-                    startedAt: calendar.date(from: DateComponents(
-                        year: 2026, month: 7, day: 20, hour: 14
-                    ))!
+                    startedAt: calendar.date(
+                        from: DateComponents(
+                            year: 2026, month: 7, day: 20, hour: 14
+                        ))!
                 ),
             ]
             let sections = HistoryPresentation.sections(
@@ -1169,9 +1199,10 @@ struct SpeakerAppUISpecs {
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let startedAt = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 20, hour: 9, minute: 5
-            ))!
+            let startedAt = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 20, hour: 9, minute: 5
+                ))!
             let textID = VoiceInputSessionID()
             let cancelledID = VoiceInputSessionID()
             let secureID = VoiceInputSessionID()
@@ -1232,9 +1263,10 @@ struct SpeakerAppUISpecs {
         ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
-            let startedAt = calendar.date(from: DateComponents(
-                year: 2026, month: 7, day: 20, hour: 9, minute: 5
-            ))!
+            let startedAt = calendar.date(
+                from: DateComponents(
+                    year: 2026, month: 7, day: 20, hour: 9, minute: 5
+                ))!
             let deliveredID = VoiceInputSessionID()
             let unconfirmedID = VoiceInputSessionID()
             let fallbackID = VoiceInputSessionID()
@@ -1498,9 +1530,11 @@ private func verifyHUDControls(
     )
 
     for expectedLabel in expectedLabels {
-        guard let button = buttons.first(where: {
-            $0.label == expectedLabel
-        }) else {
+        guard
+            let button = buttons.first(where: {
+                $0.label == expectedLabel
+            })
+        else {
             throw SpecFailure(
                 message: "missing accessibility button \(expectedLabel); found \(labels)"
             )
@@ -1544,13 +1578,14 @@ private func accessibilityButtons(in root: NSView) -> [AccessibilityButton] {
         let identifier = ObjectIdentifier(view)
         guard visited.insert(identifier).inserted else { return }
         if view.isAccessibilityElement(),
-           let button = view as? NSAccessibilityButton
+            let button = view as? NSAccessibilityButton
         {
-            buttons.append(AccessibilityButton(
-                label: button.accessibilityLabel(),
-                frame: button.accessibilityFrame(),
-                press: button.accessibilityPerformPress
-            ))
+            buttons.append(
+                AccessibilityButton(
+                    label: button.accessibilityLabel(),
+                    frame: button.accessibilityFrame(),
+                    press: button.accessibilityPerformPress
+                ))
         }
         view.subviews.forEach(visit)
     }
@@ -1575,7 +1610,7 @@ private func accessibilityLabels(in root: NSView) -> [String] {
             if let childView = child as? NSView {
                 visit(childView)
             } else if let childElement = child as? NSAccessibilityElement,
-                      let label = childElement.accessibilityLabel()
+                let label = childElement.accessibilityLabel()
             {
                 labels.append(label)
             }
@@ -1631,10 +1666,12 @@ private func hudTopBorderLuminance(_ bitmap: NSBitmapImageRep) -> Double {
     let centerY = Int((39 * scale).rounded())
     let samples = (-2...2).flatMap { yOffset in
         (-2...2).compactMap { xOffset -> Double? in
-            guard let color = bitmap.colorAt(
-                x: centerX + xOffset,
-                y: centerY + yOffset
-            )?.usingColorSpace(.sRGB) else { return nil }
+            guard
+                let color = bitmap.colorAt(
+                    x: centerX + xOffset,
+                    y: centerY + yOffset
+                )?.usingColorSpace(.sRGB)
+            else { return nil }
             return 0.2126 * color.redComponent
                 + 0.7152 * color.greenComponent
                 + 0.0722 * color.blueComponent
@@ -1701,4 +1738,3 @@ private func verticalDistanceFromTop(_ scrollView: NSScrollView) -> CGFloat {
     }
     return documentView.bounds.maxY - visibleRect.maxY
 }
-

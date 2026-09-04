@@ -45,9 +45,10 @@ enum DeliverySmokeRunner {
 
         let initialFrontmostProcessID = NSWorkspace.shared
             .frontmostApplication?.processIdentifier
-        guard let targetProcessID = request.processID
+        guard
+            let targetProcessID = request.processID
                 ?? initialFrontmostProcessID,
-              targetProcessID > 0
+            targetProcessID > 0
         else {
             try? writeOwnerOnly(
                 [
@@ -62,9 +63,11 @@ enum DeliverySmokeRunner {
             return
         }
 
-        guard let targetApplication = NSRunningApplication(
-            processIdentifier: targetProcessID
-        ) else {
+        guard
+            let targetApplication = NSRunningApplication(
+                processIdentifier: targetProcessID
+            )
+        else {
             try? writeOwnerOnly(
                 [
                     "result=FAIL",
@@ -80,7 +83,8 @@ enum DeliverySmokeRunner {
         }
 
         if !request.captureOnly {
-            var targetIsFrontmost = NSWorkspace.shared.frontmostApplication?
+            var targetIsFrontmost =
+                NSWorkspace.shared.frontmostApplication?
                 .processIdentifier == targetProcessID
             if !targetIsFrontmost {
                 for _ in 0..<40 {
@@ -114,7 +118,8 @@ enum DeliverySmokeRunner {
             }
         }
         try? await Task.sleep(for: .milliseconds(250))
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier
+        guard
+            NSWorkspace.shared.frontmostApplication?.processIdentifier
                 == targetProcessID
         else {
             try? writeOwnerOnly(
@@ -151,7 +156,7 @@ enum DeliverySmokeRunner {
         let captureHint = targets.releaseCaptureHint()
         let capture: InputTargetCaptureResult
         if let captureHint,
-           captureHint.processID == targetProcessID
+            captureHint.processID == targetProcessID
         {
             capture = await targets.capture(matching: captureHint)
         } else {
@@ -159,7 +164,7 @@ enum DeliverySmokeRunner {
         }
         let result: String
         switch capture {
-        case let .unavailable(reason):
+        case .unavailable(let reason):
             var lines = [
                 "result=FAIL",
                 "stage=capture",
@@ -172,7 +177,7 @@ enum DeliverySmokeRunner {
                 lines.append("diagnostic=\(diagnostic)")
             }
             result = lines.joined(separator: "\n")
-        case let .writable(target) where request.captureOnly:
+        case .writable(let target) where request.captureOnly:
             result = [
                 "result=PASS",
                 "stage=capture",
@@ -181,7 +186,7 @@ enum DeliverySmokeRunner {
                 "targetPID=\(targetProcessID)",
                 "targetApplication=\(sanitize(target.applicationName))",
             ].joined(separator: "\n")
-        case let .writable(target):
+        case .writable(let target):
             let outcome = await targets.deliver(
                 "Speaker smoke",
                 to: target,
@@ -198,7 +203,7 @@ enum DeliverySmokeRunner {
                     "targetPID=\(targetProcessID)",
                     "targetApplication=\(sanitize(target.applicationName))",
                 ].joined(separator: "\n")
-            case let .pasteCommandPosted(diagnostic):
+            case .pasteCommandPosted(let diagnostic):
                 result = [
                     "result=PASS",
                     "stage=delivery",
@@ -209,7 +214,7 @@ enum DeliverySmokeRunner {
                     "targetPID=\(targetProcessID)",
                     "targetApplication=\(sanitize(target.applicationName))",
                 ].joined(separator: "\n")
-            case let .pendingCopy(reason):
+            case .pendingCopy(let reason):
                 result = [
                     "result=FAIL",
                     "stage=delivery",
@@ -219,7 +224,7 @@ enum DeliverySmokeRunner {
                     "targetPID=\(targetProcessID)",
                     "targetApplication=\(sanitize(target.applicationName))",
                 ].joined(separator: "\n")
-            case let .pendingCopyDiagnosed(reason, diagnostic):
+            case .pendingCopyDiagnosed(let reason, let diagnostic):
                 result = [
                     "result=FAIL",
                     "stage=delivery",
@@ -282,14 +287,15 @@ enum DeliverySmokeRunner {
             "targetPID=\(targetProcessID)",
         ]
         switch terminal {
-        case let .delivered(_, applicationName, text)
-            where text == "Speaker smoke":
-            return ([
-                "result=PASS",
-                "stage=voiceSession",
-                "targetApplication=\(sanitize(applicationName))",
-            ] + base).joined(separator: "\n")
-        case let .pendingCopy(_, _, reason):
+        case .delivered(_, let applicationName, let text)
+        where text == "Speaker smoke":
+            return
+                ([
+                    "result=PASS",
+                    "stage=voiceSession",
+                    "targetApplication=\(sanitize(applicationName))",
+                ] + base).joined(separator: "\n")
+        case .pendingCopy(_, _, let reason):
             var lines = [
                 "result=FAIL",
                 "stage=voiceSession",
@@ -299,36 +305,41 @@ enum DeliverySmokeRunner {
                 lines.append("diagnostic=\(diagnostic)")
             }
             return (lines + base).joined(separator: "\n")
-        case let .failed(_, failure):
-            return ([
-                "result=FAIL",
-                "stage=voiceSession",
-                "reason=\(failure)",
-            ] + base).joined(separator: "\n")
+        case .failed(_, let failure):
+            return
+                ([
+                    "result=FAIL",
+                    "stage=voiceSession",
+                    "reason=\(failure)",
+                ] + base).joined(separator: "\n")
         case .cancelled:
-            return ([
-                "result=FAIL",
-                "stage=voiceSession",
-                "reason=cancelled",
-            ] + base).joined(separator: "\n")
+            return
+                ([
+                    "result=FAIL",
+                    "stage=voiceSession",
+                    "reason=cancelled",
+                ] + base).joined(separator: "\n")
         case .delivered:
-            return ([
-                "result=FAIL",
-                "stage=voiceSession",
-                "reason=unexpectedDeliveredText",
-            ] + base).joined(separator: "\n")
+            return
+                ([
+                    "result=FAIL",
+                    "stage=voiceSession",
+                    "reason=unexpectedDeliveredText",
+                ] + base).joined(separator: "\n")
         case .none:
-            return ([
-                "result=FAIL",
-                "stage=voiceSession",
-                "reason=terminalTimeout",
-            ] + base).joined(separator: "\n")
+            return
+                ([
+                    "result=FAIL",
+                    "stage=voiceSession",
+                    "reason=terminalTimeout",
+                ] + base).joined(separator: "\n")
         case .idle, .preparing, .recording, .processing:
-            return ([
-                "result=FAIL",
-                "stage=voiceSession",
-                "reason=nonterminalResult",
-            ] + base).joined(separator: "\n")
+            return
+                ([
+                    "result=FAIL",
+                    "stage=voiceSession",
+                    "reason=nonterminalResult",
+                ] + base).joined(separator: "\n")
         }
     }
 
@@ -373,7 +384,7 @@ enum DeliverySmokeRunner {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(60))
         while !FileManager.default.fileExists(atPath: triggerURL.path),
-              clock.now < deadline
+            clock.now < deadline
         {
             try? await Task.sleep(for: .milliseconds(25))
         }

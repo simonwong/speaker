@@ -1,6 +1,6 @@
+import AppKit
 @preconcurrency import ApplicationServices
 @preconcurrency import Carbon
-import AppKit
 import Foundation
 
 package enum AccessibilityTargetScope: Sendable {
@@ -97,9 +97,9 @@ package enum AccessibilityReleaseCapture: @unchecked Sendable {
 
     package var processID: pid_t {
         switch self {
-        case let .process(processID): processID
-        case let .target(target): target.processID
-        case let .unavailable(processID, _): processID
+        case .process(let processID): processID
+        case .target(let target): target.processID
+        case .unavailable(let processID, _): processID
         }
     }
 }
@@ -151,10 +151,11 @@ package enum AccessibilityTextRangeDecoder {
         guard AXValueGetValue(axValue, .cfRange, &range) else {
             return .failure(.other)
         }
-        return .success(NSRange(
-            location: range.location,
-            length: range.length
-        ))
+        return .success(
+            NSRange(
+                location: range.location,
+                length: range.length
+            ))
     }
 }
 
@@ -208,17 +209,17 @@ package protocol AccessibilityTargetSystem: Sendable {
     func shutdown() async
 }
 
-package extension AccessibilityTargetSystem {
-    var captureDiagnostic: String? { nil }
+extension AccessibilityTargetSystem {
+    package var captureDiagnostic: String? { nil }
 
-    func shutdown() async {}
+    package func shutdown() async {}
 
-    func captureFocusedTarget(
+    package func captureFocusedTarget(
         in processID: pid_t
     ) async -> AccessibilityTargetCapture {
         let capture = await captureFocusedTarget()
-        guard case let .writable(evidence) = capture,
-              evidence.processID != processID
+        guard case .writable(let evidence) = capture,
+            evidence.processID != processID
         else { return capture }
         return .unavailable(.invalidatedTarget)
     }
@@ -250,10 +251,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     private let preparePasteboardTransaction:
         @Sendable (String) async -> PasteboardDeliveryTransaction?
     private let focusedTargetState:
-        (@Sendable (
-            AccessibilityTargetReference,
-            pid_t
-        ) async -> AccessibilityOperationResult<Bool>)?
+        (
+            @Sendable (
+                AccessibilityTargetReference,
+                pid_t
+            ) async -> AccessibilityOperationResult<Bool>
+        )?
     private let postPasteCommand: @Sendable () async -> Bool
     private let pasteboardRestoreCoordinator: PasteboardRestoreCoordinator
     private let captureDiagnosticBox = AccessibilityCaptureDiagnosticBox()
@@ -277,14 +280,16 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         },
         preparePasteboardTransaction:
             @escaping @Sendable (String) async
-                -> PasteboardDeliveryTransaction? = { text in
-                    await PasteboardDeliveryTransaction.prepare(text: text)
-                },
+            -> PasteboardDeliveryTransaction? = { text in
+                await PasteboardDeliveryTransaction.prepare(text: text)
+            },
         focusedTargetState:
-            (@Sendable (
-                AccessibilityTargetReference,
-                pid_t
-            ) async -> AccessibilityOperationResult<Bool>)? = nil,
+            (
+                @Sendable (
+                    AccessibilityTargetReference,
+                    pid_t
+                ) async -> AccessibilityOperationResult<Bool>
+            )? = nil,
         postPasteCommand: @escaping @Sendable () async -> Bool = {
             await PasteboardDeliveryTransaction.postCommandV()
         },
@@ -315,11 +320,11 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             from: system,
             attribute: kAXFocusedApplicationAttribute
         ) {
-        case let .success(value?):
+        case .success(let value?):
             application = value
         case .success(nil):
             return .unavailable(.missingTarget)
-        case let .failure(failure):
+        case .failure(let failure):
             return .unavailable(failure.pendingCopyReason)
         }
         return await captureFocusedTarget(
@@ -371,12 +376,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             from: application,
             attribute: kAXFocusedUIElementAttribute
         ) {
-        case let .success(value?):
+        case .success(let value?):
             focusedElement = AccessibilityTargetReference(element: value)
         case .success(nil), .failure(.attributeUnsupported),
-             .failure(.notImplemented):
+            .failure(.notImplemented):
             focusedElement = nil
-        case let .failure(failure):
+        case .failure(let failure):
             return .unavailable(failure.pendingCopyReason)
         }
 
@@ -386,26 +391,28 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
                 from: application,
                 attribute: kAXFocusedWindowAttribute
             ) {
-            case let .success(value?):
+            case .success(let value?):
                 focusedWindow = AccessibilityTargetReference(
                     element: value,
                     scope: .window
                 )
             case .success(nil), .failure(.attributeUnsupported),
-                 .failure(.notImplemented):
+                .failure(.notImplemented):
                 focusedWindow = nil
-            case let .failure(failure):
+            case .failure(let failure):
                 return .unavailable(failure.pendingCopyReason)
             }
         } else {
             focusedWindow = nil
         }
 
-        guard let target = AccessibilityReleaseTargetSelection.select(
-            focusedElement: focusedElement,
-            focusedWindow: focusedWindow,
-            processID: processID
-        ) else {
+        guard
+            let target = AccessibilityReleaseTargetSelection.select(
+                focusedElement: focusedElement,
+                focusedWindow: focusedWindow,
+                processID: processID
+            )
+        else {
             return .unavailable(.missingTarget)
         }
         return await inspectTarget(target)
@@ -425,19 +432,20 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         }
         let application = AXUIElementCreateApplication(target.processID)
         _ = AXUIElementSetMessagingTimeout(application, 1)
-        let focusedAttribute = switch target.reference.scope {
-        case .element: kAXFocusedUIElementAttribute
-        case .window: kAXFocusedWindowAttribute
-        }
+        let focusedAttribute =
+            switch target.reference.scope {
+            case .element: kAXFocusedUIElementAttribute
+            case .window: kAXFocusedWindowAttribute
+            }
         switch readElement(
             from: application,
             attribute: focusedAttribute
         ) {
-        case let .success(focused?) where CFEqual(focused, expected):
+        case .success(let focused?) where CFEqual(focused, expected):
             break
         case .success:
             return .unavailable(.invalidatedTarget)
-        case let .failure(failure):
+        case .failure(let failure):
             return .unavailable(failure.pendingCopyReason)
         }
         return await inspectTarget(target)
@@ -456,23 +464,24 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             let runningApplication = NSRunningApplication(
                 processIdentifier: target.processID
             )
-            return .writable(.init(
-                reference: target.reference,
-                selection: nil,
-                originalValue: nil,
-                processID: target.processID,
-                applicationName: runningApplication?.localizedName
-                    ?? Self.unknownApplicationName
-            ))
+            return .writable(
+                .init(
+                    reference: target.reference,
+                    selection: nil,
+                    originalValue: nil,
+                    processID: target.processID,
+                    applicationName: runningApplication?.localizedName
+                        ?? Self.unknownApplicationName
+                ))
         }
 
         switch readString(from: element, attribute: kAXSubroleAttribute) {
-        case let .success(subrole?) where subrole == kAXSecureTextFieldSubrole:
+        case .success(let subrole?) where subrole == kAXSecureTextFieldSubrole:
             return .unavailable(.secureTarget)
         case .success, .failure(.attributeUnsupported),
-             .failure(.notImplemented):
+            .failure(.notImplemented):
             break
-        case let .failure(failure):
+        case .failure(let failure):
             captureDiagnosticBox.set(
                 "inspect.subrole.\(failure)"
             )
@@ -484,12 +493,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             from: element,
             attribute: kAXSelectedTextRangeAttribute
         ) {
-        case let .success(value?):
+        case .success(let value?):
             selection = value
         case .success(nil), .failure(.attributeUnsupported),
-             .failure(.notImplemented):
+            .failure(.notImplemented):
             selection = nil
-        case let .failure(failure):
+        case .failure(let failure):
             captureDiagnosticBox.set(
                 "inspect.selection.\(failure)"
             )
@@ -501,12 +510,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             from: element,
             attribute: kAXValueAttribute
         ) {
-        case let .success(value?):
+        case .success(let value?):
             originalValue = value
         case .success(nil), .failure(.attributeUnsupported),
-             .failure(.notImplemented):
+            .failure(.notImplemented):
             originalValue = nil
-        case let .failure(failure):
+        case .failure(let failure):
             captureDiagnosticBox.set(
                 "inspect.value.\(failure)"
             )
@@ -516,13 +525,14 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         let runningApplication = NSRunningApplication(
             processIdentifier: target.processID
         )
-        return .writable(.init(
-            reference: target.reference,
-            selection: selection,
-            originalValue: originalValue,
-            processID: target.processID,
-            applicationName: runningApplication?.localizedName ?? Self.unknownApplicationName
-        ))
+        return .writable(
+            .init(
+                reference: target.reference,
+                selection: selection,
+                originalValue: originalValue,
+                processID: target.processID,
+                applicationName: runningApplication?.localizedName ?? Self.unknownApplicationName
+            ))
     }
 
     /// Stored in Session Records as the Input Target's application name when
@@ -569,19 +579,20 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         }
         let application = AXUIElementCreateApplication(processID)
         _ = AXUIElementSetMessagingTimeout(application, 1)
-        let focusedAttribute = switch target.scope {
-        case .element: kAXFocusedUIElementAttribute
-        case .window: kAXFocusedWindowAttribute
-        }
+        let focusedAttribute =
+            switch target.scope {
+            case .element: kAXFocusedUIElementAttribute
+            case .window: kAXFocusedWindowAttribute
+            }
         switch readElement(
             from: application,
             attribute: focusedAttribute
         ) {
-        case let .success(focused?):
+        case .success(let focused?):
             return .success(CFEqual(focused, expected))
         case .success(nil):
             return .success(false)
-        case let .failure(failure):
+        case .failure(let failure):
             return .failure(failure)
         }
     }
@@ -608,10 +619,10 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         in processID: pid_t
     ) async -> AccessibilityPasteResult {
         guard canPostEvents(),
-              let restoreReservation = await pasteboardRestoreCoordinator.reserve()
+            let restoreReservation = await pasteboardRestoreCoordinator.reserve()
         else { return .eventFailed }
         guard !text.isEmpty,
-              let transaction = await preparePasteboardTransaction(text)
+            let transaction = await preparePasteboardTransaction(text)
         else {
             await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .clipboardFailed
@@ -628,11 +639,12 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .targetChanged
         }
-        let focusState = if let focusedTargetState {
-            await focusedTargetState(target, processID)
-        } else {
-            await focusedState(target, in: processID)
-        }
+        let focusState =
+            if let focusedTargetState {
+                await focusedTargetState(target, processID)
+            } else {
+                await focusedState(target, in: processID)
+            }
         switch focusState {
         case .success(true):
             break
@@ -640,7 +652,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             await transaction.restoreIfOwned()
             await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .targetChanged
-        case let .failure(failure):
+        case .failure(let failure):
             await transaction.restoreIfOwned()
             await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .targetFailure(failure)
@@ -675,13 +687,13 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         attribute: String
     ) -> AccessibilityOperationResult<AXUIElement?> {
         switch readValue(from: element, attribute: attribute) {
-        case let .success(value):
+        case .success(let value):
             guard let value else { return .success(nil) }
             guard CFGetTypeID(value) == AXUIElementGetTypeID() else {
                 return .failure(.other)
             }
             return .success(unsafeDowncast(value, to: AXUIElement.self))
-        case let .failure(error):
+        case .failure(let error):
             return .failure(error)
         }
     }
@@ -691,9 +703,9 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         attribute: String
     ) -> AccessibilityOperationResult<String?> {
         switch readValue(from: element, attribute: attribute) {
-        case let .success(value):
+        case .success(let value):
             return .success(value as? String)
-        case let .failure(error):
+        case .failure(let error):
             return .failure(error)
         }
     }
@@ -703,9 +715,9 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         attribute: String
     ) -> AccessibilityOperationResult<NSRange?> {
         switch readValue(from: element, attribute: attribute) {
-        case let .success(value):
+        case .success(let value):
             return AccessibilityTextRangeDecoder.decode(value)
-        case let .failure(error):
+        case .failure(let error):
             return .failure(error)
         }
     }

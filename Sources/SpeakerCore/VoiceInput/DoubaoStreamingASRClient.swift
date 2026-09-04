@@ -167,9 +167,9 @@ private actor URLSessionDoubaoWebSocketConnection: DoubaoWebSocketConnection {
 
     func receive() async throws -> Data {
         switch try await task.receive() {
-        case let .data(data):
+        case .data(let data):
             return data
-        case let .string(text):
+        case .string(let text):
             return Data(text.utf8)
         @unknown default:
             throw DoubaoASRFailure(kind: .invalidResponse)
@@ -349,7 +349,8 @@ package actor DoubaoStreamingASRClient {
     }
 
     private static func makeHotwordContext(hotwords: [String]) throws -> String? {
-        let words = hotwords
+        let words =
+            hotwords
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }

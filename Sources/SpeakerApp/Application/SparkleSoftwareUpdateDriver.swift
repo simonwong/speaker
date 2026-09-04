@@ -1,6 +1,6 @@
 import Combine
-import SpeakerAppFeatures
 import Sparkle
+import SpeakerAppFeatures
 
 @MainActor
 final class SparkleSoftwareUpdateDriver: SoftwareUpdateDriving {
@@ -28,9 +28,10 @@ final class SparkleSoftwareUpdateDriver: SoftwareUpdateDriving {
     }
 
     func start(
-        observing: @escaping @MainActor @Sendable (
-            SoftwareUpdateDriverSnapshot
-        ) -> Void
+        observing:
+            @escaping @MainActor @Sendable (
+                SoftwareUpdateDriverSnapshot
+            ) -> Void
     ) throws -> SoftwareUpdateDriverSnapshot {
         try controller.updater.start()
         observation = controller.updater.publisher(
@@ -44,10 +45,11 @@ final class SparkleSoftwareUpdateDriver: SoftwareUpdateDriving {
             )
         )
         .sink { canCheck, automaticallyChecks in
-            observing(.init(
-                canCheckForUpdates: canCheck,
-                automaticallyChecksForUpdates: automaticallyChecks
-            ))
+            observing(
+                .init(
+                    canCheckForUpdates: canCheck,
+                    automaticallyChecksForUpdates: automaticallyChecks
+                ))
         }
         return snapshot
     }

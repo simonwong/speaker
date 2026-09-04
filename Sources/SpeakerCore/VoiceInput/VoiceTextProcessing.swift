@@ -162,7 +162,8 @@ public actor VoiceInputConfigurationController {
         let dictionarySnapshot = dictionary.snapshot()
         return VoiceTextProcessingSnapshot(
             dictionary: dictionarySnapshot,
-            dictionaryContext: DictionaryRequestContextBuilder.makeContext(from: dictionarySnapshot),
+            dictionaryContext: DictionaryRequestContextBuilder.makeContext(
+                from: dictionarySnapshot),
             refinementMode: refinementMode
         )
     }
@@ -280,10 +281,11 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
         if snapshot.refinementMode.requiresDeepSeek {
-            await progress(.init(
-                stage: .refining,
-                confirmedDoubaoResult: doubaoResult
-            ))
+            await progress(
+                .init(
+                    stage: .refining,
+                    confirmedDoubaoResult: doubaoResult
+                ))
         }
         let refinementStarted = ContinuousClock.now
         let refinementOutcome = try await refinement.refine(
@@ -360,8 +362,9 @@ struct BasicVoiceTextProcessor: VoiceTextProcessing {
 
     private static func milliseconds(_ duration: Duration) -> Int {
         let components = duration.components
-        return Int(clamping:
-            components.seconds * 1_000
+        return Int(
+            clamping:
+                components.seconds * 1_000
                 + components.attoseconds / 1_000_000_000_000_000
         )
     }

@@ -40,8 +40,8 @@ private struct VoiceInputHUDIncreasedContrastOverrideKey: EnvironmentKey {
     static let defaultValue: Bool? = nil
 }
 
-package extension EnvironmentValues {
-    var voiceInputHUDIncreasedContrastOverride: Bool? {
+extension EnvironmentValues {
+    package var voiceInputHUDIncreasedContrastOverride: Bool? {
         get { self[VoiceInputHUDIncreasedContrastOverrideKey.self] }
         set { self[VoiceInputHUDIncreasedContrastOverrideKey.self] = newValue }
     }

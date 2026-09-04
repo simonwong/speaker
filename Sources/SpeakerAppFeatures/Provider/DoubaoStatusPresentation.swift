@@ -32,7 +32,7 @@ package struct DoubaoStatusPresentation: Equatable, Sendable {
             text = SpeakerCopy.DoubaoStatus.success
             symbolName = "checkmark.circle.fill"
             tint = .green
-        case let .failure(message):
+        case .failure(let message):
             text = message
             symbolName = "exclamationmark.triangle.fill"
             tint = .red

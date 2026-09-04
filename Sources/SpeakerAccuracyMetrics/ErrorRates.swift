@@ -29,10 +29,12 @@ public struct ErrorRateAggregate: Equatable, Codable, Sendable {
         sampleCount = results.count
         referenceLength = results.reduce(0) { $0 + $1.referenceLength }
         counts = results.reduce(EditCounts.zero) { $0 + $1.counts }
-        corpusRate = results.isEmpty
+        corpusRate =
+            results.isEmpty
             ? 0
             : Double(counts.total) / Double(max(referenceLength, 1))
-        meanSampleRate = results.isEmpty
+        meanSampleRate =
+            results.isEmpty
             ? 0
             : results.reduce(0.0) { $0 + $1.rate } / Double(results.count)
     }
@@ -78,7 +80,10 @@ public enum AccuracyMetrics {
             }
         }
         for scalar in TranscriptNormalizer.normalize(text).unicodeScalars {
-            if scalar.isASCII, scalar.properties.isAlphabetic || scalar.properties.numericType != nil || scalar == "'" {
+            if scalar.isASCII,
+                scalar.properties.isAlphabetic || scalar.properties.numericType != nil
+                    || scalar == "'"
+            {
                 current.append(scalar)
             } else {
                 flush()

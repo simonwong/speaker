@@ -166,12 +166,12 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
 
     public static func safeToken(_ value: String?) -> String? {
         guard let value, !value.isEmpty, value.utf8.count <= 200,
-              value.utf8.allSatisfy({ byte in
-                  (48...57).contains(byte)
-                      || (65...90).contains(byte)
-                      || (97...122).contains(byte)
-                      || byte == 45 || byte == 46 || byte == 58 || byte == 95
-              })
+            value.utf8.allSatisfy({ byte in
+                (48...57).contains(byte)
+                    || (65...90).contains(byte)
+                    || (97...122).contains(byte)
+                    || byte == 45 || byte == 46 || byte == 58 || byte == 95
+            })
         else { return nil }
         return value
     }
@@ -184,11 +184,13 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
             throw ProviderEvidenceError.invalidSchema("schemaVersion")
         }
         guard Self.matches(environment.sourceCommit, "^[0-9a-f]{40}$"),
-              Self.matches(environment.packageResolvedSHA256, "^[0-9a-f]{64}$"),
-              Self.matches(environment.candidateVersion, "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$"),
-              Self.matches(environment.candidateBuild, "^[1-9][0-9]*$"),
-              Self.matches(environment.macOSVersion, "^[0-9]+(\\.[0-9]+){1,2}$"),
-              ["arm64", "x86_64"].contains(environment.architecture)
+            Self.matches(environment.packageResolvedSHA256, "^[0-9a-f]{64}$"),
+            Self.matches(
+                environment.candidateVersion,
+                "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$"),
+            Self.matches(environment.candidateBuild, "^[1-9][0-9]*$"),
+            Self.matches(environment.macOSVersion, "^[0-9]+(\\.[0-9]+){1,2}$"),
+            ["arm64", "x86_64"].contains(environment.architecture)
         else {
             throw ProviderEvidenceError.invalidSchema("environment")
         }
@@ -197,23 +199,26 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
         }
 
         guard providers.count == EvidenceProvider.allCases.count,
-              Set(providers.map(\.provider)).count == EvidenceProvider.allCases.count
+            Set(providers.map(\.provider)).count == EvidenceProvider.allCases.count
         else {
             throw ProviderEvidenceError.invalidSchema("providers")
         }
         for provider in providers {
             if requireSignedAppKeychain,
-               provider.credentialSource != .signedAppKeychain {
+                provider.credentialSource != .signedAppKeychain
+            {
                 throw ProviderEvidenceError.invalidSchema("credentialSource")
             }
             switch provider.provider {
             case .doubao:
-                guard [
-                    "volc.seedasr.sauc.duration",
-                    "volc.seedasr.sauc.concurrent",
-                    "volc.bigasr.sauc.duration",
-                    "volc.bigasr.sauc.concurrent",
-                ].contains(provider.resource), provider.model == "bigmodel" else {
+                guard
+                    [
+                        "volc.seedasr.sauc.duration",
+                        "volc.seedasr.sauc.concurrent",
+                        "volc.bigasr.sauc.duration",
+                        "volc.bigasr.sauc.concurrent",
+                    ].contains(provider.resource), provider.model == "bigmodel"
+                else {
                     throw ProviderEvidenceError.invalidSchema("doubaoConfiguration")
                 }
             case .deepSeek:
@@ -224,15 +229,15 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
         }
 
         guard cases.count == ProviderMatrixCaseID.allCases.count,
-              Set(cases.map(\.caseID)).count == ProviderMatrixCaseID.allCases.count,
-              Set(cases.map(\.caseID)) == Set(ProviderMatrixCaseID.allCases)
+            Set(cases.map(\.caseID)).count == ProviderMatrixCaseID.allCases.count,
+            Set(cases.map(\.caseID)) == Set(ProviderMatrixCaseID.allCases)
         else {
             throw ProviderEvidenceError.invalidSchema("caseSet")
         }
         for result in cases {
             guard result.provider == result.caseID.provider,
-                  result.providerStatusCode == Self.safeToken(result.providerStatusCode),
-                  result.requestID == Self.safeToken(result.requestID)
+                result.providerStatusCode == Self.safeToken(result.providerStatusCode),
+                result.requestID == Self.safeToken(result.requestID)
             else {
                 throw ProviderEvidenceError.invalidSchema("caseIdentity")
             }
@@ -268,13 +273,13 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
     ) throws {
         try validate(requirePassingCases: true, requireSignedAppKeychain: true)
         guard generatedNotAfter >= generatedNotBefore,
-              generatedNotAfter.timeIntervalSince(generatedNotBefore) <= 4 * 60 * 60,
-              generatedAt >= generatedNotBefore,
-              generatedAt <= generatedNotAfter,
-              environment.sourceCommit == sourceCommit,
-              environment.packageResolvedSHA256 == packageResolvedSHA256,
-              environment.candidateVersion == candidateVersion,
-              environment.candidateBuild == candidateBuild
+            generatedNotAfter.timeIntervalSince(generatedNotBefore) <= 4 * 60 * 60,
+            generatedAt >= generatedNotBefore,
+            generatedAt <= generatedNotAfter,
+            environment.sourceCommit == sourceCommit,
+            environment.packageResolvedSHA256 == packageResolvedSHA256,
+            environment.candidateVersion == candidateVersion,
+            environment.candidateBuild == candidateBuild
         else {
             throw ProviderEvidenceError.invalidSchema("releaseBinding")
         }
@@ -339,9 +344,9 @@ public enum ProviderEvidenceFile {
             }
             var info = stat()
             guard fstat(directory, &info) == 0,
-                  (info.st_mode & S_IFMT) == S_IFDIR,
-                  info.st_uid == getuid(),
-                  info.st_mode & 0o777 == 0o700
+                (info.st_mode & S_IFMT) == S_IFDIR,
+                info.st_uid == getuid(),
+                info.st_mode & 0o777 == 0o700
             else { throw ProviderEvidenceError.unsafePath }
 
             let data = try evidence.encoded()
@@ -372,8 +377,10 @@ public enum ProviderEvidenceFile {
                 }
             }
             guard fsync(descriptor) == 0,
-                  renameatx_np(directory, temporary, directory, ProviderMatrixEvidence.fileName, UInt32(RENAME_EXCL)) == 0,
-                  fsync(directory) == 0
+                renameatx_np(
+                    directory, temporary, directory, ProviderMatrixEvidence.fileName,
+                    UInt32(RENAME_EXCL)) == 0,
+                fsync(directory) == 0
             else {
                 throw errno == EEXIST
                     ? ProviderEvidenceError.fileAlreadyExists
@@ -394,9 +401,9 @@ public enum ProviderEvidenceFile {
         defer { close(directory) }
         var directoryInfo = stat()
         guard fstat(directory, &directoryInfo) == 0,
-              (directoryInfo.st_mode & S_IFMT) == S_IFDIR,
-              directoryInfo.st_uid == getuid(),
-              directoryInfo.st_mode & 0o777 == 0o700
+            (directoryInfo.st_mode & S_IFMT) == S_IFDIR,
+            directoryInfo.st_uid == getuid(),
+            directoryInfo.st_mode & 0o777 == 0o700
         else { throw ProviderEvidenceError.unsafePath }
         let descriptor = openat(
             directory, basename, O_RDONLY | O_CLOEXEC | O_NOFOLLOW
@@ -405,11 +412,11 @@ public enum ProviderEvidenceFile {
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var info = stat()
         guard fstat(descriptor, &info) == 0,
-              (info.st_mode & S_IFMT) == S_IFREG,
-              info.st_uid == getuid(),
-              info.st_mode & 0o777 == 0o600,
-              info.st_size > 0,
-              info.st_size <= ProviderMatrixEvidence.maximumEvidenceBytes
+            (info.st_mode & S_IFMT) == S_IFREG,
+            info.st_uid == getuid(),
+            info.st_mode & 0o777 == 0o600,
+            info.st_size > 0,
+            info.st_size <= ProviderMatrixEvidence.maximumEvidenceBytes
         else { throw ProviderEvidenceError.unsafePath }
         guard let data = try handle.readToEnd(), data.count == Int(info.st_size) else {
             throw ProviderEvidenceError.unsafePath
@@ -471,15 +478,19 @@ private enum StrictEvidenceJSON {
         }
         try exactKeys(root, ["schemaVersion", "generatedAt", "environment", "providers", "cases"])
         guard let environment = root["environment"] as? [String: Any],
-              let providers = root["providers"] as? [[String: Any]],
-              let cases = root["cases"] as? [[String: Any]]
+            let providers = root["providers"] as? [[String: Any]],
+            let cases = root["cases"] as? [[String: Any]]
         else { throw ProviderEvidenceError.invalidJSON }
-        try exactKeys(environment, [
-            "sourceCommit", "sourceTreeClean", "packageResolvedSHA256",
-            "candidateVersion", "candidateBuild", "macOSVersion", "architecture",
-        ])
+        try exactKeys(
+            environment,
+            [
+                "sourceCommit", "sourceTreeClean", "packageResolvedSHA256",
+                "candidateVersion", "candidateBuild", "macOSVersion", "architecture",
+            ])
         for provider in providers {
-            try exactKeys(provider, ["provider", "credentialSource", "resource", "model"], optional: ["resource"])
+            try exactKeys(
+                provider, ["provider", "credentialSource", "resource", "model"],
+                optional: ["resource"])
         }
         for result in cases {
             try exactKeys(
@@ -496,12 +507,13 @@ private enum StrictEvidenceJSON {
         optional: Set<String> = []
     ) throws {
         let actual = Set(object.keys)
-        guard actual.isSubset(of: allowed), allowed.subtracting(optional).isSubset(of: actual) else {
+        guard actual.isSubset(of: allowed), allowed.subtracting(optional).isSubset(of: actual)
+        else {
             throw ProviderEvidenceError.invalidSchema("unknownOrMissingField")
         }
     }
 }
 
-private extension Optional where Wrapped == String {
-    var orEmpty: String { self ?? "" }
+extension Optional where Wrapped == String {
+    fileprivate var orEmpty: String { self ?? "" }
 }

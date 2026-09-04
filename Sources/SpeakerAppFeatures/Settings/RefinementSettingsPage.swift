@@ -11,7 +11,7 @@ struct RefinementSettingsPage: View {
             modeCard
 
             if let promptEditor = model.promptEditorState,
-               !model.isEditingCustomMode
+                !model.isEditingCustomMode
             {
                 RefinementPromptEditorCard(
                     model: model,
@@ -217,10 +217,13 @@ private struct RefinementModeButton: View {
                             selected || inspected ? Color.accentColor : .secondary
                         )
                     Spacer()
-                    Image(systemName: selected ? "checkmark.circle.fill" : locked ? "lock.fill" : "circle")
-                        .foregroundStyle(
-                            selected ? Color.accentColor : Color.secondary.opacity(0.55)
-                        )
+                    Image(
+                        systemName: selected
+                            ? "checkmark.circle.fill" : locked ? "lock.fill" : "circle"
+                    )
+                    .foregroundStyle(
+                        selected ? Color.accentColor : Color.secondary.opacity(0.55)
+                    )
                 }
                 Text(choice.title)
                     .font(SpeakerTypography.bodyEmphasis)

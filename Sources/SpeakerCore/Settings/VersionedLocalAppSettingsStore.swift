@@ -20,7 +20,7 @@ public enum VoiceShortcutPreference: Equatable, Sendable, Codable {
         switch self {
         case .functionKey:
             nil
-        case let .custom(keyCode, modifiers, displayName):
+        case .custom(let keyCode, let modifiers, let displayName):
             CustomHotKey(
                 keyCode: keyCode,
                 modifiers: modifiers,
@@ -32,7 +32,7 @@ public enum VoiceShortcutPreference: Equatable, Sendable, Codable {
     public var displayName: String {
         switch self {
         case .functionKey: "Fn"
-        case let .custom(_, _, displayName): displayName
+        case .custom(_, _, let displayName): displayName
         }
     }
 
@@ -67,7 +67,7 @@ public enum VoiceShortcutPreference: Equatable, Sendable, Codable {
         switch self {
         case .functionKey:
             try container.encode(Kind.functionKey, forKey: .kind)
-        case let .custom(keyCode, modifiers, displayName):
+        case .custom(let keyCode, let modifiers, let displayName):
             try container.encode(Kind.custom, forKey: .kind)
             try container.encode(keyCode, forKey: .keyCode)
             try container.encode(modifiers, forKey: .modifiers)
@@ -90,7 +90,7 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
             self = .conciseCleanup
         case .fullRewrite:
             self = .fullRewrite
-        case let .custom(name, prompt):
+        case .custom(let name, let prompt):
             self = .custom(name: name, prompt: prompt)
         }
     }
@@ -103,7 +103,7 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
             .conciseCleanup()
         case .fullRewrite:
             .fullRewrite()
-        case let .custom(name, prompt):
+        case .custom(let name, let prompt):
             .custom(name: name, prompt: prompt)
         }
     }
@@ -147,7 +147,7 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
             try container.encode(Kind.conciseCleanup, forKey: .kind)
         case .fullRewrite:
             try container.encode(Kind.fullRewrite, forKey: .kind)
-        case let .custom(name, prompt):
+        case .custom(let name, let prompt):
             try container.encode(Kind.custom, forKey: .kind)
             try container.encode(name, forKey: .name)
             try container.encode(prompt, forKey: .prompt)
@@ -277,10 +277,11 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         )
         // Incremental field: settings.json written before prompt overrides
         // existed decodes with no overrides.
-        refinementPromptOverrides = try container.decodeIfPresent(
-            RefinementPromptOverrides.self,
-            forKey: .refinementPromptOverrides
-        ) ?? RefinementPromptOverrides()
+        refinementPromptOverrides =
+            try container.decodeIfPresent(
+                RefinementPromptOverrides.self,
+                forKey: .refinementPromptOverrides
+            ) ?? RefinementPromptOverrides()
         launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
         doubaoResourceID = try container.decodeIfPresent(
             String.self,
@@ -288,14 +289,16 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         )
         // Preserve history until the user makes an explicit retention choice.
         // The hard record cap remains an independent resource-safety boundary.
-        historyRetention = try container.decodeIfPresent(
-            HistoryRetentionPolicy.self,
-            forKey: .historyRetention
-        ) ?? .forever
-        let rememberedRetention = try container.decodeIfPresent(
-            HistoryRetentionPolicy.self,
-            forKey: .historyRetentionWhenEnabled
-        ) ?? historyRetention
+        historyRetention =
+            try container.decodeIfPresent(
+                HistoryRetentionPolicy.self,
+                forKey: .historyRetention
+            ) ?? .forever
+        let rememberedRetention =
+            try container.decodeIfPresent(
+                HistoryRetentionPolicy.self,
+                forKey: .historyRetentionWhenEnabled
+            ) ?? historyRetention
         historyRetentionWhenEnabled = Self.enabledRetention(
             rememberedRetention
         )
@@ -336,10 +339,10 @@ public enum AppSettingsLoadResult: Equatable, Sendable {
 
     public var settings: SpeakerAppSettings {
         switch self {
-        case let .defaults(settings),
-             let .loaded(settings),
-             let .recovered(settings, _),
-             let .recoveryFailed(settings, _):
+        case .defaults(let settings),
+            .loaded(let settings),
+            .recovered(let settings, _),
+            .recoveryFailed(let settings, _):
             settings
         }
     }
@@ -412,7 +415,7 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
         decoders: [
             1: { data in
                 try decoder.decode(SettingsDocumentV1.self, from: data).settings
-            },
+            }
         ]
     )
 
@@ -420,12 +423,14 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
         fileManager: FileManager = .default,
         applicationDirectoryName: String = "Speaker"
     ) -> URL {
-        let baseDirectory = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.homeDirectoryForCurrentUser
+        let baseDirectory =
+            fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.homeDirectoryForCurrentUser
 
-        return baseDirectory
+        return
+            baseDirectory
             .appendingPathComponent(applicationDirectoryName, isDirectory: true)
             .appendingPathComponent("settings.json", isDirectory: false)
     }
@@ -434,18 +439,18 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
         switch documents.load().outcome {
         case .absent:
             return .defaults(.default)
-        case let .loaded(settings, _):
+        case .loaded(let settings, _):
             return .loaded(settings)
-        case let .corruptedPreserved(backupURL, corruption):
+        case .corruptedPreserved(let backupURL, let corruption):
             return .recovered(
                 .default,
                 recovery: AppSettingsRecovery(backupURL: backupURL, reason: corruption)
             )
         case .failed(.protectionFailed):
             return .recoveryFailed(.default, failure: .protectionFailed)
-        case let .failed(.readFailed(detail)):
+        case .failed(.readFailed(let detail)):
             return .recoveryFailed(.default, failure: .readFailed(detail: detail))
-        case let .failed(.preservationFailed(_, detail)):
+        case .failed(.preservationFailed(_, let detail)):
             return .recoveryFailed(.default, failure: .preservationFailed(detail: detail))
         }
     }
@@ -540,21 +545,21 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
 
     private func settingsForUpdate() throws -> SpeakerAppSettings {
         let result = load()
-        guard case let .recoveryFailed(_, failure) = result else {
+        guard case .recoveryFailed(_, let failure) = result else {
             return result.settings
         }
         throw AppSettingsStoreError.sourceUnreadable(failure)
     }
 }
 
-private extension VersionedLocalAppSettingsStore {
-    static var encoder: JSONEncoder {
+extension VersionedLocalAppSettingsStore {
+    fileprivate static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
     }
 
-    static var decoder: JSONDecoder {
+    fileprivate static var decoder: JSONDecoder {
         JSONDecoder()
     }
 }

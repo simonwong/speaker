@@ -132,11 +132,11 @@ package struct VoiceInputFailurePresentation {
     )
 }
 
-package extension VoiceInputFailure {
-    var userTitle: String { appPresentation.title }
-    var userGuidance: String { appPresentation.guidance }
-    var userIcon: String { appPresentation.icon }
-    var needsSettings: Bool { appPresentation.needsSettings }
+extension VoiceInputFailure {
+    package var userTitle: String { appPresentation.title }
+    package var userGuidance: String { appPresentation.guidance }
+    package var userIcon: String { appPresentation.icon }
+    package var needsSettings: Bool { appPresentation.needsSettings }
 
     private var appPresentation: VoiceInputFailurePresentation {
         switch self {

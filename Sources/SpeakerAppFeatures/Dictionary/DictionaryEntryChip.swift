@@ -120,8 +120,8 @@ package struct DictionaryEntryChip: View {
     }
 }
 
-private extension DictionaryEntryQualityHint {
-    var presentation: (text: String, symbol: String)? {
+extension DictionaryEntryQualityHint {
+    fileprivate var presentation: (text: String, symbol: String)? {
         switch self {
         case .none:
             nil

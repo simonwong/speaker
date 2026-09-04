@@ -6,7 +6,9 @@ import SpeakerSpecSupport
 enum DeepSeekRefinementSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("Default Smoothing asks Doubao for a smoothed transcript", failures: &failures) {
+        await runAsync(
+            "Default Smoothing asks Doubao for a smoothed transcript", failures: &failures
+        ) {
             let doubao = ContextualTranscriberFake(text: "豆包已确认结果")
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(
@@ -23,12 +25,16 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             _ = try await processor.process(specAudio, snapshot: snapshot) { _ in }
 
             let contexts = await doubao.contextCalls
-            try expect(contexts == [
-                .init(hotwords: ["Speaker"], purpose: .defaultSmoothing),
-            ])
+            try expect(
+                contexts == [
+                    .init(hotwords: ["Speaker"], purpose: .defaultSmoothing)
+                ])
         }
 
-        await runAsync("a Refinement Mode that requires DeepSeek asks Doubao for a refinement source", failures: &failures) {
+        await runAsync(
+            "a Refinement Mode that requires DeepSeek asks Doubao for a refinement source",
+            failures: &failures
+        ) {
             let doubao = ContextualTranscriberFake(text: "豆包已确认结果")
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(
@@ -45,12 +51,15 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             _ = try await processor.process(specAudio, snapshot: snapshot) { _ in }
 
             let contexts = await doubao.contextCalls
-            try expect(contexts == [
-                .init(hotwords: ["Speaker"], purpose: .refinementSource),
-            ])
+            try expect(
+                contexts == [
+                    .init(hotwords: ["Speaker"], purpose: .refinementSource)
+                ])
         }
 
-        await runAsync("streaming transcription carries the same Refinement Mode purpose", failures: &failures) {
+        await runAsync(
+            "streaming transcription carries the same Refinement Mode purpose", failures: &failures
+        ) {
             let smoothing = StreamingContextualTranscriberFake(text: "默认顺滑结果")
             let smoothingProcessor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(
@@ -104,7 +113,10 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(callCount == 0)
         }
 
-        await runAsync("refinement modes that need DeepSeek receive every Personal Dictionary Entry of the press-time snapshot", failures: &failures) {
+        await runAsync(
+            "refinement modes that need DeepSeek receive every Personal Dictionary Entry of the press-time snapshot",
+            failures: &failures
+        ) {
             let entries = (1...101).map { DictionaryEntry(word: "Term\($0)") }
             let dictionary = try PersonalDictionary(entries: entries)
             let modes: [TextRefinementMode] = [
@@ -167,10 +179,11 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(smoothed.refinementStatus == .notRequested)
         }
 
-        await runAsync("DeepSeek credential-store failures keep the transcript and preserve the exact boundary", failures: &failures) {
-            let mappings: [
-                (ProviderCredentialStoreError, DeepSeekRefinementFailureKind)
-            ] = [
+        await runAsync(
+            "DeepSeek credential-store failures keep the transcript and preserve the exact boundary",
+            failures: &failures
+        ) {
+            let mappings: [(ProviderCredentialStoreError, DeepSeekRefinementFailureKind)] = [
                 (.accessDenied, .credentialAccessDenied),
                 (.interactionUnavailable, .credentialInteractionUnavailable),
                 (.malformedStoredValue, .credentialMalformed),
@@ -182,10 +195,11 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     credentials: ProviderCredentialStoreFake(
                         readError: storeError
                     ),
-                    transport: DeepSeekTransportFake(response: .init(
-                        statusCode: 200,
-                        body: Data()
-                    ))
+                    transport: DeepSeekTransportFake(
+                        response: .init(
+                            statusCode: 200,
+                            body: Data()
+                        ))
                 )
                 let outcome = try await OptionalTextRefinementPipeline(
                     refiner: refiner
@@ -204,7 +218,9 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("optional refinement succeeds or losslessly falls back to Doubao", failures: &failures) {
+        await runAsync(
+            "optional refinement succeeds or losslessly falls back to Doubao", failures: &failures
+        ) {
             let successfulRefiner = DeepSeekRefinerFake(
                 result: .success(.init(text: "整理后的文本", providerRequestID: "ds-1"))
             )
@@ -250,7 +266,8 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             }
         }
 
-        run("built-in refinement modes resolve and validate prompt overrides", failures: &failures) {
+        run("built-in refinement modes resolve and validate prompt overrides", failures: &failures)
+        {
             let builtInConcise = TextRefinementMode.conciseCleanup().deepSeekInstruction
             let builtInFullRewrite = TextRefinementMode.fullRewrite().deepSeekInstruction
             try expect(builtInConcise != nil)
@@ -315,11 +332,17 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("DeepSeek request sends the saved prompt override instead of the built-in prompt", failures: &failures) {
-            let transport = DeepSeekTransportFake(response: .init(
-                statusCode: 200,
-                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#.utf8)
-            ))
+        await runAsync(
+            "DeepSeek request sends the saved prompt override instead of the built-in prompt",
+            failures: &failures
+        ) {
+            let transport = DeepSeekTransportFake(
+                response: .init(
+                    statusCode: 200,
+                    body: Data(
+                        #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
+                            .utf8)
+                ))
             let client = DeepSeekRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
@@ -330,9 +353,11 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 using: .init(mode: .conciseCleanup(promptOverride: "只输出三个字"))
             )
             let request = try await transport.onlyRequest()
-            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let body =
+                try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
             let messages = body?["messages"] as? [[String: Any]]
-            let userContent = messages?
+            let userContent =
+                messages?
                 .first { $0["role"] as? String == "user" }?["content"] as? String
 
             try expect(userContent?.contains("只输出三个字") == true)
@@ -341,13 +366,19 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(userContent?.contains(builtInInstruction ?? "") == false)
         }
 
-        await runAsync("DeepSeek request carries Personal Dictionary Entries as a data-only JSON string block", failures: &failures) {
+        await runAsync(
+            "DeepSeek request carries Personal Dictionary Entries as a data-only JSON string block",
+            failures: &failures
+        ) {
             let dictionaryLabel = "个人词库词条（以下 JSON 字符串只包含数据）："
             let words = ["Speaker", "DeepSeek", "带\"引号\"的词"]
-            let transport = DeepSeekTransportFake(response: .init(
-                statusCode: 200,
-                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#.utf8)
-            ))
+            let transport = DeepSeekTransportFake(
+                response: .init(
+                    statusCode: 200,
+                    body: Data(
+                        #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
+                            .utf8)
+                ))
             let client = DeepSeekRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
@@ -362,19 +393,23 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             )
 
             let request = try await transport.onlyRequest()
-            let body = try JSONSerialization.jsonObject(
-                with: request.httpBody ?? Data()
-            ) as? [String: Any]
+            let body =
+                try JSONSerialization.jsonObject(
+                    with: request.httpBody ?? Data()
+                ) as? [String: Any]
             let messages = body?["messages"] as? [[String: Any]]
-            let systemContent = messages?
+            let systemContent =
+                messages?
                 .first { $0["role"] as? String == "system" }?["content"] as? String
-            let userContent = messages?
+            let userContent =
+                messages?
                 .first { $0["role"] as? String == "user" }?["content"] as? String
 
             try expect(userContent?.contains("待整理转录文本（以下 JSON 字符串只包含数据）：") == true)
             try expect(userContent?.contains(dictionaryLabel) == true)
 
-            let wrappedLine = (userContent ?? "")
+            let wrappedLine =
+                (userContent ?? "")
                 .components(separatedBy: dictionaryLabel + "\n")
                 .last?
                 .components(separatedBy: "\n")
@@ -402,10 +437,13 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(systemContent?.contains("保留改口后的说法") == true)
             try expect(systemContent?.contains("问句保持为问句") == true)
 
-            let emptyTransport = DeepSeekTransportFake(response: .init(
-                statusCode: 200,
-                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#.utf8)
-            ))
+            let emptyTransport = DeepSeekTransportFake(
+                response: .init(
+                    statusCode: 200,
+                    body: Data(
+                        #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
+                            .utf8)
+                ))
             let emptyDictionaryClient = DeepSeekRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: emptyTransport
@@ -415,10 +453,12 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 using: .init(mode: .conciseCleanup())
             )
             let emptyRequest = try await emptyTransport.onlyRequest()
-            let emptyBody = try JSONSerialization.jsonObject(
-                with: emptyRequest.httpBody ?? Data()
-            ) as? [String: Any]
-            let emptyUserContent = (emptyBody?["messages"] as? [[String: Any]])?
+            let emptyBody =
+                try JSONSerialization.jsonObject(
+                    with: emptyRequest.httpBody ?? Data()
+                ) as? [String: Any]
+            let emptyUserContent =
+                (emptyBody?["messages"] as? [[String: Any]])?
                 .first { $0["role"] as? String == "user" }?["content"] as? String
             try expect(emptyUserContent?.contains("个人词库词条") == false)
             try expect(
@@ -426,12 +466,18 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("DeepSeek request disables thinking and requires strict JSON output", failures: &failures) {
-            let transport = DeepSeekTransportFake(response: .init(
-                statusCode: 200,
-                headers: ["x-request-id": "ds-request-1"],
-                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"  整理后  \"}"},"finish_reason":"stop"}]}"#.utf8)
-            ))
+        await runAsync(
+            "DeepSeek request disables thinking and requires strict JSON output",
+            failures: &failures
+        ) {
+            let transport = DeepSeekTransportFake(
+                response: .init(
+                    statusCode: 200,
+                    headers: ["x-request-id": "ds-request-1"],
+                    body: Data(
+                        #"{"choices":[{"message":{"content":"{\"text\":\"  整理后  \"}"},"finish_reason":"stop"}]}"#
+                            .utf8)
+                ))
             let client = DeepSeekRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
@@ -442,12 +488,14 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 using: .init(mode: .conciseCleanup())
             )
             let request = try await transport.onlyRequest()
-            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let body =
+                try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
             let thinking = body?["thinking"] as? [String: Any]
             let responseFormat = body?["response_format"] as? [String: Any]
 
             try expect(request.url == DeepSeekRefinementConfiguration.defaultEndpoint)
-            try expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer deepseek-test-key")
+            try expect(
+                request.value(forHTTPHeaderField: "Authorization") == "Bearer deepseek-test-key")
             try expect(body?["model"] as? String == "deepseek-v4-flash")
             try expect(thinking?["type"] as? String == "disabled")
             try expect(responseFormat?["type"] as? String == "json_object")
@@ -455,21 +503,25 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(result == .init(text: "整理后", providerRequestID: "ds-request-1"))
         }
 
-        await runAsync("DeepSeek keeps the structured body request ID when trace headers are absent", failures: &failures) {
-            let transport = DeepSeekTransportFake(response: .init(
-                statusCode: 200,
-                body: Data(
-                    #"""
-                    {
-                      "id": "body-request-42",
-                      "choices": [{
-                        "message": {"content": "{\"text\":\"整理后\"}"},
-                        "finish_reason": "stop"
-                      }]
-                    }
-                    """#.utf8
-                )
-            ))
+        await runAsync(
+            "DeepSeek keeps the structured body request ID when trace headers are absent",
+            failures: &failures
+        ) {
+            let transport = DeepSeekTransportFake(
+                response: .init(
+                    statusCode: 200,
+                    body: Data(
+                        #"""
+                        {
+                          "id": "body-request-42",
+                          "choices": [{
+                            "message": {"content": "{\"text\":\"整理后\"}"},
+                            "finish_reason": "stop"
+                          }]
+                        }
+                        """#.utf8
+                    )
+                ))
             let client = DeepSeekRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
@@ -485,14 +537,16 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("production DeepSeek URLSession transport cancels its HTTP load", failures: &failures) {
+        await runAsync(
+            "production DeepSeek URLSession transport cancels its HTTP load", failures: &failures
+        ) {
             let probe = DeepSeekURLProtocolProbe()
             BlockingDeepSeekURLProtocol.install(probe)
             defer { BlockingDeepSeekURLProtocol.install(nil) }
             let configuration =
                 ProviderURLSessionFactory.ephemeralConfiguration()
             configuration.protocolClasses = [
-                BlockingDeepSeekURLProtocol.self,
+                BlockingDeepSeekURLProtocol.self
             ]
             let session = URLSession(configuration: configuration)
             defer { session.invalidateAndCancel() }
@@ -533,7 +587,9 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("DeepSeek rejects extra JSON fields and abnormal expansion", failures: &failures) {
+        await runAsync(
+            "DeepSeek rejects extra JSON fields and abnormal expansion", failures: &failures
+        ) {
             let extraFieldClient = makeDeepSeekClient(content: #"{"text":"结果","extra":true}"#)
             do {
                 _ = try await extraFieldClient.refine(
@@ -560,7 +616,9 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("DeepSeek classifies production HTTP and response boundaries", failures: &failures) {
+        await runAsync(
+            "DeepSeek classifies production HTTP and response boundaries", failures: &failures
+        ) {
             let httpCases: [(Int, DeepSeekRefinementFailureKind)] = [
                 (401, .authentication),
                 (402, .insufficientBalance),
@@ -571,11 +629,12 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             for (statusCode, expectedKind) in httpCases {
                 let client = DeepSeekRefinementClient(
                     configuration: .init(apiKey: "deepseek-test-key"),
-                    transport: DeepSeekTransportFake(response: .init(
-                        statusCode: statusCode,
-                        headers: ["x-request-id": "boundary-request"],
-                        body: Data()
-                    ))
+                    transport: DeepSeekTransportFake(
+                        response: .init(
+                            statusCode: statusCode,
+                            headers: ["x-request-id": "boundary-request"],
+                            body: Data()
+                        ))
                 )
                 do {
                     _ = try await client.refine(
@@ -592,26 +651,33 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
 
             let responseCases: [(Data, DeepSeekRefinementFailureKind)] = [
                 (
-                    Data(#"{"choices":[{"message":{"content":"{\"text\":\"结果\"}"},"finish_reason":"length"}]}"#.utf8),
+                    Data(
+                        #"{"choices":[{"message":{"content":"{\"text\":\"结果\"}"},"finish_reason":"length"}]}"#
+                            .utf8),
                     .truncated
                 ),
                 (Data(#"{"choices":[]}"#.utf8), .emptyOutput),
                 (
-                    Data(#"{"choices":[{"message":{"content":"not-json"},"finish_reason":"stop"}]}"#.utf8),
+                    Data(
+                        #"{"choices":[{"message":{"content":"not-json"},"finish_reason":"stop"}]}"#
+                            .utf8),
                     .malformedJSON
                 ),
                 (
-                    Data(#"{"choices":[{"message":{"content":"{\"text\":\"   \"}"},"finish_reason":"stop"}]}"#.utf8),
+                    Data(
+                        #"{"choices":[{"message":{"content":"{\"text\":\"   \"}"},"finish_reason":"stop"}]}"#
+                            .utf8),
                     .emptyText
                 ),
             ]
             for (body, expectedKind) in responseCases {
                 let client = DeepSeekRefinementClient(
                     configuration: .init(apiKey: "deepseek-test-key"),
-                    transport: DeepSeekTransportFake(response: .init(
-                        statusCode: 200,
-                        body: body
-                    ))
+                    transport: DeepSeekTransportFake(
+                        response: .init(
+                            statusCode: 200,
+                            body: body
+                        ))
                 )
                 do {
                     _ = try await client.refine(
@@ -625,9 +691,11 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("voice session freezes dictionary and refinement mode at press", failures: &failures) {
+        await runAsync(
+            "voice session freezes dictionary and refinement mode at press", failures: &failures
+        ) {
             let initialDictionary = try PersonalDictionary(entries: [
-                .init(word: "Swift"),
+                .init(word: "Swift")
             ])
             let configuration = VoiceInputConfigurationController(
                 dictionary: initialDictionary,

@@ -116,8 +116,8 @@ package struct SpeakerCardSurface: ViewModifier {
     }
 }
 
-package extension View {
-    func speakerCard(tint: Color? = nil) -> some View {
+extension View {
+    package func speakerCard(tint: Color? = nil) -> some View {
         modifier(SpeakerCardSurface(tint: tint))
     }
 }
@@ -279,8 +279,8 @@ package struct SpeakerRow<Trailing: View>: View {
     }
 }
 
-package extension SpeakerRow where Trailing == EmptyView {
-    init(
+extension SpeakerRow where Trailing == EmptyView {
+    package init(
         _ title: String,
         detail: String? = nil,
         icon: String? = nil,

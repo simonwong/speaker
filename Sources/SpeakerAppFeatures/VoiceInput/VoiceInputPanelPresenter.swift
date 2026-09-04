@@ -28,12 +28,13 @@ private struct VoiceInputPanelTransitionState: Sendable {
 
     mutating func dismiss(reduceMotion: Bool) -> VoiceInputPanelDismissal {
         revision &+= 1
-        let collapsesActivity = switch presentedLayout {
-        case .recording, .processing:
-            !reduceMotion
-        case .pendingCopy, .problem, nil:
-            false
-        }
+        let collapsesActivity =
+            switch presentedLayout {
+            case .recording, .processing:
+                !reduceMotion
+            case .pendingCopy, .problem, nil:
+                false
+            }
         presentedLayout = nil
         return VoiceInputPanelDismissal(
             collapsesActivity: collapsesActivity,
@@ -123,35 +124,35 @@ private struct VoiceInputPanelHost<Content: View>: View {
 }
 
 #if DEBUG
-package struct VoiceInputPanelEvidence: Equatable, Sendable {
-    package let isBorderless: Bool
-    package let isNonactivating: Bool
-    package let becomesKeyOnlyIfNeeded: Bool
-    package let canBecomeKey: Bool
-    package let canBecomeMain: Bool
-    package let hidesOnDeactivate: Bool
-    package let joinsAllSpaces: Bool
-    package let appearsOverFullScreen: Bool
-    package let hostingSurfaceIsLayerBacked: Bool
-    package let hostingSurfaceIsOpaque: Bool?
-    package let hostingSurfaceBackgroundAlpha: CGFloat?
-    package let windowSize: CGSize
-    package let contentSize: CGSize?
-    package let isVisible: Bool
-    package let isKeyWindow: Bool
-    package let isCollapsingActivity: Bool
-}
+    package struct VoiceInputPanelEvidence: Equatable, Sendable {
+        package let isBorderless: Bool
+        package let isNonactivating: Bool
+        package let becomesKeyOnlyIfNeeded: Bool
+        package let canBecomeKey: Bool
+        package let canBecomeMain: Bool
+        package let hidesOnDeactivate: Bool
+        package let joinsAllSpaces: Bool
+        package let appearsOverFullScreen: Bool
+        package let hostingSurfaceIsLayerBacked: Bool
+        package let hostingSurfaceIsOpaque: Bool?
+        package let hostingSurfaceBackgroundAlpha: CGFloat?
+        package let windowSize: CGSize
+        package let contentSize: CGSize?
+        package let isVisible: Bool
+        package let isKeyWindow: Bool
+        package let isCollapsingActivity: Bool
+    }
 
-package struct VoiceInputPanelAccessibilityButtonEvidence: Equatable {
-    package let label: String?
-    package let frame: NSRect
-}
+    package struct VoiceInputPanelAccessibilityButtonEvidence: Equatable {
+        package let label: String?
+        package let frame: NSRect
+    }
 
-package struct VoiceInputPanelVisualEffectEvidence: Equatable {
-    package let material: NSVisualEffectView.Material
-    package let blendingMode: NSVisualEffectView.BlendingMode
-    package let state: NSVisualEffectView.State
-}
+    package struct VoiceInputPanelVisualEffectEvidence: Equatable {
+        package let material: NSVisualEffectView.Material
+        package let blendingMode: NSVisualEffectView.BlendingMode
+        package let state: NSVisualEffectView.State
+    }
 #endif
 
 /// Presents every Voice Input HUD state through one AppKit lifecycle.
@@ -166,10 +167,11 @@ package final class VoiceInputPanelPresenter<Content: View> {
     private let content: (VoiceInputOverlayPresentation) -> Content
     private let animationState: VoiceInputPanelAnimationState
     private let reduceMotion: () -> Bool
-    private let scheduleDismissal: @MainActor (
-        Duration,
-        @escaping @MainActor () -> Void
-    ) -> Void
+    private let scheduleDismissal:
+        @MainActor (
+            Duration,
+            @escaping @MainActor () -> Void
+        ) -> Void
     private var placementCancellables: Set<AnyCancellable> = []
     private var transitionState = VoiceInputPanelTransitionState()
 
@@ -177,15 +179,16 @@ package final class VoiceInputPanelPresenter<Content: View> {
         reduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         },
-        scheduleDismissal: @escaping @MainActor (
-            Duration,
-            @escaping @MainActor () -> Void
-        ) -> Void = { delay, completion in
-            Task { @MainActor in
-                try? await Task.sleep(for: delay)
-                completion()
-            }
-        },
+        scheduleDismissal:
+            @escaping @MainActor (
+                Duration,
+                @escaping @MainActor () -> Void
+            ) -> Void = { delay, completion in
+                Task { @MainActor in
+                    try? await Task.sleep(for: delay)
+                    completion()
+                }
+            },
         @ViewBuilder content:
             @escaping (VoiceInputOverlayPresentation) -> Content
     ) {
@@ -195,11 +198,12 @@ package final class VoiceInputPanelPresenter<Content: View> {
 
         let animationState = VoiceInputPanelAnimationState()
         self.animationState = animationState
-        hostingView = NSHostingView(rootView: Self.rootView(
-            presentation: .hidden,
-            content: content,
-            animationState: animationState
-        ))
+        hostingView = NSHostingView(
+            rootView: Self.rootView(
+                presentation: .hidden,
+                content: content,
+                animationState: animationState
+            ))
 
         let initialSize = VoiceInputPanelLayout.processing.size
         panel = VoiceInputPanelFactory.make(
@@ -232,31 +236,31 @@ package final class VoiceInputPanelPresenter<Content: View> {
         panel.close()
     }
 
-#if DEBUG
-    package var evidence: VoiceInputPanelEvidence {
-        VoiceInputPanelEvidence(
-            isBorderless: panel.styleMask.contains(.borderless),
-            isNonactivating: panel.styleMask.contains(.nonactivatingPanel),
-            becomesKeyOnlyIfNeeded: panel.becomesKeyOnlyIfNeeded,
-            canBecomeKey: panel.canBecomeKey,
-            canBecomeMain: panel.canBecomeMain,
-            hidesOnDeactivate: panel.hidesOnDeactivate,
-            joinsAllSpaces: panel.collectionBehavior.contains(.canJoinAllSpaces),
-            appearsOverFullScreen: panel.collectionBehavior.contains(
-                .fullScreenAuxiliary
-            ),
-            hostingSurfaceIsLayerBacked: hostingView.wantsLayer,
-            hostingSurfaceIsOpaque: hostingView.layer?.isOpaque,
-            hostingSurfaceBackgroundAlpha:
-                hostingView.layer?.backgroundColor?.alpha,
-            windowSize: panel.frame.size,
-            contentSize: panel.contentView?.frame.size,
-            isVisible: panel.isVisible,
-            isKeyWindow: panel.isKeyWindow,
-            isCollapsingActivity: animationState.dismissal != nil
-        )
-    }
-#endif
+    #if DEBUG
+        package var evidence: VoiceInputPanelEvidence {
+            VoiceInputPanelEvidence(
+                isBorderless: panel.styleMask.contains(.borderless),
+                isNonactivating: panel.styleMask.contains(.nonactivatingPanel),
+                becomesKeyOnlyIfNeeded: panel.becomesKeyOnlyIfNeeded,
+                canBecomeKey: panel.canBecomeKey,
+                canBecomeMain: panel.canBecomeMain,
+                hidesOnDeactivate: panel.hidesOnDeactivate,
+                joinsAllSpaces: panel.collectionBehavior.contains(.canJoinAllSpaces),
+                appearsOverFullScreen: panel.collectionBehavior.contains(
+                    .fullScreenAuxiliary
+                ),
+                hostingSurfaceIsLayerBacked: hostingView.wantsLayer,
+                hostingSurfaceIsOpaque: hostingView.layer?.isOpaque,
+                hostingSurfaceBackgroundAlpha:
+                    hostingView.layer?.backgroundColor?.alpha,
+                windowSize: panel.frame.size,
+                contentSize: panel.contentView?.frame.size,
+                isVisible: panel.isVisible,
+                isKeyWindow: panel.isKeyWindow,
+                isCollapsingActivity: animationState.dismissal != nil
+            )
+        }
+    #endif
 
     package func present(_ presentation: VoiceInputOverlayPresentation) {
         guard let layout = VoiceInputPanelLayout(presentation) else {
@@ -300,13 +304,13 @@ package final class VoiceInputPanelPresenter<Content: View> {
             }
         }
         panel.displayIfNeeded()
-#if DEBUG
-        NSLog(
-            "Speaker visual panel shown: layout=\(String(describing: layout)) "
-                + "window=\(panel.windowNumber) "
-                + "frame=\(NSStringFromRect(panel.frame)) visible=\(panel.isVisible)"
-        )
-#endif
+        #if DEBUG
+            NSLog(
+                "Speaker visual panel shown: layout=\(String(describing: layout)) "
+                    + "window=\(panel.windowNumber) "
+                    + "frame=\(NSStringFromRect(panel.frame)) visible=\(panel.isVisible)"
+            )
+        #endif
     }
 
     private func dismiss() {
@@ -323,7 +327,8 @@ package final class VoiceInputPanelPresenter<Content: View> {
             return
         }
 
-        animationState.dismissal = dismissal.collapsesActivity
+        animationState.dismissal =
+            dismissal.collapsesActivity
             ? dismissal
             : nil
         NSAnimationContext.runAnimationGroup { context in
@@ -333,7 +338,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
         }
         scheduleDismissal(dismissal.completionDelay) { [weak self] in
             guard let self,
-                  self.transitionState.canComplete(dismissal)
+                self.transitionState.canComplete(dismissal)
             else { return }
             self.panel.orderOut(nil)
             self.hostingView.rootView = Self.rootView(
@@ -360,10 +365,11 @@ package final class VoiceInputPanelPresenter<Content: View> {
 
     private func repositionVisiblePanel() {
         guard let frame = Self.presentationScreen()?.visibleFrame else { return }
-        panel.setFrameOrigin(NSPoint(
-            x: frame.midX - panel.frame.width / 2,
-            y: frame.minY + 24
-        ))
+        panel.setFrameOrigin(
+            NSPoint(
+                x: frame.midX - panel.frame.width / 2,
+                y: frame.minY + 24
+            ))
     }
 
     private static func presentationScreen() -> NSScreen? {
@@ -377,8 +383,8 @@ package final class VoiceInputPanelPresenter<Content: View> {
 
     private static func focusedWindowScreen() -> NSScreen? {
         guard AXIsProcessTrusted(),
-              let application = NSWorkspace.shared.frontmostApplication,
-              application.bundleIdentifier != Bundle.main.bundleIdentifier
+            let application = NSWorkspace.shared.frontmostApplication,
+            application.bundleIdentifier != Bundle.main.bundleIdentifier
         else { return nil }
 
         let applicationElement = AXUIElementCreateApplication(
@@ -386,11 +392,12 @@ package final class VoiceInputPanelPresenter<Content: View> {
         )
         _ = AXUIElementSetMessagingTimeout(applicationElement, 0.25)
         var windowValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            applicationElement,
-            kAXFocusedWindowAttribute as CFString,
-            &windowValue
-        ) == .success,
+        guard
+            AXUIElementCopyAttributeValue(
+                applicationElement,
+                kAXFocusedWindowAttribute as CFString,
+                &windowValue
+            ) == .success,
             let windowValue,
             CFGetTypeID(windowValue) == AXUIElementGetTypeID()
         else { return nil }
@@ -398,11 +405,12 @@ package final class VoiceInputPanelPresenter<Content: View> {
 
         var positionValue: CFTypeRef?
         var sizeValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            window,
-            kAXPositionAttribute as CFString,
-            &positionValue
-        ) == .success,
+        guard
+            AXUIElementCopyAttributeValue(
+                window,
+                kAXPositionAttribute as CFString,
+                &positionValue
+            ) == .success,
             AXUIElementCopyAttributeValue(
                 window,
                 kAXSizeAttribute as CFString,
@@ -416,15 +424,18 @@ package final class VoiceInputPanelPresenter<Content: View> {
 
         var position = CGPoint.zero
         var size = CGSize.zero
-        guard AXValueGetValue(
-            unsafeDowncast(positionValue, to: AXValue.self),
-            .cgPoint,
-            &position
-        ), AXValueGetValue(
-            unsafeDowncast(sizeValue, to: AXValue.self),
-            .cgSize,
-            &size
-        ) else { return nil }
+        guard
+            AXValueGetValue(
+                unsafeDowncast(positionValue, to: AXValue.self),
+                .cgPoint,
+                &position
+            ),
+            AXValueGetValue(
+                unsafeDowncast(sizeValue, to: AXValue.self),
+                .cgSize,
+                &size
+            )
+        else { return nil }
 
         let windowBounds = CGRect(origin: position, size: size)
         return NSScreen.screens.max { lhs, rhs in
@@ -440,8 +451,9 @@ package final class VoiceInputPanelPresenter<Content: View> {
         with quartzWindowBounds: CGRect
     ) -> CGFloat {
         let screenNumberKey = NSDeviceDescriptionKey("NSScreenNumber")
-        guard let screenNumber = screen.deviceDescription[screenNumberKey]
-            as? NSNumber
+        guard
+            let screenNumber = screen.deviceDescription[screenNumberKey]
+                as? NSNumber
         else { return 0 }
         let displayBounds = CGDisplayBounds(
             CGDirectDisplayID(screenNumber.uint32Value)
@@ -451,98 +463,102 @@ package final class VoiceInputPanelPresenter<Content: View> {
         return intersection.width * intersection.height
     }
 
-#if DEBUG
-    package func captureDebugSnapshot(to url: URL) throws {
-        let representation = try renderedBitmap()
-        guard let data = representation.representation(
-            using: .png,
-            properties: [:]
-        ) else {
-            throw VoiceInputHUDSnapshotError.pngEncodingFailed
-        }
-        try data.write(to: url, options: .atomic)
-    }
-
-    package func renderedBitmap() throws -> NSBitmapImageRep {
-        hostingView.layoutSubtreeIfNeeded()
-        panel.displayIfNeeded()
-        let bounds = hostingView.bounds
-        guard let representation = hostingView.bitmapImageRepForCachingDisplay(
-            in: bounds
-        ) else {
-            throw VoiceInputHUDSnapshotError.bitmapUnavailable
-        }
-        hostingView.cacheDisplay(in: bounds, to: representation)
-        return representation
-    }
-
-    package var accessibilityButtonEvidence:
-        [VoiceInputPanelAccessibilityButtonEvidence]
-    {
-        accessibilityButtons().map { button in
-            VoiceInputPanelAccessibilityButtonEvidence(
-                label: button.accessibilityLabel(),
-                frame: button.accessibilityFrame()
-            )
-        }
-    }
-
-    package func pressAccessibilityButton(label: String) -> Bool {
-        guard let button = accessibilityButtons().first(where: {
-            $0.accessibilityLabel() == label
-        }) else { return false }
-        return button.accessibilityPerformPress()
-    }
-
-    package var visualEffectEvidence: [VoiceInputPanelVisualEffectEvidence] {
-        visualEffectViews().map { effect in
-            VoiceInputPanelVisualEffectEvidence(
-                material: effect.material,
-                blendingMode: effect.blendingMode,
-                state: effect.state
-            )
-        }
-    }
-
-    private func accessibilityButtons() -> [NSAccessibilityButton] {
-        hostingView.layoutSubtreeIfNeeded()
-        var visited = Set<ObjectIdentifier>()
-        var buttons: [NSAccessibilityButton] = []
-
-        func visit(_ view: NSView) {
-            let identifier = ObjectIdentifier(view)
-            guard visited.insert(identifier).inserted else { return }
-            if view.isAccessibilityElement(),
-               let button = view as? NSAccessibilityButton
-            {
-                buttons.append(button)
+    #if DEBUG
+        package func captureDebugSnapshot(to url: URL) throws {
+            let representation = try renderedBitmap()
+            guard
+                let data = representation.representation(
+                    using: .png,
+                    properties: [:]
+                )
+            else {
+                throw VoiceInputHUDSnapshotError.pngEncodingFailed
             }
-            view.subviews.forEach(visit)
+            try data.write(to: url, options: .atomic)
         }
 
-        visit(hostingView)
-        return buttons
-    }
-
-    private func visualEffectViews() -> [NSVisualEffectView] {
-        var effects: [NSVisualEffectView] = []
-
-        func visit(_ view: NSView) {
-            if let effect = view as? NSVisualEffectView {
-                effects.append(effect)
+        package func renderedBitmap() throws -> NSBitmapImageRep {
+            hostingView.layoutSubtreeIfNeeded()
+            panel.displayIfNeeded()
+            let bounds = hostingView.bounds
+            guard
+                let representation = hostingView.bitmapImageRepForCachingDisplay(
+                    in: bounds
+                )
+            else {
+                throw VoiceInputHUDSnapshotError.bitmapUnavailable
             }
-            view.subviews.forEach(visit)
+            hostingView.cacheDisplay(in: bounds, to: representation)
+            return representation
         }
 
-        visit(hostingView)
-        return effects
-    }
-#endif
+        package var accessibilityButtonEvidence: [VoiceInputPanelAccessibilityButtonEvidence] {
+            accessibilityButtons().map { button in
+                VoiceInputPanelAccessibilityButtonEvidence(
+                    label: button.accessibilityLabel(),
+                    frame: button.accessibilityFrame()
+                )
+            }
+        }
+
+        package func pressAccessibilityButton(label: String) -> Bool {
+            guard
+                let button = accessibilityButtons().first(where: {
+                    $0.accessibilityLabel() == label
+                })
+            else { return false }
+            return button.accessibilityPerformPress()
+        }
+
+        package var visualEffectEvidence: [VoiceInputPanelVisualEffectEvidence] {
+            visualEffectViews().map { effect in
+                VoiceInputPanelVisualEffectEvidence(
+                    material: effect.material,
+                    blendingMode: effect.blendingMode,
+                    state: effect.state
+                )
+            }
+        }
+
+        private func accessibilityButtons() -> [NSAccessibilityButton] {
+            hostingView.layoutSubtreeIfNeeded()
+            var visited = Set<ObjectIdentifier>()
+            var buttons: [NSAccessibilityButton] = []
+
+            func visit(_ view: NSView) {
+                let identifier = ObjectIdentifier(view)
+                guard visited.insert(identifier).inserted else { return }
+                if view.isAccessibilityElement(),
+                    let button = view as? NSAccessibilityButton
+                {
+                    buttons.append(button)
+                }
+                view.subviews.forEach(visit)
+            }
+
+            visit(hostingView)
+            return buttons
+        }
+
+        private func visualEffectViews() -> [NSVisualEffectView] {
+            var effects: [NSVisualEffectView] = []
+
+            func visit(_ view: NSView) {
+                if let effect = view as? NSVisualEffectView {
+                    effects.append(effect)
+                }
+                view.subviews.forEach(visit)
+            }
+
+            visit(hostingView)
+            return effects
+        }
+    #endif
 }
 
 #if DEBUG
-private enum VoiceInputHUDSnapshotError: Error {
-    case bitmapUnavailable
-    case pngEncodingFailed
-}
+    private enum VoiceInputHUDSnapshotError: Error {
+        case bitmapUnavailable
+        case pngEncodingFailed
+    }
 #endif

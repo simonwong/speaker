@@ -16,8 +16,7 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
     private let continuation: AsyncStream<SequencedTrigger>.Continuation
     private let consumer: Task<Void, Never>
     private let gestureController: GestureController
-    private let releaseCaptureHint:
-        @Sendable () -> InputTargetCaptureHint?
+    private let releaseCaptureHint: @Sendable () -> InputTargetCaptureHint?
 
     package init(
         sessions: VoiceInputSessions,
@@ -47,12 +46,13 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                             await sessions.send(.pressed, triggerSequence: event.sequence)
                         case .released:
                             if event.source == .pressed,
-                               let ownerSequence = event.ownerSequence,
-                               !(await sessions.isActive(triggerSequence: ownerSequence)),
-                               gestureController.recoverStalePress(
-                                   sequence: event.sequence,
-                                   at: event.uptimeNanoseconds
-                               ) {
+                                let ownerSequence = event.ownerSequence,
+                                !(await sessions.isActive(triggerSequence: ownerSequence)),
+                                gestureController.recoverStalePress(
+                                    sequence: event.sequence,
+                                    at: event.uptimeNanoseconds
+                                )
+                            {
                                 await sessions.send(
                                     .pressed,
                                     triggerSequence: event.sequence
@@ -211,8 +211,9 @@ package struct VoiceShortcutGestureStateMachine: Sendable {
             }
         case .released:
             switch state {
-            case let .held(startedAt):
-                let elapsed = uptimeNanoseconds >= startedAt
+            case .held(let startedAt):
+                let elapsed =
+                    uptimeNanoseconds >= startedAt
                     ? uptimeNanoseconds - startedAt
                     : 0
                 if elapsed >= longPressNanoseconds {

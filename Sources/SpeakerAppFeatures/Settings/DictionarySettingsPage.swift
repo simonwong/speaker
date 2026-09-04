@@ -169,7 +169,7 @@ private struct DictionaryChipFlowLayout: Layout {
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
             if point.x > bounds.minX,
-               point.x + size.width > bounds.maxX
+                point.x + size.width > bounds.maxX
             {
                 point.x = bounds.minX
                 point.y += rowHeight + spacing

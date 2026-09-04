@@ -12,7 +12,7 @@ struct ShortcutSettingsPage: View {
                 recorderRow
 
                 if shortcutRecorder.isRecording,
-                   let notice = shortcutRecorder.notice
+                    let notice = shortcutRecorder.notice
                 {
                     recordingNotice(notice)
                 }
@@ -145,10 +145,9 @@ struct ShortcutSettingsPage: View {
         }
     }
 
-
     private var shortcutStatusText: String {
         switch shortcut.activation {
-        case let .active(preference):
+        case .active(let preference):
             preference == .functionKey ? "默认 Fn 已启用" : "自定义组合键已启用"
         case .waitingForAccessibility:
             "已选择，等待辅助功能权限"

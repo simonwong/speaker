@@ -131,7 +131,7 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
     private func beginConfirmation() -> Bool {
         let request = lock.withLock { () -> (UUID, Confirm)? in
             guard var interaction = exclusive,
-                  !interaction.isConfirming
+                !interaction.isConfirming
             else { return nil }
             interaction.isConfirming = true
             exclusive = interaction
@@ -149,7 +149,7 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
     private func finishConfirmation(id: UUID, accepted: Bool) {
         lock.withLock {
             guard var interaction = exclusive,
-                  interaction.id == id
+                interaction.id == id
             else { return }
             if accepted {
                 exclusive = nil

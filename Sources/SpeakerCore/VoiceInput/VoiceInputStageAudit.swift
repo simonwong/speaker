@@ -57,7 +57,8 @@ struct VoiceInputStageAudit {
 
     private mutating func accumulateCurrentStage(now: Duration) {
         guard let stage = stageName, let startedAt = stageStartedAt else { return }
-        stageDurations[stage, default: 0] += max(.zero, now - startedAt)
+        stageDurations[stage, default: 0] +=
+            max(.zero, now - startedAt)
             .wholeMillisecondsClamped
     }
 }
@@ -66,8 +67,9 @@ extension Duration {
     /// Whole milliseconds, saturating instead of trapping on absurd inputs.
     var wholeMillisecondsClamped: Int {
         let components = components
-        return Int(clamping:
-            components.seconds * 1_000
+        return Int(
+            clamping:
+                components.seconds * 1_000
                 + components.attoseconds / 1_000_000_000_000_000
         )
     }

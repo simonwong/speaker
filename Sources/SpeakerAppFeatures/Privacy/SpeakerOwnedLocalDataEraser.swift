@@ -23,20 +23,24 @@ package struct SpeakerOwnedDataLocations {
         bundleIdentifier: String
     ) -> SpeakerOwnedDataLocations {
         let home = fileManager.homeDirectoryForCurrentUser
-        let applicationSupportBase = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? home.appendingPathComponent(
-            "Library/Application Support",
-            isDirectory: true
-        )
-        let cachesBase = fileManager.urls(
-            for: .cachesDirectory,
-            in: .userDomainMask
-        ).first ?? home.appendingPathComponent(
-            "Library/Caches",
-            isDirectory: true
-        )
+        let applicationSupportBase =
+            fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first
+            ?? home.appendingPathComponent(
+                "Library/Application Support",
+                isDirectory: true
+            )
+        let cachesBase =
+            fileManager.urls(
+                for: .cachesDirectory,
+                in: .userDomainMask
+            ).first
+            ?? home.appendingPathComponent(
+                "Library/Caches",
+                isDirectory: true
+            )
         let savedStateBase = home.appendingPathComponent(
             "Library/Saved Application State",
             isDirectory: true
@@ -46,7 +50,8 @@ package struct SpeakerOwnedDataLocations {
                 "Speaker",
                 isDirectory: true
             ),
-            legacyApplicationSupport: applicationSupportBase
+            legacyApplicationSupport:
+                applicationSupportBase
                 .appendingPathComponent(
                     "com.local.speaker",
                     isDirectory: true
@@ -114,10 +119,11 @@ package struct SpeakerOwnedLocalDataEraser {
     }
 
     package func verify() throws {
-        let ownedLocations = [
-            locations.applicationSupport,
-            locations.legacyApplicationSupport,
-        ] + locations.caches + locations.savedApplicationState
+        let ownedLocations =
+            [
+                locations.applicationSupport,
+                locations.legacyApplicationSupport,
+            ] + locations.caches + locations.savedApplicationState
         for location in unique(ownedLocations) {
             try validate(location)
             guard !fileManager.fileExists(atPath: location.path) else {
@@ -136,7 +142,8 @@ package struct SpeakerOwnedLocalDataEraser {
             return
         } catch let error as CocoaError
             where error.code == .fileWriteNoPermission
-                || error.code == .fileReadNoPermission {
+            || error.code == .fileReadNoPermission
+        {
             throw SpeakerDataErasureReason.accessDenied
         } catch {
             throw SpeakerDataErasureReason.io
@@ -148,13 +155,14 @@ package struct SpeakerOwnedLocalDataEraser {
 
     private func validate(_ location: URL) throws {
         let candidate = location.standardizedFileURL
-        let parent = candidate
+        let parent =
+            candidate
             .deletingLastPathComponent()
             .standardizedFileURL
             .resolvingSymlinksInPath()
         let allowedPrefix = allowedLibraryRoot.path + "/"
         guard candidate.path != parent.path,
-              parent.path == allowedLibraryRoot.path
+            parent.path == allowedLibraryRoot.path
                 || parent.path.hasPrefix(allowedPrefix)
         else {
             throw SpeakerDataErasureReason.unsafePath

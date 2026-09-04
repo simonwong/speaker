@@ -82,7 +82,9 @@ private struct SpeakerProviderEvidenceSpecs {
         }
 
         run("release verification rejects development credentials", failures: &failures) {
-            try expectThrows(ProviderEvidenceError.self, "release verification accepted development credentials") {
+            try expectThrows(
+                ProviderEvidenceError.self, "release verification accepted development credentials"
+            ) {
                 try valid.validate(requirePassingCases: true, requireSignedAppKeychain: true)
             }
         }
@@ -94,7 +96,10 @@ private struct SpeakerProviderEvidenceSpecs {
             )
         }
 
-        run("release binding accepts matching commit, package hash, version, build, and window", failures: &failures) {
+        run(
+            "release binding accepts matching commit, package hash, version, build, and window",
+            failures: &failures
+        ) {
             try releaseEvidence.validateReleaseBinding(
                 sourceCommit: String(repeating: "a", count: 40),
                 packageResolvedSHA256: String(repeating: "b", count: 64),
@@ -169,7 +174,10 @@ private struct SpeakerProviderEvidenceSpecs {
             }
         }
 
-        run("unsafe provider status and request ID never enter a case or its summary", failures: &failures) {
+        run(
+            "unsafe provider status and request ID never enter a case or its summary",
+            failures: &failures
+        ) {
             let unsafe = ProviderEvidenceCase(
                 provider: .doubao,
                 caseID: .doubaoConnection,
@@ -180,11 +188,16 @@ private struct SpeakerProviderEvidenceSpecs {
             )
             try expect(unsafe.providerStatusCode == nil, "unsafe status was retained")
             try expect(unsafe.requestID == nil, "unsafe request ID was retained")
-            try expect(!unsafe.privacySafeSummary.contains("secret body"), "stdout retained provider body")
-            try expect(!unsafe.privacySafeSummary.contains("sentry"), "stdout retained unsafe request ID")
+            try expect(
+                !unsafe.privacySafeSummary.contains("secret body"), "stdout retained provider body")
+            try expect(
+                !unsafe.privacySafeSummary.contains("sentry"), "stdout retained unsafe request ID")
         }
 
-        run("encoded report has no forbidden fields and strict decoding rejects unknown fields", failures: &failures) {
+        run(
+            "encoded report has no forbidden fields and strict decoding rejects unknown fields",
+            failures: &failures
+        ) {
             let encoded = try valid.encoded()
             let encodedText = String(decoding: encoded, as: UTF8.self)
             for forbidden in ["apiKey", "transcript", "providerMessage", "secret body"] {
@@ -198,12 +211,19 @@ private struct SpeakerProviderEvidenceSpecs {
             }
         }
 
-        run("evidence file is written owner-only into a fresh directory and read back strictly", failures: &failures) {
+        run(
+            "evidence file is written owner-only into a fresh directory and read back strictly",
+            failures: &failures
+        ) {
             let root = freshFixtureRoot("speaker-provider-evidence-spec")
             defer { try? FileManager.default.removeItem(at: root) }
             let reportURL = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
-            let directoryMode = (try FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions] as! NSNumber).intValue
-            let reportMode = (try FileManager.default.attributesOfItem(atPath: reportURL.path)[.posixPermissions] as! NSNumber).intValue
+            let directoryMode =
+                (try FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions]
+                as! NSNumber).intValue
+            let reportMode =
+                (try FileManager.default.attributesOfItem(atPath: reportURL.path)[.posixPermissions]
+                as! NSNumber).intValue
             try expect(directoryMode == 0o700, "evidence directory is not 0700")
             try expect(reportMode == 0o600, "evidence report is not 0600")
             _ = try ProviderMatrixEvidence.decodeStrict(
@@ -218,13 +238,16 @@ private struct SpeakerProviderEvidenceSpecs {
             let root = freshFixtureRoot("speaker-provider-evidence-read-spec")
             defer { try? FileManager.default.removeItem(at: root) }
             let reportURL = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
-            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: reportURL.path)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: reportURL.path)
             try expectThrows(ProviderEvidenceError.self, "wide report permissions passed") {
                 _ = try ProviderEvidenceFile.readSecurely(from: reportURL)
             }
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: reportURL.path)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: reportURL.path)
             let symlinkURL = root.appendingPathComponent("linked.json")
-            try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: reportURL)
+            try FileManager.default.createSymbolicLink(
+                at: symlinkURL, withDestinationURL: reportURL)
             try expectThrows(ProviderEvidenceError.self, "symlink report passed") {
                 _ = try ProviderEvidenceFile.readSecurely(from: symlinkURL)
             }
@@ -244,7 +267,9 @@ private struct SpeakerProviderEvidenceSpecs {
                 at: linkedParent,
                 withDestinationURL: realParent
             )
-            try expectThrows(ProviderEvidenceError.self, "symlink ancestor was followed while writing") {
+            try expectThrows(
+                ProviderEvidenceError.self, "symlink ancestor was followed while writing"
+            ) {
                 _ = try ProviderEvidenceFile.writeAtomically(
                     valid,
                     toNewDirectory: linkedParent.appendingPathComponent("evidence")

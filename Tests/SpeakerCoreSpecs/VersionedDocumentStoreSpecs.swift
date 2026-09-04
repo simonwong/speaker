@@ -44,7 +44,10 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
 
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("corrupt personal dictionary is preserved beside the file and loading continues empty", failures: &failures) {
+        await runAsync(
+            "corrupt personal dictionary is preserved beside the file and loading continues empty",
+            failures: &failures
+        ) {
             let directory = try fixtureDirectory("speaker-dictionary-preserve")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("personal-dictionary.json")
@@ -90,7 +93,10 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("unsupported personal dictionary version is preserved instead of refused", failures: &failures) {
+        await runAsync(
+            "unsupported personal dictionary version is preserved instead of refused",
+            failures: &failures
+        ) {
             let directory = try fixtureDirectory("speaker-dictionary-unsupported")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("personal-dictionary.json")
@@ -102,12 +108,16 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             try expect(result.dictionary == .empty)
             try expect(result.recovery?.reason == .unsupportedVersion(99))
             try expect(
-                result.recovery.map { FileManager.default.fileExists(atPath: $0.backupURL.path) } == true,
+                result.recovery.map { FileManager.default.fileExists(atPath: $0.backupURL.path) }
+                    == true,
                 "unsupported dictionary was not preserved"
             )
         }
 
-        await runAsync("whitespace-only v2 dictionary words are treated as corruption and preserved", failures: &failures) {
+        await runAsync(
+            "whitespace-only v2 dictionary words are treated as corruption and preserved",
+            failures: &failures
+        ) {
             let directory = try fixtureDirectory("speaker-dictionary-whitespace")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("personal-dictionary.json")
@@ -125,7 +135,10 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("dictionary migration inspects a corrupt legacy file without moving it", failures: &failures) {
+        await runAsync(
+            "dictionary migration inspects a corrupt legacy file without moving it",
+            failures: &failures
+        ) {
             let directory = try fixtureDirectory("speaker-dictionary-inspect")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("legacy.json")
@@ -139,7 +152,10 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             try expect(siblings == ["legacy.json"], "inspection moved or copied the file")
         }
 
-        run("versioned document store dispatches by version table and preserves what it cannot decode", failures: &failures) {
+        run(
+            "versioned document store dispatches by version table and preserves what it cannot decode",
+            failures: &failures
+        ) {
             let directory = try fixtureDirectory("speaker-document-store")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("fixture.json")
@@ -156,16 +172,18 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
 
             try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "word": "legacy"])
                 .write(to: fileURL)
-            guard case let .loaded(document, version) = store.load().outcome else {
+            guard case .loaded(let document, let version) = store.load().outcome else {
                 throw SpecFailure(message: "version 1 document was not migrated")
             }
             try expect(document == ["legacy"])
             try expect(version == 1)
-            let storedLegacy = try JSONDecoder().decode(LegacyFixture.self, from: Data(contentsOf: fileURL))
+            let storedLegacy = try JSONDecoder().decode(
+                LegacyFixture.self, from: Data(contentsOf: fileURL))
             try expect(storedLegacy.word == "legacy", "loading rewrote the stored document")
 
-            try store.write(JSONEncoder().encode(VersionedFixture(schemaVersion: 2, words: ["a", "b"])))
-            guard case let .loaded(current, currentVersion) = store.load().outcome else {
+            try store.write(
+                JSONEncoder().encode(VersionedFixture(schemaVersion: 2, words: ["a", "b"])))
+            guard case .loaded(let current, let currentVersion) = store.load().outcome else {
                 throw SpecFailure(message: "current document was not loaded")
             }
             try expect(current == ["a", "b"] && currentVersion == 2)
@@ -177,7 +195,10 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             }
             let afterDecode = try siblingNames(of: fileURL)
             try expect(afterDecode == ["fixture.json"], "decode moved the file")
-            guard case let .corruptedPreserved(backupURL, .unsupportedVersion(7)) = store.load().outcome else {
+            guard
+                case .corruptedPreserved(let backupURL, .unsupportedVersion(7)) = store.load()
+                    .outcome
+            else {
                 throw SpecFailure(message: "load did not preserve the unsupported document")
             }
             try expect(backupURL.lastPathComponent.hasPrefix("fixture.recovery-"))
@@ -219,9 +240,11 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             // link is refused before any bytes are read or moved aside.
             let linkOutcome = store.load().outcome
             guard case .failed = linkOutcome else {
-                throw SpecFailure(message: "a symbolic link was loaded or preserved: \(linkOutcome)")
+                throw SpecFailure(
+                    message: "a symbolic link was loaded or preserved: \(linkOutcome)")
             }
-            let destination = try FileManager.default.destinationOfSymbolicLink(atPath: fileURL.path)
+            let destination = try FileManager.default.destinationOfSymbolicLink(
+                atPath: fileURL.path)
             try expect(destination == targetURL.path, "the symbolic link was moved")
 
             let unprotectable = VersionedOwnerOnlyDocumentStore(

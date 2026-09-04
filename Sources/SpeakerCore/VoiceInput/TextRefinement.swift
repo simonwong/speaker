@@ -53,7 +53,7 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
             "精简清理"
         case .fullRewrite:
             "完整重写"
-        case let .custom(name, _):
+        case .custom(let name, _):
             name.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
@@ -78,8 +78,8 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     /// The user's saved replacement for the mode's built-in prompt, if any.
     public var promptOverride: String? {
         switch self {
-        case let .conciseCleanup(promptOverride),
-             let .fullRewrite(promptOverride):
+        case .conciseCleanup(let promptOverride),
+            .fullRewrite(let promptOverride):
             promptOverride
         case .defaultSmooth, .custom:
             nil
@@ -90,15 +90,15 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         switch self {
         case .defaultSmooth:
             return self
-        case let .conciseCleanup(promptOverride):
+        case .conciseCleanup(let promptOverride):
             return .conciseCleanup(
                 promptOverride: try Self.validatedPromptOverride(promptOverride)
             )
-        case let .fullRewrite(promptOverride):
+        case .fullRewrite(let promptOverride):
             return .fullRewrite(
                 promptOverride: try Self.validatedPromptOverride(promptOverride)
             )
-        case let .custom(name, prompt):
+        case .custom(let name, let prompt):
             let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanName.isEmpty else {
@@ -140,11 +140,11 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         switch self {
         case .defaultSmooth:
             nil
-        case let .conciseCleanup(promptOverride):
+        case .conciseCleanup(let promptOverride):
             promptOverride ?? BuiltInRefinementMode.conciseCleanup.defaultPrompt
-        case let .fullRewrite(promptOverride):
+        case .fullRewrite(let promptOverride):
             promptOverride ?? BuiltInRefinementMode.fullRewrite.defaultPrompt
-        case let .custom(_, prompt):
+        case .custom(_, let prompt):
             prompt
         }
     }

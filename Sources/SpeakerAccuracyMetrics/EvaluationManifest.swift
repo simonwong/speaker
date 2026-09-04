@@ -16,13 +16,13 @@ extension EvaluationManifestError: CustomStringConvertible {
             "manifest is not valid JSON of the form {\"samples\":[{\"id\",\"wav\",\"reference\",\"tags\"?}]}"
         case .noSamples:
             "manifest lists no samples"
-        case let .emptySampleID(index):
+        case .emptySampleID(let index):
             "sample at index \(index) has an empty id"
-        case let .duplicateSampleID(id):
+        case .duplicateSampleID(let id):
             "sample id \"\(id)\" appears more than once"
-        case let .emptyWAVPath(sampleID):
+        case .emptyWAVPath(let sampleID):
             "sample \"\(sampleID)\" has an empty wav path"
-        case let .emptyReference(sampleID):
+        case .emptyReference(let sampleID):
             "sample \"\(sampleID)\" has a reference with no scorable characters"
         }
     }
@@ -78,21 +78,27 @@ public struct EvaluationManifest: Equatable, Sendable {
         for (index, sample) in document.samples.enumerated() {
             let id = sample.id.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !id.isEmpty else { throw EvaluationManifestError.emptySampleID(index: index) }
-            guard seenIDs.insert(id).inserted else { throw EvaluationManifestError.duplicateSampleID(id) }
+            guard seenIDs.insert(id).inserted else {
+                throw EvaluationManifestError.duplicateSampleID(id)
+            }
             let wavPath = sample.wav.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !wavPath.isEmpty else { throw EvaluationManifestError.emptyWAVPath(sampleID: id) }
             guard !TranscriptNormalizer.scoredCharacters(sample.reference).isEmpty else {
                 throw EvaluationManifestError.emptyReference(sampleID: id)
             }
-            let wavURL = wavPath.hasPrefix("/")
+            let wavURL =
+                wavPath.hasPrefix("/")
                 ? URL(fileURLWithPath: wavPath)
                 : URL(fileURLWithPath: wavPath, relativeTo: baseDirectory).standardizedFileURL
-            samples.append(EvaluationSample(
-                id: id,
-                wavURL: wavURL,
-                reference: sample.reference,
-                tags: (sample.tags ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            ))
+            samples.append(
+                EvaluationSample(
+                    id: id,
+                    wavURL: wavURL,
+                    reference: sample.reference,
+                    tags: (sample.tags ?? []).map {
+                        $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }.filter { !$0.isEmpty }
+                ))
         }
         return EvaluationManifest(samples: samples)
     }

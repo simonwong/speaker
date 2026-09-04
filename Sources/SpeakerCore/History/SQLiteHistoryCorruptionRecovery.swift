@@ -9,7 +9,7 @@ extension SQLiteHistoryError {
     /// neither may be preserved and replaced behind the user's back.
     var isRecoverableCorruption: Bool {
         switch self {
-        case let .sqlite(code, _):
+        case .sqlite(let code, _):
             code == SQLITE_CORRUPT || code == SQLITE_NOTADB
         case .integrityCheckFailed:
             true

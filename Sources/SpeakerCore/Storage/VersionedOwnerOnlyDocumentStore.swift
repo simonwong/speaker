@@ -8,9 +8,9 @@ public enum DocumentCorruption: Equatable, Sendable {
     /// A content-free technical summary suitable for diagnostics.
     public var summary: String {
         switch self {
-        case let .malformed(detail):
+        case .malformed(let detail):
             detail
-        case let .unsupportedVersion(version):
+        case .unsupportedVersion(let version):
             "Unsupported schema version \(version)."
         }
     }
@@ -130,14 +130,14 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         switch decode() {
         case .absent:
             return VersionedDocumentLoad(outcome: .absent, pruning: pruning)
-        case let .decoded(document, version):
+        case .decoded(let document, let version):
             return VersionedDocumentLoad(
                 outcome: .loaded(document, version: version),
                 pruning: pruning
             )
-        case let .failed(failure):
+        case .failed(let failure):
             return VersionedDocumentLoad(outcome: .failed(failure), pruning: pruning)
-        case let .corrupted(corruption):
+        case .corrupted(let corruption):
             return preserveCorruptFile(corruption: corruption, pruning: pruning)
         }
     }
@@ -152,10 +152,12 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         }
         let data: Data
         do {
-            guard let storedData = try OwnerOnlyFilePersistence.read(
-                from: fileURL,
-                maximumByteCount: maximumByteCount
-            ) else {
+            guard
+                let storedData = try OwnerOnlyFilePersistence.read(
+                    from: fileURL,
+                    maximumByteCount: maximumByteCount
+                )
+            else {
                 return .absent
             }
             data = storedData
@@ -209,9 +211,10 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         )
-        for candidate in candidates where
+        for candidate in candidates
+        where
             candidate.lastPathComponent.hasPrefix(backupNamePrefix)
-                && candidate.pathExtension == "json"
+            && candidate.pathExtension == "json"
         {
             try FileManager.default.removeItem(at: candidate)
         }
@@ -230,10 +233,11 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
             try FileManager.default.moveItem(at: fileURL, to: backupURL)
         } catch {
             return VersionedDocumentLoad(
-                outcome: .failed(.preservationFailed(
-                    corruption: corruption,
-                    detail: PrivacySafeText.reason(for: error)
-                )),
+                outcome: .failed(
+                    .preservationFailed(
+                        corruption: corruption,
+                        detail: PrivacySafeText.reason(for: error)
+                    )),
                 pruning: pruning
             )
         }
@@ -256,10 +260,11 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         key: DocumentVersionKey
     ) throws -> Int {
         let header = try JSONDecoder().decode(VersionHeader.self, from: data)
-        let version = switch key {
-        case .schemaVersion: header.schemaVersion
-        case .version: header.version
-        }
+        let version =
+            switch key {
+            case .schemaVersion: header.schemaVersion
+            case .version: header.version
+            }
         guard let version else {
             throw DecodingError.keyNotFound(
                 VersionCodingKey(stringValue: key.rawValue),

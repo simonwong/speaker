@@ -110,7 +110,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
                 runtimeOperation: .connectionCheck
             ).providerRequestID
         } catch let failure as DoubaoASRFailure
-            where failure.kind == .silence || failure.kind == .emptyTranscript {
+            where failure.kind == .silence || failure.kind == .emptyTranscript
+        {
             return failure.providerRequestID
         }
     }
@@ -136,7 +137,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
             return data
         }
         guard String(data: data.prefix(4), encoding: .ascii) == "RIFF",
-              String(data: data.dropFirst(8).prefix(4), encoding: .ascii) == "WAVE"
+            String(data: data.dropFirst(8).prefix(4), encoding: .ascii) == "WAVE"
         else {
             return data
         }
@@ -148,7 +149,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
                 encoding: .ascii
             )
             let sizeOffset = offset + 4
-            let size = Int(data[sizeOffset])
+            let size =
+                Int(data[sizeOffset])
                 | Int(data[sizeOffset + 1]) << 8
                 | Int(data[sizeOffset + 2]) << 16
                 | Int(data[sizeOffset + 3]) << 24

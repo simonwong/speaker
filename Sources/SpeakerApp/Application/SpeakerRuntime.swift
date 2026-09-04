@@ -36,9 +36,9 @@ final class SpeakerRuntime: ObservableObject {
     private let shutdown: RuntimeShutdownCoordinator
     private var started = false
     private var runtimeCancellables = Set<AnyCancellable>()
-#if DEBUG
-    private var visualScenarioCancellable: AnyCancellable?
-#endif
+    #if DEBUG
+        private var visualScenarioCancellable: AnyCancellable?
+    #endif
 
     private(set) lazy var settingsWorkspace = SettingsWorkspace(
         navigation: settingsNavigation,
@@ -325,7 +325,7 @@ final class SpeakerRuntime: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let outcome = await self.dataErasure.eraseAllAndExit()
-                if case let .incomplete(failure) = outcome {
+                if case .incomplete(let failure) = outcome {
                     self.mainWindow.select(.about)
                     self.diagnostics.publish(
                         SpeakerCopy.LocalDataErase.failureMessage(failure)
@@ -334,34 +334,34 @@ final class SpeakerRuntime: ObservableObject {
             }
             return
         }
-#if DEBUG
-        if let scenario = SpeakerDebugLaunchOptions.visualScenario(
-            in: dependencies.launchArguments
-        ) {
-            NSLog(
-                "Speaker visual scenario requested: \(scenario.rawValue), "
-                    + "appRunning=\(NSApp.isRunning)"
-            )
-            panel.start()
-            if NSApp.isRunning {
-                voiceInput.presentVisualScenario(scenario)
-                captureVisualScenarioIfRequested()
-            } else {
-                visualScenarioCancellable = NotificationCenter.default
-                    .publisher(
-                        for: NSApplication.didFinishLaunchingNotification
-                    )
-                    .prefix(1)
-                    .sink { [weak self] _ in
-                        NSLog("Speaker visual scenario received didFinishLaunching")
-                        self?.voiceInput.presentVisualScenario(scenario)
-                        self?.captureVisualScenarioIfRequested()
-                        self?.visualScenarioCancellable = nil
-                    }
+        #if DEBUG
+            if let scenario = SpeakerDebugLaunchOptions.visualScenario(
+                in: dependencies.launchArguments
+            ) {
+                NSLog(
+                    "Speaker visual scenario requested: \(scenario.rawValue), "
+                        + "appRunning=\(NSApp.isRunning)"
+                )
+                panel.start()
+                if NSApp.isRunning {
+                    voiceInput.presentVisualScenario(scenario)
+                    captureVisualScenarioIfRequested()
+                } else {
+                    visualScenarioCancellable = NotificationCenter.default
+                        .publisher(
+                            for: NSApplication.didFinishLaunchingNotification
+                        )
+                        .prefix(1)
+                        .sink { [weak self] _ in
+                            NSLog("Speaker visual scenario received didFinishLaunching")
+                            self?.voiceInput.presentVisualScenario(scenario)
+                            self?.captureVisualScenarioIfRequested()
+                            self?.visualScenarioCancellable = nil
+                        }
+                }
+                return
             }
-            return
-        }
-#endif
+        #endif
         permissions.refresh()
         softwareUpdate.start()
         let activations = dependencies.workspace.applicationActivations
@@ -400,37 +400,39 @@ final class SpeakerRuntime: ObservableObject {
         let bundle = dependencies.bundle
         let buildIdentity = bundle.buildInfo.buildIdentity
         let activity = voiceInput.state.diagnosticCode
-        let historyNotice: String = switch historyStatus.notice {
-        case nil: "none"
-        case .corruptedDataPreserved: "corruptedDataPreserved"
-        case .corruptedRecordsSkipped: "corruptedRecordsSkipped"
-        case .privacyMigrationFailed: "privacyMigrationFailed"
-        case .writeFailed: "writeFailed"
-        case .recoveryArchivePruneFailed: "recoveryArchivePruneFailed"
-        }
-        let report = SpeakerDiagnosticReport.make(from: .init(
-            version: buildIdentity.version,
-            build: buildIdentity.build,
-            sourceRevision: buildIdentity.sourceRevision,
-            bundleIdentifier: bundle.bundleIdentifier,
-            signingMode: bundle.buildInfo.signingMode.diagnosticValue,
-            operatingSystem: dependencies.operatingSystemVersion,
-            credentialStorage: bundle.credentialStorage ?? "unknown",
-            accessibility: permissions.snapshot.accessibility,
-            microphone: permissions.snapshot.microphone,
-            shortcut: shortcut.preference.displayName,
-            activity: activity,
-            refinement: refinementSettings.mode.diagnosticKind,
-            doubaoConfigured: doubaoSettings.hasConfiguredKey,
-            doubaoResource: doubaoSettings.resource.rawValue,
-            deepSeekConfigured: refinementSettings.hasStoredKey,
-            deepSeekVerified: refinementSettings.isConnectionVerified,
-            historyRecordCount: historyStatus.recordCount,
-            historyPersistence: historyNotice,
-            audioCaptureEnvironment: audioCaptureEnvironment,
-            activeProvider: activeProvider,
-            latestRecord: latestRecord
-        ))
+        let historyNotice: String =
+            switch historyStatus.notice {
+            case nil: "none"
+            case .corruptedDataPreserved: "corruptedDataPreserved"
+            case .corruptedRecordsSkipped: "corruptedRecordsSkipped"
+            case .privacyMigrationFailed: "privacyMigrationFailed"
+            case .writeFailed: "writeFailed"
+            case .recoveryArchivePruneFailed: "recoveryArchivePruneFailed"
+            }
+        let report = SpeakerDiagnosticReport.make(
+            from: .init(
+                version: buildIdentity.version,
+                build: buildIdentity.build,
+                sourceRevision: buildIdentity.sourceRevision,
+                bundleIdentifier: bundle.bundleIdentifier,
+                signingMode: bundle.buildInfo.signingMode.diagnosticValue,
+                operatingSystem: dependencies.operatingSystemVersion,
+                credentialStorage: bundle.credentialStorage ?? "unknown",
+                accessibility: permissions.snapshot.accessibility,
+                microphone: permissions.snapshot.microphone,
+                shortcut: shortcut.preference.displayName,
+                activity: activity,
+                refinement: refinementSettings.mode.diagnosticKind,
+                doubaoConfigured: doubaoSettings.hasConfiguredKey,
+                doubaoResource: doubaoSettings.resource.rawValue,
+                deepSeekConfigured: refinementSettings.hasStoredKey,
+                deepSeekVerified: refinementSettings.isConnectionVerified,
+                historyRecordCount: historyStatus.recordCount,
+                historyPersistence: historyNotice,
+                audioCaptureEnvironment: audioCaptureEnvironment,
+                activeProvider: activeProvider,
+                latestRecord: latestRecord
+            ))
         let copied = await SystemClipboardWriter().copy(report)
         diagnostics.publish(
             copied
@@ -439,22 +441,24 @@ final class SpeakerRuntime: ObservableObject {
         )
     }
 
-#if DEBUG
-    private func captureVisualScenarioIfRequested() {
-        guard let url = SpeakerDebugLaunchOptions.visualCaptureURL(
-            in: dependencies.launchArguments
-        ) else {
-            return
-        }
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            do {
-                try self?.panel.captureDebugSnapshot(to: url)
-                NSLog("Speaker visual scenario captured: \(url.path)")
-            } catch {
-                NSLog("Speaker visual scenario capture failed: \(error)")
+    #if DEBUG
+        private func captureVisualScenarioIfRequested() {
+            guard
+                let url = SpeakerDebugLaunchOptions.visualCaptureURL(
+                    in: dependencies.launchArguments
+                )
+            else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                await Task.yield()
+                do {
+                    try self?.panel.captureDebugSnapshot(to: url)
+                    NSLog("Speaker visual scenario captured: \(url.path)")
+                } catch {
+                    NSLog("Speaker visual scenario capture failed: \(error)")
+                }
             }
         }
-    }
-#endif
+    #endif
 }

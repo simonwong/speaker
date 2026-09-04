@@ -46,11 +46,13 @@ public enum VoiceInputUsagePresentation {
         let today = calendar.startOfDay(for: now)
         let weekday = calendar.component(.weekday, from: today)
         let daysSinceMonday = (weekday + 5) % 7
-        guard let monday = calendar.date(
-            byAdding: .day,
-            value: -daysSinceMonday,
-            to: today
-        ) else {
+        guard
+            let monday = calendar.date(
+                byAdding: .day,
+                value: -daysSinceMonday,
+                to: today
+            )
+        else {
             return 0
         }
 
@@ -70,11 +72,13 @@ public enum VoiceInputUsagePresentation {
     ) -> [Int] {
         guard days > 0 else { return [] }
         let today = calendar.startOfDay(for: now)
-        guard let firstDay = calendar.date(
-            byAdding: .day,
-            value: -(days - 1),
-            to: today
-        ) else {
+        guard
+            let firstDay = calendar.date(
+                byAdding: .day,
+                value: -(days - 1),
+                to: today
+            )
+        else {
             return []
         }
 
@@ -88,12 +92,13 @@ public enum VoiceInputUsagePresentation {
             )
         }
 
-        return (0 ..< days).map { offset in
-            let day = calendar.date(
-                byAdding: .day,
-                value: offset,
-                to: firstDay
-            ) ?? firstDay
+        return (0..<days).map { offset in
+            let day =
+                calendar.date(
+                    byAdding: .day,
+                    value: offset,
+                    to: firstDay
+                ) ?? firstDay
             return countsByDay[day] ?? 0
         }
     }
@@ -179,16 +184,16 @@ public struct ContributionHeatmap: Equatable, Sendable {
         let weekday = calendar.component(.weekday, from: today)
         let daysSinceMonday = (weekday + 5) % 7
         guard weeks > 0,
-              let currentMonday = calendar.date(
-                  byAdding: .day,
-                  value: -daysSinceMonday,
-                  to: today
-              ),
-              let startMonday = calendar.date(
-                  byAdding: .day,
-                  value: -7 * (weeks - 1),
-                  to: currentMonday
-              )
+            let currentMonday = calendar.date(
+                byAdding: .day,
+                value: -daysSinceMonday,
+                to: today
+            ),
+            let startMonday = calendar.date(
+                byAdding: .day,
+                value: -7 * (weeks - 1),
+                to: currentMonday
+            )
         else {
             return ContributionHeatmap(columns: [], monthLabels: [], hasData: false)
         }
@@ -204,28 +209,30 @@ public struct ContributionHeatmap: Equatable, Sendable {
         var lastObservedMonth = -1
         var lastLabelColumn: Int?
 
-        for week in 0 ..< weeks {
+        for week in 0..<weeks {
             var column: [Cell] = []
             column.reserveCapacity(7)
-            for weekdayIndex in 0 ..< 7 {
+            for weekdayIndex in 0..<7 {
                 let offset = week * 7 + weekdayIndex
-                let date = calendar.date(
-                    byAdding: .day,
-                    value: offset,
-                    to: startMonday
-                ) ?? startMonday
+                let date =
+                    calendar.date(
+                        byAdding: .day,
+                        value: offset,
+                        to: startMonday
+                    ) ?? startMonday
                 let isFuture = date > today
                 let count = isFuture ? 0 : (counts[date] ?? 0)
-                column.append(Cell(
-                    date: date,
-                    recognizedCharacterCount: count,
-                    level: isFuture
-                        ? 0
-                        : VoiceInputUsagePresentation.heatmapLevel(
-                            recognizedCharacterCount: count
-                        ),
-                    isFuture: isFuture
-                ))
+                column.append(
+                    Cell(
+                        date: date,
+                        recognizedCharacterCount: count,
+                        level: isFuture
+                            ? 0
+                            : VoiceInputUsagePresentation.heatmapLevel(
+                                recognizedCharacterCount: count
+                            ),
+                        isFuture: isFuture
+                    ))
             }
             if let monday = column.first {
                 let month = calendar.component(.month, from: monday.date)

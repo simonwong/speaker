@@ -21,8 +21,8 @@ package final class OnboardingPermissionCoordinator {
         synchronize()
 
         guard permission == .microphone,
-              previous.microphone == .notDetermined,
-              permissions.snapshot.microphone == .granted
+            previous.microphone == .notDetermined,
+            permissions.snapshot.microphone == .granted
         else { return }
 
         switch permissions.snapshot.accessibility {

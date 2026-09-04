@@ -19,18 +19,21 @@ enum ShortcutRecorderSpecs {
         ) {
             var policy = ShortcutRecorderPolicy()
 
-            let decision = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_D),
-                flags: [.control, .option],
-                charactersIgnoringModifiers: "d"
-            ))
+            let decision = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_D),
+                    flags: [.control, .option],
+                    charactersIgnoringModifiers: "d"
+                ))
 
             try expect(
-                decision == .capture(CustomHotKey(
-                    keyCode: UInt32(kVK_ANSI_D),
-                    modifiers: UInt32(controlKey | optionKey),
-                    displayName: "⌃⌥D"
-                )),
+                decision
+                    == .capture(
+                        CustomHotKey(
+                            keyCode: UInt32(kVK_ANSI_D),
+                            modifiers: UInt32(controlKey | optionKey),
+                            displayName: "⌃⌥D"
+                        )),
                 "a safe two-modifier chord was not captured: \(decision)"
             )
         }
@@ -41,11 +44,12 @@ enum ShortcutRecorderSpecs {
         ) {
             var policy = ShortcutRecorderPolicy()
 
-            let decision = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_D),
-                flags: [],
-                charactersIgnoringModifiers: "d"
-            ))
+            let decision = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_D),
+                    flags: [],
+                    charactersIgnoringModifiers: "d"
+                ))
 
             try expect(
                 decision == .reject(ShortcutRecorderPolicy.missingModifierPrompt),
@@ -59,11 +63,12 @@ enum ShortcutRecorderSpecs {
         ) {
             var policy = ShortcutRecorderPolicy()
 
-            let decision = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_D),
-                flags: [.option],
-                charactersIgnoringModifiers: "d"
-            ))
+            let decision = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_D),
+                    flags: [.option],
+                    charactersIgnoringModifiers: "d"
+                ))
 
             try expect(
                 decision == .reject(ShortcutRecorderPolicy.recordingPrompt),
@@ -78,16 +83,18 @@ enum ShortcutRecorderSpecs {
             let conflictPrompt = ShortcutRecorderPolicy.editingConflictPrompt
             var policy = ShortcutRecorderPolicy()
 
-            let copyDecision = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_C),
-                flags: [.command],
-                charactersIgnoringModifiers: "c"
-            ))
-            let redoDecision = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_Z),
-                flags: [.command, .shift],
-                charactersIgnoringModifiers: "z"
-            ))
+            let copyDecision = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_C),
+                    flags: [.command],
+                    charactersIgnoringModifiers: "c"
+                ))
+            let redoDecision = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_Z),
+                    flags: [.command, .shift],
+                    charactersIgnoringModifiers: "z"
+                ))
 
             try expect(
                 copyDecision == .reject(conflictPrompt),
@@ -111,14 +118,16 @@ enum ShortcutRecorderSpecs {
             for keyCode in [kVK_Command, kVK_RightCommand] {
                 var policy = ShortcutRecorderPolicy()
 
-                let held = policy.handle(.flagsChanged(
-                    keyCode: UInt16(keyCode),
-                    flags: [.command]
-                ))
-                let released = policy.handle(.flagsChanged(
-                    keyCode: UInt16(keyCode),
-                    flags: []
-                ))
+                let held = policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(keyCode),
+                        flags: [.command]
+                    ))
+                let released = policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(keyCode),
+                        flags: []
+                    ))
 
                 try expect(
                     held == .consume,
@@ -137,16 +146,18 @@ enum ShortcutRecorderSpecs {
         ) {
             var policy = ShortcutRecorderPolicy()
 
-            let bare = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_Escape),
-                flags: [],
-                charactersIgnoringModifiers: nil
-            ))
-            let modified = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_Escape),
-                flags: [.command, .option],
-                charactersIgnoringModifiers: nil
-            ))
+            let bare = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_Escape),
+                    flags: [],
+                    charactersIgnoringModifiers: nil
+                ))
+            let modified = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_Escape),
+                    flags: [.command, .option],
+                    charactersIgnoringModifiers: nil
+                ))
 
             try expect(bare == .cancel, "bare Escape produced \(bare)")
             try expect(
@@ -162,49 +173,57 @@ enum ShortcutRecorderSpecs {
             var policy = ShortcutRecorderPolicy()
 
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Control),
-                    flags: [.control]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Control),
+                        flags: [.control]
+                    )) == .consume
             )
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Control),
-                    flags: [.control, .shift]
-                )) == .consume,
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Control),
+                        flags: [.control, .shift]
+                    )) == .consume,
                 "a second modifier did not abandon the candidate"
             )
-            let releasedWithShiftHeld = policy.handle(.flagsChanged(
-                keyCode: UInt16(kVK_Control),
-                flags: [.shift]
-            ))
+            let releasedWithShiftHeld = policy.handle(
+                .flagsChanged(
+                    keyCode: UInt16(kVK_Control),
+                    flags: [.shift]
+                ))
             try expect(
                 releasedWithShiftHeld == .consume,
                 "an unclean release captured \(releasedWithShiftHeld)"
             )
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Shift),
-                    flags: []
-                )) == .consume,
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Shift),
+                        flags: []
+                    )) == .consume,
                 "the trailing Shift release captured a shortcut"
             )
 
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Control),
-                    flags: [.control]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Control),
+                        flags: [.control]
+                    )) == .consume
             )
-            let captured = policy.handle(.flagsChanged(
-                keyCode: UInt16(kVK_Control),
-                flags: []
-            ))
+            let captured = policy.handle(
+                .flagsChanged(
+                    keyCode: UInt16(kVK_Control),
+                    flags: []
+                ))
             try expect(
-                captured == .capture(CustomHotKey.modifierOnly(
-                    .leftControl,
-                    displayName: "左 ⌃"
-                )),
+                captured
+                    == .capture(
+                        CustomHotKey.modifierOnly(
+                            .leftControl,
+                            displayName: "左 ⌃"
+                        )),
                 "a clean modifier release produced \(captured)"
             )
         }
@@ -216,29 +235,34 @@ enum ShortcutRecorderSpecs {
             var policy = ShortcutRecorderPolicy()
 
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Option),
-                    flags: [.option]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Option),
+                        flags: [.option]
+                    )) == .consume
             )
-            let captured = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_D),
-                flags: [.control, .option],
-                charactersIgnoringModifiers: "d"
-            ))
+            let captured = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_D),
+                    flags: [.control, .option],
+                    charactersIgnoringModifiers: "d"
+                ))
             try expect(
-                captured == .capture(CustomHotKey(
-                    keyCode: UInt32(kVK_ANSI_D),
-                    modifiers: UInt32(controlKey | optionKey),
-                    displayName: "⌃⌥D"
-                )),
+                captured
+                    == .capture(
+                        CustomHotKey(
+                            keyCode: UInt32(kVK_ANSI_D),
+                            modifiers: UInt32(controlKey | optionKey),
+                            displayName: "⌃⌥D"
+                        )),
                 "the chord following a held modifier produced \(captured)"
             )
 
-            let release = policy.handle(.flagsChanged(
-                keyCode: UInt16(kVK_Option),
-                flags: []
-            ))
+            let release = policy.handle(
+                .flagsChanged(
+                    keyCode: UInt16(kVK_Option),
+                    flags: []
+                ))
             try expect(
                 release == .consume,
                 "releasing the modifier recorded a second shortcut: \(release)"

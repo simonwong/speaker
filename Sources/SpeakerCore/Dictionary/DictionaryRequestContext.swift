@@ -43,7 +43,8 @@ public struct DictionaryContextOmission: Codable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         entryID = try container.decode(UUID.self, forKey: .entryID)
-        word = try container.decodeIfPresent(String.self, forKey: .word)
+        word =
+            try container.decodeIfPresent(String.self, forKey: .word)
             ?? container.decode(String.self, forKey: .canonicalTerm)
         reason = try container.decode(DictionaryContextOmissionReason.self, forKey: .reason)
     }

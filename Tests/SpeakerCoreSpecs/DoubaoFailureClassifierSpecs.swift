@@ -7,15 +7,21 @@ import SpeakerSpecSupport
 enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        run("a known Doubao error code classifies the same way in any language", failures: &failures) {
-            let wordings = ["server busy", "服务器繁忙", "", "rate limit exceeded", "unauthorized api key"]
+        run(
+            "a known Doubao error code classifies the same way in any language", failures: &failures
+        ) {
+            let wordings = [
+                "server busy", "服务器繁忙", "", "rate limit exceeded", "unauthorized api key",
+            ]
             for wording in wordings {
                 let failure = DoubaoFailureClassifier.providerFailure(
                     code: 55_000_031,
                     message: wording,
                     providerRequestID: "req"
                 )
-                try expect(failure.kind == .serverBusy, "\"\(wording)\" changed 55000031 into \(failure.kind)")
+                try expect(
+                    failure.kind == .serverBusy,
+                    "\"\(wording)\" changed 55000031 into \(failure.kind)")
                 try expect(failure.providerStatusCode == "55000031")
                 try expect(failure.providerRequestID == "req")
             }
@@ -33,7 +39,8 @@ enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
                     message: "resource not activated",
                     providerRequestID: nil
                 )
-                try expect(failure.kind == kind, "\(code) with a resource message became \(failure.kind)")
+                try expect(
+                    failure.kind == kind, "\(code) with a resource message became \(failure.kind)")
             }
         }
 
@@ -80,7 +87,10 @@ enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
             }
         }
 
-        run("handshake status codes classify transport failures ahead of wording", failures: &failures) {
+        run(
+            "handshake status codes classify transport failures ahead of wording",
+            failures: &failures
+        ) {
             let error = URLError(.badServerResponse)
 
             let headerCode = DoubaoFailureClassifier.transportFailure(
@@ -93,7 +103,9 @@ enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
                 ),
                 fallbackRequestID: "fallback"
             )
-            try expect(headerCode.kind == .serverBusy, "X-Api-Status-Code lost to wording: \(headerCode.kind)")
+            try expect(
+                headerCode.kind == .serverBusy,
+                "X-Api-Status-Code lost to wording: \(headerCode.kind)")
             try expect(headerCode.providerStatusCode == "55000031")
             try expect(headerCode.providerRequestID == "log-1")
             try expect(headerCode.message == "rate limit")
@@ -110,7 +122,8 @@ enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
                     metadata: .init(httpStatusCode: status, providerMessage: message),
                     fallbackRequestID: "fallback"
                 )
-                try expect(failure.kind == kind, "HTTP \(status) \"\(message)\" became \(failure.kind)")
+                try expect(
+                    failure.kind == kind, "HTTP \(status) \"\(message)\" became \(failure.kind)")
                 try expect(failure.providerStatusCode == String(status))
                 try expect(failure.providerRequestID == "fallback")
             }
@@ -120,10 +133,14 @@ enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
                 metadata: .init(httpStatusCode: 400, providerMessage: "资源未开通"),
                 fallbackRequestID: "fallback"
             )
-            try expect(worded.kind == .resourceNotActivated, "unclassified status ignored the wording")
+            try expect(
+                worded.kind == .resourceNotActivated, "unclassified status ignored the wording")
         }
 
-        run("Doubao transport failures without a handshake carry only structured network codes", failures: &failures) {
+        run(
+            "Doubao transport failures without a handshake carry only structured network codes",
+            failures: &failures
+        ) {
             let timedOut = DoubaoFailureClassifier.transportFailure(
                 URLError(.timedOut),
                 metadata: .init(),
@@ -147,14 +164,21 @@ enum DoubaoFailureClassifierSpecs: CoreSpecDomain {
                 fallbackRequestID: "fallback"
             )
             try expect(opaque.kind == .network)
-            try expect(opaque.providerStatusCode == nil && opaque.message == nil, "an opaque error leaked text")
+            try expect(
+                opaque.providerStatusCode == nil && opaque.message == nil,
+                "an opaque error leaked text")
         }
 
-        run("Doubao error payload message is read from message, error, or msg", failures: &failures) {
-            try expect(DoubaoFailureClassifier.errorMessage(from: Data(#"{"message":"a"}"#.utf8)) == "a")
-            try expect(DoubaoFailureClassifier.errorMessage(from: Data(#"{"error":"b"}"#.utf8)) == "b")
-            try expect(DoubaoFailureClassifier.errorMessage(from: Data(#"{"msg":"c"}"#.utf8)) == "c")
-            try expect(DoubaoFailureClassifier.errorMessage(from: Data("plain text".utf8)) == "plain text")
+        run("Doubao error payload message is read from message, error, or msg", failures: &failures)
+        {
+            try expect(
+                DoubaoFailureClassifier.errorMessage(from: Data(#"{"message":"a"}"#.utf8)) == "a")
+            try expect(
+                DoubaoFailureClassifier.errorMessage(from: Data(#"{"error":"b"}"#.utf8)) == "b")
+            try expect(
+                DoubaoFailureClassifier.errorMessage(from: Data(#"{"msg":"c"}"#.utf8)) == "c")
+            try expect(
+                DoubaoFailureClassifier.errorMessage(from: Data("plain text".utf8)) == "plain text")
             try expect(DoubaoFailureClassifier.errorMessage(from: Data(#"{"code":1}"#.utf8)) == nil)
         }
     }

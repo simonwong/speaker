@@ -36,8 +36,8 @@ private struct MainWindowLayoutEnvironmentKey: EnvironmentKey {
     )
 }
 
-package extension EnvironmentValues {
-    var mainWindowLayout: MainWindowLayout {
+extension EnvironmentValues {
+    package var mainWindowLayout: MainWindowLayout {
         get { self[MainWindowLayoutEnvironmentKey.self] }
         set { self[MainWindowLayoutEnvironmentKey.self] = newValue }
     }

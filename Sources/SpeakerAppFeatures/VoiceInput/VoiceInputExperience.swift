@@ -171,12 +171,12 @@ package struct VoiceInputExperienceState: Equatable, Sendable {
 }
 
 #if DEBUG
-package enum VoiceInputVisualScenario: String, Sendable {
-    case recording
-    case processing
-    case pendingCopy = "pending-copy"
-    case problem
-}
+    package enum VoiceInputVisualScenario: String, Sendable {
+        case recording
+        case processing
+        case pendingCopy = "pending-copy"
+        case problem
+    }
 #endif
 
 /// Owns the user-facing voice interaction behind one state + action interface.
@@ -260,95 +260,95 @@ package final class VoiceInputExperience: ObservableObject {
         }
     }
 
-#if DEBUG
-    package func presentVisualScenario(_ scenario: VoiceInputVisualScenario) {
-        NSLog("Speaker visual scenario presenting: \(scenario.rawValue)")
-        let sessionID = VoiceInputSessionID()
-        let cancel = VoiceInputExperienceAction(
-            sessionID: sessionID,
-            operation: .cancel
-        )
-        let dismiss = VoiceInputExperienceAction(
-            sessionID: sessionID,
-            operation: .dismissResult
-        )
-        let copy = VoiceInputExperienceAction(
-            sessionID: sessionID,
-            operation: .copyRetainedText
-        )
-        let overlay: VoiceInputOverlayPresentation
-        let menuStatus: VoiceInputMenuPresentation.Status?
-        let isRecording: Bool
-        let diagnosticCode: String
+    #if DEBUG
+        package func presentVisualScenario(_ scenario: VoiceInputVisualScenario) {
+            NSLog("Speaker visual scenario presenting: \(scenario.rawValue)")
+            let sessionID = VoiceInputSessionID()
+            let cancel = VoiceInputExperienceAction(
+                sessionID: sessionID,
+                operation: .cancel
+            )
+            let dismiss = VoiceInputExperienceAction(
+                sessionID: sessionID,
+                operation: .dismissResult
+            )
+            let copy = VoiceInputExperienceAction(
+                sessionID: sessionID,
+                operation: .copyRetainedText
+            )
+            let overlay: VoiceInputOverlayPresentation
+            let menuStatus: VoiceInputMenuPresentation.Status?
+            let isRecording: Bool
+            let diagnosticCode: String
 
-        switch scenario {
-        case .recording:
-            overlay = .recording(peakPower: -18, cancelAction: cancel)
-            menuStatus = .init(title: "正在录音", icon: "mic.fill")
-            isRecording = true
-            diagnosticCode = "visual.recording"
-        case .processing:
-            overlay = .processing(
-                title: "正在转成文字",
-                cancelAction: cancel
+            switch scenario {
+            case .recording:
+                overlay = .recording(peakPower: -18, cancelAction: cancel)
+                menuStatus = .init(title: "正在录音", icon: "mic.fill")
+                isRecording = true
+                diagnosticCode = "visual.recording"
+            case .processing:
+                overlay = .processing(
+                    title: "正在转成文字",
+                    cancelAction: cancel
+                )
+                menuStatus = .init(title: "正在转成文字…", icon: "sparkles")
+                isRecording = false
+                diagnosticCode = "visual.processing"
+            case .pendingCopy:
+                overlay = .pendingCopy(
+                    title: "这个输入框需要手动粘贴",
+                    text: "这是保留的转录文字，用于检查待复制状态。",
+                    copyButtonTitle: "复制",
+                    copyAction: copy,
+                    dismissAction: dismiss
+                )
+                menuStatus = .init(
+                    title: "这个输入框需要手动粘贴",
+                    icon: "doc.on.clipboard"
+                )
+                isRecording = false
+                diagnosticCode = "visual.pendingCopy"
+            case .problem:
+                overlay = .problem(
+                    icon: "wifi.exclamationmark",
+                    title: "网络连接不可用",
+                    guidance: "请检查网络连接后重新录音。",
+                    recoveryAction: nil,
+                    dismissAction: dismiss
+                )
+                menuStatus = .init(
+                    title: "网络连接不可用",
+                    icon: "wifi.exclamationmark"
+                )
+                isRecording = false
+                diagnosticCode = "visual.problem"
+            }
+
+            state = VoiceInputExperienceState(
+                revision: state.revision &+ 1,
+                menu: .init(
+                    status: menuStatus,
+                    notice: nil,
+                    cancelAction: scenario == .recording || scenario == .processing
+                        ? cancel
+                        : nil,
+                    copyRetainedTextTitle: scenario == .pendingCopy
+                        ? "复制保留的文字"
+                        : nil,
+                    copyRetainedTextAction: scenario == .pendingCopy ? copy : nil,
+                    dismissAction: scenario == .pendingCopy || scenario == .problem
+                        ? dismiss
+                        : nil,
+                    recoveryAction: nil
+                ),
+                overlay: overlay,
+                isRecording: isRecording,
+                diagnosticCode: diagnosticCode
             )
-            menuStatus = .init(title: "正在转成文字…", icon: "sparkles")
-            isRecording = false
-            diagnosticCode = "visual.processing"
-        case .pendingCopy:
-            overlay = .pendingCopy(
-                title: "这个输入框需要手动粘贴",
-                text: "这是保留的转录文字，用于检查待复制状态。",
-                copyButtonTitle: "复制",
-                copyAction: copy,
-                dismissAction: dismiss
-            )
-            menuStatus = .init(
-                title: "这个输入框需要手动粘贴",
-                icon: "doc.on.clipboard"
-            )
-            isRecording = false
-            diagnosticCode = "visual.pendingCopy"
-        case .problem:
-            overlay = .problem(
-                icon: "wifi.exclamationmark",
-                title: "网络连接不可用",
-                guidance: "请检查网络连接后重新录音。",
-                recoveryAction: nil,
-                dismissAction: dismiss
-            )
-            menuStatus = .init(
-                title: "网络连接不可用",
-                icon: "wifi.exclamationmark"
-            )
-            isRecording = false
-            diagnosticCode = "visual.problem"
+            NSLog("Speaker visual scenario published: \(diagnosticCode)")
         }
-
-        state = VoiceInputExperienceState(
-            revision: state.revision &+ 1,
-            menu: .init(
-                status: menuStatus,
-                notice: nil,
-                cancelAction: scenario == .recording || scenario == .processing
-                    ? cancel
-                    : nil,
-                copyRetainedTextTitle: scenario == .pendingCopy
-                    ? "复制保留的文字"
-                    : nil,
-                copyRetainedTextAction: scenario == .pendingCopy ? copy : nil,
-                dismissAction: scenario == .pendingCopy || scenario == .problem
-                    ? dismiss
-                    : nil,
-                recoveryAction: nil
-            ),
-            overlay: overlay,
-            isRecording: isRecording,
-            diagnosticCode: diagnosticCode
-        )
-        NSLog("Speaker visual scenario published: \(diagnosticCode)")
-    }
-#endif
+    #endif
 
     @discardableResult
     package func perform(
@@ -430,22 +430,22 @@ package final class VoiceInputExperience: ObservableObject {
         }
         return switch (action.operation, currentPresentation.activity) {
         case (.cancel, .preparing),
-             (.cancel, .recording),
-             (.cancel, .processing),
-             (.copyRetainedText, .pendingCopy),
-             (.dismissResult, .pendingCopy),
-             (.dismissResult, .failed):
+            (.cancel, .recording),
+            (.cancel, .processing),
+            (.copyRetainedText, .pendingCopy),
+            (.dismissResult, .pendingCopy),
+            (.dismissResult, .failed):
             true
-        case let (.requestRecovery, .failed(_, failure)):
+        case (.requestRecovery, .failed(_, let failure)):
             failure.needsSettings
         case (.cancel, .idle),
-             (.cancel, .delivered),
-             (.cancel, .pendingCopy),
-             (.cancel, .cancelled),
-             (.cancel, .failed),
-             (.copyRetainedText, _),
-             (.dismissResult, _),
-             (.requestRecovery, _):
+            (.cancel, .delivered),
+            (.cancel, .pendingCopy),
+            (.cancel, .cancelled),
+            (.cancel, .failed),
+            (.copyRetainedText, _),
+            (.dismissResult, _),
+            (.requestRecovery, _):
             false
         }
     }
@@ -458,13 +458,14 @@ package final class VoiceInputExperience: ObservableObject {
         // silently ignoring the user. Only in-flight processing keeps the
         // gate shut, because a stray press there would race the session's
         // own completion.
-        let allowsSessionTriggers = switch presentation.activity {
-        case .processing:
-            false
-        case .idle, .preparing, .recording, .delivered, .cancelled, .failed,
-             .pendingCopy:
-            true
-        }
+        let allowsSessionTriggers =
+            switch presentation.activity {
+            case .processing:
+                false
+            case .idle, .preparing, .recording, .delivered, .cancelled, .failed,
+                .pendingCopy:
+                true
+            }
         triggerIntakeGate.setAllowsSessionTriggers(allowsSessionTriggers)
         escapeGate.setActive(presentation.activity.isActive)
         state = Self.makeState(from: presentation)
@@ -474,9 +475,9 @@ package final class VoiceInputExperience: ObservableObject {
 
     private func announceTransitionIfNeeded(_ activity: VoiceInputActivity) {
         guard !Self.endsSilently(activity),
-              let key = Self.announcementKey(for: activity),
-              key != lastAnnouncementKey,
-              let message = activity.accessibilityAnnouncement
+            let key = Self.announcementKey(for: activity),
+            key != lastAnnouncementKey,
+            let message = activity.accessibilityAnnouncement
         else { return }
         lastAnnouncementKey = key
         announce(message)
@@ -484,7 +485,7 @@ package final class VoiceInputExperience: ObservableObject {
 
     private func announceNoticeIfNeeded(_ presentation: VoiceInputPresentation) {
         guard let notice = presentation.notice,
-              lastAnnouncedNoticeRevision != presentation.revision
+            lastAnnouncedNoticeRevision != presentation.revision
         else { return }
         lastAnnouncedNoticeRevision = presentation.revision
         announce(notice.userMessage)
@@ -513,30 +514,32 @@ package final class VoiceInputExperience: ObservableObject {
         }
         // Idle notices are one-shot feedback effects (for example, successful
         // copy). They are announced below but must not become stale menu state.
-        let retainedMenuNotice: String? = switch activity {
-        case .idle:
-            nil
-        case let .failed(_, failure):
-            failure.userGuidance
-        default:
-            presentation.notice?.userMessage
-        }
+        let retainedMenuNotice: String? =
+            switch activity {
+            case .idle:
+                nil
+            case .failed(_, let failure):
+                failure.userGuidance
+            default:
+                presentation.notice?.userMessage
+            }
         let sessionID = activity.sessionID
         let cancelAction = sessionID.map {
             VoiceInputExperienceAction(sessionID: $0, operation: .cancel)
         }
-        let menuStatus: VoiceInputMenuPresentation.Status? = switch activity {
-        case .idle, .delivered, .cancelled:
-            nil
-        case .preparing, .recording, .processing:
-            .init(title: activity.compactTitle, icon: activity.icon)
-        case let .pendingCopy(_, _, reason):
-            .init(title: reason.userTitle, icon: activity.icon)
-        case let .failed(_, failure):
-            .init(title: failure.userTitle, icon: failure.userIcon)
-        }
+        let menuStatus: VoiceInputMenuPresentation.Status? =
+            switch activity {
+            case .idle, .delivered, .cancelled:
+                nil
+            case .preparing, .recording, .processing:
+                .init(title: activity.compactTitle, icon: activity.icon)
+            case .pendingCopy(_, _, let reason):
+                .init(title: reason.userTitle, icon: activity.icon)
+            case .failed(_, let failure):
+                .init(title: failure.userTitle, icon: failure.userIcon)
+            }
         let copyAction: VoiceInputExperienceAction? = {
-            guard case let .pendingCopy(id, _, _) = activity else { return nil }
+            guard case .pendingCopy(let id, _, _) = activity else { return nil }
             return VoiceInputExperienceAction(
                 sessionID: id,
                 operation: .copyRetainedText
@@ -544,7 +547,7 @@ package final class VoiceInputExperience: ObservableObject {
         }()
         let dismissAction: VoiceInputExperienceAction? = {
             switch activity {
-            case let .pendingCopy(id, _, _), let .failed(id, _):
+            case .pendingCopy(let id, _, _), .failed(let id, _):
                 VoiceInputExperienceAction(
                     sessionID: id,
                     operation: .dismissResult
@@ -554,8 +557,8 @@ package final class VoiceInputExperience: ObservableObject {
             }
         }()
         let recoveryAction: VoiceInputExperienceAction? = {
-            guard case let .failed(id, failure) = activity,
-                  failure.needsSettings
+            guard case .failed(let id, let failure) = activity,
+                failure.needsSettings
             else { return nil }
             return VoiceInputExperienceAction(
                 sessionID: id,
@@ -601,22 +604,22 @@ package final class VoiceInputExperience: ObservableObject {
         switch activity {
         case .idle, .delivered, .cancelled:
             .hidden
-        case let .preparing(id):
+        case .preparing(let id):
             .processing(
                 title: activity.compactTitle,
                 cancelAction: .init(sessionID: id, operation: .cancel)
             )
-        case let .recording(id):
+        case .recording(let id):
             .recording(
                 peakPower: peakPower,
                 cancelAction: .init(sessionID: id, operation: .cancel)
             )
-        case let .processing(id, _, _):
+        case .processing(let id, _, _):
             .processing(
                 title: activity.compactTitle,
                 cancelAction: .init(sessionID: id, operation: .cancel)
             )
-        case let .pendingCopy(id, text, reason):
+        case .pendingCopy(let id, let text, let reason):
             .pendingCopy(
                 title: reason.userTitle,
                 text: text,
@@ -632,7 +635,7 @@ package final class VoiceInputExperience: ObservableObject {
                     operation: .dismissResult
                 )
             )
-        case let .failed(id, failure):
+        case .failed(let id, let failure):
             .problem(
                 icon: failure.userIcon,
                 title: failure.userTitle,
@@ -653,11 +656,11 @@ package final class VoiceInputExperience: ObservableObject {
         case .idle: "idle"
         case .preparing: "preparing"
         case .recording: "recording"
-        case let .processing(_, stage, _): "processing.\(stage)"
+        case .processing(_, let stage, _): "processing.\(stage)"
         case .delivered: "delivered"
-        case let .pendingCopy(_, _, reason): "pendingCopy.\(reason.rawValue)"
+        case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
         case .cancelled: "cancelled"
-        case let .failed(_, failure): "failed.\(failure.rawValue)"
+        case .failed(_, let failure): "failed.\(failure.rawValue)"
         }
     }
 
@@ -668,23 +671,24 @@ package final class VoiceInputExperience: ObservableObject {
         switch activity {
         case .preparing:
             return nil
-        case let .processing(_, stage, _)
-            where stage == .capturingTarget || stage == .delivering:
+        case .processing(_, let stage, _)
+        where stage == .capturingTarget || stage == .delivering:
             return nil
         case .idle, .recording, .processing, .delivered, .pendingCopy,
-             .cancelled, .failed:
+            .cancelled, .failed:
             break
         }
-        let phase: String = switch activity {
-        case .idle: "idle"
-        case .preparing: "preparing"
-        case .recording: "recording"
-        case let .processing(_, stage, _): "processing.\(stage)"
-        case .delivered: "delivered"
-        case let .pendingCopy(_, _, reason): "pendingCopy.\(reason.rawValue)"
-        case .cancelled: "cancelled"
-        case let .failed(_, failure): "failed.\(failure.rawValue)"
-        }
+        let phase: String =
+            switch activity {
+            case .idle: "idle"
+            case .preparing: "preparing"
+            case .recording: "recording"
+            case .processing(_, let stage, _): "processing.\(stage)"
+            case .delivered: "delivered"
+            case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
+            case .cancelled: "cancelled"
+            case .failed(_, let failure): "failed.\(failure.rawValue)"
+            }
         return AnnouncementKey(sessionID: sessionID, phase: phase)
     }
 }

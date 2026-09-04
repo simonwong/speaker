@@ -49,9 +49,11 @@ package final class SpeakerDataErasureIntentStore {
             preferences.removePersistentDomain(forName: domainName)
         }
         preferences.synchronize()
-        guard preferenceDomainNames.allSatisfy({
-            preferences.persistentDomain(forName: $0)?.isEmpty != false
-        }) else {
+        guard
+            preferenceDomainNames.allSatisfy({
+                preferences.persistentDomain(forName: $0)?.isEmpty != false
+            })
+        else {
             throw SpeakerDataErasureReason.verificationMismatch
         }
     }

@@ -43,11 +43,11 @@ final class VoiceInputPanelController {
         presenter.stop()
     }
 
-#if DEBUG
-    func captureDebugSnapshot(to url: URL) throws {
-        try presenter.captureDebugSnapshot(to: url)
-    }
-#endif
+    #if DEBUG
+        func captureDebugSnapshot(to url: URL) throws {
+            try presenter.captureDebugSnapshot(to: url)
+        }
+    #endif
 }
 
 /// App-owned adapter for the system Settings side effect. HUD rendering and
@@ -55,8 +55,7 @@ final class VoiceInputPanelController {
 /// Environment action that only the App scene owns.
 private struct VoiceInputOverlay: View {
     let presentation: VoiceInputOverlayPresentation
-    let performAction:
-        (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
+    let performAction: (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
     @Environment(\.openSettings) private var openSettings
 

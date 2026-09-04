@@ -98,9 +98,10 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
             },
             1: { data in
                 let envelope = try JSONDecoder().decode(LegacyEnvelopeV1.self, from: data)
-                return try PersonalDictionary(entries: envelope.entries.map {
-                    DictionaryEntry(id: $0.id, word: $0.canonicalTerm)
-                })
+                return try PersonalDictionary(
+                    entries: envelope.entries.map {
+                        DictionaryEntry(id: $0.id, word: $0.canonicalTerm)
+                    })
             },
         ]
     )
@@ -109,11 +110,13 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         fileManager: FileManager = .default,
         applicationDirectoryName: String = "Speaker"
     ) -> URL {
-        let root = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.homeDirectoryForCurrentUser
-        return root
+        let root =
+            fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.homeDirectoryForCurrentUser
+        return
+            root
             .appendingPathComponent(applicationDirectoryName, isDirectory: true)
             .appendingPathComponent(
                 "personal-dictionary.json",
@@ -133,7 +136,8 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
             appropriateFor: nil,
             create: true
         )
-        return root
+        return
+            root
             .appendingPathComponent(bundleIdentifier, isDirectory: true)
             .appendingPathComponent("personal-dictionary.json", isDirectory: false)
     }
@@ -145,7 +149,7 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         let legacyPath = legacyURL.standardizedFileURL.path
         let primaryPath = primaryURL.standardizedFileURL.path
         guard legacyPath != primaryPath,
-              FileManager.default.fileExists(atPath: legacyPath)
+            FileManager.default.fileExists(atPath: legacyPath)
         else {
             return .notNeeded
         }
@@ -188,12 +192,12 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         switch documents.load().outcome {
         case .absent:
             return PersonalDictionaryLoadResult(dictionary: .empty)
-        case let .loaded(dictionary, version):
+        case .loaded(let dictionary, let version):
             if version != Self.currentVersion {
                 try await save(dictionary)
             }
             return PersonalDictionaryLoadResult(dictionary: dictionary)
-        case let .corruptedPreserved(backupURL, corruption):
+        case .corruptedPreserved(let backupURL, let corruption):
             return PersonalDictionaryLoadResult(
                 dictionary: .empty,
                 recovery: PersonalDictionaryRecovery(
@@ -201,7 +205,7 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
                     reason: corruption
                 )
             )
-        case let .failed(failure):
+        case .failed(let failure):
             throw Self.error(for: failure)
         }
     }
@@ -212,11 +216,11 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         switch documents.decode() {
         case .absent:
             return .empty
-        case let .decoded(dictionary, _):
+        case .decoded(let dictionary, _):
             return dictionary
         case .corrupted:
             return nil
-        case let .failed(failure):
+        case .failed(let failure):
             throw Self.error(for: failure)
         }
     }

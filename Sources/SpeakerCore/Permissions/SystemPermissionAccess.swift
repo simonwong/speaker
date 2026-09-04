@@ -1,6 +1,6 @@
-import ApplicationServices
-import AppKit
 import AVFoundation
+import AppKit
+import ApplicationServices
 import Foundation
 
 package enum SystemPermissionRequestPlan: Equatable, Sendable {
@@ -27,7 +27,7 @@ public final class SystemPermissionAccess: PermissionAccess {
             break
         case .requestMicrophone:
             _ = await AVCaptureDevice.requestAccess(for: .audio)
-        case let .openSystemSettings(anchor):
+        case .openSystemSettings(let anchor):
             openPrivacySettings(anchor: anchor)
         }
 
@@ -74,9 +74,11 @@ public final class SystemPermissionAccess: PermissionAccess {
     }
 
     private func openPrivacySettings(anchor: String) {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
-        ) else { return }
+        guard
+            let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
+            )
+        else { return }
         NSWorkspace.shared.open(url)
     }
 }

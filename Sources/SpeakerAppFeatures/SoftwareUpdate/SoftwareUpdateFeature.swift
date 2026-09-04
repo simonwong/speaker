@@ -28,18 +28,18 @@ package struct SoftwareUpdateConfiguration: Equatable, Sendable {
             return
         }
         guard let feedURLString,
-              let feedURL = URL(string: feedURLString),
-              feedURL.scheme?.lowercased() == "https",
-              feedURL.host != nil,
-              !feedURLString.contains(".invalid")
+            let feedURL = URL(string: feedURLString),
+            feedURL.scheme?.lowercased() == "https",
+            feedURL.host != nil,
+            !feedURLString.contains(".invalid")
         else {
             availability = .unavailable(.invalidFeed)
             return
         }
         guard let publicEDKey,
-              !publicEDKey.contains("REPLACE_"),
-              let keyData = Data(base64Encoded: publicEDKey),
-              keyData.count == 32
+            !publicEDKey.contains("REPLACE_"),
+            let keyData = Data(base64Encoded: publicEDKey),
+            keyData.count == 32
         else {
             availability = .unavailable(.invalidPublicKey)
             return
@@ -53,49 +53,51 @@ package enum SoftwareUpdateFeedOverridePolicy {
         arguments: [String],
         stableFeedURLString: String?
     ) -> String? {
-        guard let optionIndex = arguments.firstIndex(
-            of: "--speaker-update-feed"
-        ), arguments.indices.contains(optionIndex + 1),
-              arguments.lastIndex(of: "--speaker-update-feed") == optionIndex,
-              let stableFeedURLString,
-              let stableURL = URL(string: stableFeedURLString),
-              let candidateURL = URL(string: arguments[optionIndex + 1]),
-              stableURL.scheme?.lowercased() == "https",
-              candidateURL.scheme?.lowercased() == "https",
-              candidateURL.host?.lowercased() == stableURL.host?.lowercased(),
-              stableURL.user == nil,
-              stableURL.password == nil,
-              stableURL.port == nil,
-              candidateURL.user == nil,
-              candidateURL.password == nil,
-              candidateURL.port == nil
+        guard
+            let optionIndex = arguments.firstIndex(
+                of: "--speaker-update-feed"
+            ), arguments.indices.contains(optionIndex + 1),
+            arguments.lastIndex(of: "--speaker-update-feed") == optionIndex,
+            let stableFeedURLString,
+            let stableURL = URL(string: stableFeedURLString),
+            let candidateURL = URL(string: arguments[optionIndex + 1]),
+            stableURL.scheme?.lowercased() == "https",
+            candidateURL.scheme?.lowercased() == "https",
+            candidateURL.host?.lowercased() == stableURL.host?.lowercased(),
+            stableURL.user == nil,
+            stableURL.password == nil,
+            stableURL.port == nil,
+            candidateURL.user == nil,
+            candidateURL.password == nil,
+            candidateURL.port == nil
         else {
             return nil
         }
         let stableParts = stableURL.pathComponents.filter { $0 != "/" }
         let candidateParts = candidateURL.pathComponents.filter { $0 != "/" }
-        let versionParts = candidateParts.indices.contains(4)
+        let versionParts =
+            candidateParts.indices.contains(4)
             ? candidateParts[4].dropFirst().split(separator: ".")
             : []
         guard stableParts.count == 6,
-              candidateParts.count == 6,
-              Array(candidateParts.prefix(3))
+            candidateParts.count == 6,
+            Array(candidateParts.prefix(3))
                 == Array(stableParts.prefix(3)),
-              Array(stableParts[3...5])
+            Array(stableParts[3...5])
                 == ["latest", "download", "appcast.xml"],
-              candidateParts[3] == "download",
-              candidateParts[4].first == "v",
-              versionParts.count == 3,
-              versionParts.allSatisfy({ part in
-                  !part.isEmpty
+            candidateParts[3] == "download",
+            candidateParts[4].first == "v",
+            versionParts.count == 3,
+            versionParts.allSatisfy({ part in
+                !part.isEmpty
                     && part.allSatisfy(\.isNumber)
                     && (part == "0" || !part.hasPrefix("0"))
-              }),
-              candidateParts[5] == "appcast.xml",
-              candidateURL.query == nil,
-              candidateURL.fragment == nil,
-              stableURL.query == nil,
-              stableURL.fragment == nil
+            }),
+            candidateParts[5] == "appcast.xml",
+            candidateURL.query == nil,
+            candidateURL.fragment == nil,
+            stableURL.query == nil,
+            stableURL.fragment == nil
         else {
             return nil
         }
@@ -120,9 +122,10 @@ package struct SoftwareUpdateDriverSnapshot: Equatable, Sendable {
 @MainActor
 package protocol SoftwareUpdateDriving: AnyObject {
     func start(
-        observing: @escaping @MainActor @Sendable (
-            SoftwareUpdateDriverSnapshot
-        ) -> Void
+        observing:
+            @escaping @MainActor @Sendable (
+                SoftwareUpdateDriverSnapshot
+            ) -> Void
     ) throws -> SoftwareUpdateDriverSnapshot
     func checkForUpdates()
     func setAutomaticallyChecksForUpdates(
@@ -200,7 +203,7 @@ package final class SoftwareUpdateFeature: ObservableObject {
         makeDriver: MakeDriver
     ) {
         switch configuration.availability {
-        case let .unavailable(statusCode):
+        case .unavailable(let statusCode):
             state = .unavailable(statusCode)
         case .ready:
             driver = makeDriver()
