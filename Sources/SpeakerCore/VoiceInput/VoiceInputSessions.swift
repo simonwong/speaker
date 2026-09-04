@@ -26,8 +26,7 @@ public actor VoiceInputSessions {
     private let clipboard: any ClipboardWriting
     private let history: any SessionHistoryRecording
     private let maximumRecordingDuration: Duration
-    private let sleepUntilRecordingLimit:
-        @Sendable (Duration) async throws -> Void
+    private let clock: any VoiceInputClock
 
     private var phase: Phase = .idle
     private var releasePending = false
@@ -70,9 +69,7 @@ public actor VoiceInputSessions {
         self.clipboard = clipboard
         self.history = history
         maximumRecordingDuration = Self.standardMaximumRecordingDuration
-        sleepUntilRecordingLimit = { duration in
-            try await Task.sleep(for: duration)
-        }
+        clock = ContinuousVoiceInputClock()
     }
 
     public init(
@@ -90,9 +87,7 @@ public actor VoiceInputSessions {
         self.clipboard = clipboard
         self.history = history
         maximumRecordingDuration = Self.standardMaximumRecordingDuration
-        sleepUntilRecordingLimit = { duration in
-            try await Task.sleep(for: duration)
-        }
+        clock = ContinuousVoiceInputClock()
     }
 
     package init(
@@ -103,8 +98,7 @@ public actor VoiceInputSessions {
         clipboard: any ClipboardWriting,
         history: any SessionHistoryRecording,
         maximumRecordingDuration: Duration,
-        sleepUntilRecordingLimit:
-            @escaping @Sendable (Duration) async throws -> Void
+        clock: any VoiceInputClock
     ) {
         self.audioCapture = audioCapture
         self.targetCapture = targetCapture
@@ -113,7 +107,7 @@ public actor VoiceInputSessions {
         self.clipboard = clipboard
         self.history = history
         self.maximumRecordingDuration = maximumRecordingDuration
-        self.sleepUntilRecordingLimit = sleepUntilRecordingLimit
+        self.clock = clock
     }
 
     package init(
@@ -124,8 +118,7 @@ public actor VoiceInputSessions {
         clipboard: any ClipboardWriting,
         history: any SessionHistoryRecording,
         maximumRecordingDuration: Duration,
-        sleepUntilRecordingLimit:
-            @escaping @Sendable (Duration) async throws -> Void
+        clock: any VoiceInputClock
     ) {
         self.audioCapture = audioCapture
         self.targetCapture = targetCapture
@@ -134,7 +127,7 @@ public actor VoiceInputSessions {
         self.clipboard = clipboard
         self.history = history
         self.maximumRecordingDuration = maximumRecordingDuration
-        self.sleepUntilRecordingLimit = sleepUntilRecordingLimit
+        self.clock = clock
     }
 
     public func observe() -> AsyncStream<VoiceInputPresentation> {
@@ -307,7 +300,7 @@ public actor VoiceInputSessions {
         // (unclassified targets keep it out of history), so this is an
         // explicit, user-initiated discard.
         let id = VoiceInputSessionID()
-        let requestedAt = Date()
+        let requestedAt = clock.date
         releasePending = false
         pendingReleaseCaptureHint = nil
         phase = .preparing(id)
@@ -316,7 +309,7 @@ public actor VoiceInputSessions {
         confirmedDoubaoResult = nil
         historyTextPolicy = .unclassified
         suppressedTerminalPresentationSessionID = nil
-        stageAudit.begin(id: id, stage: "preparing")
+        stageAudit.begin(id: id, stage: "preparing", now: clock.monotonicNow)
         publish(.preparing(id))
         saveStage(.preparing(id), id: id, startedAt: requestedAt)
         let snapshot = await textProcessor.captureSnapshot()
@@ -342,7 +335,7 @@ public actor VoiceInputSessions {
             }
             let startedAt = requestedAt
             phase = .recording(id, startedAt: startedAt, snapshot: snapshot)
-            stageAudit.advance(id: id, stage: "recording")
+            stageAudit.advance(id: id, stage: "recording", now: clock.monotonicNow)
             publish(.recording(id))
             startRecordingLimit(
                 for: id,
@@ -403,8 +396,8 @@ public actor VoiceInputSessions {
                 .map(VoiceInputProblem.init(audioCaptureError:))
                 ?? VoiceInputProblem(failure: .recordingFailed)
             let activity = VoiceInputActivity.failed(id, problem.failure)
-            let audit = stageAudit.finish(id: id)
-            let elapsed = max(0, Int(Date().timeIntervalSince(requestedAt) * 1_000))
+            let audit = stageAudit.finish(id: id, now: clock.monotonicNow)
+            let elapsed = max(0, Int(clock.date.timeIntervalSince(requestedAt) * 1_000))
             let record = VoiceInputHistoryRecord(
                 sessionID: id,
                 startedAt: requestedAt,
@@ -441,7 +434,7 @@ public actor VoiceInputSessions {
         captureFailureTask?.cancel()
         captureFailureTask = nil
         phase = .processing(id, startedAt: startedAt, snapshot: snapshot)
-        stageAudit.advance(id: id, stage: "targetCapture")
+        stageAudit.advance(id: id, stage: "targetCapture", now: clock.monotonicNow)
         publish(.processing(id, .capturingTarget, applicationName: nil))
         saveStage(
             .processing(id, .capturingTarget, applicationName: nil),
@@ -452,7 +445,7 @@ public actor VoiceInputSessions {
         let targetCapture = targetCapture
         let audioCapture = audioCapture
         let targetTask = Task {
-            await Self.captureWithTiming(
+            await captureWithTiming(
                 targetCapture,
                 matching: captureHint
             )
@@ -515,7 +508,12 @@ public actor VoiceInputSessions {
             return
         }
         let applicationName = target.applicationName
-        stageAudit.advance(id: id, stage: "doubao", applicationName: applicationName)
+        stageAudit.advance(
+            id: id,
+            stage: "doubao",
+            applicationName: applicationName,
+            now: clock.monotonicNow
+        )
         publish(.processing(id, .transcribing, applicationName: applicationName))
         saveStage(
             .processing(id, .transcribing, applicationName: applicationName),
@@ -594,7 +592,8 @@ public actor VoiceInputSessions {
             stageAudit.advance(
                 id: id,
                 stage: "delivery",
-                applicationName: targetSnapshot.applicationName
+                applicationName: targetSnapshot.applicationName,
+                now: clock.monotonicNow
             )
             publish(.processing(id, .delivering, applicationName: targetSnapshot.applicationName))
             saveStage(
@@ -606,7 +605,7 @@ public actor VoiceInputSessions {
             )
             let commitGate = DeliveryCommitGate()
             deliveryCommitGate = commitGate
-            let deliveryStarted = ContinuousClock.now
+            let deliveryStarted = clock.monotonicNow
             let resolution = DeliveryResolution()
             deliveryResolution = resolution
             let delivery = delivery
@@ -626,7 +625,7 @@ public actor VoiceInputSessions {
             deliveryResolution = nil
             deliveryCommitGate = nil
             sessionStageDurations["delivery"] = Self.milliseconds(
-                deliveryStarted.duration(to: .now)
+                clock.monotonicNow - deliveryStarted
             )
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
             switch outcome {
@@ -758,7 +757,7 @@ public actor VoiceInputSessions {
         switch phase {
         case let .preparing(sessionID):
             id = sessionID
-            startedAt = preparingStartedAt ?? Date()
+            startedAt = preparingStartedAt ?? clock.date
             processingSnapshot = activeSnapshot
         case let .recording(sessionID, sessionStartedAt, snapshot),
              let .processing(sessionID, sessionStartedAt, snapshot):
@@ -770,7 +769,7 @@ public actor VoiceInputSessions {
         }
 
         let cancelledAtStage = stageAudit.currentStage
-        let audit = stageAudit.finish(id: id)
+        let audit = stageAudit.finish(id: id, now: clock.monotonicNow)
         phase = .finalizing(id)
         finishActiveTriggerSequence()
         preparingStartedAt = nil
@@ -801,7 +800,7 @@ public actor VoiceInputSessions {
         // disappears immediately and late results are fenced by `.finalizing`.
         publish(activity)
         await audioCapture.cancel()
-        let elapsed = max(0, Int(Date().timeIntervalSince(startedAt) * 1_000))
+        let elapsed = max(0, Int(clock.date.timeIntervalSince(startedAt) * 1_000))
         _ = queueHistory(.init(
             sessionID: id,
             startedAt: startedAt,
@@ -849,7 +848,7 @@ public actor VoiceInputSessions {
 
     private func finishTerminal(_ termination: VoiceInputSessionTermination) async {
         let id = termination.id
-        let audit = stageAudit.finish(id: id)
+        let audit = stageAudit.finish(id: id, now: clock.monotonicNow)
         let terminalHistoryTextPolicy = historyTextPolicy
         let suppressTerminalPresentation =
             suppressedTerminalPresentationSessionID == id
@@ -996,7 +995,7 @@ public actor VoiceInputSessions {
         guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
             return
         }
-        let audit = stageAudit.finish(id: id)
+        let audit = stageAudit.finish(id: id, now: clock.monotonicNow)
         phase = .finalizing(id)
         finishActiveTriggerSequence()
         preparingStartedAt = nil
@@ -1064,7 +1063,7 @@ public actor VoiceInputSessions {
             dictionaryRequestContext: snapshot.dictionaryContext,
             durationMilliseconds: max(
                 0,
-                Int(Date().timeIntervalSince(startedAt) * 1_000)
+                Int(clock.date.timeIntervalSince(startedAt) * 1_000)
             ),
             stageDurationsMilliseconds: stageDurations,
             outcome: activity
@@ -1082,10 +1081,10 @@ public actor VoiceInputSessions {
     ) {
         _ = cancelRecordingLimit()
         let duration = maximumRecordingDuration
-        let sleep = sleepUntilRecordingLimit
+        let clock = clock
         recordingLimitTask = Task { [weak self] in
             do {
-                try await sleep(duration)
+                try await clock.sleep(for: duration)
             } catch {
                 return
             }
@@ -1160,7 +1159,8 @@ public actor VoiceInputSessions {
         stageAudit.advance(
             id: id,
             stage: auditStage,
-            applicationName: applicationName
+            applicationName: applicationName,
+            now: clock.monotonicNow
         )
         let activity = VoiceInputActivity.processing(
             id,
@@ -1248,17 +1248,17 @@ public actor VoiceInputSessions {
         await discarding.discard(target)
     }
 
-    private static func captureWithTiming(
+    private func captureWithTiming(
         _ capture: any InputTargetCapturing,
         matching hint: InputTargetCaptureHint?
     ) async -> (InputTargetCaptureResult, Int) {
-        let started = ContinuousClock.now
+        let started = clock.monotonicNow
         let result = if let hint {
             await capture.capture(matching: hint)
         } else {
             await capture.capture()
         }
-        return (result, milliseconds(started.duration(to: .now)))
+        return (result, Self.milliseconds(clock.monotonicNow - started))
     }
 
     private static func milliseconds(_ duration: Duration) -> Int {
