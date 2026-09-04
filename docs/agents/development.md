@@ -26,7 +26,7 @@ Without `--confirm-paid-requests` the tool validates every input and prints the 
 
 ## Build and test
 
-Speaker requires Swift 6 and the macOS 26 SDK. Run build and test work through `scripts/*`; the wrappers select `MacOSX26.sdk`, isolate the per-user module cache, and disable the nested SwiftPM sandbox. Override only the SDK with `SPEAKER_SDKROOT`. Bare `swift build`, `swift run`, and `swift test` are not equivalent to CI.
+Speaker requires Swift 6 and the macOS 26 SDK. Run build and test work through `scripts/*`; the wrappers take the active toolchain's macOS SDK from `xcrun`, refuse a major version below 26, announce the choice on stderr as `swiftw: using SDK <path>`, isolate the per-user module cache, and disable the nested SwiftPM sandbox. Override only the SDK with `SPEAKER_SDKROOT`, which CI sets to the same `xcrun` path. No versioned SDK path is hardcoded. Bare `swift build`, `swift run`, and `swift test` are not equivalent to CI.
 
 Use the tightest relevant specification executable while iterating:
 
@@ -53,6 +53,8 @@ Iterate with a filter, then run the whole executable, then the full deterministi
 `./scripts/test` is the repository's full deterministic gate: all specification executables, its shell contract tests, and warnings-as-errors builds for tool executables. It is not the whole CI workflow. An ordinary code change is test-complete when its tightest relevant specification executable and `./scripts/test` both exit 0.
 
 `skills-lock.json` is validated rather than deleted because every name it locks still resolves to a real `.agents/skills/<name>/SKILL.md` exposed through `.claude/skills/`, so `./scripts/test-skills-lock` turns silent drift between the lock file and those directories into a failing gate.
+
+The gate runs every step even after one fails, then prints a PASS/FAIL summary with each step's exit status and exits non-zero if any step failed, so one run reports every broken gate. The contract tests that read the repository and write only inside their own `mktemp` directory run concurrently with the sequential lane; every step that reenters SwiftPM on the shared `.build` directory, bundles the App, or installs it stays sequential. The runner helpers live in `scripts/test-runner-common` and are covered by `./scripts/test-scripts-test-summary`.
 
 For installer, release, or workflow changes, also inspect `.github/workflows/ci.yml` and run every directly relevant CI-only gate. `./scripts/test-install-rollback` is currently a CI-only gate and does not run inside `./scripts/test`. Such a change is test-complete only when the ordinary code gates and all directly relevant CI-only gates exit 0.
 

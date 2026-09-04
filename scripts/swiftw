@@ -3,17 +3,40 @@
 set -euo pipefail
 
 ROOT="${0:A:h:h}"
-DEFAULT_SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+# Select the SDK exactly as CI does: an explicit SPEAKER_SDKROOT wins, otherwise
+# take whatever the active toolchain reports, then assert the major version.
+# No versioned path is hardcoded here.
 if [[ -n "${SPEAKER_SDKROOT:-}" ]]; then
     SDK="$SPEAKER_SDKROOT"
-elif [[ -d "$DEFAULT_SDK" ]]; then
-    # This repository currently targets the CLT version used for local
-    # verification. CI may pin SPEAKER_SDKROOT explicitly.
-    SDK="$DEFAULT_SDK"
 else
-    SDK="$(xcrun --sdk macosx --show-sdk-path)"
+    SDK="$(xcrun --show-sdk-path --sdk macosx)"
 fi
 SDK="${SDK:A}"
+if [[ ! -d "$SDK" ]]; then
+    print -u2 "swiftw: the selected SDK is not a directory: $SDK"
+    exit 1
+fi
+SDK_SETTINGS="$SDK/SDKSettings.plist"
+if [[ ! -f "$SDK_SETTINGS" ]]; then
+    print -u2 "swiftw: the selected SDK has no SDKSettings.plist: $SDK"
+    exit 1
+fi
+SDK_NAME="$(
+    /usr/libexec/PlistBuddy -c 'Print :CanonicalName' "$SDK_SETTINGS" 2>/dev/null
+)" || SDK_NAME=""
+if [[ -z "$SDK_NAME" ]]; then
+    SDK_NAME="macosx$(
+        /usr/libexec/PlistBuddy -c 'Print :Version' "$SDK_SETTINGS" 2>/dev/null
+    )" || SDK_NAME=""
+fi
+SDK_MAJOR="${${SDK_NAME#macosx}%%.*}"
+if [[ "$SDK_MAJOR" != <-> ]] || (( SDK_MAJOR < 26 )); then
+    print -u2 "swiftw: Speaker requires the macOS 26 SDK or newer."
+    print -u2 "swiftw: $SDK reports '${SDK_NAME:-an unreadable canonical name}'."
+    print -u2 "swiftw: select a newer toolchain, or set SPEAKER_SDKROOT."
+    exit 1
+fi
+print -u2 "swiftw: using SDK $SDK"
 if [[ "${1:-}" == "--print-sdk-path" ]]; then
     print -r -- "$SDK"
     exit 0
