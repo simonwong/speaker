@@ -3262,6 +3262,7 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
+        await ShortcutRecorderSpecs.run(failures: &failures)
         await RuntimeLifecycleSpecs.run(failures: &failures)
         await DashboardGroupingSpecs.run(failures: &failures)
 
