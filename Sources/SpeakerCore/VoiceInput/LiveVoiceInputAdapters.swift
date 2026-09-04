@@ -147,17 +147,10 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
 
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        let voiceProcessingFailure: AudioCaptureVoiceProcessingFailure?
-        do {
-            try input.setVoiceProcessingEnabled(true)
-            voiceProcessingFailure = nil
-        } catch {
-            voiceProcessingFailure = .classify(error)
-        }
-        refreshCaptureEnvironment(
-            input: input,
-            voiceProcessingFailure: voiceProcessingFailure
-        )
+        // Apple voice processing is deliberately not requested: enabling it
+        // on the engine's input node was observed to end capture immediately
+        // on device. The snapshot still records the raw-path facts.
+        refreshCaptureEnvironment(input: input)
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0,
               let outputFormat = AVAudioFormat(
@@ -191,10 +184,7 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         do {
             engine.prepare()
             try engine.start()
-            refreshCaptureEnvironment(
-                input: input,
-                voiceProcessingFailure: voiceProcessingFailure
-            )
+            refreshCaptureEnvironment(input: input)
         } catch {
             input.removeTap(onBus: 0)
             audioStream.finish()
@@ -346,14 +336,11 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         configurationObserver = nil
     }
 
-    private func refreshCaptureEnvironment(
-        input: AVAudioInputNode,
-        voiceProcessingFailure: AudioCaptureVoiceProcessingFailure?
-    ) {
+    private func refreshCaptureEnvironment(input: AVAudioInputNode) {
         latestEnvironmentSnapshot = AudioCaptureEnvironmentSnapshot(
-            voiceProcessingRequested: true,
+            voiceProcessingRequested: false,
             voiceProcessingActive: input.isVoiceProcessingEnabled,
-            voiceProcessingEnableFailure: voiceProcessingFailure,
+            voiceProcessingEnableFailure: nil,
             automaticGainControlEnabled: input.isVoiceProcessingAGCEnabled,
             preferredMicrophoneMode: Self.microphoneMode(
                 AVCaptureDevice.preferredMicrophoneMode

@@ -67,13 +67,11 @@ Recording, target capture, transcription, optional refinement, delivery, cancell
 
 User Cancellation is distinct from a Session Problem. Cancellation suppresses late provider results. Once `DeliveryCommitGate` commits a mutation, cancellation may close the HUD and release the shortcut, while receipt and Session Record settlement continue with the real mutation outcome.
 
-Waiting For Result publishes `ProcessingTelemetry` next to the activity: the current stage's start instant and whether a confirmed Doubao Stage Result can be accepted. The waited duration is derived by the presentation layer and is display-only. `acceptConfirmedDoubaoResult(expectedSessionID:)` is valid only while refining over a confirmed Doubao result; it cancels the pending refinement and routes the Doubao text through the unchanged delivery and settlement path with the `userAcceptedDoubao` refinement status, keeping the frozen Input Target and the selected Refinement Mode. Late refinement results after acceptance are discarded.
-
 New shortcut presses are rejected while processing or while a Pending Copy Result owns the interaction. Gesture ownership is reset synchronously and in the actor so a rejected press cannot start a delayed recording after the old session finishes.
 
 ## Provider processing and audio
 
-Microphone capture attempts to enable Apple voice processing before the engine starts and falls back to the existing raw path when it cannot be enabled. The result is converted to 16 kHz, 16-bit, mono PCM and enters a bounded in-memory stream. Doubao transmission and reception run concurrently over the bidirectional `bigmodel_async` WebSocket. Release marks the final audio frame; cancellation never sends a final frame after the task has been cancelled.
+Microphone capture uses the raw input path and does not request Apple voice processing. The result is converted to 16 kHz, 16-bit, mono PCM and enters a bounded in-memory stream. Doubao transmission and reception run concurrently over the bidirectional `bigmodel_async` WebSocket. Release marks the final audio frame; cancellation never sends a final frame after the task has been cancelled.
 
 `AVAudioCapture` records a content-free `AudioCaptureEnvironmentSnapshot` while configuring the engine and refreshes it after recording starts. The snapshot contains only booleans and stable enums for the voice-processing request and active state, enable-failure class, AGC state, and preferred and active system microphone modes. It contains no device name, path, or raw error. The diagnostic report renders every field; before the first recording, unavailable values are `unknown`. On a real Mac, start one recording before copying diagnostics, then compare `audioCaptureVoiceProcessingRequested` and `audioCaptureVoiceProcessingActive` and verify that `audioCapturePreferredMicrophoneMode` and `audioCaptureActiveMicrophoneMode` match the Control Center selection and active route.
 
