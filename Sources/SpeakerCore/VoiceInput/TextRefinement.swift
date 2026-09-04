@@ -54,14 +54,11 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     }
 
     public var diagnosticKind: String {
-        if let builtInMode {
-            return builtInMode.rawValue
-        }
-        return switch self {
+        switch self {
         case .defaultSmooth: "defaultSmooth"
+        case .conciseCleanup: BuiltInRefinementMode.conciseCleanup.rawValue
+        case .fullRewrite: BuiltInRefinementMode.fullRewrite.rawValue
         case .custom: "custom"
-        case .conciseCleanup, .fullRewrite:
-            preconditionFailure("built-in mode handled above")
         }
     }
 
@@ -85,14 +82,17 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     }
 
     public func validated() throws -> TextRefinementMode {
-        if let builtInMode {
-            return builtInMode.refinementMode(
-                promptOverride: try Self.validatedPromptOverride(promptOverride)
-            )
-        }
         switch self {
         case .defaultSmooth:
             return self
+        case let .conciseCleanup(promptOverride):
+            return .conciseCleanup(
+                promptOverride: try Self.validatedPromptOverride(promptOverride)
+            )
+        case let .fullRewrite(promptOverride):
+            return .fullRewrite(
+                promptOverride: try Self.validatedPromptOverride(promptOverride)
+            )
         case let .custom(name, prompt):
             let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -109,8 +109,6 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
                 throw TextRefinementModeValidationError.customPromptTooLong
             }
             return .custom(name: cleanName, prompt: cleanPrompt)
-        case .conciseCleanup, .fullRewrite:
-            preconditionFailure("built-in mode handled above")
         }
     }
 
@@ -134,16 +132,15 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     /// present, otherwise the built-in prompt. Default Smoothing has no
     /// prompt — it is Doubao built-in.
     public var deepSeekInstruction: String? {
-        if let builtInMode {
-            return promptOverride ?? builtInMode.defaultPrompt
-        }
-        return switch self {
+        switch self {
         case .defaultSmooth:
             nil
+        case let .conciseCleanup(promptOverride):
+            promptOverride ?? BuiltInRefinementMode.conciseCleanup.defaultPrompt
+        case let .fullRewrite(promptOverride):
+            promptOverride ?? BuiltInRefinementMode.fullRewrite.defaultPrompt
         case let .custom(_, prompt):
             prompt
-        case .conciseCleanup, .fullRewrite:
-            preconditionFailure("built-in mode handled above")
         }
     }
 

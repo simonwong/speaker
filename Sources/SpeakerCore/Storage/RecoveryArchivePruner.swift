@@ -1,6 +1,34 @@
 import Darwin
 import Foundation
 
+/// What one pruning pass did, including the archives it could not remove.
+///
+/// Pruning is best effort — a stuck archive must never stop a document from
+/// loading — but "best effort" is not "unobservable": the caller is told which
+/// archives survived and why, so a directory that keeps filling up can be
+/// reported instead of silently growing.
+package struct RecoveryArchivePruneSummary: Equatable, Sendable {
+    package let retainedCount: Int
+    package let removedCount: Int
+    /// One privacy-safe reason per archive the pass meant to remove and could
+    /// not. Each entry names the archive file, which is Speaker-generated and
+    /// carries no user content.
+    package let failures: [String]
+
+    package init(
+        retainedCount: Int = 0,
+        removedCount: Int = 0,
+        failures: [String] = []
+    ) {
+        self.retainedCount = retainedCount
+        self.removedCount = removedCount
+        self.failures = failures
+    }
+
+    /// Every archive the pass meant to remove is gone.
+    package var isComplete: Bool { failures.isEmpty }
+}
+
 /// Bounds privacy-sensitive corruption evidence without deleting the newest
 /// usable recovery artifact. Candidate discovery uses `lstat`; deletion goes
 /// back through the descriptor-relative no-follow persistence boundary.
@@ -27,7 +55,7 @@ package enum RecoveryArchivePruner {
         suffix: String,
         preserving preservedURL: URL? = nil,
         now: Date = Date()
-    ) {
+    ) -> RecoveryArchivePruneSummary {
         prune(
             in: directory,
             prefix: prefix,
@@ -43,7 +71,7 @@ package enum RecoveryArchivePruner {
         prefix: String,
         preserving preservedURL: URL? = nil,
         now: Date = Date()
-    ) {
+    ) -> RecoveryArchivePruneSummary {
         prune(
             in: directory,
             prefix: prefix,
@@ -61,15 +89,22 @@ package enum RecoveryArchivePruner {
         kind: Kind,
         preserving preservedURL: URL?,
         now: Date
-    ) {
-        guard !prefix.isEmpty,
-              metadata(at: directory)?.kind == S_IFDIR,
-              let entries = try? FileManager.default.contentsOfDirectory(
-                  at: directory,
-                  includingPropertiesForKeys: nil,
-                  options: [.skipsHiddenFiles]
-              )
-        else { return }
+    ) -> RecoveryArchivePruneSummary {
+        guard !prefix.isEmpty, metadata(at: directory)?.kind == S_IFDIR else {
+            return RecoveryArchivePruneSummary()
+        }
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return RecoveryArchivePruneSummary(
+                failures: [failure(named: directory, error: error)]
+            )
+        }
 
         let preservedPath = preservedURL?.standardizedFileURL.path
         let candidates = entries.compactMap { url -> Candidate? in
@@ -86,7 +121,9 @@ package enum RecoveryArchivePruner {
         }
 
         var retainedCount = 0
+        var removedCount = 0
         var retainedBytes = 0
+        var failures: [String] = []
         for candidate in candidates {
             let isPreserved = candidate.url.standardizedFileURL.path == preservedPath
             let isNewestUsable = retainedCount == 0
@@ -106,8 +143,18 @@ package enum RecoveryArchivePruner {
                 )
                 continue
             }
-            remove(candidate)
+            if let failure = remove(candidate) {
+                failures.append(failure)
+                retainedCount += 1
+            } else {
+                removedCount += 1
+            }
         }
+        return RecoveryArchivePruneSummary(
+            retainedCount: retainedCount,
+            removedCount: removedCount,
+            failures: failures
+        )
     }
 
     private static func candidate(at url: URL, kind: Kind) -> Candidate? {
@@ -163,20 +210,33 @@ package enum RecoveryArchivePruner {
         )
     }
 
-    private static func remove(_ candidate: Candidate) {
-        switch candidate.kind {
-        case .regularFile:
-            _ = try? OwnerOnlyFilePersistence.removeRegularFile(at: candidate.url)
-        case .flatDirectory:
-            guard let children = try? FileManager.default.contentsOfDirectory(
-                at: candidate.url,
-                includingPropertiesForKeys: nil
-            ) else { return }
-            for child in children {
-                guard (try? OwnerOnlyFilePersistence.removeRegularFile(at: child)) != nil
-                else { return }
+    /// Removes one archive, returning a privacy-safe reason when it survived.
+    /// A flat directory stops at its first unremovable child so a partially
+    /// deleted archive is never left looking complete.
+    private static func remove(_ candidate: Candidate) -> String? {
+        do {
+            switch candidate.kind {
+            case .regularFile:
+                _ = try OwnerOnlyFilePersistence.removeRegularFile(at: candidate.url)
+            case .flatDirectory:
+                let children = try FileManager.default.contentsOfDirectory(
+                    at: candidate.url,
+                    includingPropertiesForKeys: nil
+                )
+                for child in children {
+                    _ = try OwnerOnlyFilePersistence.removeRegularFile(at: child)
+                }
+                _ = try OwnerOnlyFilePersistence.removeEmptyDirectory(at: candidate.url)
             }
-            _ = try? OwnerOnlyFilePersistence.removeEmptyDirectory(at: candidate.url)
+            return nil
+        } catch {
+            return failure(named: candidate.url, error: error)
         }
+    }
+
+    /// Names the Speaker-generated archive and appends the one privacy-safe
+    /// reason Speaker is allowed to record for a local failure.
+    private static func failure(named url: URL, error: Error) -> String {
+        "\(url.lastPathComponent): \(PrivacySafeText.reason(for: error))"
     }
 }

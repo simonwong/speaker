@@ -51,6 +51,9 @@ public enum LocalHistoryPersistenceNotice: Equatable, Sendable {
     case corruptedRecordsSkipped(count: Int)
     case privacyMigrationFailed(reason: String)
     case writeFailed(reason: String)
+    /// Preserved corruption evidence could not be pruned back inside its
+    /// budget, so the store's directory keeps growing until it is cleared.
+    case recoveryArchivePruneFailed(reason: String)
 }
 
 /// A permanent, local history store whose on-disk representation contains only
@@ -101,7 +104,8 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         self.retentionPolicy = retentionPolicy
         self.maximumRecordCount = resolvedMaximumRecordCount
 
-        switch documents.load() {
+        let load = documents.load()
+        switch load.outcome {
         case .absent:
             storedRecords = []
             notice = nil
@@ -131,6 +135,14 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
             storedRecords = []
             notice = .writeFailed(
                 reason: "History data is corrupt and could not be preserved: \(detail)"
+            )
+        }
+        // Pruning never fails a load, but a directory that cannot be bounded
+        // is the user's problem the next time it fills up, so say so when no
+        // stronger notice already describes the same file.
+        if notice == nil, !load.pruning.isComplete {
+            notice = .recoveryArchivePruneFailed(
+                reason: load.pruning.failures.joined(separator: "; ")
             )
         }
     }

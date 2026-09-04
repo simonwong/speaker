@@ -130,9 +130,15 @@ public enum PersonalDictionaryValidator {
 }
 
 public struct PersonalDictionary: Equatable, Sendable {
-    public static let empty = try! PersonalDictionary(entries: [])
+    public static let empty = PersonalDictionary()
 
     public let entries: [DictionaryEntry]
+
+    /// The empty dictionary. Validation only has anything to say about
+    /// entries, so the empty case needs no throwing path.
+    public init() {
+        entries = []
+    }
 
     public init(entries: [DictionaryEntry]) throws {
         let issues = PersonalDictionaryValidator.validate(entries)

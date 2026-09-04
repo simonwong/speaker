@@ -200,7 +200,7 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
     /// dictionary, so the user can keep working and still recover the file.
     /// A version 1 document is migrated and rewritten in the current version.
     public func load() async throws -> PersonalDictionaryLoadResult {
-        switch documents.load() {
+        switch documents.load().outcome {
         case .absent:
             return PersonalDictionaryLoadResult(dictionary: .empty)
         case let .loaded(dictionary, version):

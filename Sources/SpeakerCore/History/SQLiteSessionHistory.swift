@@ -258,17 +258,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         self.fileURL = fileURL
         self.retentionPolicy = retentionPolicy
         self.maximumRecordCount = max(1, maximumRecordCount)
-        Self.pruneRecoveryArtifacts(for: fileURL)
+        var pruning = Self.pruneRecoveryArtifacts(for: fileURL)
         var resolvedConnection: SQLiteHistoryConnection?
         var resolvedNotice: LocalHistoryPersistenceNotice?
         do {
             resolvedConnection = try SQLiteHistoryConnection(fileURL: fileURL)
         } catch let error as SQLiteHistoryError where error.isRecoverableCorruption {
             do {
-                let backupURL = try Self.preserveCorruptedDatabase(at: fileURL)
+                let preserved = try Self.preserveCorruptedDatabase(at: fileURL)
+                pruning = preserved.pruning
                 resolvedConnection = try SQLiteHistoryConnection(fileURL: fileURL)
                 resolvedNotice = .corruptedDataPreserved(
-                    backupURL: backupURL,
+                    backupURL: preserved.backupURL,
                     reason: PrivacySafeText.reason(for: error)
                 )
             } catch {
@@ -276,6 +277,13 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             }
         } catch {
             resolvedNotice = .writeFailed(reason: PrivacySafeText.reason(for: error))
+        }
+        // Pruning cannot fail an open, but an archive directory that refuses to
+        // shrink is worth saying out loud once nothing more urgent is pending.
+        if resolvedNotice == nil, !pruning.isComplete {
+            resolvedNotice = .recoveryArchivePruneFailed(
+                reason: pruning.failures.joined(separator: "; ")
+            )
         }
         connection = resolvedConnection
         notice = resolvedNotice
@@ -587,7 +595,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             return "会话历史写入失败：\(reason)"
         case let .corruptedRecordsSkipped(count):
             return "有 \(count) 条本地历史记录已损坏，其他记录仍可使用。"
-        case .corruptedDataPreserved, nil:
+        // Preserved evidence and an unpruned archive directory are both
+        // reported through the History page instead of this urgent surface.
+        case .corruptedDataPreserved, .recoveryArchivePruneFailed, nil:
             return nil
         }
     }
@@ -1225,7 +1235,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         return decoder
     }
 
-    private static func preserveCorruptedDatabase(at fileURL: URL) throws -> URL {
+    private static func preserveCorruptedDatabase(
+        at fileURL: URL
+    ) throws -> (backupURL: URL, pruning: RecoveryArchivePruneSummary) {
         let fileManager = FileManager.default
         let parent = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(
@@ -1262,8 +1274,13 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             guard preservedAnyFile else {
                 throw SQLiteHistoryError.openFailed
             }
-            pruneRecoveryArtifacts(for: fileURL, preserving: backupDirectory)
-            return backupDirectory
+            return (
+                backupURL: backupDirectory,
+                pruning: pruneRecoveryArtifacts(
+                    for: fileURL,
+                    preserving: backupDirectory
+                )
+            )
         } catch {
             // Do not leave a half-moved recovery set. Restore anything that was
             // already moved before surfacing the failure. If even one restore
@@ -1299,7 +1316,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     private static func pruneRecoveryArtifacts(
         for fileURL: URL,
         preserving preservedURL: URL? = nil
-    ) {
+    ) -> RecoveryArchivePruneSummary {
         RecoveryArchivePruner.pruneFlatDirectories(
             in: fileURL.deletingLastPathComponent(),
             prefix: "history.corrupt-",

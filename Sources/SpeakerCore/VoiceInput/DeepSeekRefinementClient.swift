@@ -1,14 +1,9 @@
 import Foundation
 
 public struct DeepSeekRefinementConfiguration: Equatable, Sendable {
-    public static let defaultEndpoint: URL = {
-        guard let endpoint = URL(
-            string: "https://api.deepseek.com/chat/completions"
-        ) else {
-            preconditionFailure("DeepSeek default endpoint is not a valid URL")
-        }
-        return endpoint
-    }()
+    public static let defaultEndpoint = URL(
+        string: "https://api.deepseek.com/chat/completions"
+    )!
 
     public var apiKey: String
     public var endpoint: URL

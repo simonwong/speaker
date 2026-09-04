@@ -253,12 +253,15 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
                 withDestinationURL: external
             )
 
-            RecoveryArchivePruner.pruneRegularFiles(
+            let filePruning = RecoveryArchivePruner.pruneRegularFiles(
                 in: root,
                 prefix: "settings.recovery-",
                 suffix: ".json",
                 now: now
             )
+            try expect(filePruning.isComplete, "pruning reported a failure")
+            try expect(filePruning.removedCount == 2)
+            try expect(filePruning.retainedCount == 3)
 
             let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
             try expect(names.contains("settings.recovery-0.json"))
@@ -280,7 +283,7 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             )
             let current = root.appendingPathComponent("history.corrupt-current.json")
             try OwnerOnlyFilePersistence.write(Data("current".utf8), to: current)
-            RecoveryArchivePruner.pruneRegularFiles(
+            _ = RecoveryArchivePruner.pruneRegularFiles(
                 in: root,
                 prefix: "history.corrupt-",
                 suffix: ".json",
@@ -301,11 +304,13 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
                     ofItemAtPath: archive.path
                 )
             }
-            RecoveryArchivePruner.pruneFlatDirectories(
+            let directoryPruning = RecoveryArchivePruner.pruneFlatDirectories(
                 in: root,
                 prefix: "history.corrupt-",
                 now: now
             )
+            try expect(directoryPruning.isComplete)
+            try expect(directoryPruning.removedCount == 2)
             let directoryNames = try FileManager.default.contentsOfDirectory(
                 atPath: root.path
             )
@@ -314,6 +319,68 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             try expect(directoryNames.contains("history.corrupt-2"))
             try expect(!directoryNames.contains("history.corrupt-3"))
             try expect(!directoryNames.contains("history.corrupt-4"))
+        }
+
+        run("recovery archive pruning reports the archives it could not remove", failures: &failures) {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-recovery-prune-failure-spec-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            var lockedPaths: [String] = []
+            defer {
+                for path in lockedPaths {
+                    try? FileManager.default.setAttributes(
+                        [.immutable: false],
+                        ofItemAtPath: path
+                    )
+                }
+                try? FileManager.default.removeItem(at: root)
+            }
+            try FileManager.default.createDirectory(
+                at: root,
+                withIntermediateDirectories: true
+            )
+            let now = Date()
+            for index in 0..<5 {
+                let file = root.appendingPathComponent("settings.recovery-\(index).json")
+                try OwnerOnlyFilePersistence.write(Data([UInt8(index)]), to: file)
+                try FileManager.default.setAttributes(
+                    [.modificationDate: now.addingTimeInterval(-Double(index * 60))],
+                    ofItemAtPath: file.path
+                )
+            }
+            // The two oldest archives are the ones over budget. Locking them
+            // is the realistic way a prune half-succeeds: they stay on disk,
+            // and the caller has to be told rather than left to assume the
+            // directory shrank.
+            for index in 3..<5 {
+                let path = root
+                    .appendingPathComponent("settings.recovery-\(index).json")
+                    .path
+                try FileManager.default.setAttributes(
+                    [.immutable: true],
+                    ofItemAtPath: path
+                )
+                lockedPaths.append(path)
+            }
+
+            let summary = RecoveryArchivePruner.pruneRegularFiles(
+                in: root,
+                prefix: "settings.recovery-",
+                suffix: ".json",
+                now: now
+            )
+
+            try expect(!summary.isComplete, "an unremovable archive was reported as pruned")
+            try expect(summary.removedCount == 0)
+            try expect(summary.failures.count == 2)
+            try expect(
+                summary.failures.allSatisfy { $0.hasPrefix("settings.recovery-") },
+                "a prune failure did not name its archive"
+            )
+            let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            try expect(names.count == 5, "an archive was removed from a read-only directory")
         }
     }
 }

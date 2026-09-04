@@ -406,6 +406,7 @@ final class SpeakerRuntime: ObservableObject {
         case .corruptedRecordsSkipped: "corruptedRecordsSkipped"
         case .privacyMigrationFailed: "privacyMigrationFailed"
         case .writeFailed: "writeFailed"
+        case .recoveryArchivePruneFailed: "recoveryArchivePruneFailed"
         }
         let report = SpeakerDiagnosticReport.make(from: .init(
             version: buildIdentity.version,

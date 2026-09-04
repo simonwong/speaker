@@ -428,7 +428,7 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     }
 
     public func load() -> AppSettingsLoadResult {
-        switch documents.load() {
+        switch documents.load().outcome {
         case .absent:
             return .defaults(.default)
         case let .loaded(settings, _):

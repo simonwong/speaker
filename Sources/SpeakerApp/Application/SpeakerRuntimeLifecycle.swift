@@ -154,6 +154,10 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
                 return .legacyProtectionFailed
             case .corruptedRecordsSkipped, .writeFailed:
                 return .legacyNotReady
+            case .recoveryArchivePruneFailed:
+                // Old evidence that refused to delete says nothing about the
+                // legacy records, which loaded normally; migration continues.
+                break
             }
         }
         let records = await legacy.allRecords()
