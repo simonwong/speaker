@@ -18,9 +18,6 @@ let package = Package(
             targets: ["SpeakerAccuracyMetrics"]
         ),
         .executable(name: "SpeakerApp", targets: ["SpeakerApp"]),
-        .executable(name: "SpeakerCoreSpecs", targets: ["SpeakerCoreSpecs"]),
-        .executable(name: "SpeakerAppScenarioSpecs", targets: ["SpeakerAppScenarioSpecs"]),
-        .executable(name: "SpeakerAppUISpecs", targets: ["SpeakerAppUISpecs"]),
         .executable(
             name: "SpeakerBrandAssetGenerator",
             targets: ["SpeakerBrandAssetGenerator"]
@@ -29,10 +26,6 @@ let package = Package(
         .executable(
             name: "SpeakerProviderEvidenceVerifier",
             targets: ["SpeakerProviderEvidenceVerifier"]
-        ),
-        .executable(
-            name: "SpeakerProviderEvidenceSpecs",
-            targets: ["SpeakerProviderEvidenceSpecs"]
         ),
         .executable(
             name: "SpeakerUpdateSignatureVerifier",
@@ -49,10 +42,6 @@ let package = Package(
         .executable(
             name: "SpeakerAccuracyEvaluator",
             targets: ["SpeakerAccuracyEvaluator"]
-        ),
-        .executable(
-            name: "SpeakerAccuracyMetricsSpecs",
-            targets: ["SpeakerAccuracyMetricsSpecs"]
         ),
     ],
     dependencies: [

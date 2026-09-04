@@ -21,7 +21,9 @@ Speaker 已可作为本机开发版持续试用，但还不能对外发布。主
 - [ ] 确定正式 Bundle ID 与 Apple Developer Team。（仓库已增加不可由 CI 覆盖的 `Resources/ReleaseIdentity.plist` 门禁；当前保留占位值，正式分发会 fail-closed。）
 - [ ] 使用 Developer ID Application 稳定签名并验证跨版本 TCC 权限保持。
 - [x] 开发构建显式标记 ad-hoc 身份、在产品内解释麦克风与辅助功能授权失效边界，并支持可选具名本地签名。
-- [ ] 开启 Hardened Runtime，通过 `notarytool` 公证并 staple。
+- [x] 开启 Hardened Runtime，通过 `notarytool` 公证并 staple。`scripts/bundle` 以 `--options runtime` 加固签名并与受审查的 `Resources/Speaker.entitlements` 逐项比对，`scripts/distribute` 对 App 与 DMG 分别执行 `notarytool submit`、`notarytool log` 和 `stapler staple`，`scripts/release-common` 复核 CodeDirectory 的 `runtime` flag、公证 status 为 `Accepted` 并执行 `stapler validate`。
+- [ ] 公布正式 Developer ID Application 证书证据：Team ID 与证书 SHA-1/SHA-256 指纹在仓库内固定为可复核值，签名产物的 `codesign -dv --verbose=4` 输出与之逐字匹配。
+- [ ] 留存一次真实公证与 staple 的证据：App 与 DMG 的 `notarytool` submission/log JSON、两次 `stapler validate` 输出，以及已 staple 制品的 SHA-256。
 - [ ] 将豆包与 DeepSeek Key 从 owner-only 本地文件迁移到稳定签名 App 的 Keychain；迁移会完整检查旧 Keychain/明文来源，只有全部可读且值一致才写入并回读 primary 后清理，冲突或部分不可读会保留所有来源并提示。代码门禁已完成，仍需 Developer ID 实机验证。
 - [ ] 在干净 macOS 用户上走完首次安装、Gatekeeper、权限、升级和卸载/清理流程。
 

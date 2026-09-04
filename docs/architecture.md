@@ -101,6 +101,8 @@ The full decision is recorded in [ADR-0002](adr/0002-freeze-the-input-target.md)
 
 ## Persistence and startup recovery
 
+A persisted Session Record carries the session identifier and start time, the Stage Results retained by `SessionHistoryRecordPolicy`, the transcription provider and its request identifiers, structured provider and refinement failure codes, the content-free `DeliveryDiagnostic`, the Refinement Mode name and instruction, the cancellation stage, the Personal Dictionary snapshot and request context, stage timings, and the terminal outcome. Target-application identity and free-text provider or refinement messages are dropped when the record is encoded, so neither reaches disk; `PRIVACY.md` and `CONTEXT.md` state the same boundary.
+
 Startup finishes credential migration, provider-resource restore, Personal Dictionary and Refinement Mode loading, legacy history migration, privacy cleanup, and non-terminal Session Record convergence before activating the global shortcut. Records left in preparing, recording, or processing become an explicit interrupted terminal state.
 
 History retention settings are the sole source of user intent. Automatic age and count eviction is a destructive transaction. A committed deletion is never presented as rolled back because WAL checkpointing is busy; pending checkpoint work is retried on later writes and the next clean open.

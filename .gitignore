@@ -4,3 +4,8 @@
 DerivedData/
 *.xcuserstate
 
+# SpeakerAccuracyEvaluator writes `<output>.with-text.json` under
+# `--include-text`; it contains transcript, reference, and Entry text and must
+# never be committed. The text-free report path is user-chosen, so keep it out
+# of the repository by hand.
+*.with-text.json
