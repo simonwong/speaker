@@ -1,476 +1,7 @@
 import Foundation
 
-public struct VoiceInputSessionID: Hashable, Sendable {
-    public let rawValue: UUID
-
-    public init(rawValue: UUID = UUID()) {
-        self.rawValue = rawValue
-    }
-}
-
-package enum VoiceInputCommand: Sendable {
-    case pressed
-    case released
-    case cancel
-    case copyPendingResult
-    case dismissResult
-}
-
-/// Content-free identity frozen inside the physical stop-gesture callback.
-///
-/// Full Accessibility inspection remains asynchronous, but it must resolve to
-/// this exact process. Switching to another App after ending the recording
-/// therefore fails closed instead of capturing the newer App.
-public struct InputTargetCaptureHint: Equatable, Sendable {
-    public let processID: Int32
-    package let targetToken: UUID?
-
-    public init(processID: Int32) {
-        self.processID = processID
-        targetToken = nil
-    }
-
-    package init(processID: Int32, targetToken: UUID) {
-        self.processID = processID
-        self.targetToken = targetToken
-    }
-}
-
-public enum VoiceInputProcessingStage: Equatable, Sendable {
-    case capturingTarget
-    case transcribing
-    case refining
-    case delivering
-}
-
-public enum PendingCopyReason: String, Equatable, Sendable {
-    case missingTarget
-    case accessibilityPermissionMissing
-    case secureTarget
-    case unsupportedTarget
-    case invalidatedTarget
-    case changedTarget
-    case deliveryFailed
-    case targetApplicationUnresponsive
-    /// Kept only so history written by older builds remains decodable.
-    case deliveryTimedOut
-    case deliveryUnconfirmed
-    case clipboardFailed
-}
-
-public enum VoiceInputActivity: Equatable, Sendable {
-    case idle
-    case preparing(VoiceInputSessionID)
-    case recording(VoiceInputSessionID)
-    case processing(
-        VoiceInputSessionID,
-        VoiceInputProcessingStage,
-        applicationName: String?
-    )
-    case delivered(
-        VoiceInputSessionID,
-        applicationName: String,
-        text: String
-    )
-    case pendingCopy(
-        VoiceInputSessionID,
-        text: String,
-        reason: PendingCopyReason
-    )
-    case cancelled(VoiceInputSessionID)
-    case failed(VoiceInputSessionID, VoiceInputFailure)
-
-    public var isRecording: Bool {
-        if case .recording = self { true } else { false }
-    }
-
-    public var isDelivered: Bool {
-        if case .delivered = self { true } else { false }
-    }
-
-    public var isTerminal: Bool {
-        switch self {
-        case .delivered, .pendingCopy, .cancelled, .failed:
-            true
-        case .idle, .preparing, .recording, .processing:
-            false
-        }
-    }
-
-    public var stage: VoiceInputProcessingStage? {
-        if case let .processing(_, stage, _) = self { stage } else { nil }
-    }
-
-    public var pendingCopyReason: PendingCopyReason? {
-        if case let .pendingCopy(_, _, reason) = self { reason } else { nil }
-    }
-
-    public var pendingText: String? {
-        if case let .pendingCopy(_, text, _) = self { text } else { nil }
-    }
-
-    package var sessionID: VoiceInputSessionID? {
-        switch self {
-        case .idle:
-            nil
-        case let .preparing(id),
-             let .recording(id),
-             let .processing(id, _, _),
-             let .delivered(id, _, _),
-             let .pendingCopy(id, _, _),
-             let .cancelled(id),
-             let .failed(id, _):
-            id
-        }
-    }
-}
-
-public enum VoiceInputNotice: Equatable, Sendable {
-    case copied
-    case refinementFellBack(DeepSeekRefinementFailureKind?)
-    case persistenceFailure(String)
-}
-
-public struct VoiceInputPresentation: Equatable, Sendable {
-    public let revision: UInt64
-    public let activity: VoiceInputActivity
-    public let recordingTelemetry: RecordingTelemetry?
-    public let notice: VoiceInputNotice?
-
-    public init(
-        revision: UInt64,
-        activity: VoiceInputActivity,
-        recordingTelemetry: RecordingTelemetry? = nil,
-        notice: VoiceInputNotice? = nil
-    ) {
-        self.revision = revision
-        self.activity = activity
-        self.recordingTelemetry = recordingTelemetry
-        self.notice = notice
-    }
-}
-
-public struct RecordingTelemetry: Equatable, Sendable {
-    public let elapsedMilliseconds: Int
-    public let peakPower: Float
-
-    public init(elapsedMilliseconds: Int, peakPower: Float) {
-        self.elapsedMilliseconds = elapsedMilliseconds
-        self.peakPower = peakPower
-    }
-}
-
-public struct CapturedAudio: Equatable, Sendable {
-    public let data: Data
-    public let duration: Duration
-    public let peakPower: Float
-
-    public init(data: Data, duration: Duration, peakPower: Float) {
-        self.data = data
-        self.duration = duration
-        self.peakPower = peakPower
-    }
-}
-
-public struct InputTargetSnapshot: Equatable, Hashable, Sendable {
-    public let id: UUID
-    public let applicationName: String
-
-    public init(id: UUID, applicationName: String) {
-        self.id = id
-        self.applicationName = applicationName
-    }
-}
-
-public enum InputTargetCaptureResult: Equatable, Sendable {
-    case writable(InputTargetSnapshot)
-    case unavailable(PendingCopyReason)
-}
-
-public struct TranscriptionResult: Equatable, Sendable {
-    public let text: String
-    public let providerRequestID: String?
-
-    public init(text: String, providerRequestID: String?) {
-        self.text = text
-        self.providerRequestID = providerRequestID
-    }
-}
-
-public struct DeliveryDiagnostic: Equatable, Sendable {
-    public enum Stage: String, Equatable, Sendable {
-        case securityRead
-        case roleRead
-        case fallbackEligibility
-        case focusRead
-        case fallbackSelection
-        case valueRead
-        case pastePost
-        case pasteReceipt
-    }
-
-    public enum Cause: String, Equatable, Sendable {
-        case invalidated
-        case unsupported
-        case unconfirmed
-        case cancelled
-        case invalidUIElement
-        case attributeUnsupported
-        case notImplemented
-        case cannotComplete
-        case other
-        case notFrontmost
-        case rejected
-        case changed
-    }
-
-    public let stage: Stage
-    public let cause: Cause
-
-    public init(stage: Stage, cause: Cause) {
-        self.stage = stage
-        self.cause = cause
-    }
-
-    public var code: String {
-        "\(stage.rawValue).\(cause.rawValue)"
-    }
-}
-
-public enum DeliveryOutcome: Equatable, Sendable {
-    case delivered
-    case pasteCommandPosted(DeliveryDiagnostic)
-    case pendingCopy(PendingCopyReason)
-    case pendingCopyDiagnosed(
-        PendingCopyReason,
-        DeliveryDiagnostic
-    )
-
-    public var pendingCopyReason: PendingCopyReason? {
-        switch self {
-        case .delivered, .pasteCommandPosted: nil
-        case let .pendingCopy(reason),
-             let .pendingCopyDiagnosed(reason, _):
-            reason
-        }
-    }
-
-    public var deliveryDiagnostic: DeliveryDiagnostic? {
-        switch self {
-        case let .pasteCommandPosted(diagnostic),
-             let .pendingCopyDiagnosed(_, diagnostic):
-            diagnostic
-        case .delivered, .pendingCopy:
-            nil
-        }
-    }
-}
-
-public actor DeliveryCommitGate {
-    private enum State: Equatable { case pending, committed, cancelled }
-    private var state = State.pending
-
-    public init() {}
-
-    public func commit() -> Bool {
-        guard state == .pending else { return state == .committed }
-        state = .committed
-        return true
-    }
-
-    /// Returns true only when cancellation wins before the mutation commit.
-    public func cancel() -> Bool {
-        guard state == .pending else { return false }
-        state = .cancelled
-        return true
-    }
-}
-
-private actor DeliveryResolution {
-    private var outcome: DeliveryOutcome?
-    private var continuation: CheckedContinuation<DeliveryOutcome, Never>?
-
-    func wait() async -> DeliveryOutcome {
-        if let outcome { return outcome }
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
-        }
-    }
-
-    func resolve(_ outcome: DeliveryOutcome) {
-        guard self.outcome == nil else { return }
-        self.outcome = outcome
-        continuation?.resume(returning: outcome)
-        continuation = nil
-    }
-}
-
-public struct VoiceInputHistoryRecord: Equatable, Sendable {
-    public let sessionID: VoiceInputSessionID
-    public let startedAt: Date
-    public let applicationName: String?
-    public let transcription: String?
-    public let finalText: String?
-    public let transcriptionProvider: String?
-    public let providerRequestID: String?
-    public let providerErrorCode: String?
-    public let providerOperation: String?
-    public let providerStatusCode: String?
-    public let providerMessage: String?
-    public let deliveryDiagnosticCode: String?
-    public let deepSeekText: String?
-    public let deepSeekRequestID: String?
-    public let refinementModeName: String?
-    public let refinementPrompt: String?
-    public let refinementStatus: String?
-    public let refinementFailureCode: String?
-    public let refinementFailureStatusCode: String?
-    public let refinementFailureMessage: String?
-    public let cancelledAtStage: String?
-    public let dictionarySnapshotID: UUID?
-    public let dictionarySnapshotEntries: [RecordedDictionaryEntry]
-    public let dictionaryRequestContext: DictionaryRequestContext?
-    public let dictionaryReplacements: [DictionaryReplacement]
-    public let durationMilliseconds: Int
-    public let stageDurationsMilliseconds: [String: Int]
-    public let outcome: VoiceInputActivity
-
-    public init(
-        sessionID: VoiceInputSessionID,
-        startedAt: Date,
-        applicationName: String?,
-        transcription: String?,
-        finalText: String?,
-        transcriptionProvider: String? = nil,
-        providerRequestID: String? = nil,
-        providerErrorCode: String? = nil,
-        providerOperation: String? = nil,
-        providerStatusCode: String? = nil,
-        providerMessage: String? = nil,
-        deliveryDiagnosticCode: String? = nil,
-        deepSeekText: String? = nil,
-        deepSeekRequestID: String? = nil,
-        refinementModeName: String? = nil,
-        refinementPrompt: String? = nil,
-        refinementStatus: String? = nil,
-        refinementFailureCode: String? = nil,
-        refinementFailureStatusCode: String? = nil,
-        refinementFailureMessage: String? = nil,
-        cancelledAtStage: String? = nil,
-        dictionarySnapshotID: UUID? = nil,
-        dictionarySnapshotEntries: [RecordedDictionaryEntry] = [],
-        dictionaryRequestContext: DictionaryRequestContext? = nil,
-        dictionaryReplacements: [DictionaryReplacement] = [],
-        durationMilliseconds: Int = 0,
-        stageDurationsMilliseconds: [String: Int] = [:],
-        outcome: VoiceInputActivity
-    ) {
-        self.sessionID = sessionID
-        self.startedAt = startedAt
-        self.applicationName = applicationName
-        self.transcription = transcription
-        self.finalText = finalText
-        self.transcriptionProvider = transcriptionProvider
-        self.providerRequestID = providerRequestID
-        self.providerErrorCode = providerErrorCode
-        self.providerOperation = providerOperation
-        self.providerStatusCode = providerStatusCode
-        self.providerMessage = providerMessage
-        self.deliveryDiagnosticCode = deliveryDiagnosticCode
-        self.deepSeekText = deepSeekText
-        self.deepSeekRequestID = deepSeekRequestID
-        self.refinementModeName = refinementModeName
-        self.refinementPrompt = refinementPrompt
-        self.refinementStatus = refinementStatus
-        self.refinementFailureCode = refinementFailureCode
-        self.refinementFailureStatusCode = refinementFailureStatusCode
-        self.refinementFailureMessage = refinementFailureMessage
-        self.cancelledAtStage = cancelledAtStage
-        self.dictionarySnapshotID = dictionarySnapshotID
-        self.dictionarySnapshotEntries = dictionarySnapshotEntries
-        self.dictionaryRequestContext = dictionaryRequestContext
-        self.dictionaryReplacements = dictionaryReplacements
-        self.durationMilliseconds = durationMilliseconds
-        self.stageDurationsMilliseconds = stageDurationsMilliseconds
-        self.outcome = outcome
-    }
-}
-
-public protocol AudioCapturing: Sendable {
-    func start() async throws
-    func stop() async throws -> CapturedAudio
-    func cancel() async
-}
-
-public protocol AudioChunkStreaming: Sendable {
-    func audioChunks() async -> AsyncStream<Data>
-}
-
-public protocol AudioCaptureTelemetryProviding: Sendable {
-    func observeTelemetry() async -> AsyncStream<RecordingTelemetry>
-}
-
-public protocol AudioCaptureFailureProviding: Sendable {
-    func observeFailures() async -> AsyncStream<AudioCaptureError>
-}
-
-public protocol InputTargetCapturing: Sendable {
-    func capture() async -> InputTargetCaptureResult
-    func capture(
-        matching hint: InputTargetCaptureHint
-    ) async -> InputTargetCaptureResult
-}
-
-public extension InputTargetCapturing {
-    func capture(
-        matching hint: InputTargetCaptureHint
-    ) async -> InputTargetCaptureResult {
-        await capture()
-    }
-}
-
-public protocol InputTargetDiscarding: Sendable {
-    func discard(_ target: InputTargetSnapshot) async
-}
-
-public protocol SpeechTranscribing: Sendable {
-    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult
-}
-
-public protocol TextDelivering: Sendable {
-    func deliver(
-        _ text: String,
-        to target: InputTargetSnapshot,
-        commitGate: DeliveryCommitGate
-    ) async -> DeliveryOutcome
-    func shutdown() async
-}
-
-public extension TextDelivering {
-    func shutdown() async {}
-}
-
-public protocol ClipboardWriting: Sendable {
-    @discardableResult
-    func copy(_ text: String) async -> Bool
-}
-
-public protocol SessionHistoryRecording: Sendable {
-    func save(_ record: VoiceInputHistoryRecord) async
-    func persistenceFailureNotice() async -> String?
-}
-
-public extension SessionHistoryRecording {
-    func persistenceFailureNotice() async -> String? { nil }
-}
-
 public actor VoiceInputSessions {
     package static let standardMaximumRecordingDuration: Duration = .seconds(600)
-
-    private struct TerminalHistoryPresentation: Sendable {
-        let activity: VoiceInputActivity
-        let notice: VoiceInputNotice?
-    }
 
     private enum Phase: Equatable {
         case idle
@@ -486,15 +17,6 @@ public actor VoiceInputSessions {
             snapshot: VoiceTextProcessingSnapshot
         )
         case finalizing(VoiceInputSessionID)
-    }
-
-    /// History text is fail-closed until the release-time Accessibility target
-    /// has been classified. A secure target must never let provider text enter
-    /// an in-flight, cancelled, failed, or terminal history record.
-    private enum HistoryTextPolicy {
-        case unclassified
-        case allowed
-        case redacted
     }
 
     private let audioCapture: any AudioCapturing
@@ -521,24 +43,17 @@ public actor VoiceInputSessions {
     private var deliveryResolution: DeliveryResolution?
     private var suppressedTerminalPresentationSessionID: VoiceInputSessionID?
     private var finishingTask: Task<Void, Never>?
-    private var historyWriteTasks: [VoiceInputSessionID: Task<Void, Never>] = [:]
-    private var historyWriteTokens: [VoiceInputSessionID: UUID] = [:]
+    private var historyWrites = SessionHistoryWriteQueue()
     private var isShutDown = false
     private var preparingStartedAt: Date?
     private var activeSnapshot: VoiceTextProcessingSnapshot?
     private var confirmedDoubaoResult: TranscriptionResult?
     private var historyTextPolicy = HistoryTextPolicy.unclassified
     private var activeTriggerSequence: UInt64?
-    private var auditSessionID: VoiceInputSessionID?
-    private var auditStageName: String?
-    private var auditStageStartedAt: ContinuousClock.Instant?
-    private var auditStageDurations: [String: Int] = [:]
-    private var auditApplicationName: String?
-    private var presentation = VoiceInputPresentation(revision: 0, activity: .idle)
-    private var observers: [UUID: AsyncStream<VoiceInputPresentation>.Continuation] = [:]
-    private var triggerTerminationObservers: [
-        UUID: AsyncStream<UInt64>.Continuation
-    ] = [:]
+    private var stageAudit = VoiceInputStageAudit()
+    private var presenter = VoiceInputPresentationPublisher()
+    private var triggerTerminations = TriggerTerminationPublisher()
+    private var presentation: VoiceInputPresentation { presenter.current }
 
     public init(
         audioCapture: any AudioCapturing,
@@ -623,18 +138,9 @@ public actor VoiceInputSessions {
     }
 
     public func observe() -> AsyncStream<VoiceInputPresentation> {
-        let id = UUID()
-        let (stream, continuation) = AsyncStream<VoiceInputPresentation>.makeStream(
-            bufferingPolicy: .bufferingNewest(1)
-        )
-        observers[id] = continuation
-        continuation.yield(presentation)
-        continuation.onTermination = { [weak self] _ in
-            Task {
-                await self?.removeObserver(id)
-            }
+        presenter.subscribe { [weak self] id in
+            Task { await self?.removeObserver(id) }
         }
-        return stream
     }
 
     /// Emits the dispatcher sequence owned by a session when that session
@@ -642,15 +148,9 @@ public actor VoiceInputSessions {
     /// Consumers must compare the sequence before resetting gesture state so a
     /// delayed terminal event cannot affect a newer session.
     package func observeTriggerTerminations() -> AsyncStream<UInt64> {
-        let id = UUID()
-        let (stream, continuation) = AsyncStream<UInt64>.makeStream(
-            bufferingPolicy: .bufferingNewest(1)
-        )
-        triggerTerminationObservers[id] = continuation
-        continuation.onTermination = { [weak self] _ in
+        triggerTerminations.subscribe { [weak self] id in
             Task { await self?.removeTriggerTerminationObserver(id) }
         }
-        return stream
     }
 
     package func isActive(triggerSequence: UInt64) -> Bool {
@@ -732,14 +232,13 @@ public actor VoiceInputSessions {
         await settlementTask?.value
         await finishingTask?.value
         await delivery.shutdown()
-        let pending = Array(historyWriteTasks.values)
-        for task in pending {
+        // Converge instead of snapshotting: a write enqueued while an earlier
+        // one was still being awaited must also reach durable storage before
+        // shutdown returns. No new session can begin once `isShutDown` is set.
+        while let (sessionID, task) = historyWrites.firstPending {
             await task.value
+            historyWrites.discard(task, for: sessionID)
         }
-        // Completed tasks are safe to discard. No new session can begin
-        // through a dispatcher after its consumer has been stopped.
-        historyWriteTasks.removeAll()
-        historyWriteTokens.removeAll()
     }
 
     private func send(
@@ -817,7 +316,7 @@ public actor VoiceInputSessions {
         confirmedDoubaoResult = nil
         historyTextPolicy = .unclassified
         suppressedTerminalPresentationSessionID = nil
-        beginAudit(id: id, stage: "preparing")
+        stageAudit.begin(id: id, stage: "preparing")
         publish(.preparing(id))
         saveStage(.preparing(id), id: id, startedAt: requestedAt)
         let snapshot = await textProcessor.captureSnapshot()
@@ -843,7 +342,7 @@ public actor VoiceInputSessions {
             }
             let startedAt = requestedAt
             phase = .recording(id, startedAt: startedAt, snapshot: snapshot)
-            advanceAudit(id: id, stage: "recording")
+            stageAudit.advance(id: id, stage: "recording")
             publish(.recording(id))
             startRecordingLimit(
                 for: id,
@@ -904,7 +403,7 @@ public actor VoiceInputSessions {
                 .map(VoiceInputProblem.init(audioCaptureError:))
                 ?? VoiceInputProblem(failure: .recordingFailed)
             let activity = VoiceInputActivity.failed(id, problem.failure)
-            let audit = finishAudit(id: id)
+            let audit = stageAudit.finish(id: id)
             let elapsed = max(0, Int(Date().timeIntervalSince(requestedAt) * 1_000))
             let record = VoiceInputHistoryRecord(
                 sessionID: id,
@@ -942,7 +441,7 @@ public actor VoiceInputSessions {
         captureFailureTask?.cancel()
         captureFailureTask = nil
         phase = .processing(id, startedAt: startedAt, snapshot: snapshot)
-        advanceAudit(id: id, stage: "targetCapture")
+        stageAudit.advance(id: id, stage: "targetCapture")
         publish(.processing(id, .capturingTarget, applicationName: nil))
         saveStage(
             .processing(id, .capturingTarget, applicationName: nil),
@@ -1016,7 +515,7 @@ public actor VoiceInputSessions {
             return
         }
         let applicationName = target.applicationName
-        advanceAudit(id: id, stage: "doubao", applicationName: applicationName)
+        stageAudit.advance(id: id, stage: "doubao", applicationName: applicationName)
         publish(.processing(id, .transcribing, applicationName: applicationName))
         saveStage(
             .processing(id, .transcribing, applicationName: applicationName),
@@ -1092,7 +591,7 @@ public actor VoiceInputSessions {
 
         switch target {
         case let .writable(targetSnapshot):
-            advanceAudit(
+            stageAudit.advance(
                 id: id,
                 stage: "delivery",
                 applicationName: targetSnapshot.applicationName
@@ -1137,8 +636,8 @@ public actor VoiceInputSessions {
                     applicationName: targetSnapshot.applicationName,
                     text: processedText.finalText
                 )
-                await finishTerminal(
-                    activity,
+                await finishTerminal(.init(
+                    activity: activity,
                     id: id,
                     startedAt: startedAt,
                     applicationName: targetSnapshot.applicationName,
@@ -1149,7 +648,7 @@ public actor VoiceInputSessions {
                     processedText: processedText,
                     processingSnapshot: snapshot,
                     additionalStageDurations: sessionStageDurations
-                )
+                ))
             case let .pendingCopy(reason),
                  let .pendingCopyDiagnosed(reason, _):
                 let activity = VoiceInputActivity.pendingCopy(
@@ -1159,8 +658,8 @@ public actor VoiceInputSessions {
                 )
                 if reason == .secureTarget {
                     historyTextPolicy = .redacted
-                    await finishTerminal(
-                        activity,
+                    await finishTerminal(.init(
+                        activity: activity,
                         id: id,
                         startedAt: startedAt,
                         applicationName: targetSnapshot.applicationName,
@@ -1177,11 +676,11 @@ public actor VoiceInputSessions {
                             text: "",
                             reason: .secureTarget
                         )
-                    )
+                    ))
                     return
                 }
-                await finishTerminal(
-                    activity,
+                await finishTerminal(.init(
+                    activity: activity,
                     id: id,
                     startedAt: startedAt,
                     applicationName: targetSnapshot.applicationName,
@@ -1193,7 +692,7 @@ public actor VoiceInputSessions {
                     processedText: processedText,
                     processingSnapshot: snapshot,
                     additionalStageDurations: sessionStageDurations
-                )
+                ))
             }
         case let .unavailable(reason):
             let activity = VoiceInputActivity.pendingCopy(
@@ -1203,8 +702,8 @@ public actor VoiceInputSessions {
             )
             if reason == .secureTarget {
                 historyTextPolicy = .redacted
-                await finishTerminal(
-                    activity,
+                await finishTerminal(.init(
+                    activity: activity,
                     id: id,
                     startedAt: startedAt,
                     applicationName: nil,
@@ -1215,11 +714,11 @@ public actor VoiceInputSessions {
                     processingSnapshot: snapshot,
                     additionalStageDurations: sessionStageDurations,
                     historyOutcome: .pendingCopy(id, text: "", reason: .secureTarget)
-                )
+                ))
                 return
             }
-            await finishTerminal(
-                activity,
+            await finishTerminal(.init(
+                activity: activity,
                 id: id,
                 startedAt: startedAt,
                 applicationName: nil,
@@ -1229,7 +728,7 @@ public actor VoiceInputSessions {
                 processedText: processedText,
                 processingSnapshot: snapshot,
                 additionalStageDurations: sessionStageDurations
-            )
+            ))
         }
     }
 
@@ -1270,8 +769,8 @@ public actor VoiceInputSessions {
             return
         }
 
-        let cancelledAtStage = auditStageName
-        let audit = finishAudit(id: id)
+        let cancelledAtStage = stageAudit.currentStage
+        let audit = stageAudit.finish(id: id)
         phase = .finalizing(id)
         finishActiveTriggerSequence()
         preparingStartedAt = nil
@@ -1335,8 +834,8 @@ public actor VoiceInputSessions {
         additionalStageDurations: [String: Int] = [:]
     ) async {
         let activity = VoiceInputActivity.failed(id, problem.failure)
-        await finishTerminal(
-            activity,
+        await finishTerminal(.init(
+            activity: activity,
             id: id,
             startedAt: startedAt,
             applicationName: nil,
@@ -1345,27 +844,12 @@ public actor VoiceInputSessions {
             problem: problem,
             processingSnapshot: processingSnapshot,
             additionalStageDurations: additionalStageDurations
-        )
+        ))
     }
 
-    private func finishTerminal(
-        _ activity: VoiceInputActivity,
-        id: VoiceInputSessionID,
-        startedAt: Date,
-        applicationName: String?,
-        transcription: String?,
-        finalText: String?,
-        transcriptionProvider: String? = nil,
-        providerRequestID: String? = nil,
-        providerErrorCode: String? = nil,
-        deliveryDiagnosticCode: String? = nil,
-        problem: VoiceInputProblem? = nil,
-        processedText: VoiceTextProcessingResult? = nil,
-        processingSnapshot: VoiceTextProcessingSnapshot? = nil,
-        additionalStageDurations: [String: Int] = [:],
-        historyOutcome: VoiceInputActivity? = nil
-    ) async {
-        let audit = finishAudit(id: id)
+    private func finishTerminal(_ termination: VoiceInputSessionTermination) async {
+        let id = termination.id
+        let audit = stageAudit.finish(id: id)
         let terminalHistoryTextPolicy = historyTextPolicy
         let suppressTerminalPresentation =
             suppressedTerminalPresentationSessionID == id
@@ -1391,89 +875,24 @@ public actor VoiceInputSessions {
         deliveryResolution = nil
         deliveryCommitGate = nil
         suppressedTerminalPresentationSessionID = nil
-        let processingNotice: VoiceInputNotice? = if processedText?.refinementStatus
-            == .fellBack
-        {
-            .refinementFellBack(processedText?.refinementFailure?.kind)
-        } else {
-            nil
-        }
-        let measuredStageDurations = (processedText?.stageDurationsMilliseconds ?? [:])
-            .merging(additionalStageDurations) { _, latest in latest }
-        let stageDurations = audit.stageDurations
-            .merging(measuredStageDurations) { _, measured in measured }
-        let providerDiagnostic = problem?.diagnostic
-        let refinementDiagnostic = processedText?.refinementFailure?.providerDiagnostic
-        let mayPersistBody = terminalHistoryTextPolicy == .allowed
-        let mayPersistProviderRequestID = terminalHistoryTextPolicy != .redacted
-        let persistedOutcome = Self.historyOutcome(
-            historyOutcome ?? activity,
-            mayPersistBody: mayPersistBody
-        )
-        let record = VoiceInputHistoryRecord(
-            sessionID: id,
-            startedAt: startedAt,
-            applicationName: nil,
-            transcription: mayPersistBody ? transcription : nil,
-            finalText: mayPersistBody ? finalText : nil,
-            transcriptionProvider: providerDiagnostic?.provider
-                ?? transcriptionProvider
-                ?? (processedText == nil ? nil : "doubao"),
-            providerRequestID: mayPersistProviderRequestID
-                ? (providerDiagnostic?.requestID ?? providerRequestID)
-                : nil,
-            providerErrorCode: providerDiagnostic?.code ?? providerErrorCode,
-            providerOperation: providerDiagnostic?.operation.rawValue,
-            providerStatusCode: providerDiagnostic?.statusCode,
-            // Provider messages are untrusted response text and can echo
-            // credentials or user context. Keep structured codes only.
-            providerMessage: nil,
-            deliveryDiagnosticCode: deliveryDiagnosticCode,
-            deepSeekText: mayPersistBody ? processedText?.deepSeekText : nil,
-            deepSeekRequestID: mayPersistProviderRequestID
-                ? processedText?.deepSeekRequestID
-                : nil,
-            refinementModeName: processingSnapshot?.refinementMode.displayName,
-            refinementPrompt: processingSnapshot?.refinementMode.deepSeekInstruction,
-            refinementStatus: processedText?.refinementStatus.rawValue,
-            refinementFailureCode: processedText?.refinementFailure?.kind.rawValue,
-            refinementFailureStatusCode: refinementDiagnostic?.statusCode,
-            refinementFailureMessage: nil,
-            dictionarySnapshotID: processingSnapshot?.dictionary.id,
-            dictionarySnapshotEntries: processingSnapshot?.dictionary.entries
-                .map(RecordedDictionaryEntry.init) ?? [],
-            dictionaryRequestContext: processingSnapshot?.dictionaryContext,
-            dictionaryReplacements: [],
-            durationMilliseconds: max(
-                0,
-                Int(Date().timeIntervalSince(startedAt) * 1_000)
-            ),
-            stageDurationsMilliseconds: stageDurations,
-            outcome: persistedOutcome
+        let terminal = VoiceInputTerminalRecordBuilder.make(
+            termination,
+            auditedStageDurations: audit.stageDurations,
+            textPolicy: terminalHistoryTextPolicy
         )
         phase = .idle
         if !suppressTerminalPresentation {
-            publish(activity, notice: processingNotice)
+            publish(termination.activity, notice: terminal.notice)
         }
         _ = queueHistory(
-            record,
+            terminal.record,
             terminalPresentation: suppressTerminalPresentation
                 ? nil
                 : .init(
-                    activity: activity,
-                    notice: processingNotice
+                    activity: termination.activity,
+                    notice: terminal.notice
                 )
         )
-    }
-
-    private static func historyOutcome(
-        _ activity: VoiceInputActivity,
-        mayPersistBody: Bool
-    ) -> VoiceInputActivity {
-        guard !mayPersistBody,
-              case let .pendingCopy(id, _, reason) = activity
-        else { return activity }
-        return .pendingCopy(id, text: "", reason: reason)
     }
 
     private func publish(
@@ -1481,15 +900,7 @@ public actor VoiceInputSessions {
         telemetry: RecordingTelemetry? = nil,
         notice: VoiceInputNotice? = nil
     ) {
-        presentation = VoiceInputPresentation(
-            revision: presentation.revision &+ 1,
-            activity: activity,
-            recordingTelemetry: telemetry,
-            notice: notice
-        )
-        for continuation in observers.values {
-            continuation.yield(presentation)
-        }
+        presenter.publish(activity, telemetry: telemetry, notice: notice)
     }
 
     private func observeRecordingTelemetry(for id: VoiceInputSessionID) {
@@ -1585,7 +996,7 @@ public actor VoiceInputSessions {
         guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
             return
         }
-        let audit = finishAudit(id: id)
+        let audit = stageAudit.finish(id: id)
         phase = .finalizing(id)
         finishActiveTriggerSequence()
         preparingStartedAt = nil
@@ -1746,7 +1157,7 @@ public actor VoiceInputSessions {
         case .refining: "deepseek"
         case .delivering: "delivery"
         }
-        advanceAudit(
+        stageAudit.advance(
             id: id,
             stage: auditStage,
             applicationName: applicationName
@@ -1799,16 +1210,11 @@ public actor VoiceInputSessions {
         _ record: VoiceInputHistoryRecord,
         terminalPresentation: TerminalHistoryPresentation? = nil
     ) -> Task<Void, Never> {
-        let previous = historyWriteTasks[record.sessionID]
-        let history = history
-        let token = UUID()
-        historyWriteTokens[record.sessionID] = token
-        let task = Task { [weak self] in
-            await previous?.value
-            await history.save(record)
-            let persistenceNotice = terminalPresentation == nil
-                ? nil
-                : await history.persistenceFailureNotice()
+        historyWrites.enqueue(
+            record,
+            into: history,
+            reportsPersistenceFailure: terminalPresentation != nil
+        ) { [weak self] token, persistenceNotice in
             await self?.historyWriteDidComplete(
                 sessionID: record.sessionID,
                 token: token,
@@ -1816,8 +1222,6 @@ public actor VoiceInputSessions {
                 persistenceNotice: persistenceNotice
             )
         }
-        historyWriteTasks[record.sessionID] = task
-        return task
     }
 
     private func historyWriteDidComplete(
@@ -1826,9 +1230,7 @@ public actor VoiceInputSessions {
         terminalPresentation: TerminalHistoryPresentation?,
         persistenceNotice: String?
     ) {
-        guard historyWriteTokens[sessionID] == token else { return }
-        historyWriteTasks[sessionID] = nil
-        historyWriteTokens[sessionID] = nil
+        guard historyWrites.complete(sessionID: sessionID, token: token) else { return }
         guard let terminalPresentation,
               let persistenceNotice,
               presentation.activity == terminalPresentation.activity
@@ -1860,88 +1262,25 @@ public actor VoiceInputSessions {
     }
 
     private static func milliseconds(_ duration: Duration) -> Int {
-        let components = duration.components
-        return Int(clamping:
-            components.seconds * 1_000
-                + components.attoseconds / 1_000_000_000_000_000
-        )
-    }
-
-    private func beginAudit(id: VoiceInputSessionID, stage: String) {
-        auditSessionID = id
-        auditStageName = stage
-        auditStageStartedAt = .now
-        auditStageDurations = [:]
-        auditApplicationName = nil
-    }
-
-    private func advanceAudit(
-        id: VoiceInputSessionID,
-        stage: String,
-        applicationName: String? = nil
-    ) {
-        guard auditSessionID == id else { return }
-        accumulateCurrentAuditStage()
-        auditStageName = stage
-        auditStageStartedAt = .now
-        if let applicationName {
-            auditApplicationName = applicationName
-        }
-    }
-
-    private func finishAudit(
-        id: VoiceInputSessionID
-    ) -> (applicationName: String?, stageDurations: [String: Int]) {
-        guard auditSessionID == id else { return (nil, [:]) }
-        accumulateCurrentAuditStage()
-        let result = (auditApplicationName, auditStageDurations)
-        auditSessionID = nil
-        auditStageName = nil
-        auditStageStartedAt = nil
-        auditStageDurations = [:]
-        auditApplicationName = nil
-        return result
-    }
-
-    private func accumulateCurrentAuditStage() {
-        guard let stage = auditStageName,
-              let startedAt = auditStageStartedAt
-        else { return }
-        auditStageDurations[stage, default: 0] += Self.milliseconds(
-            startedAt.duration(to: .now)
-        )
+        duration.wholeMillisecondsClamped
     }
 
     private func removeObserver(_ id: UUID) {
-        observers[id] = nil
+        presenter.remove(id)
     }
 
     private func removeTriggerTerminationObserver(_ id: UUID) {
-        triggerTerminationObservers[id] = nil
+        triggerTerminations.remove(id)
     }
 
     private func finishActiveTriggerSequence() {
         guard let sequence = activeTriggerSequence else { return }
         activeTriggerSequence = nil
-        for continuation in triggerTerminationObservers.values {
-            continuation.yield(sequence)
-        }
+        triggerTerminations.yield(sequence)
     }
 
     private func finishRejectedTriggerSequence(_ sequence: UInt64) {
-        for continuation in triggerTerminationObservers.values {
-            continuation.yield(sequence)
-        }
+        triggerTerminations.yield(sequence)
     }
 
-}
-
-private extension InputTargetCaptureResult {
-    var applicationName: String? {
-        if case let .writable(snapshot) = self {
-            snapshot.applicationName
-        } else {
-            nil
-        }
-    }
 }

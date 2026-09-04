@@ -490,9 +490,13 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         self.onConversionFailure = onConversionFailure
     }
 
+    /// The engine tap delivers buffers serially, so the converter and the
+    /// chunk buffer are only ever touched from one thread at a time. The lock
+    /// protects the metrics and the finished flag that `metrics()` and
+    /// `finish()` read from other threads; format conversion happens outside
+    /// it so a slow conversion never blocks a meter read.
     func consume(_ input: AVAudioPCMBuffer) {
         let power = Self.power(of: input)
-        var chunks: [Data] = []
 
         lock.lock()
         guard !isFinished else {
@@ -501,17 +505,42 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         }
         currentPower = power
         peakPower = max(peakPower, power)
+        lock.unlock()
 
+        guard let converted = convert(input) else {
+            lock.lock()
+            didFailConversion = true
+            lock.unlock()
+            onConversionFailure()
+            return
+        }
+
+        var chunks: [Data] = []
+        lock.lock()
+        guard !isFinished else {
+            lock.unlock()
+            return
+        }
+        for data in converted {
+            chunks.append(contentsOf: chunkBuffer.append(data))
+        }
+        lock.unlock()
+
+        for chunk in chunks {
+            guard audioStream.yield(chunk) == .accepted else { return }
+        }
+    }
+
+    /// Converts one input buffer to the output format. Returns nil when the
+    /// converter cannot produce output. Called only from the tap thread.
+    private func convert(_ input: AVAudioPCMBuffer) -> [Data]? {
         let ratio = outputFormat.sampleRate / input.format.sampleRate
         let capacity = AVAudioFrameCount(ceil(Double(input.frameLength) * ratio)) + 16
         guard let output = AVAudioPCMBuffer(
             pcmFormat: outputFormat,
             frameCapacity: capacity
         ) else {
-            didFailConversion = true
-            lock.unlock()
-            onConversionFailure()
-            return
+            return nil
         }
 
         // AVAudioConverter 在 convert 调用内同步执行输入闭包，不跨线程；
@@ -531,22 +560,13 @@ private final class PCMStreamingBridge: @unchecked Sendable {
               status == .haveData || status == .inputRanDry,
               output.frameLength > 0
         else {
-            didFailConversion = true
-            lock.unlock()
-            onConversionFailure()
-            return
+            return nil
         }
 
         let buffers = UnsafeMutableAudioBufferListPointer(output.mutableAudioBufferList)
-        for buffer in buffers {
-            guard let bytes = buffer.mData, buffer.mDataByteSize > 0 else { continue }
-            let converted = Data(bytes: bytes, count: Int(buffer.mDataByteSize))
-            chunks.append(contentsOf: chunkBuffer.append(converted))
-        }
-        lock.unlock()
-
-        for chunk in chunks {
-            guard audioStream.yield(chunk) == .accepted else { return }
+        return buffers.compactMap { buffer in
+            guard let bytes = buffer.mData, buffer.mDataByteSize > 0 else { return nil }
+            return Data(bytes: bytes, count: Int(buffer.mDataByteSize))
         }
     }
 
