@@ -58,6 +58,16 @@ public enum SpecSelection {
         return name.localizedCaseInsensitiveContains(filter)
     }
 
+    /// Whether each case name is written to stderr as it starts. Set
+    /// `SPEAKER_SPEC_TRACE=1` to find the case a run hangs in.
+    public static let traces =
+        ProcessInfo.processInfo.environment["SPEAKER_SPEC_TRACE"] == "1"
+
+    static func trace(_ name: String) {
+        guard traces else { return }
+        FileHandle.standardError.write(Data("▶ \(name)\n".utf8))
+    }
+
     static func parse(_ arguments: [String]) -> String? {
         let words = arguments.dropFirst().filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }
@@ -77,6 +87,7 @@ public func run(
         return
     }
     SpecSelection.executed += 1
+    SpecSelection.trace(name)
     do {
         try body()
     } catch let failure as SpecFailure {
@@ -98,6 +109,7 @@ public func runAsync(
         return
     }
     SpecSelection.executed += 1
+    SpecSelection.trace(name)
     do {
         try await body()
     } catch let failure as SpecFailure {
