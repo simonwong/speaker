@@ -113,7 +113,7 @@ File-backed sensitive data cross `OwnerOnlyFilePersistence`. The implementation 
 
 Credential migration treats the current Keychain service as primary and old Keychain or development files as legacy sources. Migration proceeds only when every legacy source is readable and all non-empty values agree. It writes and reads back the primary value before removing legacy sources. A conflict or inaccessible source preserves all data and emits only provider-level diagnostics.
 
-The persistence decision is recorded in [ADR-0004](adr/0004-protect-local-sensitive-data.md), and the Session Record store's WAL, secure-delete, and checkpoint-convergence rationale in [ADR-0006](adr/0006-store-session-records-in-sqlite.md).
+The persistence decision is recorded in [ADR-0004](adr/0004-protect-local-sensitive-data.md), and the Session Record store's WAL, secure-delete, and checkpoint-convergence rationale in [ADR-0006](adr/0006-store-session-records-in-sqlite.md). `SQLiteSessionHistory` itself holds only Session Record reads and writes, retention, interrupted-session reconciliation, and WAL convergence; `SQLiteConnection` is the one place SQLite's C API is called, `SQLiteHistoryPrivacyMigration` owns the legacy provider-message scrub, and `SQLiteHistoryCorruptionRecovery` owns preserved corrupt-database evidence and its pruning.
 
 ## Local data erasure
 
