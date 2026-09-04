@@ -855,7 +855,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
 
             // Shutdown's cancellation of session two queued one more write
             // behind the blocked ones; it must reach storage before shutdown
-            // returns.
+            // returns. Unblocking resumes the blocked writers in no particular
+            // order, so the records are checked by content rather than position.
             await history.unblock()
             await shutdown.value
             let records = await history.records
@@ -864,9 +865,14 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 records.count == 2,
                 "\(records.count) sessions reached history before shutdown returned"
             )
+            let outcomes = records.map(\.outcome)
             try expect(
-                records.last?.outcome.isCancelled == true,
-                "the write queued during shutdown did not reach history: \(String(describing: records.last?.outcome))"
+                outcomes.contains { $0.isCancelled },
+                "the write queued during shutdown did not reach history: \(outcomes)"
+            )
+            try expect(
+                outcomes.contains { !$0.isCancelled },
+                "the delivered session lost its record: \(outcomes)"
             )
         }
 
