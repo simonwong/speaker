@@ -36,7 +36,13 @@ Use the tightest relevant specification executable while iterating:
 ./scripts/swiftw run --disable-sandbox SpeakerAccuracyMetricsSpecs
 ```
 
-These are sequential `@main` executables with local `run`/`runAsync` and `expect` helpers. They have no per-case filter. Locate a case by name, iterate with its whole executable, then run the full deterministic gate:
+These are sequential `@main` executables. Their `run`/`runAsync`, `expect`, `expectThrows`, `eventually`, and end-of-run summary come from the shared `SpeakerSpecSupport` library target; do not redefine them per executable. Every executable accepts an optional case-name filter after the product name: the words are joined and matched case-insensitively against case names, only matching cases run, and the summary reports how many were skipped. A filter that matches nothing exits with status 2.
+
+```bash
+./scripts/swiftw run --disable-sandbox SpeakerCoreSpecs input target is frozen
+```
+
+Iterate with a filter, then run the whole executable, then the full deterministic gate:
 
 ```bash
 ./scripts/test

@@ -1,23 +1,7 @@
 import Darwin
 import Foundation
 import SpeakerProviderEvidence
-
-private enum SpecFailure: Error {
-    case failed(String)
-}
-
-private func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
-    guard condition() else { throw SpecFailure.failed(message) }
-}
-
-private func expectThrows(_ message: String, _ operation: () throws -> Void) throws {
-    do {
-        try operation()
-        throw SpecFailure.failed(message)
-    } catch is ProviderEvidenceError {
-        return
-    }
-}
+import SpeakerSpecSupport
 
 private func cases(status: EvidenceStatus = .pass) -> [ProviderEvidenceCase] {
     ProviderMatrixCaseID.allCases.map { caseID in
@@ -83,42 +67,36 @@ private func evidence(
 
 @main
 private struct SpeakerProviderEvidenceSpecs {
-    static func main() throws {
+    @MainActor
+    static func main() {
+        var failures: [String] = []
         let valid = evidence()
-        try valid.validate(requirePassingCases: true, requireSignedAppKeychain: false)
-        try expectThrows("release verification accepted development credentials") {
-            try valid.validate(requirePassingCases: true, requireSignedAppKeychain: true)
-        }
-        try evidence(credentialSource: .signedAppKeychain).validate(
-            requirePassingCases: true,
-            requireSignedAppKeychain: true
-        )
         let releaseGeneratedAt = Date(timeIntervalSince1970: 1_700_000_100)
         let releaseEvidence = evidence(
             credentialSource: .signedAppKeychain,
             generatedAt: releaseGeneratedAt
         )
-        try releaseEvidence.validateReleaseBinding(
-            sourceCommit: String(repeating: "a", count: 40),
-            packageResolvedSHA256: String(repeating: "b", count: 64),
-            candidateVersion: "1.2.3",
-            candidateBuild: "42",
-            generatedNotBefore: releaseGeneratedAt.addingTimeInterval(-1),
-            generatedNotAfter: releaseGeneratedAt.addingTimeInterval(1)
-        )
-        try expectThrows("stale release evidence passed") {
-            try releaseEvidence.validateReleaseBinding(
-                sourceCommit: String(repeating: "a", count: 40),
-                packageResolvedSHA256: String(repeating: "b", count: 64),
-                candidateVersion: "1.2.3",
-                candidateBuild: "42",
-                generatedNotBefore: releaseGeneratedAt.addingTimeInterval(1),
-                generatedNotAfter: releaseGeneratedAt.addingTimeInterval(2)
+
+        run("development evidence validates without a signed-app keychain", failures: &failures) {
+            try valid.validate(requirePassingCases: true, requireSignedAppKeychain: false)
+        }
+
+        run("release verification rejects development credentials", failures: &failures) {
+            try expectThrows(ProviderEvidenceError.self, "release verification accepted development credentials") {
+                try valid.validate(requirePassingCases: true, requireSignedAppKeychain: true)
+            }
+        }
+
+        run("signed-app keychain evidence validates for release", failures: &failures) {
+            try evidence(credentialSource: .signedAppKeychain).validate(
+                requirePassingCases: true,
+                requireSignedAppKeychain: true
             )
         }
-        try expectThrows("evidence for another commit passed") {
+
+        run("release binding accepts matching commit, package hash, version, build, and window", failures: &failures) {
             try releaseEvidence.validateReleaseBinding(
-                sourceCommit: String(repeating: "c", count: 40),
+                sourceCommit: String(repeating: "a", count: 40),
                 packageResolvedSHA256: String(repeating: "b", count: 64),
                 candidateVersion: "1.2.3",
                 candidateBuild: "42",
@@ -126,105 +104,159 @@ private struct SpeakerProviderEvidenceSpecs {
                 generatedNotAfter: releaseGeneratedAt.addingTimeInterval(1)
             )
         }
-        try expectThrows("dirty source tree passed") {
-            try evidence(sourceTreeClean: false).validate(
-                requirePassingCases: true,
-                requireSignedAppKeychain: false
+
+        run("release binding rejects stale evidence", failures: &failures) {
+            try expectThrows(ProviderEvidenceError.self, "stale release evidence passed") {
+                try releaseEvidence.validateReleaseBinding(
+                    sourceCommit: String(repeating: "a", count: 40),
+                    packageResolvedSHA256: String(repeating: "b", count: 64),
+                    candidateVersion: "1.2.3",
+                    candidateBuild: "42",
+                    generatedNotBefore: releaseGeneratedAt.addingTimeInterval(1),
+                    generatedNotAfter: releaseGeneratedAt.addingTimeInterval(2)
+                )
+            }
+        }
+
+        run("release binding rejects evidence for another commit", failures: &failures) {
+            try expectThrows(ProviderEvidenceError.self, "evidence for another commit passed") {
+                try releaseEvidence.validateReleaseBinding(
+                    sourceCommit: String(repeating: "c", count: 40),
+                    packageResolvedSHA256: String(repeating: "b", count: 64),
+                    candidateVersion: "1.2.3",
+                    candidateBuild: "42",
+                    generatedNotBefore: releaseGeneratedAt.addingTimeInterval(-1),
+                    generatedNotAfter: releaseGeneratedAt.addingTimeInterval(1)
+                )
+            }
+        }
+
+        run("dirty source tree is rejected", failures: &failures) {
+            try expectThrows(ProviderEvidenceError.self, "dirty source tree passed") {
+                try evidence(sourceTreeClean: false).validate(
+                    requirePassingCases: true,
+                    requireSignedAppKeychain: false
+                )
+            }
+        }
+
+        run("missing matrix case is rejected", failures: &failures) {
+            try expectThrows(ProviderEvidenceError.self, "missing case passed") {
+                try evidence(results: Array(cases().dropLast())).validate(
+                    requirePassingCases: true,
+                    requireSignedAppKeychain: false
+                )
+            }
+        }
+
+        run("duplicate matrix case is rejected", failures: &failures) {
+            var duplicate = cases()
+            duplicate[duplicate.count - 1] = duplicate[0]
+            try expectThrows(ProviderEvidenceError.self, "duplicate case passed") {
+                try evidence(results: duplicate).validate(
+                    requirePassingCases: true,
+                    requireSignedAppKeychain: false
+                )
+            }
+        }
+
+        run("SKIP status is rejected when passing cases are required", failures: &failures) {
+            try expectThrows(ProviderEvidenceError.self, "SKIP passed") {
+                try evidence(results: cases(status: .skip)).validate(
+                    requirePassingCases: true,
+                    requireSignedAppKeychain: false
+                )
+            }
+        }
+
+        run("unsafe provider status and request ID never enter a case or its summary", failures: &failures) {
+            let unsafe = ProviderEvidenceCase(
+                provider: .doubao,
+                caseID: .doubaoConnection,
+                status: .pass,
+                outcome: .passed,
+                providerStatusCode: "secret body: denied",
+                requestID: "key sentry/unsafe"
             )
+            try expect(unsafe.providerStatusCode == nil, "unsafe status was retained")
+            try expect(unsafe.requestID == nil, "unsafe request ID was retained")
+            try expect(!unsafe.privacySafeSummary.contains("secret body"), "stdout retained provider body")
+            try expect(!unsafe.privacySafeSummary.contains("sentry"), "stdout retained unsafe request ID")
         }
-        try expectThrows("missing case passed") {
-            try evidence(results: Array(cases().dropLast())).validate(
-                requirePassingCases: true,
-                requireSignedAppKeychain: false
+
+        run("encoded report has no forbidden fields and strict decoding rejects unknown fields", failures: &failures) {
+            let encoded = try valid.encoded()
+            let encodedText = String(decoding: encoded, as: UTF8.self)
+            for forbidden in ["apiKey", "transcript", "providerMessage", "secret body"] {
+                try expect(!encodedText.contains(forbidden), "report contains forbidden field")
+            }
+            var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            object["providerMessage"] = "do not accept"
+            let unknownField = try JSONSerialization.data(withJSONObject: object)
+            try expectThrows(ProviderEvidenceError.self, "unknown JSON field passed") {
+                _ = try ProviderMatrixEvidence.decodeStrict(unknownField)
+            }
+        }
+
+        run("evidence file is written owner-only into a fresh directory and read back strictly", failures: &failures) {
+            let root = freshFixtureRoot("speaker-provider-evidence-spec")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let reportURL = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
+            let directoryMode = (try FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions] as! NSNumber).intValue
+            let reportMode = (try FileManager.default.attributesOfItem(atPath: reportURL.path)[.posixPermissions] as! NSNumber).intValue
+            try expect(directoryMode == 0o700, "evidence directory is not 0700")
+            try expect(reportMode == 0o600, "evidence report is not 0600")
+            _ = try ProviderMatrixEvidence.decodeStrict(
+                ProviderEvidenceFile.readSecurely(from: reportURL)
             )
+            try expectThrows(ProviderEvidenceError.self, "existing evidence directory was reused") {
+                _ = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
+            }
         }
-        var duplicate = cases()
-        duplicate[duplicate.count - 1] = duplicate[0]
-        try expectThrows("duplicate case passed") {
-            try evidence(results: duplicate).validate(
-                requirePassingCases: true,
-                requireSignedAppKeychain: false
+
+        run("evidence read rejects wide permissions and symlinked reports", failures: &failures) {
+            let root = freshFixtureRoot("speaker-provider-evidence-read-spec")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let reportURL = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: reportURL.path)
+            try expectThrows(ProviderEvidenceError.self, "wide report permissions passed") {
+                _ = try ProviderEvidenceFile.readSecurely(from: reportURL)
+            }
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: reportURL.path)
+            let symlinkURL = root.appendingPathComponent("linked.json")
+            try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: reportURL)
+            try expectThrows(ProviderEvidenceError.self, "symlink report passed") {
+                _ = try ProviderEvidenceFile.readSecurely(from: symlinkURL)
+            }
+        }
+
+        run("evidence write refuses a symlinked ancestor directory", failures: &failures) {
+            let parentFixture = freshFixtureRoot("speaker-provider-parent-spec")
+            defer { try? FileManager.default.removeItem(at: parentFixture) }
+            let realParent = parentFixture.appendingPathComponent("real")
+            let linkedParent = parentFixture.appendingPathComponent("linked")
+            try FileManager.default.createDirectory(
+                at: realParent,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
             )
-        }
-        try expectThrows("SKIP passed") {
-            try evidence(results: cases(status: .skip)).validate(
-                requirePassingCases: true,
-                requireSignedAppKeychain: false
+            try FileManager.default.createSymbolicLink(
+                at: linkedParent,
+                withDestinationURL: realParent
             )
+            try expectThrows(ProviderEvidenceError.self, "symlink ancestor was followed while writing") {
+                _ = try ProviderEvidenceFile.writeAtomically(
+                    valid,
+                    toNewDirectory: linkedParent.appendingPathComponent("evidence")
+                )
+            }
         }
 
-        let unsafe = ProviderEvidenceCase(
-            provider: .doubao,
-            caseID: .doubaoConnection,
-            status: .pass,
-            outcome: .passed,
-            providerStatusCode: "secret body: denied",
-            requestID: "key sentry/unsafe"
-        )
-        try expect(unsafe.providerStatusCode == nil, "unsafe status was retained")
-        try expect(unsafe.requestID == nil, "unsafe request ID was retained")
-        try expect(!unsafe.privacySafeSummary.contains("secret body"), "stdout retained provider body")
-        try expect(!unsafe.privacySafeSummary.contains("sentry"), "stdout retained unsafe request ID")
-
-        let encoded = try valid.encoded()
-        let encodedText = String(decoding: encoded, as: UTF8.self)
-        for forbidden in ["apiKey", "transcript", "providerMessage", "secret body"] {
-            try expect(!encodedText.contains(forbidden), "report contains forbidden field")
-        }
-        var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
-        object["providerMessage"] = "do not accept"
-        let unknownField = try JSONSerialization.data(withJSONObject: object)
-        try expectThrows("unknown JSON field passed") {
-            _ = try ProviderMatrixEvidence.decodeStrict(unknownField)
-        }
-
-        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
-            .appendingPathComponent("speaker-provider-evidence-spec-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let reportURL = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
-        let directoryMode = (try FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions] as! NSNumber).intValue
-        let reportMode = (try FileManager.default.attributesOfItem(atPath: reportURL.path)[.posixPermissions] as! NSNumber).intValue
-        try expect(directoryMode == 0o700, "evidence directory is not 0700")
-        try expect(reportMode == 0o600, "evidence report is not 0600")
-        _ = try ProviderMatrixEvidence.decodeStrict(
-            ProviderEvidenceFile.readSecurely(from: reportURL)
-        )
-        try expectThrows("existing evidence directory was reused") {
-            _ = try ProviderEvidenceFile.writeAtomically(valid, toNewDirectory: root)
-        }
-
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: reportURL.path)
-        try expectThrows("wide report permissions passed") {
-            _ = try ProviderEvidenceFile.readSecurely(from: reportURL)
-        }
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: reportURL.path)
-        let symlinkURL = root.appendingPathComponent("linked.json")
-        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: reportURL)
-        try expectThrows("symlink report passed") {
-            _ = try ProviderEvidenceFile.readSecurely(from: symlinkURL)
-        }
-
-        let parentFixture = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
-            .appendingPathComponent("speaker-provider-parent-spec-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: parentFixture) }
-        let realParent = parentFixture.appendingPathComponent("real")
-        let linkedParent = parentFixture.appendingPathComponent("linked")
-        try FileManager.default.createDirectory(
-            at: realParent,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try FileManager.default.createSymbolicLink(
-            at: linkedParent,
-            withDestinationURL: realParent
-        )
-        try expectThrows("symlink ancestor was followed while writing") {
-            _ = try ProviderEvidenceFile.writeAtomically(
-                valid,
-                toNewDirectory: linkedParent.appendingPathComponent("evidence")
-            )
-        }
-
-        print("PASS: provider evidence schema, privacy, completeness, and filesystem specs")
+        SpecSummary.finish(failures: failures, label: "provider evidence specs")
     }
+}
+
+private func freshFixtureRoot(_ prefix: String) -> URL {
+    URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+        .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
 }

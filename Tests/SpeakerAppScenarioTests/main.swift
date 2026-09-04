@@ -5,15 +5,15 @@ import Combine
 import Foundation
 import SpeakerAppFeatures
 import SpeakerCore
+import SpeakerSpecSupport
 
 @main
 struct SpeakerAppScenarioSpecs {
     @MainActor
     static func main() async {
         var failures: [String] = []
-        var executed = 0
 
-        run("Doubao refresh preserves a verified connection for an existing key", failures: &failures, executed: &executed) {
+        run("Doubao refresh preserves a verified connection for an existing key", failures: &failures) {
             let status = DoubaoConnectionStatus.success("request-id")
             try expect(
                 status.afterCredentialRefresh(keyExists: true)
@@ -21,21 +21,21 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("Doubao refresh drops verification when the key disappears", failures: &failures, executed: &executed) {
+        run("Doubao refresh drops verification when the key disappears", failures: &failures) {
             try expect(
                 DoubaoConnectionStatus.success(nil)
                     .afterCredentialRefresh(keyExists: false) == .unconfigured
             )
         }
 
-        run("Doubao refresh clears a stale connection error for an existing key", failures: &failures, executed: &executed) {
+        run("Doubao refresh clears a stale connection error for an existing key", failures: &failures) {
             try expect(
                 DoubaoConnectionStatus.failure("旧错误")
                     .afterCredentialRefresh(keyExists: true) == .configured
             )
         }
 
-        run("onboarding requires both permissions and a verified connection", failures: &failures, executed: &executed) {
+        run("onboarding requires both permissions and a verified connection", failures: &failures) {
             let ready = OnboardingPresentation(
                 permissions: .init(
                     accessibility: .granted,
@@ -69,7 +69,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(!deletedKeyWithStaleSuccess.isReady)
         }
 
-        run("shortcut recorder captures one physical modifier on release", failures: &failures, executed: &executed) {
+        run("shortcut recorder captures one physical modifier on release", failures: &failures) {
             var policy = ShortcutRecorderPolicy()
             try expect(
                 policy.handle(.flagsChanged(
@@ -151,7 +151,7 @@ struct SpeakerAppScenarioSpecs {
             }
         }
 
-        run("onboarding exposes only valid permission and provider actions", failures: &failures, executed: &executed) {
+        run("onboarding exposes only valid permission and provider actions", failures: &failures) {
             let presentation = OnboardingPresentation(
                 permissions: .init(
                     accessibility: .denied,
@@ -193,8 +193,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "onboarding advances from an explicit microphone grant only",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let grantedAccess = ScenarioPermissionAccess(
                 snapshot: .init(
@@ -255,8 +254,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "data erasure preserves strict ordering and exits only after verification",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let harness = DataErasureHarness()
             let coordinator = SpeakerDataErasureCoordinator(
@@ -287,8 +285,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "data erasure intent survives preference deletion until verification commits",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let suiteName = "speaker-erasure-intent-spec-\(UUID().uuidString)"
             guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -328,8 +325,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "data erasure intent never follows a symbolic-link parent",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let suiteName = "speaker-erasure-intent-link-spec-\(UUID().uuidString)"
             guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -384,8 +380,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "data erasure stops before credentials when login item removal fails",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let harness = DataErasureHarness(failing: ["login"])
             let coordinator = SpeakerDataErasureCoordinator(
@@ -409,8 +404,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "data erasure attempts independent path groups but preserves preferences on failure",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let harness = DataErasureHarness(
                 failing: ["applicationSupport", "caches"]
@@ -435,8 +429,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "data erasure keeps its recovery intent when final verification fails",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let harness = DataErasureHarness(failing: ["verification"])
             let coordinator = SpeakerDataErasureCoordinator(
@@ -456,8 +449,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "concurrent data erasure callers share one non-cancellable operation",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let harness = DataErasureHarness(operationDelay: .milliseconds(8))
             let coordinator = SpeakerDataErasureCoordinator(
@@ -483,8 +475,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "owned local data erasure deletes only verified Library descendants",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -554,8 +545,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "owned local data erasure fails closed for an unsafe path",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -599,8 +589,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "owned local data erasure rejects a parent symlink escaping Library",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -657,8 +646,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "owned data locations include legacy cache for a production bundle",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let locations = SpeakerOwnedDataLocations.current(
                 bundleIdentifier: "com.example.Speaker"
@@ -671,7 +659,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("build signing mode exposes the permission identity boundary", failures: &failures, executed: &executed) {
+        run("build signing mode exposes the permission identity boundary", failures: &failures) {
             let adHoc = SpeakerSigningMode(infoValue: "development-ad-hoc")
             try expect(adHoc == .developmentAdHoc)
             try expect(!adHoc.permissionIdentityIsStable)
@@ -702,7 +690,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(!unknown.permitsLocalDeliverySmoke)
         }
 
-        run("build identity presents version, numeric build and source revision", failures: &failures, executed: &executed) {
+        run("build identity presents version, numeric build and source revision", failures: &failures) {
             let identity = SpeakerBuildIdentity(
                 version: "1.2.3",
                 build: "45",
@@ -717,8 +705,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "software updates fail closed until the complete production identity exists",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let validKey = Data(repeating: 7, count: 32)
                 .base64EncodedString()
@@ -767,8 +754,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "software update staging feed accepts only this repository immutable release",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let stableFeed =
                 "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml"
@@ -809,8 +795,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "software update feature exposes only semantic product state",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let driver = SoftwareUpdateDriverFake()
             let feature = SoftwareUpdateFeature(
@@ -838,8 +823,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "delivery smoke launch arguments are accepted only for local development builds",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let reportURL = URL(
                 fileURLWithPath: "/private/tmp/speaker-delivery-smoke-spec",
@@ -929,7 +913,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("startup privacy cleanup removes only the obsolete installation identifier", failures: &failures, executed: &executed) {
+        run("startup privacy cleanup removes only the obsolete installation identifier", failures: &failures) {
             let suiteName = "speaker-privacy-spec-\(UUID().uuidString)"
             let legacySuiteName = "speaker-legacy-privacy-spec-\(UUID().uuidString)"
             guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -963,8 +947,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "activating another app refreshes permission and restores the shortcut",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let events = PassthroughSubject<Void, Never>()
             let access = ScenarioPermissionAccess(
@@ -1012,8 +995,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "runtime permission revocation stops shortcuts without repeating VoiceOver warnings",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let access = ScenarioPermissionAccess(
                 snapshot: .init(
@@ -1078,8 +1060,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "voice input notices are localized by the app presentation layer",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             try expect(VoiceInputNotice.copied.userMessage == "文字已复制")
             try expect(
@@ -1106,8 +1087,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "voice input failures are localized by the app presentation layer",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let denied = VoiceInputFailure.microphonePermissionDenied
             try expect(denied.userTitle == "麦克风权限未开启")
@@ -1133,8 +1113,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "missing Accessibility permission is not presented as an unsupported editor",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             try expect(
                 PendingCopyReason.accessibilityPermissionMissing.userTitle
@@ -1144,8 +1123,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "diagnostic report renders audio capture environment and unknown fallbacks",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             func report(
                 _ environment: AudioCaptureEnvironmentSnapshot?
@@ -1204,8 +1182,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "diagnostic report includes latest structured failure evidence without user content",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let record = VoiceInputHistoryRecord(
                 sessionID: VoiceInputSessionID(),
@@ -1313,8 +1290,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "global interaction router forwards idle shortcut sequences to voice input",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let voice = RouterVoiceRecorder()
             let router = GlobalVoiceInteractionRouter(
@@ -1338,8 +1314,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "exclusive shortcut confirmation consumes its complete press release sequence",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let voice = RouterVoiceRecorder()
             let router = GlobalVoiceInteractionRouter(
@@ -1365,8 +1340,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "rejected exclusive confirmation stays armed and can be retried",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let voice = RouterVoiceRecorder()
             let router = GlobalVoiceInteractionRouter(
@@ -1397,8 +1371,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "exclusive Escape cancels once and consumes a pending shortcut release",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let voice = RouterVoiceRecorder()
             let router = GlobalVoiceInteractionRouter(
@@ -1428,8 +1401,7 @@ struct SpeakerAppScenarioSpecs {
 
         run(
             "exclusive interaction cannot displace active voice input",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let voice = RouterVoiceRecorder(escapeActive: true)
             let router = GlobalVoiceInteractionRouter(
@@ -1446,7 +1418,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(router.shortcutTarget.shouldConsumeEscape())
         }
 
-        run("onboarding fits the visible screen and keeps a useful resizable minimum", failures: &failures, executed: &executed) {
+        run("onboarding fits the visible screen and keeps a useful resizable minimum", failures: &failures) {
             let largeScreen = OnboardingWindowLayout(
                 visibleFrame: .init(x: 0, y: 0, width: 1_440, height: 900)
             )
@@ -1485,7 +1457,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("voice HUD increases every low-emphasis contrast token", failures: &failures, executed: &executed) {
+        run("voice HUD increases every low-emphasis contrast token", failures: &failures) {
             let standard = VoiceInputHUDContrastPalette(increased: false)
             let increased = VoiceInputHUDContrastPalette(increased: true)
 
@@ -1514,7 +1486,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(standard.fallbackTintBottomOpacity < 0.25)
         }
 
-        run("glass surfaces honor native availability and Reduce Transparency", failures: &failures, executed: &executed) {
+        run("glass surfaces honor native availability and Reduce Transparency", failures: &failures) {
             try expect(
                 AdaptiveGlassSurfacePolicy.resolve(
                     reduceTransparency: false,
@@ -1541,7 +1513,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("onboarding remains ready after an unchanged credential refresh", failures: &failures, executed: &executed) {
+        run("onboarding remains ready after an unchanged credential refresh", failures: &failures) {
             let refreshedStatus = DoubaoConnectionStatus.success("verified")
                 .afterCredentialRefresh(keyExists: true)
             let presentation = OnboardingPresentation(
@@ -1556,7 +1528,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(presentation.isReady)
         }
 
-        run("login item awaiting approval stays enabled and exposes recovery", failures: &failures, executed: &executed) {
+        run("login item awaiting approval stays enabled and exposes recovery", failures: &failures) {
             let presentation = LoginItemPresentation(
                 desiredEnabled: true,
                 serviceState: .requiresApproval
@@ -1569,7 +1541,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(presentation.showsSystemSettingsButton)
         }
 
-        run("missing login item registration remains explicitly recoverable", failures: &failures, executed: &executed) {
+        run("missing login item registration remains explicitly recoverable", failures: &failures) {
             let presentation = LoginItemPresentation(
                 desiredEnabled: true,
                 serviceState: .notRegistered
@@ -1584,7 +1556,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("unavailable login item never presents an effective enabled state", failures: &failures, executed: &executed) {
+        run("unavailable login item never presents an effective enabled state", failures: &failures) {
             let presentation = LoginItemPresentation(
                 desiredEnabled: true,
                 serviceState: .notFound
@@ -1595,7 +1567,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(presentation.notice != nil)
         }
 
-        await runAsync("login item model respects a system-disabled registration until the user acts", failures: &failures, executed: &executed) {
+        await runAsync("login item model respects a system-disabled registration until the user acts", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-login-item-restore-\(UUID().uuidString)",
@@ -1617,7 +1589,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.notice?.contains("打开开关") == true)
         }
 
-        await runAsync("login item model persists an explicit re-enable", failures: &failures, executed: &executed) {
+        await runAsync("login item model persists an explicit re-enable", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-login-item-enable-\(UUID().uuidString)",
@@ -1643,7 +1615,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(persistedSettings.launchAtLogin)
         }
 
-        await runAsync("login item model rolls the system registration back when persistence fails", failures: &failures, executed: &executed) {
+        await runAsync("login item model rolls the system registration back when persistence fails", failures: &failures) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-login-item-failure-\(UUID().uuidString)",
@@ -1673,7 +1645,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.notice?.contains("无法更新登录项") == true)
         }
 
-        run("DeepSeek modes stay inactive until a key is available", failures: &failures, executed: &executed) {
+        run("DeepSeek modes stay inactive until a key is available", failures: &failures) {
             let unavailable = RefinementActivationPlan(
                 desiredMode: .fullRewrite(),
                 hasStoredKey: false
@@ -1689,7 +1661,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(available.deferredMode == nil)
         }
 
-        run("only DeepSeek built-in modes expose a prompt editor", failures: &failures, executed: &executed) {
+        run("only DeepSeek built-in modes expose a prompt editor", failures: &failures) {
             try expect(
                 RefinementChoice(mode: .conciseCleanup()) == .conciseCleanup
             )
@@ -1729,7 +1701,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(overridden?.defaultPrompt != overridden?.effectivePrompt)
         }
 
-        run("refinement prompt editor gates save and restore on the draft", failures: &failures, executed: &executed) {
+        run("refinement prompt editor gates save and restore on the draft", failures: &failures) {
             let state = RefinementPromptPresentation.editorState(for: .conciseCleanup())
             try expect(state != nil)
             guard let state else { return }
@@ -1753,8 +1725,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "dictionary settings exposes provider capacity and saves a hinted Entry",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -1790,8 +1761,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "history adds an edited candidate through the shared Personal Dictionary model",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -1869,8 +1839,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "built-in prompts stay inspectable and editable without a DeepSeek key",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -1914,8 +1883,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "saving a key restores the deferred mode and its current prompt draft",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -1960,7 +1928,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(currentMode == expectedMode)
         }
 
-        await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures, executed: &executed) {
+        await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-doubao-settings-\(UUID().uuidString)",
@@ -1998,7 +1966,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.status == .unconfigured)
         }
 
-        await runAsync("Doubao connection result is bound to the checked resource", failures: &failures, executed: &executed) {
+        await runAsync("Doubao connection result is bound to the checked resource", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-doubao-resource-\(UUID().uuidString)",
@@ -2027,7 +1995,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.status == .configured)
         }
 
-        run("recording takes priority over the menu bar permission warning", failures: &failures, executed: &executed) {
+        run("recording takes priority over the menu bar permission warning", failures: &failures) {
             let activity = VoiceInputActivity.recording(VoiceInputSessionID())
             let permissions = PermissionSnapshot(
                 accessibility: .denied,
@@ -2042,7 +2010,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("menu bar reflects permission state outside recording", failures: &failures, executed: &executed) {
+        run("menu bar reflects permission state outside recording", failures: &failures) {
             let granted = PermissionSnapshot(
                 accessibility: .granted,
                 microphone: .granted
@@ -2066,7 +2034,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("processing is not presented as active recording in the menu bar", failures: &failures, executed: &executed) {
+        run("processing is not presented as active recording in the menu bar", failures: &failures) {
             let activity = VoiceInputActivity.processing(
                 VoiceInputSessionID(),
                 .transcribing,
@@ -2085,7 +2053,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("main window uses one minimum and one responsive breakpoint", failures: &failures, executed: &executed) {
+        run("main window uses one minimum and one responsive breakpoint", failures: &failures) {
             let minimum = MainWindowLayout(availableWidth: 720)
             let justBelowRegular = MainWindowLayout(availableWidth: 779)
             let regular = MainWindowLayout(availableWidth: 780)
@@ -2116,7 +2084,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(regular.overviewMetricDividerPadding == 34)
         }
 
-        run("settings and main window expose the approved information architecture", failures: &failures, executed: &executed) {
+        run("settings and main window expose the approved information architecture", failures: &failures) {
             try expect(
                 SettingsGroup.allCases == [
                     .shortcut,
@@ -2178,7 +2146,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("API key cards show a persistent input only before a key is saved", failures: &failures, executed: &executed) {
+        run("API key cards show a persistent input only before a key is saved", failures: &failures) {
             try expect(
                 APIKeyCardPresentation.mode(
                     hasStoredKey: false,
@@ -2205,7 +2173,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("main window visibility drives dock activation policy once per transition", failures: &failures, executed: &executed) {
+        run("main window visibility drives dock activation policy once per transition", failures: &failures) {
             var appliedPolicies: [MainWindowActivationPolicy] = []
             let feature = MainWindowVisibilityFeature {
                 appliedPolicies.append($0)
@@ -2222,7 +2190,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("settings navigation presents ordinary entry at the top", failures: &failures, executed: &executed) {
+        run("settings navigation presents ordinary entry at the top", failures: &failures) {
             let navigation = SettingsNavigationModel()
 
             try expect(navigation.presentationRequest == nil)
@@ -2236,7 +2204,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(navigation.presentationRequest == nil)
         }
 
-        run("settings navigation emits every explicit presentation request", failures: &failures, executed: &executed) {
+        run("settings navigation emits every explicit presentation request", failures: &failures) {
             let navigation = SettingsNavigationModel()
 
             navigation.open(.permissions)
@@ -2258,7 +2226,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(navigation.presentationRequest?.target == .top)
         }
 
-        run("data erasure keeps failure recovery reachable", failures: &failures, executed: &executed) {
+        run("data erasure keeps failure recovery reachable", failures: &failures) {
             let failure = SpeakerDataErasureFailure(
                 issues: [],
                 remaining: [.history]
@@ -2275,7 +2243,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("menu bar presents only compact contextual shortcuts in exact order", failures: &failures, executed: &executed) {
+        run("menu bar presents only compact contextual shortcuts in exact order", failures: &failures) {
             let idle = MenuBarVoiceCapabilities()
             let active = MenuBarVoiceCapabilities(
                 showsStatus: true,
@@ -2375,7 +2343,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("menu commands route to the intended product destination", failures: &failures, executed: &executed) {
+        run("menu commands route to the intended product destination", failures: &failures) {
             let navigation = SettingsNavigationModel()
             var events: [String] = []
             let router = MenuBarCommandRouter(
@@ -2419,7 +2387,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(events.last == "terminate")
         }
 
-        run("voice activity presentation is shared across experience surfaces", failures: &failures, executed: &executed) {
+        run("voice activity presentation is shared across experience surfaces", failures: &failures) {
             let id = VoiceInputSessionID()
             let transcribing = VoiceInputActivity.processing(
                 id,
@@ -2451,7 +2419,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("initial shortcut state does not announce an activation", failures: &failures, executed: &executed) {
+        run("initial shortcut state does not announce an activation", failures: &failures) {
             let feature = makeFeature()
             var announcements: [String] = []
             let coordinator = ShortcutAnnouncementCoordinator(
@@ -2463,7 +2431,7 @@ struct SpeakerAppScenarioSpecs {
             withExtendedLifetime(coordinator) {}
         }
 
-        run("successful shortcut activation announces exactly once", failures: &failures, executed: &executed) {
+        run("successful shortcut activation announces exactly once", failures: &failures) {
             let feature = makeFeature()
             var announcements: [String] = []
             let coordinator = ShortcutAnnouncementCoordinator(
@@ -2477,7 +2445,7 @@ struct SpeakerAppScenarioSpecs {
             withExtendedLifetime(coordinator) {}
         }
 
-        run("shortcut activation failure announces its precise boundary", failures: &failures, executed: &executed) {
+        run("shortcut activation failure announces its precise boundary", failures: &failures) {
             let feature = makeFeature(functionResult: .eventTapUnavailable)
             var announcements: [String] = []
             let coordinator = ShortcutAnnouncementCoordinator(
@@ -2491,7 +2459,7 @@ struct SpeakerAppScenarioSpecs {
             withExtendedLifetime(coordinator) {}
         }
 
-        await runAsync("persistence retry announces both failure and recovery", failures: &failures, executed: &executed) {
+        await runAsync("persistence retry announces both failure and recovery", failures: &failures) {
             let persistence = FailOncePersistence()
             let feature = VoiceShortcutFeature(
                 functionKeyMonitor: FunctionMonitorFake(),
@@ -2518,7 +2486,7 @@ struct SpeakerAppScenarioSpecs {
             withExtendedLifetime(coordinator) {}
         }
 
-        await runAsync("voice experience owns Esc immediately and fences triggers after shutdown", failures: &failures, executed: &executed) {
+        await runAsync("voice experience owns Esc immediately and fences triggers after shutdown", failures: &failures) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -2542,7 +2510,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("voice experience consumes Esc while processing and cancels the processor", failures: &failures, executed: &executed) {
+        await runAsync("voice experience consumes Esc while processing and cancels the processor", failures: &failures) {
             let processor = ExperienceHangingProcessor()
             let sessions = VoiceInputSessions(
                 audioCapture: ExperienceAudioCaptureFake(),
@@ -2588,7 +2556,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("successful automatic input stays visually silent but announces completion", failures: &failures, executed: &executed) {
+        await runAsync("successful automatic input stays visually silent but announces completion", failures: &failures) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
                 audioCapture: ExperienceAudioCaptureFake(),
@@ -2633,8 +2601,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "an empty provider transcript ends silently",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
@@ -2685,7 +2652,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("clipboard failure produces one retained-result announcement", failures: &failures, executed: &executed) {
+        await runAsync("clipboard failure produces one retained-result announcement", failures: &failures) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
                 audioCapture: ExperienceAudioCaptureFake(),
@@ -2738,7 +2705,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("successful copy is announced without leaving a stale menu notice", failures: &failures, executed: &executed) {
+        await runAsync("successful copy is announced without leaving a stale menu notice", failures: &failures) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -2776,7 +2743,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("history failure announces only the newly reported problem", failures: &failures, executed: &executed) {
+        await runAsync("history failure announces only the newly reported problem", failures: &failures) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
                 audioCapture: ExperienceAudioCaptureFake(),
@@ -2824,7 +2791,7 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("voice experience replaces retained text on a new press and rejects stale actions", failures: &failures, executed: &executed) {
+        await runAsync("voice experience replaces retained text on a new press and rejects stale actions", failures: &failures) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -2892,7 +2859,7 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        await runAsync("voice experience projects terminal persistence notices", failures: &failures, executed: &executed) {
+        await runAsync("voice experience projects terminal persistence notices", failures: &failures) {
             let fixture = makeVoiceExperienceFixture(
                 history: ExperienceHistoryFake(
                     failureNotice: "会话历史写入失败：磁盘不可用"
@@ -2918,7 +2885,7 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        await runAsync("stale cancel capability cannot cancel a newer recording", failures: &failures, executed: &executed) {
+        await runAsync("stale cancel capability cannot cancel a newer recording", failures: &failures) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -2948,8 +2915,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync(
             "recording limit guidance reaches the production HUD and menu state",
-            failures: &failures,
-            executed: &executed
+            failures: &failures
         ) {
             let deadline = ScenarioRecordingDeadline()
             let sessions = VoiceInputSessions(
@@ -3004,7 +2970,7 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        await runAsync("recovery action routes to speech settings and dismisses the failure", failures: &failures, executed: &executed) {
+        await runAsync("recovery action routes to speech settings and dismisses the failure", failures: &failures) {
             let sessions = VoiceInputSessions(
                 audioCapture: ExperienceAudioCaptureFake(),
                 targetCapture: ExperienceTargetCaptureFake(),
@@ -3039,14 +3005,7 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        guard failures.isEmpty else {
-            for failure in failures {
-                FileHandle.standardError.write(Data("FAIL: \(failure)\n".utf8))
-            }
-            Darwin.exit(1)
-        }
-
-        print("PASS: \(executed) app scenario specs")
+        SpecSummary.finish(failures: failures, label: "app scenario specs")
     }
 
     @MainActor
@@ -3349,51 +3308,6 @@ private actor ExperienceHangingProcessor: VoiceTextProcessing {
             throw CancellationError()
         }
         throw VoiceTextProcessingFailure(userFailure: .transcriptionFailed)
-    }
-}
-
-private struct SpecFailure: Error {
-    let message: String
-}
-
-private func expect(
-    _ condition: @autoclosure () -> Bool,
-    _ message: String = "expectation failed"
-) throws {
-    guard condition() else { throw SpecFailure(message: message) }
-}
-
-@MainActor
-private func run(
-    _ name: String,
-    failures: inout [String],
-    executed: inout Int,
-    body: () throws -> Void
-) {
-    executed += 1
-    do {
-        try body()
-    } catch let failure as SpecFailure {
-        failures.append("\(name): \(failure.message)")
-    } catch {
-        failures.append("\(name): \(error)")
-    }
-}
-
-@MainActor
-private func runAsync(
-    _ name: String,
-    failures: inout [String],
-    executed: inout Int,
-    body: () async throws -> Void
-) async {
-    executed += 1
-    do {
-        try await body()
-    } catch let failure as SpecFailure {
-        failures.append("\(name): \(failure.message)")
-    } catch {
-        failures.append("\(name): \(error)")
     }
 }
 
