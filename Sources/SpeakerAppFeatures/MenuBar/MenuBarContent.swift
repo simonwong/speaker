@@ -1,8 +1,10 @@
 import AppKit
-import SpeakerAppFeatures
 import SwiftUI
 
-struct MenuBarContent: View {
+/// The menu bar extra's rows. Order comes from `MenuBarPresentation`; the
+/// wording, symbols, and shortcuts of each row live here rather than in the
+/// composition root.
+package struct MenuBarContent: View {
     @ObservedObject var voiceInput: VoiceInputExperience
     @ObservedObject var refinement: RefinementSettingsModel
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
@@ -11,6 +13,24 @@ struct MenuBarContent: View {
     let startRuntime: () -> Void
     let refreshPermissions: () -> Void
     @Environment(\.openWindow) private var openWindow
+
+    package init(
+        voiceInput: VoiceInputExperience,
+        refinement: RefinementSettingsModel,
+        dataErasure: SpeakerDataErasureCoordinator,
+        settingsNavigation: SettingsNavigationModel,
+        mainWindow: MainWindowModel,
+        startRuntime: @escaping () -> Void,
+        refreshPermissions: @escaping () -> Void
+    ) {
+        self.voiceInput = voiceInput
+        self.refinement = refinement
+        self.dataErasure = dataErasure
+        self.settingsNavigation = settingsNavigation
+        self.mainWindow = mainWindow
+        self.startRuntime = startRuntime
+        self.refreshPermissions = refreshPermissions
+    }
 
     private var commandRouter: MenuBarCommandRouter {
         MenuBarCommandRouter(
@@ -37,7 +57,7 @@ struct MenuBarContent: View {
         openWindow(id: MainWindowModel.windowID)
     }
 
-    var body: some View {
+    package var body: some View {
         Group {
             ForEach(rows.indices, id: \.self) { index in
                 row(rows[index])

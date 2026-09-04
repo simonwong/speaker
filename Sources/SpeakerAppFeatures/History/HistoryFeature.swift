@@ -1,44 +1,64 @@
 import Combine
 import Foundation
-import SpeakerAppFeatures
 import SpeakerCore
 import SwiftUI
 
-enum HistoryOperation: Equatable {
+package enum HistoryOperation: Equatable {
     case copying(VoiceInputSessionID)
     case deleting(VoiceInputSessionID)
     case clearing
     case addingDictionaryEntry
 }
 
+/// The History tab's state: the visible Session Records, the moment they were
+/// read, and the one operation allowed to run at a time.
 @MainActor
-final class HistoryModel: ObservableObject {
-    @Published private(set) var records: [VoiceInputHistoryRecord] = []
-    @Published private(set) var totalRecordCount = 0
-    @Published var query = ""
-    @Published private(set) var notice: String?
-    @Published private(set) var feedback: HistoryDashboardFeedback?
-    @Published private(set) var activeOperation: HistoryOperation?
+package final class HistoryModel: ObservableObject {
+    @Published package private(set) var records: [VoiceInputHistoryRecord] = []
+    @Published package private(set) var totalRecordCount = 0
+    @Published package var query = ""
+    @Published package private(set) var notice: String?
+    @Published package private(set) var feedback: HistoryDashboardFeedback?
+    @Published package private(set) var activeOperation: HistoryOperation?
+    /// The moment the last refresh read the store. Day grouping is pinned to
+    /// it, so a specification can fix the 今天/昨天 boundary.
+    @Published package private(set) var referenceDate: Date
 
     private let store: any LocalSessionHistoryStoring
     private let clipboard: any ClipboardWriting
     private let dictionary: DictionarySettingsModel
     private let announce: (String) -> Void
+    private let now: () -> Date
     private var feedbackTask: Task<Void, Never>?
 
-    init(
+    package init(
         store: any LocalSessionHistoryStoring,
         clipboard: any ClipboardWriting,
         dictionary: DictionarySettingsModel,
-        announce: @escaping (String) -> Void
+        announce: @escaping (String) -> Void,
+        now: @escaping () -> Date = { Date() }
     ) {
         self.store = store
         self.clipboard = clipboard
         self.dictionary = dictionary
         self.announce = announce
+        self.now = now
+        referenceDate = now()
     }
 
-    func refresh() async {
+    package var dashboardState: HistoryDashboardState {
+        HistoryDashboardState(
+            records: records,
+            totalRecordCount: totalRecordCount,
+            notice: notice,
+            feedback: feedback,
+            isBusy: activeOperation != nil,
+            referenceDate: referenceDate
+        )
+    }
+
+    package func refresh() async {
+        referenceDate = now()
         records = HistoryPresentation.filteredRecords(
             await store.allRecords(),
             query: query
@@ -56,7 +76,7 @@ final class HistoryModel: ObservableObject {
     }
 
     @discardableResult
-    func copy(_ record: VoiceInputHistoryRecord) async -> Bool {
+    package func copy(_ record: VoiceInputHistoryRecord) async -> Bool {
         guard activeOperation == nil,
               let text = HistoryPresentation.retainedText(for: record)
         else { return false }
@@ -74,7 +94,7 @@ final class HistoryModel: ObservableObject {
     }
 
     @discardableResult
-    func delete(_ id: VoiceInputSessionID) async -> Bool {
+    package func delete(_ id: VoiceInputSessionID) async -> Bool {
         guard activeOperation == nil else { return false }
         activeOperation = .deleting(id)
         defer { activeOperation = nil }
@@ -92,7 +112,7 @@ final class HistoryModel: ObservableObject {
     }
 
     @discardableResult
-    func clear() async -> Bool {
+    package func clear() async -> Bool {
         guard activeOperation == nil else { return false }
         let deletedCount = totalRecordCount
         activeOperation = .clearing
@@ -114,7 +134,7 @@ final class HistoryModel: ObservableObject {
     }
 
     @discardableResult
-    func addDictionaryEntry(_ word: String) async -> Bool {
+    package func addDictionaryEntry(_ word: String) async -> Bool {
         guard activeOperation == nil else { return false }
         activeOperation = .addingDictionaryEntry
         defer { activeOperation = nil }
@@ -155,22 +175,16 @@ final class HistoryModel: ObservableObject {
 }
 
 
-struct HistoryView: View {
+package struct HistoryView: View {
     @ObservedObject var model: HistoryModel
 
-    init(model: HistoryModel) {
+    package init(model: HistoryModel) {
         self.model = model
     }
 
-    var body: some View {
+    package var body: some View {
         HistoryDashboard(
-            state: HistoryDashboardState(
-                records: model.records,
-                totalRecordCount: model.totalRecordCount,
-                notice: model.notice,
-                feedback: model.feedback,
-                isBusy: model.activeOperation != nil
-            ),
+            state: model.dashboardState,
             query: $model.query,
             actions: HistoryDashboardActions(
                 refresh: { Task { await model.refresh() } },

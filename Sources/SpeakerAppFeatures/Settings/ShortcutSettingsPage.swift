@@ -37,7 +37,9 @@ struct ShortcutSettingsPage: View {
     private var recorderRow: some View {
         HStack(spacing: 14) {
             Text(shortcut.preference.displayName)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .font(
+                    Font.system(.title2, design: .rounded).weight(.semibold)
+                )
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .frame(minWidth: 72, minHeight: 40)
@@ -190,6 +192,7 @@ private struct GestureHint: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: icon)
+                // A glyph centred in a fixed 24pt tile.
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 24, height: 24)

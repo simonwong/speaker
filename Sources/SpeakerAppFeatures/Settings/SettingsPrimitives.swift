@@ -80,7 +80,7 @@ package struct StatusBadge: View {
                 .foregroundStyle(contrast == .increased ? Color.primary : color)
         } icon: {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(SpeakerTypography.footnote.weight(.semibold))
                 .foregroundStyle(color)
         }
             .font(SpeakerTypography.footnote.weight(.medium))

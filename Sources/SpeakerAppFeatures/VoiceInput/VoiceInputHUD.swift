@@ -88,6 +88,7 @@ private struct ActivityPillModel: Equatable {
     }
 
     let phase: Phase
+    let layout: VoiceInputPanelLayout
     let accessibilityTitle: String
     let cancelHint: String
     let cancelAction: VoiceInputExperienceAction
@@ -96,11 +97,13 @@ private struct ActivityPillModel: Equatable {
         switch presentation {
         case let .recording(peakPower, cancelAction):
             phase = .recording(peakPower: peakPower)
+            layout = .recording
             accessibilityTitle = "正在录音"
             cancelHint = "停止录音并忽略本次内容"
             self.cancelAction = cancelAction
         case let .processing(title, cancelAction):
             phase = .processing
+            layout = .processing
             accessibilityTitle = title
             cancelHint = "停止当前处理并忽略迟到结果"
             self.cancelAction = cancelAction
@@ -130,8 +133,8 @@ private struct ActivityPill: View {
 
     var body: some View {
         ActivityHUDSurface(
-            width: isRevealed ? 118 : 10,
-            height: 34,
+            width: isRevealed ? contentSize.width : 10,
+            height: contentSize.height,
             palette: palette
         ) {
             ZStack {
@@ -140,10 +143,13 @@ private struct ActivityPill: View {
                     levels: levels,
                     reduceMotion: reduceMotion
                 )
-                .frame(width: 96, height: 34)
+                .frame(width: waveformWidth, height: contentSize.height)
                 .mask {
                     Capsule()
-                        .frame(width: isRevealed ? 96 : 2, height: 34)
+                        .frame(
+                            width: isRevealed ? waveformWidth : 2,
+                            height: contentSize.height
+                        )
                 }
                 .opacity(isHovered ? 0.3 : 1)
                 .animation(
@@ -166,7 +172,7 @@ private struct ActivityPill: View {
             }
         }
         .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-        .padding(5)
+        .padding(VoiceInputPanelLayout.contentInset)
         .accessibilityElement(children: .contain)
         .task {
             guard dismissal == nil else { return }
@@ -208,6 +214,16 @@ private struct ActivityPill: View {
                 levels = advanced
             }
         }
+    }
+
+    private var contentSize: CGSize {
+        model.layout.contentSize
+    }
+
+    /// The waveform stops short of the pill edges so the cancel control has
+    /// room without the bars ever touching the capsule.
+    private var waveformWidth: CGFloat {
+        contentSize.width - 22
     }
 
     /// Microphone power mapped into 0…1 bar strength. The gamma keeps room
@@ -453,20 +469,24 @@ private struct PendingCopyStrip: View {
     let copy: () -> Void
     let dismiss: () -> Void
 
+    private var contentSize: CGSize {
+        VoiceInputPanelLayout.pendingCopy.contentSize
+    }
+
     var body: some View {
         ActivityHUDSurface(
-            width: 384,
-            height: 44,
+            width: contentSize.width,
+            height: contentSize.height,
             palette: palette
         ) {
             HStack(spacing: 9) {
                 Image(systemName: "doc.on.clipboard")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(SpeakerVisualIdentity.warmAccent)
                     .accessibilityHidden(true)
 
                 Text(text)
-                    .font(.system(size: 12.5))
+                    .font(.callout)
                     .foregroundStyle(.primary.opacity(0.85))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -495,7 +515,7 @@ private struct PendingCopyStrip: View {
             .padding(.leading, 16)
             .padding(.trailing, 9)
         }
-        .padding(5)
+        .padding(VoiceInputPanelLayout.contentInset)
     }
 }
 
@@ -510,22 +530,26 @@ private struct ProblemStrip: View {
     let palette: VoiceInputHUDContrastPalette
     let dismiss: () -> Void
 
+    private var contentSize: CGSize {
+        VoiceInputPanelLayout.problem.contentSize
+    }
+
     var body: some View {
         ActivityHUDSurface(
-            width: 320,
-            height: 44,
+            width: contentSize.width,
+            height: contentSize.height,
             palette: palette
         ) {
             HStack(spacing: 9) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(
                         .red.opacity(max(0.82, palette.errorIconOpacity))
                     )
                     .accessibilityHidden(true)
 
                 Text(title)
-                    .font(.system(size: 12.5))
+                    .font(.callout)
                     .foregroundStyle(.primary.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -545,7 +569,7 @@ private struct ProblemStrip: View {
             .padding(.leading, 16)
             .padding(.trailing, 9)
         }
-        .padding(5)
+        .padding(VoiceInputPanelLayout.contentInset)
     }
 }
 
@@ -575,7 +599,7 @@ private struct HUDSecondaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary.opacity(foregroundOpacity))
                 .lineLimit(1)
                 .padding(.horizontal, 11)
@@ -589,7 +613,7 @@ private struct HUDSecondaryButton: View {
         .buttonStyle(.plain)
         .accessibilityHidden(true)
         .overlay {
-            HUDAccessibilityAction(
+            AccessibilityButtonBridge(
                 label: accessibilityLabel ?? title,
                 hint: accessibilityHint,
                 action: action
@@ -636,6 +660,7 @@ private struct ActivityHUDCloseButton: View {
     private var button: some View {
         Button(action: action) {
             Image(systemName: "xmark")
+                // A glyph centred in a fixed 24pt hit circle.
                 .font(.system(size: 8.5, weight: .semibold))
                 .foregroundStyle(
                     .primary.opacity(
@@ -663,78 +688,11 @@ private struct ActivityHUDCloseButton: View {
         .help(help)
         .accessibilityHidden(true)
         .overlay {
-            HUDAccessibilityAction(
+            AccessibilityButtonBridge(
                 label: accessibilityLabel,
                 hint: accessibilityHint,
                 action: action
             )
         }
-    }
-}
-
-/// An invisible accessibility adapter over a visually identical SwiftUI
-/// control. AppKit can discover and press this view even when SwiftUI lazily
-/// omits its virtual accessibility children while VoiceOver is not running.
-/// Mouse hit-testing deliberately falls through to the original SwiftUI
-/// button, preserving hover, click and keyboard-shortcut behaviour.
-private struct HUDAccessibilityAction: NSViewRepresentable {
-    let label: String
-    let hint: String
-    let action: () -> Void
-
-    func makeNSView(context: Context) -> HUDAccessibilityActionView {
-        HUDAccessibilityActionView(
-            label: label,
-            hint: hint,
-            action: action
-        )
-    }
-
-    func updateNSView(
-        _ view: HUDAccessibilityActionView,
-        context: Context
-    ) {
-        view.update(label: label, hint: hint, action: action)
-    }
-}
-
-@MainActor
-private final class HUDAccessibilityActionView:
-    NSView,
-    @preconcurrency NSAccessibilityButton
-{
-    private var accessibilityAction: () -> Void
-
-    init(label: String, hint: String, action: @escaping () -> Void) {
-        accessibilityAction = action
-        super.init(frame: .zero)
-        update(label: label, hint: hint, action: action)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func update(
-        label: String,
-        hint: String,
-        action: @escaping () -> Void
-    ) {
-        accessibilityAction = action
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel(label)
-        setAccessibilityHelp(hint)
-        setAccessibilityEnabled(true)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        accessibilityAction()
-        return true
     }
 }

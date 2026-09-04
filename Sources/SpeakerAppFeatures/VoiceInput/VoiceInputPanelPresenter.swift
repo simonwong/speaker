@@ -10,39 +10,6 @@ private final class NonactivatingVoiceInputPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private enum VoiceInputPanelLayout: Equatable, Sendable {
-    case processing
-    case recording
-    case pendingCopy
-    case problem
-
-    init?(_ presentation: VoiceInputOverlayPresentation) {
-        switch presentation {
-        case .hidden:
-            return nil
-        case .processing:
-            self = .processing
-        case .recording:
-            self = .recording
-        case .pendingCopy:
-            self = .pendingCopy
-        case .problem:
-            self = .problem
-        }
-    }
-
-    var size: CGSize {
-        switch self {
-        case .processing, .recording:
-            CGSize(width: 128, height: 44)
-        case .pendingCopy:
-            CGSize(width: 394, height: 54)
-        case .problem:
-            CGSize(width: 330, height: 54)
-        }
-    }
-}
-
 struct VoiceInputPanelDismissal: Equatable, Sendable {
     let collapsesActivity: Bool
     let fadeDuration: TimeInterval

@@ -35,7 +35,7 @@ final class SpeakerRuntime: ObservableObject {
     private let startup: RuntimeStartupSequence
     private let shutdown: RuntimeShutdownCoordinator
     private var started = false
-    private var childStateCancellables = Set<AnyCancellable>()
+    private var runtimeCancellables = Set<AnyCancellable>()
 #if DEBUG
     private var visualScenarioCancellable: AnyCancellable?
 #endif
@@ -272,13 +272,6 @@ final class SpeakerRuntime: ObservableObject {
                 terminate: dependencies.workspace.terminate
             )
         )
-
-        permissions.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
-            .store(in: &childStateCancellables)
-        voiceInput.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
-            .store(in: &childStateCancellables)
     }
 
     private static func makeDataErasureDependencies(
@@ -379,7 +372,7 @@ final class SpeakerRuntime: ObservableObject {
                     await loginItemSettings?.refresh()
                 }
             }
-            .store(in: &childStateCancellables)
+            .store(in: &runtimeCancellables)
         voiceInput.start()
         panel.start()
         dependencies.termination.handler = { [shutdown] in
@@ -439,7 +432,9 @@ final class SpeakerRuntime: ObservableObject {
         ))
         let copied = await SystemClipboardWriter().copy(report)
         diagnostics.publish(
-            copied ? "诊断信息已复制，不包含文字、音频或 API Key。" : "复制失败，请重试。"
+            copied
+                ? SpeakerCopy.Diagnostics.copied
+                : SpeakerCopy.Diagnostics.copyFailed
         )
     }
 

@@ -20,30 +20,39 @@ package enum SpeakerSurfaceMetrics {
     package static let iconTileCornerRadius: CGFloat = 7
 }
 
-/// The only type sizes the main window uses.
+/// The only type ladder the main window uses.
+///
+/// Every rung is a relative text style, so the whole window follows the
+/// accessibility text size instead of freezing at one point size. The names
+/// stay product-facing: `caption` is the small supporting line, which the
+/// system ladder calls Callout, and `footnote` the smallest, which it calls
+/// Subheadline.
 package enum SpeakerTypography {
-    package static let pageTitle = Font.system(size: 20, weight: .semibold)
-    package static let cardTitle = Font.system(size: 13, weight: .semibold)
-    package static let sectionHeader = Font.system(size: 12, weight: .semibold)
-    package static let body = Font.system(size: 13)
-    package static let bodyEmphasis = Font.system(size: 13, weight: .medium)
-    package static let caption = Font.system(size: 12)
-    package static let footnote = Font.system(size: 11)
+    package static let pageTitle = Font.title2.weight(.semibold)
+    package static let cardTitle = Font.headline
+    package static let sectionHeader = Font.callout.weight(.semibold)
+    package static let body = Font.body
+    package static let bodyEmphasis = Font.body.weight(.medium)
+    package static let caption = Font.callout
+    package static let footnote = Font.subheadline
     package static let mono = Font.system(
-        size: 11,
-        weight: .medium,
+        .subheadline,
         design: .monospaced
-    )
-    package static let heroNumber = Font.system(
-        size: 64,
-        weight: .semibold,
-        design: .serif
-    ).monospacedDigit()
+    ).weight(.medium)
     package static let metricNumber = Font.system(
-        size: 20,
-        weight: .semibold,
+        .title2,
         design: .serif
-    ).monospacedDigit()
+    ).weight(.semibold).monospacedDigit()
+
+    /// The overview's headline figure is display typography: no text style is
+    /// large enough, so the surface scales `heroNumberBaseSize` through
+    /// `@ScaledMetric` and passes the result here.
+    package static let heroNumberBaseSize: CGFloat = 64
+
+    package static func heroNumber(size: CGFloat) -> Font {
+        Font.system(size: size, weight: .semibold, design: .serif)
+            .monospacedDigit()
+    }
 }
 
 /// The card paper: window background stays the ground, cards lift one step.
@@ -125,6 +134,8 @@ package struct SpeakerIconTile: View {
 
     package var body: some View {
         Image(systemName: symbol)
+            // A glyph centred in a fixed 28pt tile: the size belongs to the
+            // tile, not to the text ladder.
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(tint ?? Color.secondary)
             .frame(
@@ -334,7 +345,7 @@ package struct SpeakerEmptyState: View {
     package var body: some View {
         VStack(spacing: 6) {
             Image(systemName: systemImage)
-                .font(.system(size: 26))
+                .font(.largeTitle)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 2)
             Text(title)

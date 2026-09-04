@@ -17,6 +17,14 @@ package enum SpeakerCopy {
         package static let success = "连接成功"
     }
 
+    /// The result of copying the diagnostic report. About and the runtime
+    /// report the same sentence, including the promise about what the report
+    /// never contains.
+    package enum Diagnostics {
+        package static let copied = "诊断信息已复制，不包含文字、音频或 API Key。"
+        package static let copyFailed = "复制失败，请重试。"
+    }
+
     /// Local-data erase failure explanations: one sentence per reason,
     /// whichever entry point reports the failure.
     package enum LocalDataErase {
