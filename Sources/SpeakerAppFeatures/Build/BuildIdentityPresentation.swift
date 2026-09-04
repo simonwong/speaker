@@ -16,17 +16,7 @@ package struct SpeakerBuildIdentity: Equatable, Sendable {
     }
 
     package static var current: SpeakerBuildIdentity {
-        SpeakerBuildIdentity(
-            version: Bundle.main.object(
-                forInfoDictionaryKey: "CFBundleShortVersionString"
-            ) as? String,
-            build: Bundle.main.object(
-                forInfoDictionaryKey: "CFBundleVersion"
-            ) as? String,
-            sourceRevision: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSourceRevision"
-            ) as? String
-        )
+        SpeakerBuildInfoReader.main.buildIdentity
     }
 
     package var displayText: String {
@@ -38,6 +28,36 @@ package struct SpeakerBuildIdentity: Equatable, Sendable {
               !value.isEmpty
         else { return "—" }
         return value
+    }
+}
+
+/// The one reader of the build facts recorded in the running bundle.
+///
+/// Views ask this for the version line and the signing mode instead of
+/// reaching into `Bundle.main` themselves, and a specification injects its own
+/// info values without a bundle.
+package struct SpeakerBuildInfoReader: Sendable {
+    private let infoValue: @Sendable (String) -> String?
+
+    package init(infoValue: @escaping @Sendable (String) -> String?) {
+        self.infoValue = infoValue
+    }
+
+    /// Reads the bundle the app is running from.
+    package static let main = SpeakerBuildInfoReader { key in
+        Bundle.main.object(forInfoDictionaryKey: key) as? String
+    }
+
+    package var buildIdentity: SpeakerBuildIdentity {
+        SpeakerBuildIdentity(
+            version: infoValue("CFBundleShortVersionString"),
+            build: infoValue("CFBundleVersion"),
+            sourceRevision: infoValue("SpeakerSourceRevision")
+        )
+    }
+
+    package var signingMode: SpeakerSigningMode {
+        SpeakerSigningMode(infoValue: infoValue("SpeakerSigningMode"))
     }
 }
 

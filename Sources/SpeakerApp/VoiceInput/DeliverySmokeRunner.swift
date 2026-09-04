@@ -9,11 +9,7 @@ enum DeliverySmokeRunner {
     static func request(
         arguments: [String] = ProcessInfo.processInfo.arguments
     ) -> DeliverySmokeLaunchRequest? {
-        let signingMode = SpeakerSigningMode(
-            infoValue: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSigningMode"
-            ) as? String
-        )
+        let signingMode = SpeakerBuildInfoReader.main.signingMode
         let request = DeliverySmokeLaunchRequest(
             arguments: arguments,
             signingMode: signingMode
