@@ -18,16 +18,16 @@ public protocol VoiceInputClock: Sendable {
 
 /// The production clock: `ContinuousClock` for durations and `Date` for
 /// timestamps.
-public struct ContinuousVoiceInputClock: VoiceInputClock {
+package struct ContinuousVoiceInputClock: VoiceInputClock {
     private let origin = ContinuousClock.now
 
-    public init() {}
+    package init() {}
 
-    public var monotonicNow: Duration { origin.duration(to: .now) }
+    package var monotonicNow: Duration { origin.duration(to: .now) }
 
-    public var date: Date { Date() }
+    package var date: Date { Date() }
 
-    public func sleep(for duration: Duration) async throws {
+    package func sleep(for duration: Duration) async throws {
         try await Task.sleep(for: duration)
     }
 }

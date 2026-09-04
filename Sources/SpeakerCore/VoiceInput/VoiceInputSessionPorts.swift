@@ -10,7 +10,7 @@ public protocol AudioChunkStreaming: Sendable {
     func audioChunks() async -> AsyncStream<Data>
 }
 
-public protocol AudioCaptureTelemetryProviding: Sendable {
+package protocol AudioCaptureTelemetryProviding: Sendable {
     func observeTelemetry() async -> AsyncStream<RecordingTelemetry>
 }
 

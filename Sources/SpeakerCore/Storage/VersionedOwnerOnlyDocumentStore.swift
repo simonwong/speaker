@@ -17,14 +17,14 @@ public enum DocumentCorruption: Equatable, Sendable {
 }
 
 /// Why a document could not be loaded at all. The original file is untouched.
-public enum DocumentLoadFailure: Equatable, Sendable {
+package enum DocumentLoadFailure: Equatable, Sendable {
     case protectionFailed(detail: String)
     case readFailed(detail: String)
     case preservationFailed(corruption: DocumentCorruption, detail: String)
 }
 
 /// The result of loading one versioned document.
-public enum VersionedDocumentLoadOutcome<Document: Sendable>: Sendable {
+package enum VersionedDocumentLoadOutcome<Document: Sendable>: Sendable {
     /// No file exists at the location; callers start from their defaults.
     case absent
     case loaded(Document, version: Int)
@@ -37,7 +37,7 @@ public enum VersionedDocumentLoadOutcome<Document: Sendable>: Sendable {
 
 /// The non-destructive counterpart of `VersionedDocumentLoadOutcome`: the
 /// file is inspected but never moved.
-public enum VersionedDocumentDecodeOutcome<Document: Sendable>: Sendable {
+package enum VersionedDocumentDecodeOutcome<Document: Sendable>: Sendable {
     case absent
     case decoded(Document, version: Int)
     case corrupted(DocumentCorruption)
@@ -45,21 +45,21 @@ public enum VersionedDocumentDecodeOutcome<Document: Sendable>: Sendable {
 }
 
 /// The JSON key that carries a document's schema version.
-public enum DocumentVersionKey: String, Sendable {
+package enum DocumentVersionKey: String, Sendable {
     case schemaVersion
     case version
 }
 
 /// Which document versions a store understands and how each decodes into the
 /// current domain value. Adding a version means adding one table row.
-public struct VersionedDocumentSchema<Document: Sendable>: Sendable {
-    public typealias Decode = @Sendable (Data) throws -> Document
+package struct VersionedDocumentSchema<Document: Sendable>: Sendable {
+    package typealias Decode = @Sendable (Data) throws -> Document
 
-    public let currentVersion: Int
-    public let versionKey: DocumentVersionKey
-    public let decoders: [Int: Decode]
+    package let currentVersion: Int
+    package let versionKey: DocumentVersionKey
+    package let decoders: [Int: Decode]
 
-    public init(
+    package init(
         currentVersion: Int,
         versionKey: DocumentVersionKey,
         decoders: [Int: Decode]

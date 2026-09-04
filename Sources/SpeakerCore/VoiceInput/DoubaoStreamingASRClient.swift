@@ -1,11 +1,11 @@
 import Foundation
 
-public struct DoubaoTranscriptionOptions: Equatable, Sendable {
-    public var enablePunctuation: Bool
-    public var enableITN: Bool
-    public var enableSemanticSmoothing: Bool
+package struct DoubaoTranscriptionOptions: Equatable, Sendable {
+    package var enablePunctuation: Bool
+    package var enableITN: Bool
+    package var enableSemanticSmoothing: Bool
 
-    public init(
+    package init(
         enablePunctuation: Bool = true,
         enableITN: Bool = true,
         enableSemanticSmoothing: Bool = true
@@ -34,19 +34,19 @@ public enum DoubaoStreamingResource: String, CaseIterable, Codable, Sendable {
     }
 }
 
-public struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
-    public static let defaultEndpoint = URL(
+package struct DoubaoStreamingASRConfiguration: Equatable, Sendable {
+    package static let defaultEndpoint = URL(
         string: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
     )!
 
-    public var apiKey: String
-    public var resource: DoubaoStreamingResource
-    public var requestUserID: String
-    public var hotwords: [String]
-    public var options: DoubaoTranscriptionOptions
-    public var endpoint: URL
+    package var apiKey: String
+    package var resource: DoubaoStreamingResource
+    package var requestUserID: String
+    package var hotwords: [String]
+    package var options: DoubaoTranscriptionOptions
+    package var endpoint: URL
 
-    public init(
+    package init(
         apiKey: String,
         resource: DoubaoStreamingResource = .default,
         requestUserID: String,
@@ -225,22 +225,22 @@ private actor DoubaoExchangeFailurePriority {
     }
 }
 
-public struct DoubaoStreamingFrame: Equatable, Sendable {
-    public let messageType: UInt8
-    public let flags: UInt8
-    public let serialization: UInt8
-    public let compression: UInt8
-    public let sequence: Int32?
-    public let errorCode: UInt32?
-    public let payload: Data
+package struct DoubaoStreamingFrame: Equatable, Sendable {
+    package let messageType: UInt8
+    package let flags: UInt8
+    package let serialization: UInt8
+    package let compression: UInt8
+    package let sequence: Int32?
+    package let errorCode: UInt32?
+    package let payload: Data
 
-    public var isFinal: Bool { flags & 0x02 != 0 }
+    package var isFinal: Bool { flags & 0x02 != 0 }
 }
 
-public enum DoubaoStreamingFrameCodec {
+package enum DoubaoStreamingFrameCodec {
     private static let versionAndHeaderSize: UInt8 = 0x11
 
-    public static func fullClientRequest(payload: Data) -> Data {
+    package static func fullClientRequest(payload: Data) -> Data {
         encode(
             messageType: 0x01,
             flags: 0x00,
@@ -250,7 +250,7 @@ public enum DoubaoStreamingFrameCodec {
         )
     }
 
-    public static func audioRequest(payload: Data, isFinal: Bool) -> Data {
+    package static func audioRequest(payload: Data, isFinal: Bool) -> Data {
         encode(
             messageType: 0x02,
             flags: isFinal ? 0x02 : 0x00,
@@ -260,7 +260,7 @@ public enum DoubaoStreamingFrameCodec {
         )
     }
 
-    public static func decode(_ data: Data) throws -> DoubaoStreamingFrame {
+    package static func decode(_ data: Data) throws -> DoubaoStreamingFrame {
         guard data.count >= 8 else {
             throw DoubaoASRFailure(kind: .invalidResponse)
         }
@@ -395,7 +395,7 @@ private struct DoubaoStreamingResponseBody: Decodable, Sendable {
     let message: String?
 }
 
-public actor DoubaoStreamingASRClient {
+package actor DoubaoStreamingASRClient {
     private enum ExchangeEvent: Sendable {
         case audioSent
         case finalResult(TranscriptionResult)
@@ -407,7 +407,7 @@ public actor DoubaoStreamingASRClient {
     private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
     private let runtimeOperation: VoiceProviderRuntimeOperation
 
-    public init(
+    package init(
         configuration: DoubaoStreamingASRConfiguration,
         connector: any DoubaoWebSocketConnecting = URLSessionDoubaoWebSocketConnector(),
         requestIDGenerator: @escaping @Sendable () -> UUID = UUID.init,
@@ -421,7 +421,7 @@ public actor DoubaoStreamingASRClient {
         self.runtimeOperation = runtimeOperation
     }
 
-    public func transcribe(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
+    package func transcribe(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
         guard !configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DoubaoASRFailure(kind: .invalidCredential)
         }
