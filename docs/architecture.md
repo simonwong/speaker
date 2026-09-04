@@ -21,7 +21,7 @@ SpeakerProviderEvidence     Provider acceptance evidence shared by app and tools
 Platform adapters           AppKit, AX, AVAudio, Carbon, Keychain, SMAppService
 ```
 
-`SpeakerApp` declares the menu-bar, settings, onboarding, and history scenes. `SpeakerRuntime` hides dependency assembly, startup migration order, shortcut activation, and shutdown convergence. SwiftUI views observe one feature state and send semantic intents; they do not coordinate several platform adapters.
+`SpeakerApp` declares the menu-bar, settings, onboarding, and history scenes. `SpeakerRuntime` is constructed from a `SpeakerRuntimeDependencies` value whose production defaults wire the live adapters (audio capture, history store, credential store, workspace, bundle info, preferences, termination coordinator); it references no shared singleton. Startup migration order lives in `RuntimeStartupSequence` and shutdown convergence in `RuntimeShutdownCoordinator`, both in `SpeakerAppFeatures` behind stage protocols so specifications drive them with fakes. App termination and the quiesce before local-data erasure call the same convergence, which runs once and lets later callers wait for it. SwiftUI views observe one feature state and send semantic intents; they do not coordinate several platform adapters.
 
 `SpeakerAppFeatures` owns product copy, SF Symbols, accessibility announcements, windowless presentation policy, and route effects. `SpeakerCore` does not expose concrete UI language or presentation policy.
 

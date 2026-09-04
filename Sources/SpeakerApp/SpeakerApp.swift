@@ -9,7 +9,9 @@ struct SpeakerApp: App {
     @StateObject private var runtime: SpeakerRuntime
 
     init() {
-        let runtime = SpeakerRuntime()
+        let runtime = SpeakerRuntime(
+            termination: _applicationDelegate.wrappedValue.terminationCoordinator
+        )
         _runtime = StateObject(wrappedValue: runtime)
         Task { @MainActor in
             runtime.start()

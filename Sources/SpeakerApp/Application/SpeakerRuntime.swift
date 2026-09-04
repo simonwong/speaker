@@ -21,11 +21,24 @@ final class SpeakerRuntime: ObservableObject {
     let shortcut: VoiceShortcutFeature
     let diagnostics: DiagnosticNoticeModel
     let softwareUpdate: SoftwareUpdateFeature
+    let dataErasure: SpeakerDataErasureCoordinator
+
+    private let dependencies: SpeakerRuntimeDependencies
     private let globalInteraction: GlobalVoiceInteractionRouter
-    private let providerRuntimeDiagnostics:
-        VoiceProviderRuntimeDiagnostics
-    private let audioCaptureEnvironmentSource:
-        any AudioCaptureEnvironmentProviding
+    private let providerRuntimeDiagnostics: VoiceProviderRuntimeDiagnostics
+    private let dataErasureIntentStore: SpeakerDataErasureIntentStore
+    private let panel: VoiceInputPanelController
+    private let permissionRefreshCoordinator: PermissionRefreshCoordinator
+    private let onboardingPermissionCoordinator: OnboardingPermissionCoordinator
+    private let shortcutAnnouncementCoordinator: ShortcutAnnouncementCoordinator
+    private let onboarding: OnboardingPresenter
+    private let startup: RuntimeStartupSequence
+    private let shutdown: RuntimeShutdownCoordinator
+    private var started = false
+    private var childStateCancellables = Set<AnyCancellable>()
+#if DEBUG
+    private var visualScenarioCancellable: AnyCancellable?
+#endif
 
     private(set) lazy var settingsWorkspace = SettingsWorkspace(
         navigation: settingsNavigation,
@@ -44,7 +57,7 @@ final class SpeakerRuntime: ObservableObject {
             await self.requestPermission(permission)
         },
         routeEffects: SettingsRouteEffects(
-            openURL: { NSWorkspace.shared.open($0) }
+            openURL: dependencies.workspace.openURL
         ),
         refreshPermissions: { [weak self] in
             self?.refreshPermissions()
@@ -55,213 +68,61 @@ final class SpeakerRuntime: ObservableObject {
         }
     )
 
-    private let settingsStore: VersionedLocalAppSettingsStore
-    private let legacyHistoryFileURL: URL
-    private let dictionaryFileURL: URL
-    private let legacyDictionaryFileURL: URL?
-    private let migratingCredentials: MigratingProviderCredentialStore?
-    private let currentKeychainService: String
-    private let dataErasureIntentStore: SpeakerDataErasureIntentStore
-    private let panel: VoiceInputPanelController
-    private let permissionRefreshCoordinator: PermissionRefreshCoordinator
-    private let onboardingPermissionCoordinator:
-        OnboardingPermissionCoordinator
-    private var started = false
-    private var childStateCancellables = Set<AnyCancellable>()
-    private let shortcutAnnouncementCoordinator: ShortcutAnnouncementCoordinator
-    private var onboardingController: SpeakerOnboardingWindowController?
-    private var startupTask: Task<Void, Never>?
-    private var isQuiescingForErasure = false
-#if DEBUG
-    private var visualScenarioCancellable: AnyCancellable?
-#endif
-
-    private lazy var credentialEraser = SpeakerProviderCredentialEraser(
-        localFileURL: LocalFileProviderCredentialStore.defaultFileURL(),
-        currentKeychainService: currentKeychainService
-    )
-    private lazy var localDataEraser = SpeakerOwnedLocalDataEraser(
-        locations: SpeakerOwnedDataLocations.current(
-            bundleIdentifier: Bundle.main.bundleIdentifier
-                ?? "com.local.speaker"
-        ),
-        allowedLibraryRoot: FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library", isDirectory: true),
-        fileManager: .default
-    )
-    private(set) var dataErasure: SpeakerDataErasureCoordinator!
-
-    private func makeDataErasureCoordinator() -> SpeakerDataErasureCoordinator {
-        SpeakerDataErasureCoordinator(
-            dependencies: SpeakerDataErasureDependencies(
-            persistIntent: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try self.dataErasureIntentStore.persist()
-            },
-            quiesceRuntime: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                await self.quiesceForDataErasure()
-            },
-            eraseLoginItem: {
-                try await SpeakerLoginItemEraser.erase()
-            },
-            eraseProviderCredentials: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try await self.credentialEraser.erase()
-            },
-            closeHistory: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                guard await self.history.closeForErasure() else {
-                    throw SpeakerDataErasureReason.busy
-                }
-            },
-            eraseApplicationSupport: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try self.localDataEraser.eraseApplicationSupport()
-            },
-            eraseLegacyData: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try self.localDataEraser.eraseLegacyData()
-            },
-            eraseCaches: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try self.localDataEraser.eraseCaches()
-            },
-            erasePreferences: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try self.dataErasureIntentStore.erasePreferences()
-            },
-            verifyErasure: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try SpeakerLoginItemEraser.verify()
-                try await self.credentialEraser.verify()
-                try self.localDataEraser.verify()
-            },
-            clearIntent: { [weak self] in
-                guard let self else {
-                    throw SpeakerDataErasureReason.io
-                }
-                try self.dataErasureIntentStore.clearIntent()
-            },
-            requestExit: {
-                SpeakerTerminationCoordinator.shared.handler = nil
-                NSApp.terminate(nil)
-            }
-            )
-        )
+    convenience init(termination: SpeakerTerminationCoordinator) {
+        self.init(dependencies: .production(termination: termination))
     }
 
-    init() {
+    init(dependencies: SpeakerRuntimeDependencies) {
+        self.dependencies = dependencies
+        let bundle = dependencies.bundle
+        let announce = dependencies.workspace.announce
         LegacyPrivacyStateCleaner.removeObsoleteIdentifiers(
-            from: .standard
+            from: dependencies.preferences
         )
-        let bundleIdentifier = Bundle.main.bundleIdentifier
-            ?? "com.local.speaker"
-        let signingMode = SpeakerBuildInfoReader.main.signingMode
         softwareUpdate = SoftwareUpdateFeature(
             configuration: .init(
-                signingMode: signingMode,
-                feedURLString: Bundle.main.object(
-                    forInfoDictionaryKey: "SUFeedURL"
-                ) as? String,
-                publicEDKey: Bundle.main.object(
-                    forInfoDictionaryKey: "SUPublicEDKey"
-                ) as? String
+                signingMode: bundle.buildInfo.signingMode,
+                feedURLString: bundle.feedURLString,
+                publicEDKey: bundle.publicEDKey
             ),
-            makeDriver: {
-                SparkleSoftwareUpdateDriver()
-            }
+            makeDriver: dependencies.makeUpdateDriver
         )
-        dataErasureIntentStore = SpeakerDataErasureIntentStore(
-            intentFileURL: SpeakerDataErasureIntentStore.defaultIntentFileURL(),
-            preferences: .standard,
+        let dataErasureIntentStore = SpeakerDataErasureIntentStore(
+            intentFileURL: dependencies.dataErasureIntentFileURL,
+            preferences: dependencies.preferences,
             preferenceDomainNames: [
-                bundleIdentifier,
-                "com.local.speaker",
+                bundle.bundleIdentifier,
+                SpeakerBundleInfo.fallbackBundleIdentifier,
             ]
         )
-        permissions = PermissionModel(access: SystemPermissionAccess())
-        let audio = AVAudioCapture()
-        audioCaptureEnvironmentSource = audio
+        self.dataErasureIntentStore = dataErasureIntentStore
+        let permissions = PermissionModel(access: dependencies.permissionAccess)
+        self.permissions = permissions
         let targets = AccessibilityInputTargets()
-        let legacyHistoryFileURL = VersionedLocalSessionHistory.defaultFileURL()
-        self.legacyHistoryFileURL = legacyHistoryFileURL
-        let history = SQLiteSessionHistory(
-            fileURL: SQLiteSessionHistory.defaultFileURL()
-        )
-        let localCredentials = LocalFileProviderCredentialStore()
-        let configuredKeychainService = Bundle.main.object(
-            forInfoDictionaryKey: "SpeakerKeychainService"
-        ) as? String ?? KeychainProviderCredentialStore.defaultService
-        currentKeychainService = configuredKeychainService
-        let credentials: any ProviderCredentialStoring
-        let migratingCredentials: MigratingProviderCredentialStore?
-        if Bundle.main.object(forInfoDictionaryKey: "SpeakerCredentialStorage") as? String
-            == "keychain"
-        {
-            let service = configuredKeychainService
-            var legacyStores: [any ProviderCredentialStoring] = []
-            if service != KeychainProviderCredentialStore.defaultService {
-                legacyStores.append(KeychainProviderCredentialStore())
-            }
-            legacyStores.append(localCredentials)
-            let migrating = MigratingProviderCredentialStore(
-                primary: KeychainProviderCredentialStore(service: service),
-                legacy: LegacyProviderCredentialStoreChain(stores: legacyStores)
-            )
-            credentials = migrating
-            migratingCredentials = migrating
-        } else {
-            credentials = localCredentials
-            migratingCredentials = nil
-        }
-        self.migratingCredentials = migratingCredentials
-        let providerRuntimeDiagnostics =
-            VoiceProviderRuntimeDiagnostics()
+        let history = dependencies.history
+        self.history = history
+        let providerRuntimeDiagnostics = VoiceProviderRuntimeDiagnostics()
         self.providerRuntimeDiagnostics = providerRuntimeDiagnostics
         let doubao = CredentialedDoubaoTranscriber(
-            credentials: credentials,
+            credentials: dependencies.credentials.store,
             runtimeDiagnostics: providerRuntimeDiagnostics
         )
-        let deepSeek = CredentialedDeepSeekTextRefiner(credentials: credentials)
+        let deepSeek = CredentialedDeepSeekTextRefiner(
+            credentials: dependencies.credentials.store
+        )
         let configuration = VoiceInputConfigurationController()
         let processor = DefaultVoiceTextProcessor(
             configuration: configuration,
             doubao: doubao,
             refinement: OptionalTextRefinementPipeline(refiner: deepSeek)
         )
-        let dictionaryURL = VersionedJSONPersonalDictionaryStore.defaultFileURL()
-        dictionaryFileURL = dictionaryURL
-        legacyDictionaryFileURL = try?
-            VersionedJSONPersonalDictionaryStore.applicationSupportFileURL()
-        let dictionaryStore = VersionedJSONPersonalDictionaryStore(fileURL: dictionaryURL)
-        let settingsStore = VersionedLocalAppSettingsStore(
-            fileURL: VersionedLocalAppSettingsStore.defaultFileURL()
-        )
-        self.settingsStore = settingsStore
+        let settingsStore = dependencies.settingsStore
         let settingsNavigation = SettingsNavigationModel()
         self.settingsNavigation = settingsNavigation
-        diagnostics = DiagnosticNoticeModel()
+        let diagnostics = DiagnosticNoticeModel()
+        self.diagnostics = diagnostics
         let sessionActor = VoiceInputSessions(
-            audioCapture: audio,
+            audioCapture: dependencies.audioCapture,
             targetCapture: targets,
             textProcessor: processor,
             delivery: targets,
@@ -273,22 +134,26 @@ final class SpeakerRuntime: ObservableObject {
             releaseCaptureHint: {
                 targets.releaseCaptureHint()
             },
-            announce: Self.announceAccessibility
+            announce: announce
         )
         self.voiceInput = voiceInput
         let globalInteraction = GlobalVoiceInteractionRouter(
             voiceTarget: voiceInput.shortcutTarget
         )
         self.globalInteraction = globalInteraction
-        self.history = history
-        doubaoSettings = DoubaoSettingsModel(service: doubao, settingsStore: settingsStore)
-        refinementSettings = RefinementSettingsModel(
+        let doubaoSettings = DoubaoSettingsModel(
+            service: doubao,
+            settingsStore: settingsStore
+        )
+        self.doubaoSettings = doubaoSettings
+        let refinementSettings = RefinementSettingsModel(
             service: deepSeek,
             configuration: configuration,
             settingsStore: settingsStore
         )
+        self.refinementSettings = refinementSettings
         let dictionarySettings = DictionarySettingsModel(
-            store: dictionaryStore,
+            store: dependencies.dictionaryStore,
             configuration: configuration
         )
         self.dictionarySettings = dictionarySettings
@@ -296,43 +161,46 @@ final class SpeakerRuntime: ObservableObject {
             store: history,
             settingsStore: settingsStore
         )
-        historyModel = HistoryModel(
+        let historyModel = HistoryModel(
             store: history,
             clipboard: SystemClipboardWriter(),
             dictionary: dictionarySettings,
-            announce: Self.announceAccessibility
+            announce: announce
         )
+        self.historyModel = historyModel
         overviewModel = OverviewModel(store: history)
-        loginItemSettings = LoginItemSettingsModel(
-            service: LoginItemServiceAdapter(),
+        let loginItemSettings = LoginItemSettingsModel(
+            service: dependencies.loginItemService,
             settingsStore: settingsStore
         )
-        let permissionModel = permissions
+        self.loginItemSettings = loginItemSettings
         let shortcut = VoiceShortcutFeature(
             target: globalInteraction.shortcutTarget,
-            accessibilityGranted: { [weak permissionModel] in
-                permissionModel?.snapshot.accessibility == .granted
+            accessibilityGranted: { [weak permissions] in
+                permissions?.snapshot.accessibility == .granted
             },
             persistPreference: { choice in
                 _ = try await settingsStore.updateShortcut(choice)
             }
         )
         self.shortcut = shortcut
-        permissionRefreshCoordinator = PermissionRefreshCoordinator(
+        let permissionRefreshCoordinator = PermissionRefreshCoordinator(
             permissions: permissions,
             shortcut: shortcut
         )
-        onboardingPermissionCoordinator = OnboardingPermissionCoordinator(
+        self.permissionRefreshCoordinator = permissionRefreshCoordinator
+        let onboardingPermissionCoordinator = OnboardingPermissionCoordinator(
             permissions: permissions,
             synchronize: { [permissionRefreshCoordinator] in
                 permissionRefreshCoordinator.refreshNow()
             }
         )
+        self.onboardingPermissionCoordinator = onboardingPermissionCoordinator
         shortcutAnnouncementCoordinator = ShortcutAnnouncementCoordinator(
             feature: shortcut,
-            announce: Self.announceAccessibility
+            announce: announce
         )
-        panel = VoiceInputPanelController(
+        let panel = VoiceInputPanelController(
             experience: voiceInput,
             routeEffect: { effect in
                 switch effect {
@@ -341,7 +209,69 @@ final class SpeakerRuntime: ObservableObject {
                 }
             }
         )
-        dataErasure = makeDataErasureCoordinator()
+        self.panel = panel
+        let onboarding = OnboardingPresenter(
+            preferences: dependencies.preferences,
+            makeController: { completion in
+                SpeakerOnboardingWindowController(
+                    permissions: permissions,
+                    doubao: doubaoSettings,
+                    requestPermission: { permission in
+                        await onboardingPermissionCoordinator.request(permission)
+                    },
+                    refreshPermissions: {
+                        permissionRefreshCoordinator.refreshNow()
+                    },
+                    announce: announce,
+                    completion: completion
+                )
+            }
+        )
+        self.onboarding = onboarding
+        let startup = RuntimeStartupSequence(
+            stages: SpeakerRuntimeStartupStages(
+                settingsStore: settingsStore,
+                doubao: doubaoSettings,
+                migratingCredentials: dependencies.credentials.migrating,
+                dictionaryFileURL: dependencies.dictionaryStore.fileURL,
+                legacyDictionaryFileURL: dependencies.legacyDictionaryFileURL,
+                dictionary: dictionarySettings,
+                refinement: refinementSettings,
+                history: history,
+                legacyHistoryFileURL: dependencies.legacyHistoryFileURL,
+                historyModel: historyModel,
+                loginItem: loginItemSettings,
+                shortcut: shortcut,
+                onboarding: onboarding,
+                launchArguments: dependencies.launchArguments
+            ),
+            publish: { [diagnostics] notice in diagnostics.publish(notice) }
+        )
+        self.startup = startup
+        let shutdown = RuntimeShutdownCoordinator(
+            stages: SpeakerRuntimeShutdownStages(
+                shortcut: shortcut,
+                permissionRefresh: permissionRefreshCoordinator,
+                startup: startup,
+                onboarding: onboarding,
+                panel: panel,
+                refinement: refinementSettings,
+                doubao: doubaoSettings,
+                voiceInput: voiceInput
+            )
+        )
+        self.shutdown = shutdown
+        dataErasure = SpeakerDataErasureCoordinator(
+            dependencies: Self.makeDataErasureDependencies(
+                intentStore: dataErasureIntentStore,
+                shutdown: shutdown,
+                history: history,
+                credentialEraser: dependencies.credentialEraser,
+                localDataEraser: dependencies.localDataEraser,
+                termination: dependencies.termination,
+                terminate: dependencies.workspace.terminate
+            )
+        )
 
         permissions.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
@@ -349,13 +279,50 @@ final class SpeakerRuntime: ObservableObject {
         voiceInput.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &childStateCancellables)
+    }
 
+    private static func makeDataErasureDependencies(
+        intentStore: SpeakerDataErasureIntentStore,
+        shutdown: RuntimeShutdownCoordinator,
+        history: SQLiteSessionHistory,
+        credentialEraser: SpeakerProviderCredentialEraser,
+        localDataEraser: SpeakerOwnedLocalDataEraser,
+        termination: SpeakerTerminationCoordinator,
+        terminate: @escaping @MainActor () -> Void
+    ) -> SpeakerDataErasureDependencies {
+        SpeakerDataErasureDependencies(
+            persistIntent: { try intentStore.persist() },
+            quiesceRuntime: { await shutdown.converge() },
+            eraseLoginItem: { try await SpeakerLoginItemEraser.erase() },
+            eraseProviderCredentials: { try await credentialEraser.erase() },
+            closeHistory: {
+                guard await history.closeForErasure() else {
+                    throw SpeakerDataErasureReason.busy
+                }
+            },
+            eraseApplicationSupport: { try localDataEraser.eraseApplicationSupport() },
+            eraseLegacyData: { try localDataEraser.eraseLegacyData() },
+            eraseCaches: { try localDataEraser.eraseCaches() },
+            erasePreferences: { try intentStore.erasePreferences() },
+            verifyErasure: {
+                try SpeakerLoginItemEraser.verify()
+                try await credentialEraser.verify()
+                try localDataEraser.verify()
+            },
+            clearIntent: { try intentStore.clearIntent() },
+            requestExit: {
+                termination.handler = nil
+                terminate()
+            }
+        )
     }
 
     func start() {
         guard !started else { return }
         started = true
-        if let request = DeliverySmokeRunner.request() {
+        if let request = DeliverySmokeRunner.request(
+            arguments: dependencies.launchArguments
+        ) {
             Task { @MainActor in
                 await DeliverySmokeRunner.run(request)
             }
@@ -375,7 +342,9 @@ final class SpeakerRuntime: ObservableObject {
             return
         }
 #if DEBUG
-        if let scenario = Self.visualScenario() {
+        if let scenario = SpeakerDebugLaunchOptions.visualScenario(
+            in: dependencies.launchArguments
+        ) {
             NSLog(
                 "Speaker visual scenario requested: \(scenario.rawValue), "
                     + "appRunning=\(NSApp.isRunning)"
@@ -402,19 +371,9 @@ final class SpeakerRuntime: ObservableObject {
 #endif
         permissions.refresh()
         softwareUpdate.start()
-        let speakerActivation = NotificationCenter.default
-            .publisher(for: NSApplication.didBecomeActiveNotification)
-            .map { _ in () }
-        let workspaceActivation = NSWorkspace.shared.notificationCenter
-            .publisher(for: NSWorkspace.didActivateApplicationNotification)
-            .map { _ in () }
-        permissionRefreshCoordinator.start(
-            observing: speakerActivation
-            .merge(with: workspaceActivation)
-            .eraseToAnyPublisher()
-        )
-        speakerActivation
-            .merge(with: workspaceActivation)
+        let activations = dependencies.workspace.applicationActivations
+        permissionRefreshCoordinator.start(observing: activations)
+        activations
             .sink { [weak loginItemSettings] _ in
                 Task { @MainActor [weak loginItemSettings] in
                     await loginItemSettings?.refresh()
@@ -423,121 +382,19 @@ final class SpeakerRuntime: ObservableObject {
             .store(in: &childStateCancellables)
         voiceInput.start()
         panel.start()
-        SpeakerTerminationCoordinator.shared.handler = { [weak self] in
-            guard let self else { return }
-            self.shortcut.beginShutdown()
-            self.permissionRefreshCoordinator.stop()
-            let startupTask = self.startupTask
-            startupTask?.cancel()
-            self.onboardingController?.close()
-            self.onboardingController = nil
-            self.panel.stop()
-            await self.refinementSettings.shutdown()
-            await self.doubaoSettings.shutdown()
-            await self.voiceInput.shutdown()
-            await startupTask?.value
-            await self.shortcut.flushPersistence()
+        dependencies.termination.handler = { [shutdown] in
+            await shutdown.converge()
         }
-        startupTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.startupTask = nil }
-            let loadedSettings = await self.settingsStore.load()
-            guard !Task.isCancelled else { return }
-            switch loadedSettings {
-            case let .recovered(_, recovery):
-                self.diagnostics.publish("设置文件已恢复为默认值，原文件保留在 \(recovery.backupURL.lastPathComponent)。")
-            case let .recoveryFailed(_, reason):
-                self.diagnostics.publish(reason)
-            case .defaults, .loaded:
-                break
-            }
-            await self.doubaoSettings.loadResource(
-                rawValue: loadedSettings.settings.doubaoResourceID
-            )
-            guard !Task.isCancelled else { return }
-            if let migratingCredentials = self.migratingCredentials {
-                await migratingCredentials.migrateAllProviders()
-                guard !Task.isCancelled else { return }
-                if let notice = await migratingCredentials.migrationNotice() {
-                    self.diagnostics.publish(notice)
-                }
-            }
-            await self.migrateLegacyDictionaryIfNeeded()
-            guard !Task.isCancelled else { return }
-            await self.dictionarySettings.load()
-            guard !Task.isCancelled else { return }
-            await self.refinementSettings.load()
-            guard !Task.isCancelled else { return }
-            let historyPrivacyScrubbed =
-                await self.history.scrubUntrustedProviderMessages()
-            guard !Task.isCancelled else { return }
-            if historyPrivacyScrubbed {
-                await self.migrateLegacyHistoryIfNeeded()
-                guard !Task.isCancelled else { return }
-                if await self.history.reconcileInterruptedSessions() == nil {
-                    self.diagnostics.publish(
-                        "上次运行中断的会话历史未能完成恢复，请在“关于”中复制诊断信息。"
-                    )
-                }
-                guard !Task.isCancelled else { return }
-                _ = await self.history.applyRetentionPolicy(
-                    loadedSettings.settings.historyRetention,
-                    now: Date()
-                )
-            } else {
-                self.diagnostics.publish(
-                    "旧版会话历史的隐私清理未完成；Speaker 已保留明确错误供你处理。"
-                )
-            }
-            guard !Task.isCancelled else { return }
-            await self.historyModel.refresh()
-            guard !Task.isCancelled else { return }
-            await self.loginItemSettings.restore(
-                desiredEnabled: loadedSettings.settings.launchAtLogin
-            )
-            guard !Task.isCancelled else { return }
-            // Activate global input only after every session dependency has
-            // restored its persisted state. A startup-time key press must
-            // never run with default provider/resource/refinement settings.
-            self.shortcut.restore(loadedSettings.settings.shortcut)
-#if DEBUG
-            if let captureURL = Self.onboardingCaptureURL() {
-                self.presentOnboarding(force: true)
-                if let size = Self.onboardingCaptureSize() {
-                    self.onboardingController?.resizeDebug(to: size)
-                }
-                await Task.yield()
-                do {
-                    try self.onboardingController?
-                        .captureDebugSnapshot(to: captureURL)
-                    NSLog(
-                        "Speaker onboarding captured: \(captureURL.path)"
-                    )
-                } catch {
-                    NSLog(
-                        "Speaker onboarding capture failed: \(error)"
-                    )
-                }
-            } else {
-                self.presentOnboarding(force: false)
-            }
-#else
-            self.presentOnboarding(force: false)
-#endif
-        }
+        startup.start()
     }
 
     func refreshPermissions() {
-        synchronizePermissionAndShortcutState()
+        permissionRefreshCoordinator.refreshNow()
     }
 
     func requestPermission(_ permission: PermissionKind) async {
         _ = await permissions.request(permission)
-        synchronizePermissionAndShortcutState()
-    }
-
-    func requestOnboardingPermission(_ permission: PermissionKind) async {
-        await onboardingPermissionCoordinator.request(permission)
+        permissionRefreshCoordinator.refreshNow()
     }
 
     func copyDiagnostics() async {
@@ -546,12 +403,9 @@ final class SpeakerRuntime: ObservableObject {
         let activeProvider =
             await providerRuntimeDiagnostics.activeSnapshot()
         let audioCaptureEnvironment =
-            await audioCaptureEnvironmentSource.captureEnvironmentSnapshot()
-        let buildIdentity = SpeakerBuildIdentity.current
-        let credentialStorage = Bundle.main.object(
-            forInfoDictionaryKey: "SpeakerCredentialStorage"
-        ) as? String ?? "unknown"
-        let signingMode = SpeakerBuildInfoReader.main.signingMode
+            await dependencies.audioCapture.captureEnvironmentSnapshot()
+        let bundle = dependencies.bundle
+        let buildIdentity = bundle.buildInfo.buildIdentity
         let activity = voiceInput.state.diagnosticCode
         let historyNotice: String = switch historyStatus.notice {
         case nil: "none"
@@ -564,10 +418,10 @@ final class SpeakerRuntime: ObservableObject {
             version: buildIdentity.version,
             build: buildIdentity.build,
             sourceRevision: buildIdentity.sourceRevision,
-            bundleIdentifier: Bundle.main.bundleIdentifier ?? "unknown",
-            signingMode: signingMode.diagnosticValue,
-            operatingSystem: ProcessInfo.processInfo.operatingSystemVersionString,
-            credentialStorage: credentialStorage,
+            bundleIdentifier: bundle.bundleIdentifier,
+            signingMode: bundle.buildInfo.signingMode.diagnosticValue,
+            operatingSystem: dependencies.operatingSystemVersion,
+            credentialStorage: bundle.credentialStorage ?? "unknown",
             accessibility: permissions.snapshot.accessibility,
             microphone: permissions.snapshot.microphone,
             shortcut: shortcut.preference.displayName,
@@ -589,158 +443,13 @@ final class SpeakerRuntime: ObservableObject {
         )
     }
 
-    func completeOnboarding() {
-        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        onboardingController?.close()
-        onboardingController = nil
-    }
-
-    private func presentOnboarding(force: Bool) {
-        guard force
-            || !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
-        else {
-            return
-        }
-        let controller = SpeakerOnboardingWindowController(
-            permissions: permissions,
-            doubao: doubaoSettings,
-            requestPermission: requestOnboardingPermission,
-            refreshPermissions: refreshPermissions,
-            announce: Self.announceAccessibility,
-            completion: { [weak self] in self?.completeOnboarding() }
-        )
-        onboardingController = controller
-        controller.show()
-    }
-
-    private func migrateLegacyHistoryIfNeeded() async {
-        guard FileManager.default.fileExists(atPath: legacyHistoryFileURL.path) else {
-            return
-        }
-        let legacy = VersionedLocalSessionHistory(fileURL: legacyHistoryFileURL)
-        let legacyStatus = await legacy.persistenceStatus()
-        if let notice = legacyStatus.notice {
-            switch notice {
-            case let .corruptedDataPreserved(backupURL, _):
-                diagnostics.publish(
-                    "旧版历史文件损坏，已保留为 \(backupURL.lastPathComponent)。"
-                )
-            case .privacyMigrationFailed:
-                diagnostics.publish(
-                    "旧版会话历史的文件权限无法收紧，已停止迁移并保留原文件。"
-                )
-            case .corruptedRecordsSkipped, .writeFailed:
-                diagnostics.publish(
-                    "旧版会话历史尚未满足安全迁移条件，原文件仍保留。"
-                )
-            }
-            return
-        }
-        let records = await legacy.allRecords()
-        guard await history.importLegacyRecords(records) else {
-            diagnostics.publish("旧版会话历史尚未完成迁移，原文件仍保留。")
-            return
-        }
-        do {
-            try FileManager.default.removeItem(at: legacyHistoryFileURL)
-        } catch {
-            diagnostics.publish("会话历史已迁移，但旧版 history.json 未能删除。")
-        }
-    }
-
-    private func migrateLegacyDictionaryIfNeeded() async {
-        guard let legacyDictionaryFileURL else { return }
-        switch await VersionedJSONPersonalDictionaryStore
-            .migrateLegacyFileIfNeeded(
-                from: legacyDictionaryFileURL,
-                to: dictionaryFileURL
-            ) {
-        case .notNeeded, .primaryAlreadyExists, .migrated:
-            break
-        case .migratedLegacyCleanupFailed:
-            diagnostics.publish(
-                "个人词库已迁移，但旧版词库文件未能删除。"
-            )
-        case .failed:
-            diagnostics.publish(
-                "旧版个人词库未能迁移，原文件仍保留。"
-            )
-        }
-    }
-
-    private func synchronizePermissionAndShortcutState() {
-        permissionRefreshCoordinator.refreshNow()
-    }
-
-    private func quiesceForDataErasure() async {
-        guard !isQuiescingForErasure else { return }
-        isQuiescingForErasure = true
-        shortcut.beginShutdown()
-        permissionRefreshCoordinator.stop()
-        let startupTask = startupTask
-        startupTask?.cancel()
-        onboardingController?.close()
-        onboardingController = nil
-        panel.stop()
-        await refinementSettings.shutdown()
-        await doubaoSettings.shutdown()
-        await voiceInput.shutdown()
-        await startupTask?.value
-        await shortcut.flushPersistence()
-    }
-
 #if DEBUG
-    private static func onboardingCaptureURL() -> URL? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let optionIndex = arguments.firstIndex(
-            of: "--speaker-onboarding-capture"
-        ), arguments.indices.contains(optionIndex + 1)
-        else {
-            return nil
-        }
-        return URL(fileURLWithPath: arguments[optionIndex + 1])
-    }
-
-    private static func onboardingCaptureSize() -> CGSize? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let optionIndex = arguments.firstIndex(
-            of: "--speaker-onboarding-size"
-        ), arguments.indices.contains(optionIndex + 1)
-        else {
-            return nil
-        }
-        let components = arguments[optionIndex + 1].split(separator: "x")
-        guard components.count == 2,
-              let width = Double(components[0]),
-              let height = Double(components[1]),
-              width >= 360,
-              height >= 360
-        else {
-            return nil
-        }
-        return CGSize(width: width, height: height)
-    }
-
-    private static func visualScenario() -> VoiceInputVisualScenario? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let optionIndex = arguments.firstIndex(
-            of: "--speaker-visual-scenario"
-        ), arguments.indices.contains(optionIndex + 1)
-        else {
-            return nil
-        }
-        return VoiceInputVisualScenario(rawValue: arguments[optionIndex + 1])
-    }
-
     private func captureVisualScenarioIfRequested() {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let optionIndex = arguments.firstIndex(
-            of: "--speaker-visual-capture"
-        ), arguments.indices.contains(optionIndex + 1)
-        else {
+        guard let url = SpeakerDebugLaunchOptions.visualCaptureURL(
+            in: dependencies.launchArguments
+        ) else {
             return
         }
-        let url = URL(fileURLWithPath: arguments[optionIndex + 1])
         Task { @MainActor [weak self] in
             await Task.yield()
             do {
@@ -752,16 +461,4 @@ final class SpeakerRuntime: ObservableObject {
         }
     }
 #endif
-
-    private static func announceAccessibility(_ message: String) {
-        NSAccessibility.post(
-            element: NSApplication.shared,
-            notification: .announcementRequested,
-            userInfo: [
-                NSAccessibility.NotificationUserInfoKey.announcement: message,
-                NSAccessibility.NotificationUserInfoKey.priority:
-                    NSAccessibilityPriorityLevel.medium.rawValue,
-            ]
-        )
-    }
 }
