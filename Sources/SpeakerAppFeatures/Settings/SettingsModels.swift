@@ -558,7 +558,7 @@ package final class DictionarySettingsModel: ObservableObject {
     }
 
     package var sendingCountText: String {
-        "\(sentEntryCount)/\(DictionaryProviderCapacity.doubao.maximumHotwordCount) 条会发送给豆包"
+        "\(sentEntryCount)/\(DictionaryProviderCapacity.doubao.maximumHotwordCount) 条"
     }
 
     package var omittedEntryIDs: Set<UUID> {
