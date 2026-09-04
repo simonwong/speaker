@@ -8,6 +8,7 @@ enum HistoryOperation: Equatable {
     case copying(VoiceInputSessionID)
     case deleting(VoiceInputSessionID)
     case clearing
+    case addingDictionaryEntry
 }
 
 @MainActor
@@ -21,16 +22,19 @@ final class HistoryModel: ObservableObject {
 
     private let store: any LocalSessionHistoryStoring
     private let clipboard: any ClipboardWriting
+    private let dictionary: DictionarySettingsModel
     private let announce: (String) -> Void
     private var feedbackTask: Task<Void, Never>?
 
     init(
         store: any LocalSessionHistoryStoring,
         clipboard: any ClipboardWriting,
+        dictionary: DictionarySettingsModel,
         announce: @escaping (String) -> Void
     ) {
         self.store = store
         self.clipboard = clipboard
+        self.dictionary = dictionary
         self.announce = announce
     }
 
@@ -109,17 +113,35 @@ final class HistoryModel: ObservableObject {
         return true
     }
 
+    @discardableResult
+    func addDictionaryEntry(_ word: String) async -> Bool {
+        guard activeOperation == nil else { return false }
+        activeOperation = .addingDictionaryEntry
+        defer { activeOperation = nil }
+        let feedback = await HistoryDictionaryEntryAddition.perform(
+            word: word,
+            using: dictionary
+        )
+        publishFeedback(feedback)
+        return feedback.kind == .success
+    }
+
     private func publishFeedback(
         _ kind: HistoryDashboardFeedback.Kind,
         _ message: String
     ) {
-        let feedback = HistoryDashboardFeedback(
-            id: UUID(),
-            kind: kind,
-            message: message
+        publishFeedback(
+            HistoryDashboardFeedback(
+                id: UUID(),
+                kind: kind,
+                message: message
+            )
         )
+    }
+
+    private func publishFeedback(_ feedback: HistoryDashboardFeedback) {
         self.feedback = feedback
-        announce(message)
+        announce(feedback.message)
         feedbackTask?.cancel()
         feedbackTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(4))
@@ -158,6 +180,9 @@ struct HistoryView: View {
                 },
                 delete: { id in
                     Task { _ = await model.delete(id) }
+                },
+                addDictionaryEntry: { word in
+                    Task { _ = await model.addDictionaryEntry(word) }
                 }
             )
         )
