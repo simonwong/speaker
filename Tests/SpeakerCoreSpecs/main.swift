@@ -4310,10 +4310,36 @@ struct SpeakerCoreSpecs {
             try expect(hotwords == [["word": "Speaker"]])
             try expect(audio?["format"] as? String == "pcm")
             try expect(audio?["rate"] as? Int == 16_000)
+            try expect(audio?["language"] == nil)
             try expect(fullRequest.messageType == 0x01)
             try expect(firstAudio.payload == Data([1, 2]) && !firstAudio.isFinal)
             try expect(finalAudio.payload == Data([3, 4]) && finalAudio.isFinal)
             try expect(result == .init(text: "你好，世界。", providerRequestID: "log-12"))
+        }
+
+        await runAsync("Doubao disables semantic smoothing while keeping written form and punctuation", failures: &failures) {
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [makeDoubaoServerResponse(text: "你好，世界。", isFinal: true)],
+                metadata: .init(httpStatusCode: 101, providerRequestID: "log-ddc-off")
+            )
+            let client = DoubaoStreamingASRClient(
+                configuration: .init(
+                    apiKey: "test-api-key",
+                    requestUserID: "request-user",
+                    options: .init(enableSemanticSmoothing: false)
+                ),
+                connector: DoubaoWebSocketConnectorFake(connection: connection)
+            )
+
+            _ = try await client.transcribe(makeAudioStream([Data([1, 2])]))
+            let frames = await connection.sentFrames
+            let fullRequest = try DoubaoStreamingFrameCodec.decode(frames[0])
+            let body = try JSONSerialization.jsonObject(with: fullRequest.payload) as? [String: Any]
+            let recognition = body?["request"] as? [String: Any]
+
+            try expect(recognition?["enable_ddc"] as? Bool == false)
+            try expect(recognition?["enable_itn"] as? Bool == true)
+            try expect(recognition?["enable_punc"] as? Bool == true)
         }
 
         await runAsync("Doubao provider errors interrupt audio that is still being recorded", failures: &failures) {
@@ -4751,6 +4777,45 @@ struct SpeakerCoreSpecs {
             let user = body?["user"] as? [String: Any]
             try expect(firstRequest.value(forHTTPHeaderField: "X-Api-Key") == "first-key")
             try expect(user?["uid"] as? String == "request-user-1")
+        }
+
+        await runAsync("credential-backed Doubao transcriber maps transcription purpose to semantic smoothing", failures: &failures) {
+            func smoothingFlag(
+                for purpose: SpeechTranscriptionPurpose
+            ) async throws -> (ddc: Bool?, itn: Bool?, punctuation: Bool?) {
+                let connection = DoubaoWebSocketConnectionFake(
+                    responses: [makeDoubaoServerResponse(text: "豆包结果", isFinal: true)]
+                )
+                let transcriber = CredentialedDoubaoTranscriber(
+                    credentials: ProviderCredentialStoreFake(values: [.doubao: "purpose-key"]),
+                    connector: DoubaoWebSocketConnectorFake(connection: connection),
+                    requestUserID: { "request-user-purpose" }
+                )
+
+                _ = try await transcriber.transcribe(
+                    specAudio,
+                    context: .init(hotwords: [], purpose: purpose)
+                )
+                let frames = await connection.sentFrames
+                let fullRequest = try DoubaoStreamingFrameCodec.decode(frames[0])
+                let body = try JSONSerialization.jsonObject(
+                    with: fullRequest.payload
+                ) as? [String: Any]
+                let recognition = body?["request"] as? [String: Any]
+                return (
+                    recognition?["enable_ddc"] as? Bool,
+                    recognition?["enable_itn"] as? Bool,
+                    recognition?["enable_punc"] as? Bool
+                )
+            }
+
+            let smoothing = try await smoothingFlag(for: .defaultSmoothing)
+            let refinementSource = try await smoothingFlag(for: .refinementSource)
+
+            try expect(smoothing.ddc == true)
+            try expect(refinementSource.ddc == false)
+            try expect(refinementSource.itn == true)
+            try expect(refinementSource.punctuation == true)
         }
 
         await runAsync("credential-backed Doubao transcriber fails before network when unconfigured", failures: &failures) {
@@ -8905,7 +8970,7 @@ private struct DoubaoFailureTranscriber: ContextualSpeechTranscribing {
 
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
         throw failure
     }
@@ -8920,7 +8985,7 @@ private struct CredentialFailureTranscriber: ContextualSpeechTranscribing {
 
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
         throw error
     }

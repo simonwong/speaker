@@ -362,7 +362,6 @@ private struct DoubaoStreamingRequestBody: Encodable, Sendable {
         let rate = 16_000
         let bits = 16
         let channel = 1
-        let language = "zh-CN"
     }
 
     struct RecognitionRequest: Encodable, Sendable {

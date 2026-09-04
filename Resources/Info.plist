@@ -24,6 +24,8 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAlwaysAllowMicrophoneModeControl</key>
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Speaker 需要在你使用语音快捷键时录制语音并将其转换为文字。</string>
 </dict>
