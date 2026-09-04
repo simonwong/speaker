@@ -13,6 +13,10 @@ let package = Package(
             name: "SpeakerProviderEvidence",
             targets: ["SpeakerProviderEvidence"]
         ),
+        .library(
+            name: "SpeakerAccuracyMetrics",
+            targets: ["SpeakerAccuracyMetrics"]
+        ),
         .executable(name: "SpeakerApp", targets: ["SpeakerApp"]),
         .executable(name: "SpeakerCoreSpecs", targets: ["SpeakerCoreSpecs"]),
         .executable(name: "SpeakerAppScenarioSpecs", targets: ["SpeakerAppScenarioSpecs"]),
@@ -42,6 +46,14 @@ let package = Package(
             name: "SpeakerDeliverySmokeTarget",
             targets: ["SpeakerDeliverySmokeTarget"]
         ),
+        .executable(
+            name: "SpeakerAccuracyEvaluator",
+            targets: ["SpeakerAccuracyEvaluator"]
+        ),
+        .executable(
+            name: "SpeakerAccuracyMetricsSpecs",
+            targets: ["SpeakerAccuracyMetricsSpecs"]
+        ),
     ],
     dependencies: [
         .package(
@@ -52,6 +64,7 @@ let package = Package(
     targets: [
         .target(name: "SpeakerCore"),
         .target(name: "SpeakerProviderEvidence"),
+        .target(name: "SpeakerAccuracyMetrics"),
         .target(
             name: "SpeakerAppFeatures",
             dependencies: ["SpeakerCore"]
@@ -102,6 +115,16 @@ let package = Package(
         .executableTarget(
             name: "SpeakerDeliverySmokeTarget",
             path: "Tools/SpeakerDeliverySmokeTarget"
+        ),
+        .executableTarget(
+            name: "SpeakerAccuracyEvaluator",
+            dependencies: ["SpeakerCore", "SpeakerAccuracyMetrics"],
+            path: "Tools/SpeakerAccuracyEvaluator"
+        ),
+        .executableTarget(
+            name: "SpeakerAccuracyMetricsSpecs",
+            dependencies: ["SpeakerAccuracyMetrics"],
+            path: "Tests/SpeakerAccuracyMetricsSpecs"
         ),
         .executableTarget(
             name: "SpeakerUpdateSignatureVerifier",

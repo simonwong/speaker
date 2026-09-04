@@ -8,6 +8,20 @@ Read this page before provider smoke or acceptance, building, testing, launching
 
 A provider check is complete only when the requested provider and scenario report a terminal verdict; a connection-only probe is not transcription or refinement acceptance evidence.
 
+## Offline accuracy evaluation
+
+`SpeakerAccuracyEvaluator` measures Doubao recognition accuracy on user-supplied samples and compares request variants. It never runs inside `./scripts/test` beyond a warnings-as-errors build; `SpeakerAccuracyMetricsSpecs` covers its deterministic metrics.
+
+```bash
+./scripts/swiftw run --disable-sandbox SpeakerAccuracyEvaluator -- \
+    --manifest ~/eval/manifest.json --resources 1.0,2.0 --smoothing on,off \
+    --dictionary-file ~/eval/entries.json --dictionary with,without
+```
+
+The manifest is `{"samples":[{"id","wav","reference","tags"?}]}`; relative `wav` paths resolve against the manifest directory and must be 16 kHz, 16-bit, mono PCM WAV, or the sample is rejected by name before anything is sent. The optional dictionary file is a JSON array of Entry strings; it is validated like the Personal Dictionary and sent through the same `DictionaryRequestContextBuilder` capacity rule. Resource `1.0`/`2.0` follow the hour or concurrent tier of the activated resource in `settings.json`.
+
+Without `--confirm-paid-requests` the tool validates every input and prints the plan only; no network request is made. Adding `--confirm-paid-requests --output <fresh report.json>` streams each sample in real-time 200 ms packets, once per variant, and bills the user's Doubao account; obtain explicit approval first. The default report is owner-only and text-free: manifest SHA-256, variant definitions, per-sample and aggregate CER (with substitution, deletion, and insertion counts) and Latin-token WER, durations, and provider request IDs. `--include-text` also writes `<output>.with-text.json` with transcript, reference, and Entry text; keep that file local and never commit it or attach it to an issue. Audio samples never enter the repository.
+
 ## Build and test
 
 Speaker requires Swift 6 and the macOS 26 SDK. Run build and test work through `scripts/*`; the wrappers select `MacOSX26.sdk`, isolate the per-user module cache, and disable the nested SwiftPM sandbox. Override only the SDK with `SPEAKER_SDKROOT`. Bare `swift build`, `swift run`, and `swift test` are not equivalent to CI.
@@ -19,6 +33,7 @@ Use the tightest relevant specification executable while iterating:
 ./scripts/swiftw run --disable-sandbox SpeakerAppScenarioSpecs
 ./scripts/swiftw run --disable-sandbox SpeakerAppUISpecs
 ./scripts/swiftw run --disable-sandbox SpeakerProviderEvidenceSpecs
+./scripts/swiftw run --disable-sandbox SpeakerAccuracyMetricsSpecs
 ```
 
 These are sequential `@main` executables with local `run`/`runAsync` and `expect` helpers. They have no per-case filter. Locate a case by name, iterate with its whole executable, then run the full deterministic gate:
