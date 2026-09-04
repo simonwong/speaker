@@ -121,9 +121,9 @@ Both the main window and the system Settings scene replace writable controls whi
 
 ## UI verification seams
 
-Debug builds provide a visual-scenario entry point for the recording, processing, refining, Pending Copy Result, and problem HUD states. It does not load the voice runtime and is absent from Release binaries. `VoiceInputPanelLayout` is the single source for panel classification and size; AppKit specifications cover every state transition and require the window and hosting content to converge together.
+Debug builds provide a visual-scenario entry point for the recording, processing, Pending Copy Result, and problem HUD states. It does not load the voice runtime and is absent from Release binaries. `VoiceInputPanelLayout` is the single source for panel classification and size; AppKit specifications cover every state transition and require the window and hosting content to converge together.
 
-The HUD exposes real state rather than fabricated progress. Recording shows a red indicator, audio level, and explicit cancel action. Preparing shows a compact wave and the same cancel action. Waiting For Result widens the same pill to show the stage title with the waited seconds, and while DeepSeek refinement is pending over a confirmed Doubao result it adds a labelled button that takes the Doubao text directly; Esc and the cancel control keep their User Cancellation meaning. Reduce Motion, Increase Contrast, VoiceOver labels, and announcements are product behavior owned by the application feature module.
+The HUD exposes real state rather than fabricated progress. Recording shows a red indicator, audio level, and explicit cancel action. Preparing shows a compact wave and the same cancel action. Waiting For Result widens the same pill to show the stage title; Esc and the cancel control keep their User Cancellation meaning. Reduce Motion, Increase Contrast, VoiceOver labels, and announcements are product behavior owned by the application feature module.
 
 Onboarding has a separate debug capture entry point that renders the production view and window. Content scrolls within constrained screens while the completion region remains reachable.
 

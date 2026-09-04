@@ -54,9 +54,7 @@ Delivery mutates the frozen Input Target only after it remains safe and current.
 34. As a user, I want login launch to be optional and disabled by default, so that Speaker changes startup behavior only with consent.
 35. As a user, I want User Cancellation and late provider results handled deterministically, so that stale text can never be delivered.
 36. As a user, I want Waiting For Result to remain honest until the provider or system reports an outcome, so that elapsed time is not misreported as a failure.
-37. As a user, I want the HUD to show how long the current stage has been waiting, so that I can judge for myself whether to keep waiting.
-38. As a user, I want to take the confirmed Doubao text directly while DeepSeek refinement is still pending, so that a slow refinement never holds my words hostage.
-39. As a user, I want a reproducible build, test, installation, and release path, so that the application can be verified from source and safely distributed.
+37. As a user, I want a reproducible build, test, installation, and release path, so that the application can be verified from source and safely distributed.
 
 ## Implementation Decisions
 
@@ -75,7 +73,6 @@ Delivery mutates the frozen Input Target only after it remains safe and current.
 - Delivery is conservative and application-independent. Accessibility freezes and validates the transient Input Target but never writes its text. One paste transaction snapshots all readable pasteboard representations, carries a private ownership marker, preflights event-post access, posts exactly one physical Command-V from the combined login-session event state, and restores only while the pasteboard still belongs to Speaker. Target-confirmed insertion and posted-without-receipt are distinct outcomes; neither can be retried after commit. Speaker does not restore focus, rewrite an entire rich document, or overwrite a newer user clipboard value.
 - A Pending Copy Result is a successful recovery surface, not a generic failure. Its non-activating presentation exposes explicit copy, retry, and dismiss actions tied to the originating session.
 - User Cancellation is distinct from a Session Problem. Cancellation closes the user-facing session immediately; a mutation that already committed may finish its receipt and history settlement but cannot be rewritten as cancelled.
-- Waiting For Result carries the current stage's start instant alongside the session activity. The application feature module derives the waited seconds and shows them next to the stage title; the value is display-only and never turns waiting into a Session Problem. While DeepSeek refinement is pending over a confirmed Doubao Stage Result, the session accepts a single intent to use that Doubao text: it cancels the pending refinement and delivers the confirmed text to the Input Target frozen at release through the unchanged delivery, `DeliveryCommitGate`, Pending Copy Result, and history settlement path without recapturing the target. The Session Record marks the refinement status as user-accepted Doubao text, distinct from a DeepSeek fallback and from Default Smoothing, and keeps the selected Refinement Mode. The intent is ignored in every other state, a refinement result that arrives after acceptance is discarded, and Esc remains User Cancellation.
 - Application shutdown fences new shortcut intake, stops session dispatch, cancels external work, and waits for required local persistence in that order.
 
 ## Testing Decisions
