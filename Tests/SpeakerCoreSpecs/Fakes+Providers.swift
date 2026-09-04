@@ -101,13 +101,6 @@ actor DoubaoWebSocketConnectorFake: DoubaoWebSocketConnecting {
     var requestCount: Int { requests.count }
 }
 
-struct HangingDoubaoWebSocketConnector: DoubaoWebSocketConnecting {
-    func connect(_ request: URLRequest) async throws -> any DoubaoWebSocketConnection {
-        try await Task.sleep(for: .seconds(10))
-        return DoubaoWebSocketConnectionFake(responses: [])
-    }
-}
-
 actor AudioChunkConsumptionProbe {
     private var hasReturnedFirstChunk = false
 
@@ -139,7 +132,6 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
     private let receiveError: URLError?
     private let metadataValue: DoubaoWebSocketMetadata
     private let hangingSendIndex: Int?
-    private let hangsOnReceive: Bool
     private let failingSendIndex: Int?
     private let blockingSendFailureIndex: Int?
     private let blocksReceiveUntilClose: Bool
@@ -156,7 +148,6 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         receiveError: URLError? = nil,
         metadata: DoubaoWebSocketMetadata = .init(),
         hangingSendIndex: Int? = nil,
-        hangsOnReceive: Bool = false,
         failingSendIndex: Int? = nil,
         blockingSendFailureIndex: Int? = nil,
         blocksReceiveUntilClose: Bool = false
@@ -165,7 +156,6 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         self.receiveError = receiveError
         metadataValue = metadata
         self.hangingSendIndex = hangingSendIndex
-        self.hangsOnReceive = hangsOnReceive
         self.failingSendIndex = failingSendIndex
         self.blockingSendFailureIndex = blockingSendFailureIndex
         self.blocksReceiveUntilClose = blocksReceiveUntilClose
@@ -178,7 +168,7 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
             throw URLError(.networkConnectionLost)
         }
         if sendIndex == hangingSendIndex {
-            try await Task.sleep(for: .seconds(10))
+            try await suspendUntilCancelled()
         }
         if sendIndex == blockingSendFailureIndex {
             try await withCheckedThrowingContinuation {
@@ -194,9 +184,6 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
             return try await withCheckedThrowingContinuation { continuation in
                 blockedReceive = continuation
             }
-        }
-        if hangsOnReceive {
-            try await Task.sleep(for: .seconds(10))
         }
         if let receiveError { throw receiveError }
         guard responseIndex < responses.count else {
@@ -378,13 +365,6 @@ actor DeepSeekTransportFake: DeepSeekTransport {
     }
 }
 
-struct HangingDeepSeekTransport: DeepSeekTransport {
-    func send(_ request: URLRequest) async throws -> DeepSeekTransportResponse {
-        try await Task.sleep(for: .seconds(10))
-        return DeepSeekTransportResponse(statusCode: 500, body: Data())
-    }
-}
-
 actor CancellableDeepSeekRefinerFake: DeepSeekTextRefining {
     private(set) var callCount = 0
     private(set) var cancellationCount = 0
@@ -395,12 +375,12 @@ actor CancellableDeepSeekRefinerFake: DeepSeekTextRefining {
     ) async throws -> DeepSeekRefinementResult {
         callCount += 1
         do {
-            try await Task.sleep(for: .seconds(10))
-            return DeepSeekRefinementResult(text: "迟到结果")
+            try await suspendUntilCancelled()
         } catch is CancellationError {
             cancellationCount += 1
             throw DeepSeekRefinementFailure(kind: .cancelled)
         }
+        throw DeepSeekRefinementFailure(kind: .cancelled)
     }
 }
 

@@ -339,13 +339,14 @@ enum ShortcutSpecs: CoreSpecDomain {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
+            let customPersistence = OneShotGate()
             let feature = VoiceShortcutFeature(
                 functionKeyMonitor: functionMonitor,
                 customShortcutMonitor: customMonitor,
                 accessibilityGranted: { true },
                 persistPreference: { preference in
                     if case .custom = preference {
-                        try? await Task.sleep(for: .milliseconds(20))
+                        await customPersistence.wait()
                     }
                     await persistence.save(preference)
                 }
@@ -356,6 +357,7 @@ enum ShortcutSpecs: CoreSpecDomain {
 
             feature.select(customPreference)
             feature.select(.functionKey)
+            await customPersistence.open()
             await feature.flushPersistence()
 
             let persistedPreferences = await persistence.values

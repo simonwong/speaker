@@ -100,9 +100,19 @@ actor DelayedFailingStopAudioCapture: AudioCapturing {
     }
 }
 
+/// Fails to start after moving the session's clock forward by `startDelay`,
+/// so preparation timing is exact instead of depending on scheduling.
 actor DelayedFailingStartAudioCapture: AudioCapturing {
+    private let clock: ManualVoiceInputClock
+    private let startDelay: Duration
+
+    init(clock: ManualVoiceInputClock, startDelay: Duration) {
+        self.clock = clock
+        self.startDelay = startDelay
+    }
+
     func start() async throws {
-        try await Task.sleep(for: .milliseconds(20))
+        clock.advance(by: startDelay)
         throw SpecFailure(message: "recorder start failed")
     }
 
@@ -150,84 +160,5 @@ actor BlockingCancelAudioCapture: AudioCapturing, AudioChunkStreaming {
     func finishCancel() {
         cancelContinuation?.resume()
         cancelContinuation = nil
-    }
-}
-
-actor ControlledRecordingDeadline {
-    private(set) var requestedDuration: Duration?
-    private(set) var requestCount = 0
-    private(set) var cancellationCount = 0
-    private var continuations: [Int: CheckedContinuation<Void, Error>] = [:]
-    private var cancelledRequests: Set<Int> = []
-
-    func sleep(for duration: Duration) async throws {
-        let requestID = requestCount
-        requestCount += 1
-        requestedDuration = duration
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<Void, Error>) in
-                if cancelledRequests.contains(requestID) {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    continuations[requestID] = continuation
-                }
-            }
-        } onCancel: {
-            Task { await self.cancel(requestID: requestID) }
-        }
-    }
-
-    func waitUntilStarted() async {
-        while requestedDuration == nil {
-            await Task.yield()
-        }
-    }
-
-    func waitUntilRequestCount(_ expectedCount: Int) async {
-        while requestCount < expectedCount {
-            await Task.yield()
-        }
-    }
-
-    func waitUntilCancelled() async {
-        while cancellationCount == 0 {
-            await Task.yield()
-        }
-    }
-
-    func fire() {
-        guard let requestID = continuations.keys.min(),
-              let continuation = continuations.removeValue(forKey: requestID)
-        else { return }
-        continuation.resume()
-    }
-
-    private func cancel(requestID: Int) {
-        guard cancelledRequests.insert(requestID).inserted else { return }
-        cancellationCount += 1
-        continuations.removeValue(forKey: requestID)?
-            .resume(throwing: CancellationError())
-    }
-}
-
-actor StubbornRecordingDeadline {
-    private(set) var requestCount = 0
-    private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
-
-    func sleep(for duration: Duration) async throws {
-        let requestID = requestCount
-        requestCount += 1
-        await withCheckedContinuation { continuation in
-            continuations[requestID] = continuation
-        }
-    }
-
-    func waitUntilRequestCount(_ expectedCount: Int) async {
-        while requestCount < expectedCount { await Task.yield() }
-    }
-
-    func fire(requestID: Int) {
-        continuations.removeValue(forKey: requestID)?.resume()
     }
 }
