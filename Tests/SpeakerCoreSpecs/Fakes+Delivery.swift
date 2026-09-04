@@ -162,20 +162,6 @@ actor ControlledPasteboardPreparation {
     }
 }
 
-actor TargetCaptureFake: InputTargetCapturing {
-    let result: InputTargetCaptureResult
-    private(set) var captureCount = 0
-
-    init(result: InputTargetCaptureResult) {
-        self.result = result
-    }
-
-    func capture() async -> InputTargetCaptureResult {
-        captureCount += 1
-        return result
-    }
-}
-
 struct LifecycleAccessibilityTargetSystem: AccessibilityTargetSystem {
     let live: LiveAccessibilityTargetSystem
     private let evidence = AccessibilityTargetEvidence(
@@ -450,27 +436,6 @@ actor DiscardingTargetCaptureFake: InputTargetCapturing, InputTargetDiscarding {
     }
 }
 
-actor TextDeliveryFake: TextDelivering {
-    let result: DeliveryOutcome
-    private(set) var deliveredTexts: [String] = []
-
-    init(result: DeliveryOutcome) {
-        self.result = result
-    }
-
-    func deliver(
-        _ text: String,
-        to target: InputTargetSnapshot,
-        commitGate: DeliveryCommitGate
-    ) async -> DeliveryOutcome {
-        guard await commitGate.commit() else {
-            return .pendingCopy(.deliveryFailed)
-        }
-        deliveredTexts.append(text)
-        return result
-    }
-}
-
 actor TargetRecordingDeliveryFake: TextDelivering {
     private(set) var applicationNames: [String] = []
 
@@ -552,19 +517,5 @@ actor BlockingDeliveryFake: TextDelivering {
 
     private func markCancelled() {
         cancellationCount += 1
-    }
-}
-
-actor ClipboardFake: ClipboardWriting {
-    private(set) var copiedTexts: [String] = []
-    private let succeeds: Bool
-
-    init(succeeds: Bool = true) {
-        self.succeeds = succeeds
-    }
-
-    func copy(_ text: String) async -> Bool {
-        copiedTexts.append(text)
-        return succeeds
     }
 }

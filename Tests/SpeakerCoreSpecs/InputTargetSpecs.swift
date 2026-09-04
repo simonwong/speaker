@@ -1,6 +1,7 @@
 import Foundation
 import ApplicationServices
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 enum InputTargetSpecs: CoreSpecDomain {

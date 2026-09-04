@@ -5,6 +5,7 @@ import Combine
 import Foundation
 import SpeakerAppFeatures
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 @main
@@ -2692,14 +2693,17 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync("voice experience consumes Esc while processing and cancels the processor", failures: &failures) {
-            let processor = ExperienceHangingProcessor()
+            let processor = HangingVoiceTextProcessor()
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceTargetCaptureFake(),
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
                 textProcessor: processor,
-                delivery: ExperienceDeliveryFake(),
-                clipboard: ExperienceClipboardFake(),
-                history: ExperienceHistoryFake()
+                delivery: TextDeliveryFake(
+                    result: .pendingCopy(.deliveryFailed),
+                    commitsBeforeDelivering: false
+                ),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
@@ -2740,12 +2744,16 @@ struct SpeakerAppScenarioSpecs {
         await runAsync("successful automatic input stays visually silent but announces completion", failures: &failures) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceWritableTargetCaptureFake(),
-                transcriber: ExperienceTranscriberFake(),
-                delivery: ExperienceSuccessfulDeliveryFake(),
-                clipboard: ExperienceClipboardFake(),
-                history: ExperienceHistoryFake()
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(
+                        .init(id: UUID(), applicationName: "TextEdit")
+                    )
+                ),
+                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
@@ -2786,12 +2794,24 @@ struct SpeakerAppScenarioSpecs {
         ) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceWritableTargetCaptureFake(),
-                textProcessor: ExperienceNoTextProcessor(),
-                delivery: ExperienceSuccessfulDeliveryFake(),
-                clipboard: ExperienceClipboardFake(),
-                history: ExperienceHistoryFake()
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(
+                        .init(id: UUID(), applicationName: "TextEdit")
+                    )
+                ),
+                textProcessor: FailingVoiceTextProcessor(
+                    failure: .init(
+                        userFailure: .providerReturnedNoText,
+                        providerDiagnostic: .init(
+                            provider: "doubao",
+                            code: "emptyTranscript"
+                        )
+                    )
+                ),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
@@ -2836,12 +2856,15 @@ struct SpeakerAppScenarioSpecs {
         await runAsync("clipboard failure produces one retained-result announcement", failures: &failures) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceTargetCaptureFake(),
-                transcriber: ExperienceTranscriberFake(),
-                delivery: ExperienceDeliveryFake(),
-                clipboard: ExperienceClipboardFake(succeeds: false),
-                history: ExperienceHistoryFake()
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                delivery: TextDeliveryFake(
+                    result: .pendingCopy(.deliveryFailed),
+                    commitsBeforeDelivering: false
+                ),
+                clipboard: ClipboardFake(succeeds: false),
+                history: SessionHistoryFake()
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
@@ -2927,14 +2950,17 @@ struct SpeakerAppScenarioSpecs {
         await runAsync("history failure announces only the newly reported problem", failures: &failures) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceTargetCaptureFake(),
-                textProcessor: ExperienceFallbackProcessor(),
-                delivery: ExperienceDeliveryFake(),
-                clipboard: ExperienceClipboardFake(),
-                history: ExperienceHistoryFake(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                textProcessor: refinementFallbackProcessor(),
+                delivery: TextDeliveryFake(
+                    result: .pendingCopy(.deliveryFailed),
+                    commitsBeforeDelivering: false
+                ),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake(
                     failureNotice: "会话历史写入失败：磁盘不可用",
-                    failureDelay: .milliseconds(80)
+                    failureNoticeDelay: .milliseconds(80)
                 )
             )
             let experience = VoiceInputExperience(
@@ -3023,7 +3049,7 @@ struct SpeakerAppScenarioSpecs {
                 experience.state.isRecording,
                 "stale copy action interrupted the new recording"
             )
-            let copyCount = await fixture.clipboard.copyCount
+            let copyCount = await fixture.clipboard.copiedTexts.count
             try expect(copyCount == 0, "stale copy action reached the clipboard")
             let recordingAnnouncements = fixture.announcements.messages.filter {
                 $0 == "Speaker 正在录音，按 Esc 可以取消"
@@ -3042,7 +3068,7 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync("voice experience projects terminal persistence notices", failures: &failures) {
             let fixture = makeVoiceExperienceFixture(
-                history: ExperienceHistoryFake(
+                history: SessionHistoryFake(
                     failureNotice: "会话历史写入失败：磁盘不可用"
                 )
             )
@@ -3100,12 +3126,15 @@ struct SpeakerAppScenarioSpecs {
         ) {
             let deadline = ScenarioRecordingDeadline()
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceTargetCaptureFake(),
-                transcriber: ExperienceTranscriberFake(),
-                delivery: ExperienceDeliveryFake(),
-                clipboard: ExperienceClipboardFake(),
-                history: ExperienceHistoryFake(),
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                delivery: TextDeliveryFake(
+                    result: .pendingCopy(.deliveryFailed),
+                    commitsBeforeDelivering: false
+                ),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake(),
                 maximumRecordingDuration: .seconds(600),
                 sleepUntilRecordingLimit: { duration in
                     try await deadline.sleep(for: duration)
@@ -3153,12 +3182,17 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync("recovery action routes to speech settings and dismisses the failure", failures: &failures) {
             let sessions = VoiceInputSessions(
-                audioCapture: ExperienceAudioCaptureFake(),
-                targetCapture: ExperienceTargetCaptureFake(),
-                textProcessor: ExperienceFailingProcessor(),
-                delivery: ExperienceDeliveryFake(),
-                clipboard: ExperienceClipboardFake(),
-                history: ExperienceHistoryFake()
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                textProcessor: FailingVoiceTextProcessor(
+                    failure: .init(userFailure: .providerNotConfigured)
+                ),
+                delivery: TextDeliveryFake(
+                    result: .pendingCopy(.deliveryFailed),
+                    commitsBeforeDelivering: false
+                ),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
@@ -3208,22 +3242,25 @@ struct SpeakerAppScenarioSpecs {
 @MainActor
 private struct VoiceExperienceFixture {
     let experience: VoiceInputExperience
-    let audio: ExperienceAudioCaptureFake
-    let clipboard: ExperienceClipboardFake
+    let audio: AudioCaptureFake
+    let clipboard: ClipboardFake
     let announcements: AnnouncementRecorder
 }
 
 @MainActor
 private func makeVoiceExperienceFixture(
-    history: any SessionHistoryRecording = ExperienceHistoryFake()
+    history: any SessionHistoryRecording = SessionHistoryFake()
 ) -> VoiceExperienceFixture {
-    let audio = ExperienceAudioCaptureFake()
-    let clipboard = ExperienceClipboardFake()
+    let audio = AudioCaptureFake()
+    let clipboard = ClipboardFake()
     let sessions = VoiceInputSessions(
         audioCapture: audio,
-        targetCapture: ExperienceTargetCaptureFake(),
-        transcriber: ExperienceTranscriberFake(),
-        delivery: ExperienceDeliveryFake(),
+        targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+        transcriber: SpeechTranscriberFake(text: "保留的文字"),
+        delivery: TextDeliveryFake(
+            result: .pendingCopy(.deliveryFailed),
+            commitsBeforeDelivering: false
+        ),
         clipboard: clipboard,
         history: history
     )
@@ -3258,117 +3295,22 @@ private final class AnnouncementRecorder {
     var messages: [String] = []
 }
 
-private actor ExperienceAudioCaptureFake: AudioCapturing {
-    private(set) var startCount = 0
-
-    func start() async throws {
-        startCount += 1
-    }
-
-    func stop() async throws -> CapturedAudio {
-        CapturedAudio(
-            data: Data([1, 2, 3]),
-            duration: .seconds(1),
-            peakPower: -12
-        )
-    }
-
-    func cancel() async {}
-}
-
-private actor ExperienceTargetCaptureFake: InputTargetCapturing {
-    func capture() async -> InputTargetCaptureResult {
-        .unavailable(.missingTarget)
-    }
-}
-
-private actor ExperienceWritableTargetCaptureFake: InputTargetCapturing {
-    func capture() async -> InputTargetCaptureResult {
-        .writable(.init(id: UUID(), applicationName: "TextEdit"))
-    }
-}
-
-private actor ExperienceTranscriberFake: SpeechTranscribing {
-    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
-        .init(text: "保留的文字", providerRequestID: "scenario-request")
-    }
-}
-
-private struct ExperienceNoTextProcessor: VoiceTextProcessing {
-    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
-
-    func process(
-        _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot,
-        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
-    ) async throws -> VoiceTextProcessingResult {
-        throw VoiceTextProcessingFailure(
-            userFailure: .providerReturnedNoText,
-            providerDiagnostic: .init(
-                provider: "doubao",
-                code: "emptyTranscript"
-            )
-        )
-    }
-}
-
-private actor ExperienceDeliveryFake: TextDelivering {
-    func deliver(
-        _ text: String,
-        to target: InputTargetSnapshot,
-        commitGate: DeliveryCommitGate
-    ) async -> DeliveryOutcome {
-        .pendingCopy(.deliveryFailed)
-    }
-}
-
-private actor ExperienceSuccessfulDeliveryFake: TextDelivering {
-    func deliver(
-        _ text: String,
-        to target: InputTargetSnapshot,
-        commitGate: DeliveryCommitGate
-    ) async -> DeliveryOutcome {
-        guard await commitGate.commit() else {
-            return .pendingCopy(.deliveryFailed)
-        }
-        return .delivered
-    }
-}
-
-private actor ExperienceClipboardFake: ClipboardWriting {
-    private(set) var copyCount = 0
-    private let succeeds: Bool
-
-    init(succeeds: Bool = true) {
-        self.succeeds = succeeds
-    }
-
-    func copy(_ text: String) async -> Bool {
-        copyCount += 1
-        return succeeds
-    }
-}
-
-private actor ExperienceHistoryFake: SessionHistoryRecording {
-    let failureNotice: String?
-    let failureDelay: Duration?
-
-    init(
-        failureNotice: String? = nil,
-        failureDelay: Duration? = nil
-    ) {
-        self.failureNotice = failureNotice
-        self.failureDelay = failureDelay
-    }
-
-    func save(_ record: VoiceInputHistoryRecord) async {}
-
-    func persistenceFailureNotice() async -> String? {
-        if let failureDelay {
-            try? await Task.sleep(for: failureDelay)
-        }
-        return failureNotice
-    }
+/// A text processor whose Stage Result already records a DeepSeek fallback, so the
+/// Experience layer has a refinement notice to project.
+private func refinementFallbackProcessor() -> VoiceTextProcessorFake {
+    VoiceTextProcessorFake(
+        result: VoiceTextProcessingResult(
+            doubaoText: "豆包结果",
+            normalizedText: "豆包结果",
+            deepSeekText: nil,
+            finalText: "豆包结果",
+            doubaoRequestID: "doubao-request",
+            deepSeekRequestID: nil,
+            refinementStatus: .fellBack,
+            refinementFailure: .init(kind: .network)
+        ),
+        reportedStages: [.refining]
+    )
 }
 
 private actor ScenarioRecordingDeadline {
@@ -3584,67 +3526,6 @@ private actor ScenarioHistoryRetentionStore: LocalSessionHistoryStoring {
         appliedPolicies.append(policy)
         self.policy = policy
         return appliesRetention
-    }
-}
-
-private struct ExperienceFallbackProcessor: VoiceTextProcessing {
-    func captureSnapshot() async -> VoiceTextProcessingSnapshot {
-        .empty
-    }
-
-    func process(
-        _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot,
-        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
-    ) async throws -> VoiceTextProcessingResult {
-        await progress(.init(stage: .refining))
-        return VoiceTextProcessingResult(
-            doubaoText: "豆包结果",
-            normalizedText: "豆包结果",
-            deepSeekText: nil,
-            finalText: "豆包结果",
-            doubaoRequestID: "doubao-request",
-            deepSeekRequestID: nil,
-            refinementStatus: .fellBack,
-            refinementFailure: .init(kind: .network)
-        )
-    }
-}
-
-private struct ExperienceFailingProcessor: VoiceTextProcessing {
-    func captureSnapshot() async -> VoiceTextProcessingSnapshot {
-        .empty
-    }
-
-    func process(
-        _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot,
-        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
-    ) async throws -> VoiceTextProcessingResult {
-        throw VoiceTextProcessingFailure(userFailure: .providerNotConfigured)
-    }
-}
-
-private actor ExperienceHangingProcessor: VoiceTextProcessing {
-    private(set) var cancellationCount = 0
-
-    func captureSnapshot() async -> VoiceTextProcessingSnapshot {
-        .empty
-    }
-
-    func process(
-        _ audio: CapturedAudio,
-        snapshot: VoiceTextProcessingSnapshot,
-        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
-    ) async throws -> VoiceTextProcessingResult {
-        await progress(.init(stage: .transcribing))
-        do {
-            try await Task.sleep(for: .seconds(3_600))
-        } catch is CancellationError {
-            cancellationCount += 1
-            throw CancellationError()
-        }
-        throw VoiceTextProcessingFailure(userFailure: .transcriptionFailed)
     }
 }
 

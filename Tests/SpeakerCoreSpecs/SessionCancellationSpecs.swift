@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 enum SessionCancellationSpecs: CoreSpecDomain {

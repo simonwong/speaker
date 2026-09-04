@@ -59,6 +59,11 @@ let package = Package(
             path: "Tests/SpeakerSpecSupport"
         ),
         .target(
+            name: "SpeakerCoreSpecFakes",
+            dependencies: ["SpeakerCore", "SpeakerSpecSupport"],
+            path: "Tests/SpeakerCoreSpecFakes"
+        ),
+        .target(
             name: "SpeakerAppFeatures",
             dependencies: ["SpeakerCore"]
         ),
@@ -72,12 +77,21 @@ let package = Package(
         ),
         .executableTarget(
             name: "SpeakerCoreSpecs",
-            dependencies: ["SpeakerCore", "SpeakerSpecSupport"],
+            dependencies: [
+                "SpeakerCore",
+                "SpeakerCoreSpecFakes",
+                "SpeakerSpecSupport",
+            ],
             path: "Tests/SpeakerCoreSpecs"
         ),
         .executableTarget(
             name: "SpeakerAppScenarioSpecs",
-            dependencies: ["SpeakerCore", "SpeakerAppFeatures", "SpeakerSpecSupport"],
+            dependencies: [
+                "SpeakerCore",
+                "SpeakerAppFeatures",
+                "SpeakerCoreSpecFakes",
+                "SpeakerSpecSupport",
+            ],
             path: "Tests/SpeakerAppScenarioTests"
         ),
         .executableTarget(

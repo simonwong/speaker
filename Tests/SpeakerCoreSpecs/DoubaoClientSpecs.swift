@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 enum DoubaoClientSpecs: CoreSpecDomain {
@@ -590,7 +591,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: target,
-                textProcessor: NormalizedFailureProcessor(failure: .init(
+                textProcessor: FailingVoiceTextProcessor(failure: .init(
                     userFailure: .providerNotConfigured,
                     providerDiagnostic: .init(
                         provider: "doubao",
