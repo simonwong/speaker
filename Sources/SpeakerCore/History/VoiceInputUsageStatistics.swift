@@ -58,7 +58,7 @@ public struct VoiceInputUsageSummary: Equatable, Sendable {
 /// Memory stays bounded by the number of distinct days rather than the number of
 /// records, so a store can stream rows through it without materializing its whole
 /// table.
-public struct VoiceInputUsageAccumulator {
+package struct VoiceInputUsageAccumulator {
     private struct Bucket {
         var characters = 0
         var milliseconds = 0
@@ -71,11 +71,11 @@ public struct VoiceInputUsageAccumulator {
     private var totalMilliseconds = 0
     private var totalSessions = 0
 
-    public init(calendar: Calendar = .current) {
+    package init(calendar: Calendar = .current) {
         self.calendar = calendar
     }
 
-    public mutating func add(
+    package mutating func add(
         startedAt: Date,
         recognizedCharacterCount: Int,
         speakingMilliseconds: Int
@@ -93,7 +93,7 @@ public struct VoiceInputUsageAccumulator {
         totalSessions += 1
     }
 
-    public mutating func add(_ record: VoiceInputHistoryRecord) {
+    package mutating func add(_ record: VoiceInputHistoryRecord) {
         add(
             startedAt: record.startedAt,
             recognizedCharacterCount: record.recognizedCharacterCount,
@@ -101,7 +101,7 @@ public struct VoiceInputUsageAccumulator {
         )
     }
 
-    public func summary() -> VoiceInputUsageSummary {
+    package func summary() -> VoiceInputUsageSummary {
         let daily = buckets.keys.sorted().map { day -> VoiceInputDailyUsage in
             let bucket = buckets[day] ?? Bucket()
             return VoiceInputDailyUsage(

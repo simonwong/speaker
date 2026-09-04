@@ -123,42 +123,42 @@ public struct DeepSeekRefinementFailure: Error, Equatable, Sendable {
     }
 }
 
-public struct DeepSeekChatCompletionRequest: Encodable, Equatable, Sendable {
-    public struct Message: Encodable, Equatable, Sendable {
-        public let role: String
-        public let content: String
+package struct DeepSeekChatCompletionRequest: Encodable, Equatable, Sendable {
+    package struct Message: Encodable, Equatable, Sendable {
+        package let role: String
+        package let content: String
 
-        public init(role: String, content: String) {
+        package init(role: String, content: String) {
             self.role = role
             self.content = content
         }
     }
 
-    public struct Thinking: Encodable, Equatable, Sendable {
-        public let type: String
+    package struct Thinking: Encodable, Equatable, Sendable {
+        package let type: String
 
-        public init(type: String) {
+        package init(type: String) {
             self.type = type
         }
     }
 
-    public struct ResponseFormat: Encodable, Equatable, Sendable {
-        public let type: String
+    package struct ResponseFormat: Encodable, Equatable, Sendable {
+        package let type: String
 
-        public init(type: String) {
+        package init(type: String) {
             self.type = type
         }
     }
 
-    public let model: String
-    public let messages: [Message]
-    public let thinking: Thinking
-    public let responseFormat: ResponseFormat
-    public let temperature: Double
-    public let maximumTokens: Int
-    public let stream: Bool
+    package let model: String
+    package let messages: [Message]
+    package let thinking: Thinking
+    package let responseFormat: ResponseFormat
+    package let temperature: Double
+    package let maximumTokens: Int
+    package let stream: Bool
 
-    public init(
+    package init(
         model: String,
         messages: [Message],
         thinking: Thinking,
