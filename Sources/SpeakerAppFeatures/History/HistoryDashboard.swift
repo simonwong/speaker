@@ -48,17 +48,20 @@ package struct HistoryDashboardActions {
     package let clear: () -> Void
     package let copy: (VoiceInputHistoryRecord) -> Void
     package let delete: (VoiceInputSessionID) -> Void
+    package let addDictionaryEntry: (String) -> Void
 
     package init(
         refresh: @escaping () -> Void,
         clear: @escaping () -> Void,
         copy: @escaping (VoiceInputHistoryRecord) -> Void,
-        delete: @escaping (VoiceInputSessionID) -> Void
+        delete: @escaping (VoiceInputSessionID) -> Void,
+        addDictionaryEntry: @escaping (String) -> Void = { _ in }
     ) {
         self.refresh = refresh
         self.clear = clear
         self.copy = copy
         self.delete = delete
+        self.addDictionaryEntry = addDictionaryEntry
     }
 }
 
@@ -207,6 +210,7 @@ package struct HistoryDashboard: View {
                             isBusy: state.isBusy,
                             reduceMotion: reduceMotion,
                             copy: { actions.copy(record) },
+                            addDictionaryEntry: actions.addDictionaryEntry,
                             toggleDetails: {
                                 withAnimation(
                                     reduceMotion
@@ -277,6 +281,7 @@ private struct HistoryRecordRow: View {
     let isBusy: Bool
     let reduceMotion: Bool
     let copy: () -> Void
+    let addDictionaryEntry: (String) -> Void
     let toggleDetails: () -> Void
     let delete: () -> Void
     @State private var isHovered = false
@@ -345,17 +350,18 @@ private struct HistoryRecordRow: View {
             if isExpanded {
                 HistoryExpandedRecord(
                     record: record,
-                    presentation: presentation
+                    presentation: presentation,
+                    isBusy: isBusy,
+                    addDictionaryEntry: addDictionaryEntry
                 )
-                .padding(.top, 2)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8)
                 .padding(.bottom, 12)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .background(
             Color.primary.opacity(isHovered || isExpanded ? 0.045 : 0),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
         .confirmationDialog(
             "删除这条会话记录？",
@@ -373,70 +379,137 @@ private struct HistoryRecordRow: View {
 private struct HistoryExpandedRecord: View {
     let record: VoiceInputHistoryRecord
     let presentation: HistoryRecordRowPresentation
+    let isBusy: Bool
+    let addDictionaryEntry: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Label(
                     presentation.status.label,
                     systemImage: presentation.status.icon
                 )
-                .font(.caption.weight(.semibold))
+                .font(SpeakerTypography.footnote.weight(.medium))
                 .foregroundStyle(presentation.status.color)
                 .padding(.horizontal, 8)
-                .padding(.vertical, 3)
+                .padding(.vertical, 4)
                 .background(
                     presentation.status.color.opacity(0.12),
                     in: Capsule()
                 )
                 Text(metadataLine)
-                    .font(.caption)
+                    .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HistoryTextBlock(
+            SpeakerTextBlock(
                 title: "豆包转录",
                 text: record.transcription ?? "无",
                 isPlaceholder: record.transcription == nil
             )
 
+            HistoryDictionaryEntryComposer(
+                transcription: record.transcription,
+                isBusy: isBusy,
+                addEntry: addDictionaryEntry
+            )
+
             if showsRefinementBlock {
-                HistoryTextBlock(
+                SpeakerTextBlock(
                     title: "DeepSeek 整理",
-                    text: record.deepSeekText ?? "无",
+                    text: record.deepSeekText ?? refinementPlaceholder,
                     isPlaceholder: record.deepSeekText == nil
                 )
             }
 
-            if !record.stageDurationsMilliseconds.isEmpty {
-                Text("阶段耗时：\(stageDurationsLine)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let diagnosticsLine {
-                Text(diagnosticsLine)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if !diagnosticLines.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(diagnosticLines, id: \.self) { line in
+                        diagnosticText(line)
+                    }
+                }
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.tertiary)
             }
         }
-        .padding(12)
         .textSelection(.enabled)
+    }
+
+    /// Diagnostics stay content-free; identifiers read in the mono face.
+    private func diagnosticText(_ line: DiagnosticLine) -> Text {
+        guard let identifier = line.identifier else {
+            return Text(line.label)
+        }
+        return Text(line.label)
+            + Text(identifier).font(SpeakerTypography.mono)
+    }
+
+    private struct DiagnosticLine: Hashable {
+        let label: String
+        var identifier: String?
+    }
+
+    private var diagnosticLines: [DiagnosticLine] {
+        var lines: [DiagnosticLine] = []
+        if !record.stageDurationsMilliseconds.isEmpty {
+            lines.append(
+                DiagnosticLine(label: "阶段耗时 · \(stageDurationsLine)")
+            )
+        }
+        if let providerRequestID = record.providerRequestID {
+            lines.append(
+                DiagnosticLine(
+                    label: "\(record.transcriptionProvider ?? "转录提供商") 请求 ID：",
+                    identifier: providerRequestID
+                )
+            )
+        }
+        if let deepSeekRequestID = record.deepSeekRequestID {
+            lines.append(
+                DiagnosticLine(
+                    label: "DeepSeek 请求 ID：",
+                    identifier: deepSeekRequestID
+                )
+            )
+        }
+        if let deliveryDiagnosticCode = record.deliveryDiagnosticCode {
+            lines.append(
+                DiagnosticLine(
+                    label: "送达诊断：",
+                    identifier: deliveryDiagnosticCode
+                )
+            )
+        }
+        return lines
     }
 
     private var metadataLine: String {
         [
             record.startedAt.formatted(date: .abbreviated, time: .shortened),
             record.refinementModeName ?? "默认顺滑",
-            "\(record.durationMilliseconds) ms",
+            Self.durationText(milliseconds: record.durationMilliseconds),
         ].joined(separator: " · ")
+    }
+
+    /// The metadata line reads in seconds; stage diagnostics keep raw ms.
+    private static func durationText(milliseconds: Int) -> String {
+        String(format: "%.1f 秒", Double(max(0, milliseconds)) / 1_000)
+    }
+
+    private var refinementPlaceholder: String {
+        record.refinementStatus
+            == DeepSeekRefinementStatus.userAcceptedDoubao.rawValue
+            ? "已由用户改用豆包文本"
+            : "无"
     }
 
     private var showsRefinementBlock: Bool {
         record.deepSeekText != nil
             || record.refinementStatus
                 == DeepSeekRefinementStatus.fellBack.rawValue
+            || record.refinementStatus
+                == DeepSeekRefinementStatus.userAcceptedDoubao.rawValue
     }
 
     private var stageDurationsLine: String {

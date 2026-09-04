@@ -288,10 +288,11 @@ final class SpeakerRuntime: ObservableObject {
             configuration: configuration,
             settingsStore: settingsStore
         )
-        dictionarySettings = DictionarySettingsModel(
+        let dictionarySettings = DictionarySettingsModel(
             store: dictionaryStore,
             configuration: configuration
         )
+        self.dictionarySettings = dictionarySettings
         historyRetention = HistoryRetentionSettingsModel(
             store: history,
             settingsStore: settingsStore
@@ -299,6 +300,7 @@ final class SpeakerRuntime: ObservableObject {
         historyModel = HistoryModel(
             store: history,
             clipboard: SystemClipboardWriter(),
+            dictionary: dictionarySettings,
             announce: Self.announceAccessibility
         )
         overviewModel = OverviewModel(store: history)
