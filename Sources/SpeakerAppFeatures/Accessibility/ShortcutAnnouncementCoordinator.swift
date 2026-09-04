@@ -22,7 +22,7 @@ package final class ShortcutAnnouncementCoordinator {
             .dropFirst()
             .compactMap { activation -> String? in
                 guard case let .active(preference) = activation else { return nil }
-                return "\(preference.displayName) 快捷键已启用"
+                return preference.activationAnnouncement
             }
             .sink(receiveValue: announce)
             .store(in: &cancellables)

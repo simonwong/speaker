@@ -665,23 +665,24 @@ struct SpeakerAppScenarioSpecs {
             failures: &failures
         ) {
             let checking = DoubaoStatusPresentation(status: .checking)
-            try expect(checking.text == "正在检查连接")
+            try expect(checking.text == SpeakerCopy.DoubaoStatus.checking)
             try expect(checking.symbolName == "arrow.triangle.2.circlepath")
 
             try expect(
                 DoubaoStatusPresentation(status: .loading).text
-                    == "正在读取本机配置"
+                    == SpeakerCopy.DoubaoStatus.loading
             )
             try expect(
                 DoubaoStatusPresentation(status: .unconfigured).symbolName
                     == "key.slash"
             )
             try expect(
-                DoubaoStatusPresentation(status: .configured).text == "已配置"
+                DoubaoStatusPresentation(status: .configured).text
+                    == SpeakerCopy.DoubaoStatus.configured
             )
             try expect(
                 DoubaoStatusPresentation(status: .success("id")).text
-                    == "连接成功"
+                    == SpeakerCopy.DoubaoStatus.success
             )
             try expect(
                 DoubaoStatusPresentation(status: .failure("网络中断")).text
@@ -748,7 +749,10 @@ struct SpeakerAppScenarioSpecs {
 
             let local = SpeakerSigningMode(infoValue: "development-signed")
             try expect(!local.permissionIdentityIsStable)
-            try expect(local.displayName == "本机具名签名")
+            try expect(
+                local.displayName
+                    == SpeakerSigningMode.developmentSignedDisplayName
+            )
             try expect(
                 local.permissionIdentityNotice?.contains("同一个代码签名 identity")
                     == true
@@ -757,7 +761,10 @@ struct SpeakerAppScenarioSpecs {
 
             let production = SpeakerSigningMode(infoValue: "developer-id")
             try expect(production.permissionIdentityIsStable)
-            try expect(production.displayName == "正式发布签名")
+            try expect(
+                production.displayName
+                    == SpeakerSigningMode.developerIDDisplayName
+            )
             try expect(!production.permitsLocalDeliverySmoke)
 
             let unknown = SpeakerSigningMode(infoValue: nil)
@@ -799,7 +806,7 @@ struct SpeakerAppScenarioSpecs {
                 SoftwareUpdateState
                     .unavailable(.developmentBuild)
                     .unavailableMessage
-                    == "检查更新仅用于正式发布版本。"
+                    == SoftwareUpdateState.developmentBuildMessage
             )
             try expect(
                 SoftwareUpdateConfiguration(
@@ -1116,7 +1123,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(shortcut.activation == .waitingForAccessibility(.functionKey))
             try expect(
                 announcements.filter {
-                    $0 == "需要辅助功能权限；授权后，已选择的快捷键会自动生效。"
+                    $0 == VoiceShortcutNotice.accessibilityRequiredMessage
                 }.count == 1
             )
 
@@ -1130,7 +1137,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(functionMonitor.isRunning)
             try expect(functionMonitor.startCount == 2)
             try expect(
-                announcements.filter { $0 == "Fn 快捷键已启用" }.count == 2
+                announcements.filter {
+                    $0 == VoiceShortcutPreference.functionKey
+                        .activationAnnouncement
+                }.count == 2
             )
             withExtendedLifetime(announcementsCoordinator) {}
         }
@@ -1139,35 +1149,44 @@ struct SpeakerAppScenarioSpecs {
             "voice input notices are localized by the app presentation layer",
             failures: &failures
         ) {
-            try expect(VoiceInputNotice.copied.userMessage == "文字已复制")
+            try expect(
+                VoiceInputNotice.copied.userMessage
+                    == SpeakerCopy.Clipboard.textCopied
+            )
             try expect(
                 VoiceInputNotice.refinementFellBack(.network).userMessage
-                    == "DeepSeek 请求发生网络错误，已使用豆包结果。"
+                    == VoiceInputNotice.refinementNetworkFallbackMessage
             )
             try expect(
                 VoiceInputNotice.refinementFellBack(.authentication).userMessage
-                    == "DeepSeek 鉴权失败，已使用豆包结果。"
+                    == VoiceInputNotice.refinementAuthenticationFallbackMessage
             )
             try expect(
                 VoiceInputNotice.refinementFellBack(.rateLimited).userMessage
-                    == "DeepSeek 请求被限流，已使用豆包结果。"
+                    == VoiceInputNotice.refinementRateLimitedFallbackMessage
             )
             try expect(
                 VoiceInputNotice.refinementFellBack(.unexpected).userMessage
-                    == "DeepSeek 整理失败，已使用豆包结果。"
+                    == VoiceInputNotice.refinementFallbackMessage
             )
             try expect(
                 VoiceInputNotice.persistenceFailure(.writeFailed(reason: "磁盘不可用"))
-                    .userMessage == "会话历史写入失败：磁盘不可用"
+                    .userMessage == SpeakerCopy.History.urgentNotice(
+                        .writeFailed(reason: "磁盘不可用")
+                    )
             )
             try expect(
                 VoiceInputNotice.persistenceFailure(
                     .privacyMigrationFailed(reason: .databaseUnavailable)
-                ).userMessage == "旧版会话历史的隐私清理失败：本地历史数据库不可用。"
+                ).userMessage == SpeakerCopy.History.urgentNotice(
+                    .privacyMigrationFailed(reason: .databaseUnavailable)
+                )
             )
             try expect(
                 VoiceInputNotice.persistenceFailure(.corruptedRecordsSkipped(count: 2))
-                    .userMessage == "有 2 条本地历史记录已损坏，其他记录仍可使用。"
+                    .userMessage == SpeakerCopy.History.urgentNotice(
+                        .corruptedRecordsSkipped(count: 2)
+                    )
             )
         }
 
@@ -1176,22 +1195,37 @@ struct SpeakerAppScenarioSpecs {
             failures: &failures
         ) {
             let denied = VoiceInputFailure.microphonePermissionDenied
-            try expect(denied.userTitle == "麦克风权限未开启")
-            try expect(denied.userGuidance == "请在系统设置中允许 Speaker 使用麦克风。")
+            try expect(
+                denied.userTitle
+                    == VoiceInputFailurePresentation
+                    .microphonePermissionDenied.title
+            )
+            try expect(
+                denied.userGuidance
+                    == VoiceInputFailurePresentation
+                    .microphonePermissionDenied.guidance
+            )
             try expect(denied.userIcon == "mic.slash.fill")
             try expect(denied.needsSettings)
 
             let deviceFailure = VoiceInputFailure.recordingFailed
-            try expect(deviceFailure.userTitle == "录音没有完成")
+            try expect(
+                deviceFailure.userTitle
+                    == VoiceInputFailurePresentation.recordingFailed.title
+            )
             try expect(!deviceFailure.userGuidance.contains("权限"))
             try expect(deviceFailure.userIcon == "mic.slash.fill")
             try expect(!deviceFailure.needsSettings)
 
             let recordingLimit = VoiceInputFailure.recordingLimitReached
-            try expect(recordingLimit.userTitle == "录音已达到 10 分钟上限")
+            try expect(
+                recordingLimit.userTitle
+                    == VoiceInputFailurePresentation.recordingLimitReached.title
+            )
             try expect(
                 recordingLimit.userGuidance
-                    == "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+                    == VoiceInputFailurePresentation
+                    .recordingLimitReached.guidance
             )
             try expect(recordingLimit.userIcon == "timer")
             try expect(!recordingLimit.needsSettings)
@@ -1203,7 +1237,7 @@ struct SpeakerAppScenarioSpecs {
         ) {
             try expect(
                 PendingCopyReason.accessibilityPermissionMissing.userTitle
-                    == "辅助功能权限不可用"
+                    == PendingCopyReason.accessibilityPermissionMissingTitle
             )
         }
 
@@ -1638,7 +1672,8 @@ struct SpeakerAppScenarioSpecs {
                 presentation.registrationState == .registrationMissing
             )
             try expect(
-                presentation.notice?.contains("打开开关") == true
+                presentation.notice
+                    == LoginItemPresentation.registrationMissingNotice
             )
         }
 
@@ -1672,7 +1707,10 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(!model.isEnabled)
             try expect(service.registerCount == 0)
-            try expect(model.notice?.contains("打开开关") == true)
+            try expect(
+                model.notice
+                    == LoginItemPresentation.registrationMissingNotice
+            )
         }
 
         await runAsync("login item model persists an explicit re-enable", failures: &failures) {
@@ -1728,7 +1766,11 @@ struct SpeakerAppScenarioSpecs {
             try expect(!model.isEnabled)
             try expect(service.registerCount == 1)
             try expect(service.unregisterCount == 1)
-            try expect(model.notice?.contains("无法更新登录项") == true)
+            try expect(
+                model.notice?.hasPrefix(
+                    LoginItemSettingsModel.updateFailureNotice
+                ) == true
+            )
         }
 
         run("DeepSeek modes stay inactive until a key is available", failures: &failures) {
@@ -1993,7 +2035,10 @@ struct SpeakerAppScenarioSpecs {
             await model.select(.conciseCleanup)
 
             try expect(model.mode == .defaultSmooth)
-            try expect(model.promptEditorState?.title == "精简清理")
+            try expect(
+                model.promptEditorState?.title
+                    == SpeakerCopy.RefinementMode.conciseCleanup
+            )
             try expect(
                 model.promptDraft
                     == TextRefinementMode.conciseCleanup().deepSeekInstruction
@@ -2041,7 +2086,10 @@ struct SpeakerAppScenarioSpecs {
 
             await model.load()
             try expect(model.mode == .defaultSmooth)
-            try expect(model.promptEditorState?.title == "完整重写")
+            try expect(
+                model.promptEditorState?.title
+                    == SpeakerCopy.RefinementMode.fullRewrite
+            )
             try expect(model.promptDraft == "初始完整重写规则")
 
             model.promptDraft = "保存 Key 前更新的完整重写规则"
@@ -2332,12 +2380,12 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(
                 SettingsGroup.allCases.map(\.title) == [
-                    "快捷键",
-                    "权限",
-                    "API Key",
-                    "整理",
-                    "通用",
-                    "本地数据",
+                    SettingsGroup.shortcutTitle,
+                    SettingsGroup.permissionsTitle,
+                    SettingsGroup.apiKeysTitle,
+                    SettingsGroup.refinementTitle,
+                    SettingsGroup.generalTitle,
+                    SettingsGroup.localDataTitle,
                 ]
             )
             try expect(
@@ -2349,21 +2397,21 @@ struct SpeakerAppScenarioSpecs {
                     .about,
                 ]
             )
-            try expect(MainWindowTab.about.title == "关于")
+            try expect(MainWindowTab.about.title == MainWindowTab.aboutTitle)
             try expect(
                 AboutSection.allCases.map(\.title) == [
-                    "隐私边界",
-                    "版本",
+                    AboutSection.privacyBoundaryTitle,
+                    AboutSection.versionTitle,
                 ]
             )
             try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
             try expect(
                 HistoryRetentionPolicy.allCases.map(\.displayName) == [
-                    "不保存",
-                    "最近 30 天",
-                    "最近 90 天",
-                    "最近一年",
-                    "不按日期清理",
+                    HistoryRetentionPolicy.disabledDisplayName,
+                    HistoryRetentionPolicy.thirtyDaysDisplayName,
+                    HistoryRetentionPolicy.ninetyDaysDisplayName,
+                    HistoryRetentionPolicy.oneYearDisplayName,
+                    HistoryRetentionPolicy.foreverDisplayName,
                 ]
             )
             try expect(
@@ -2373,10 +2421,10 @@ struct SpeakerAppScenarioSpecs {
                     .refinementFellBack,
                     .pendingCopy,
                 ].map(\.label) == [
-                    "已送达",
-                    "已发送·未确认",
-                    "已送达·整理回退",
-                    "待复制结果",
+                    HistoryRecordStatus.deliveredLabel,
+                    HistoryRecordStatus.deliveryUnconfirmedLabel,
+                    HistoryRecordStatus.refinementFellBackLabel,
+                    HistoryRecordStatus.pendingCopyLabel,
                 ]
             )
         }
@@ -2630,11 +2678,14 @@ struct SpeakerAppScenarioSpecs {
                 applicationName: "TextEdit"
             )
             try expect(transcribing.isActive)
-            try expect(transcribing.compactTitle == "正在转成文字…")
+            try expect(
+                transcribing.compactTitle
+                    == VoiceInputProcessingStage.transcribingCompactTitle
+            )
             try expect(transcribing.icon == "sparkles")
             try expect(
                 transcribing.accessibilityAnnouncement
-                    == "正在等待豆包返回文字"
+                    == VoiceInputProcessingStage.transcribingAnnouncement
             )
 
             let delivered = VoiceInputActivity.delivered(
@@ -2642,15 +2693,21 @@ struct SpeakerAppScenarioSpecs {
                 applicationName: "TextEdit",
                 text: "完成"
             )
-            try expect(delivered.compactTitle == "已完成")
-            try expect(delivered.accessibilityAnnouncement == "文字已输入")
+            try expect(
+                delivered.compactTitle
+                    == VoiceInputActivity.deliveredCompactTitle
+            )
+            try expect(
+                delivered.accessibilityAnnouncement
+                    == VoiceInputActivity.deliveredAnnouncement
+            )
             try expect(
                 delivered.accessibilityAnnouncement?.contains("TextEdit")
                     == false
             )
             try expect(
                 PendingCopyReason.changedTarget.userTitle
-                    == "输入位置已经变化"
+                    == PendingCopyReason.changedTargetTitle
             )
         }
 
@@ -2676,7 +2733,11 @@ struct SpeakerAppScenarioSpecs {
 
             feature.restore(.functionKey)
 
-            try expect(announcements == ["Fn 快捷键已启用"])
+            try expect(
+                announcements == [
+                    VoiceShortcutPreference.functionKey.activationAnnouncement,
+                ]
+            )
             withExtendedLifetime(coordinator) {}
         }
 
@@ -2690,7 +2751,11 @@ struct SpeakerAppScenarioSpecs {
 
             feature.select(.functionKey)
 
-            try expect(announcements == ["无法创建 Fn 键的系统事件监听。"])
+            try expect(
+                announcements == [
+                    VoiceShortcutNotice.functionKeyEventTapUnavailableMessage,
+                ]
+            )
             withExtendedLifetime(coordinator) {}
         }
 
@@ -2715,9 +2780,21 @@ struct SpeakerAppScenarioSpecs {
             feature.retryPersistence()
             await feature.flushPersistence()
 
-            try expect(announcements.first == "Fn 快捷键已启用")
-            try expect(announcements.contains("无法保存快捷键设置"))
-            try expect(announcements.last == "Fn 快捷键设置已保存。")
+            try expect(
+                announcements.first
+                    == VoiceShortcutPreference.functionKey
+                    .activationAnnouncement
+            )
+            try expect(
+                announcements.contains(
+                    VoiceShortcutNotice.persistenceFailedMessage
+                )
+            )
+            try expect(
+                announcements.last
+                    == VoiceShortcutPreference.functionKey
+                    .persistenceConfirmationMessage
+            )
             withExtendedLifetime(coordinator) {}
         }
 
@@ -2836,7 +2913,9 @@ struct SpeakerAppScenarioSpecs {
                 "successful input unexpectedly displayed a completion HUD"
             )
             try expect(
-                announcements.messages.contains("文字已输入"),
+                announcements.messages.contains(
+                    VoiceInputActivity.deliveredAnnouncement
+                ),
                 "VoiceOver received no completion feedback after automatic input"
             )
         }
@@ -2891,7 +2970,9 @@ struct SpeakerAppScenarioSpecs {
                 && experience.state.menu.dismissAction == nil
                 && experience.state.menu.recoveryAction == nil
             let announcedEmptyResult = announcements.messages.contains {
-                $0.contains("没有返回文字")
+                $0.contains(
+                    VoiceInputFailurePresentation.providerReturnedNoText.title
+                )
             }
             await experience.shutdown()
 
@@ -2956,7 +3037,9 @@ struct SpeakerAppScenarioSpecs {
             try expect(clipboardFailurePresented)
             try expect(
                 copyAnnouncements == [
-                    "复制失败，请重试，文字已保留，可以选择复制",
+                    VoiceInputActivity.pendingCopyAnnouncement(
+                        .clipboardFailed
+                    ),
                 ],
                 "clipboard failure announced overlapping messages: \(copyAnnouncements)"
             )
@@ -2988,7 +3071,8 @@ struct SpeakerAppScenarioSpecs {
             experience.perform(copyAction)
             let copied = await waitUntil {
                 experience.state.diagnosticCode == "idle"
-                    && fixture.announcements.messages.last == "文字已复制"
+                    && fixture.announcements.messages.last
+                    == SpeakerCopy.Clipboard.textCopied
             }
             let menuNotice = experience.state.menu.notice
             await experience.shutdown()
@@ -3031,12 +3115,15 @@ struct SpeakerAppScenarioSpecs {
                 experience.state.menu.notice?
                     .contains("会话历史写入失败") == true
             }
-            let fallbackMessage = "DeepSeek 请求发生网络错误，已使用豆包结果。"
+            let fallbackMessage =
+                VoiceInputNotice.refinementNetworkFallbackMessage
             let fallbackCount = announcements.messages.filter {
                 $0.contains(fallbackMessage)
             }.count
             let historyFailureCount = announcements.messages.filter {
-                $0 == "会话历史写入失败：磁盘不可用"
+                $0 == SpeakerCopy.History.urgentNotice(
+                    .writeFailed(reason: "磁盘不可用")
+                )
             }.count
             await experience.shutdown()
 
@@ -3105,7 +3192,7 @@ struct SpeakerAppScenarioSpecs {
             let copyCount = await fixture.clipboard.copiedTexts.count
             try expect(copyCount == 0, "stale copy action reached the clipboard")
             let recordingAnnouncements = fixture.announcements.messages.filter {
-                $0 == "Speaker 正在录音，按 Esc 可以取消"
+                $0 == VoiceInputActivity.recordingAnnouncement
             }
             try expect(
                 recordingAnnouncements.count == 2,
@@ -3209,20 +3296,27 @@ struct SpeakerAppScenarioSpecs {
             try expect(presented)
             try expect(
                 experience.state.menu.status?.title
-                    == "录音已达到 10 分钟上限"
+                    == VoiceInputFailurePresentation
+                    .recordingLimitReached.title
             )
             try expect(
                 experience.state.menu.notice
-                    == "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+                    == VoiceInputFailurePresentation
+                    .recordingLimitReached.guidance
             )
             if case let .problem(icon, title, guidance, recovery, _) =
                 experience.state.overlay
             {
                 try expect(icon == "timer")
-                try expect(title == "录音已达到 10 分钟上限")
+                try expect(
+                    title
+                        == VoiceInputFailurePresentation
+                        .recordingLimitReached.title
+                )
                 try expect(
                     guidance
-                        == "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。"
+                        == VoiceInputFailurePresentation
+                        .recordingLimitReached.guidance
                 )
                 try expect(recovery == nil)
             } else {

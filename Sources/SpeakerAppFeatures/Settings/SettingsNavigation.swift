@@ -12,14 +12,21 @@ package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendab
 
     package var id: String { rawValue }
 
+    package static let shortcutTitle = "快捷键"
+    package static let permissionsTitle = "权限"
+    package static let apiKeysTitle = "API Key"
+    package static let refinementTitle = "整理"
+    package static let generalTitle = "通用"
+    package static let localDataTitle = "本地数据"
+
     package var title: String {
         switch self {
-        case .shortcut: "快捷键"
-        case .permissions: "权限"
-        case .apiKeys: "API Key"
-        case .refinement: "整理"
-        case .general: "通用"
-        case .localData: "本地数据"
+        case .shortcut: Self.shortcutTitle
+        case .permissions: Self.permissionsTitle
+        case .apiKeys: Self.apiKeysTitle
+        case .refinement: Self.refinementTitle
+        case .general: Self.generalTitle
+        case .localData: Self.localDataTitle
         }
     }
 }

@@ -17,6 +17,22 @@ package enum SpeakerCopy {
         package static let success = "连接成功"
     }
 
+    /// The refinement mode names the settings picker, the menu bar menu and
+    /// the prompt editor all show. `TextRefinementMode.displayName` keeps its
+    /// own stable identifiers for Session Records and diagnostics.
+    package enum RefinementMode {
+        package static let defaultSmooth = "默认顺滑"
+        package static let conciseCleanup = "精简清理"
+        package static let fullRewrite = "完整重写"
+        package static let custom = "自定义"
+    }
+
+    /// The clipboard confirmation. The voice HUD announces it after a manual
+    /// copy and the History page reports the same fact.
+    package enum Clipboard {
+        package static let textCopied = "文字已复制"
+    }
+
     /// The result of copying the diagnostic report. About and the runtime
     /// report the same sentence, including the promise about what the report
     /// never contains.

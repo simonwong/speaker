@@ -1,10 +1,19 @@
 import SpeakerCore
 
 package extension VoiceShortcutNotice {
+    static let accessibilityRequiredMessage =
+        "需要辅助功能权限；授权后，已选择的快捷键会自动生效。"
+    static let persistenceFailedMessage = "无法保存快捷键设置"
+    static let functionKeyActiveMessage = "Fn 快捷键已启用。"
+    static let functionKeyEventTapUnavailableMessage =
+        "无法创建 Fn 键的系统事件监听。"
+    static let functionKeyRunLoopSourceUnavailableMessage =
+        "Fn 键监听无法接入系统事件循环。"
+
     var message: String {
         switch kind {
         case .accessibilityRequired:
-            "需要辅助功能权限；授权后，已选择的快捷键会自动生效。"
+            Self.accessibilityRequiredMessage
         case let .functionKeyActivationFailed(result):
             Self.functionKeyFailureMessage(result)
         case let .fellBackToFunctionKey(reason):
@@ -12,7 +21,7 @@ package extension VoiceShortcutNotice {
         case let .fallbackUnavailable(reason, result):
             "\(Self.fallbackReasonMessage(reason))；\(Self.functionKeyFailureMessage(result))"
         case .persistenceFailed:
-            "无法保存快捷键设置"
+            Self.persistenceFailedMessage
         }
     }
 
@@ -38,11 +47,11 @@ package extension VoiceShortcutNotice {
     ) -> String {
         switch result {
         case .active:
-            "Fn 快捷键已启用。"
+            functionKeyActiveMessage
         case .eventTapUnavailable:
-            "无法创建 Fn 键的系统事件监听。"
+            functionKeyEventTapUnavailableMessage
         case .runLoopSourceUnavailable:
-            "Fn 键监听无法接入系统事件循环。"
+            functionKeyRunLoopSourceUnavailableMessage
         }
     }
 
@@ -65,6 +74,11 @@ package extension VoiceShortcutNotice {
 }
 
 package extension VoiceShortcutPreference {
+    /// Announced once a chosen shortcut becomes the live one.
+    var activationAnnouncement: String {
+        "\(displayName) 快捷键已启用"
+    }
+
     var persistenceConfirmationMessage: String {
         "\(displayName) 快捷键设置已保存。"
     }

@@ -48,7 +48,7 @@ enum ShortcutRecorderSpecs {
             ))
 
             try expect(
-                decision == .reject("组合键必须包含至少一个修饰键。"),
+                decision == .reject(ShortcutRecorderPolicy.missingModifierPrompt),
                 "a bare key produced \(decision)"
             )
         }
@@ -75,7 +75,7 @@ enum ShortcutRecorderSpecs {
             "shortcut recorder rejects a common editing chord with its own prompt",
             failures: &failures
         ) {
-            let conflictPrompt = "这个组合键是常用编辑命令，请换一个组合键。"
+            let conflictPrompt = ShortcutRecorderPolicy.editingConflictPrompt
             var policy = ShortcutRecorderPolicy()
 
             let copyDecision = policy.handle(.keyDown(
@@ -107,7 +107,7 @@ enum ShortcutRecorderSpecs {
             "shortcut recorder refuses either Command key on its own",
             failures: &failures
         ) {
-            let commandPrompt = "不支持单独使用 Command；请选择左/右 ⌥、⌃ 或 ⇧。"
+            let commandPrompt = ShortcutRecorderPolicy.soloCommandPrompt
             for keyCode in [kVK_Command, kVK_RightCommand] {
                 var policy = ShortcutRecorderPolicy()
 

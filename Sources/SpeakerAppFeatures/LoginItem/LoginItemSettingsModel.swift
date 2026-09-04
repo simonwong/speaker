@@ -28,6 +28,9 @@ package final class LoginItemSettingsModel: ObservableObject {
         self.settingsStore = settingsStore
     }
 
+    /// Prefixes the system error when the login item cannot be updated.
+    package static let updateFailureNotice = "无法更新登录项"
+
     package func restore(desiredEnabled: Bool) async {
         self.desiredEnabled = desiredEnabled
         // `notRegistered` can mean that the user explicitly disabled Speaker
@@ -51,7 +54,7 @@ package final class LoginItemSettingsModel: ObservableObject {
             desiredEnabled = previousDesiredEnabled
             try? await setServiceEnabled(previousDesiredEnabled)
             applyCurrentStatus()
-            notice = "无法更新登录项：\(error.localizedDescription)"
+            notice = "\(Self.updateFailureNotice)：\(error.localizedDescription)"
         }
     }
 

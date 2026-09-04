@@ -93,16 +93,21 @@ package enum SpeakerSigningMode: Equatable, Sendable {
         }
     }
 
+    package static let developmentAdHocDisplayName = "本机开发签名"
+    package static let developmentSignedDisplayName = "本机具名签名"
+    package static let developerIDDisplayName = "正式发布签名"
+    package static let unknownDisplayName = "未识别的签名"
+
     package var displayName: String {
         switch self {
         case .developmentAdHoc:
-            "本机开发签名"
+            Self.developmentAdHocDisplayName
         case .developmentSigned:
-            "本机具名签名"
+            Self.developmentSignedDisplayName
         case .developerID:
-            "正式发布签名"
+            Self.developerIDDisplayName
         case .unknown:
-            "未识别的签名"
+            Self.unknownDisplayName
         }
     }
 

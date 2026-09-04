@@ -98,10 +98,10 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .defaultSmooth: "默认顺滑"
-        case .conciseCleanup: "精简清理"
-        case .fullRewrite: "完整重写"
-        case .custom: "自定义"
+        case .defaultSmooth: SpeakerCopy.RefinementMode.defaultSmooth
+        case .conciseCleanup: SpeakerCopy.RefinementMode.conciseCleanup
+        case .fullRewrite: SpeakerCopy.RefinementMode.fullRewrite
+        case .custom: SpeakerCopy.RefinementMode.custom
         }
     }
 
@@ -722,6 +722,11 @@ package enum ShortcutRecorderDecision: Equatable {
 package struct ShortcutRecorderPolicy {
     package static let recordingPrompt =
         "请单独按下左/右 ⌥、⌃、⇧，或输入一个安全组合键。"
+    package static let soloCommandPrompt =
+        "不支持单独使用 Command；请选择左/右 ⌥、⌃ 或 ⇧。"
+    package static let missingModifierPrompt = "组合键必须包含至少一个修饰键。"
+    package static let editingConflictPrompt =
+        "这个组合键是常用编辑命令，请换一个组合键。"
 
     private var modifierPolicy = ShortcutRecorderModifierPolicy()
 
@@ -738,7 +743,7 @@ package struct ShortcutRecorderPolicy {
             if [kVK_Command, kVK_RightCommand].contains(Int(keyCode)),
                !flags.contains(.command)
             {
-                return .reject("不支持单独使用 Command；请选择左/右 ⌥、⌃ 或 ⇧。")
+                return .reject(Self.soloCommandPrompt)
             }
             return .consume
         case let .keyDown(keyCode, flags, charactersIgnoringModifiers):
@@ -746,7 +751,7 @@ package struct ShortcutRecorderPolicy {
             guard keyCode != UInt16(kVK_Escape) else { return .cancel }
             let modifiers = Self.carbonModifiers(flags)
             guard modifiers != 0 else {
-                return .reject("组合键必须包含至少一个修饰键。")
+                return .reject(Self.missingModifierPrompt)
             }
             let hotKey = CustomHotKey(
                 keyCode: UInt32(keyCode),
@@ -758,7 +763,7 @@ package struct ShortcutRecorderPolicy {
                 )
             )
             guard !hotKey.conflictsWithCommonEditingShortcut else {
-                return .reject("这个组合键是常用编辑命令，请换一个组合键。")
+                return .reject(Self.editingConflictPrompt)
             }
             guard hotKey.isSafeForGlobalVoiceInput else {
                 return .reject(Self.recordingPrompt)

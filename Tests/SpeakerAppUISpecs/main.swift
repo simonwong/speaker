@@ -601,7 +601,7 @@ struct SpeakerAppUISpecs {
                 visibleFrame: visibleFrame
             )
 
-            try expect(window.title == "开始使用 Speaker")
+            try expect(window.title == OnboardingWindowFactory.windowTitle)
             try expect(window.styleMask.contains(.titled))
             try expect(window.styleMask.contains(.closable))
             try expect(window.styleMask.contains(.miniaturizable))
@@ -1147,7 +1147,13 @@ struct SpeakerAppUISpecs {
                 calendar: calendar
             )
 
-            try expect(sections.map(\.title) == ["今天", "昨天", "7月17日"])
+            try expect(
+                sections.map(\.title) == [
+                    HistoryPresentation.todaySectionTitle,
+                    HistoryPresentation.yesterdaySectionTitle,
+                    "7月17日",
+                ]
+            )
             try expect(
                 sections.map { $0.records.map(\.sessionID) } == [
                     [todayAfternoonID, todayMorningID],
@@ -1306,10 +1312,22 @@ struct SpeakerAppUISpecs {
                     == .deliveryUnconfirmed
             )
             try expect(HistoryPresentation.status(for: pendingRecord) == .pendingCopy)
-            try expect(HistoryRecordStatus.delivered.label == "已送达")
-            try expect(HistoryRecordStatus.deliveryUnconfirmed.label == "已发送·未确认")
-            try expect(HistoryRecordStatus.refinementFellBack.label == "已送达·整理回退")
-            try expect(HistoryRecordStatus.pendingCopy.label == "待复制结果")
+            try expect(
+                HistoryRecordStatus.delivered.label
+                    == HistoryRecordStatus.deliveredLabel
+            )
+            try expect(
+                HistoryRecordStatus.deliveryUnconfirmed.label
+                    == HistoryRecordStatus.deliveryUnconfirmedLabel
+            )
+            try expect(
+                HistoryRecordStatus.refinementFellBack.label
+                    == HistoryRecordStatus.refinementFellBackLabel
+            )
+            try expect(
+                HistoryRecordStatus.pendingCopy.label
+                    == HistoryRecordStatus.pendingCopyLabel
+            )
 
             let deliveredRow = HistoryPresentation.row(
                 for: deliveredRecord,

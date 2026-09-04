@@ -29,12 +29,17 @@ package enum HistoryRecordStatus: Equatable, Sendable {
     case pendingCopy
     case failed(VoiceInputFailure)
 
+    package static let deliveredLabel = "已送达"
+    package static let deliveryUnconfirmedLabel = "已发送·未确认"
+    package static let refinementFellBackLabel = "已送达·整理回退"
+    package static let pendingCopyLabel = "待复制结果"
+
     package var label: String {
         switch self {
-        case .delivered: "已送达"
-        case .deliveryUnconfirmed: "已发送·未确认"
-        case .refinementFellBack: "已送达·整理回退"
-        case .pendingCopy: "待复制结果"
+        case .delivered: Self.deliveredLabel
+        case .deliveryUnconfirmed: Self.deliveryUnconfirmedLabel
+        case .refinementFellBack: Self.refinementFellBackLabel
+        case .pendingCopy: Self.pendingCopyLabel
         case let .failed(failure): failure.userTitle
         }
     }
@@ -90,6 +95,11 @@ package struct HistoryRecordRowPresentation: Equatable, Sendable {
 /// Presentation policy for the History tab. Calendar grouping belongs here,
 /// outside `SpeakerCore`, because labels such as Today are interface language.
 package enum HistoryPresentation {
+    /// The two relative day-section titles. Every other section is the
+    /// formatted date itself.
+    package static let todaySectionTitle = "今天"
+    package static let yesterdaySectionTitle = "昨天"
+
     package static func filteredRecords(
         _ records: [VoiceInputHistoryRecord],
         query: String
@@ -210,14 +220,14 @@ package enum HistoryPresentation {
         calendar: Calendar
     ) -> String {
         if day == today {
-            return "今天"
+            return todaySectionTitle
         }
         if let yesterday = calendar.date(
             byAdding: .day,
             value: -1,
             to: today
         ), day == yesterday {
-            return "昨天"
+            return yesterdaySectionTitle
         }
 
         let components = calendar.dateComponents(
@@ -237,13 +247,19 @@ package enum HistoryPresentation {
 /// Interface labels for the retention picker; the policy's single home is
 /// 设置-通用.
 package extension HistoryRetentionPolicy {
+    static let disabledDisplayName = "不保存"
+    static let thirtyDaysDisplayName = "最近 30 天"
+    static let ninetyDaysDisplayName = "最近 90 天"
+    static let oneYearDisplayName = "最近一年"
+    static let foreverDisplayName = "不按日期清理"
+
     var displayName: String {
         switch self {
-        case .disabled: "不保存"
-        case .thirtyDays: "最近 30 天"
-        case .ninetyDays: "最近 90 天"
-        case .oneYear: "最近一年"
-        case .forever: "不按日期清理"
+        case .disabled: Self.disabledDisplayName
+        case .thirtyDays: Self.thirtyDaysDisplayName
+        case .ninetyDays: Self.ninetyDaysDisplayName
+        case .oneYear: Self.oneYearDisplayName
+        case .forever: Self.foreverDisplayName
         }
     }
 }

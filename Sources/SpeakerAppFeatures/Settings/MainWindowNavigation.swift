@@ -10,13 +10,19 @@ package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
 
     package var id: String { rawValue }
 
+    package static let overviewTitle = "概览"
+    package static let historyTitle = "历史"
+    package static let settingsTitle = "设置"
+    package static let dictionaryTitle = "词典"
+    package static let aboutTitle = "关于"
+
     package var title: String {
         switch self {
-        case .overview: "概览"
-        case .history: "历史"
-        case .settings: "设置"
-        case .dictionary: "词典"
-        case .about: "关于"
+        case .overview: Self.overviewTitle
+        case .history: Self.historyTitle
+        case .settings: Self.settingsTitle
+        case .dictionary: Self.dictionaryTitle
+        case .about: Self.aboutTitle
         }
     }
 
@@ -115,10 +121,13 @@ package enum AboutSection: String, CaseIterable, Identifiable, Sendable {
 
     package var id: String { rawValue }
 
+    package static let privacyBoundaryTitle = "隐私边界"
+    package static let versionTitle = "版本"
+
     package var title: String {
         switch self {
-        case .privacyBoundary: "隐私边界"
-        case .version: "版本"
+        case .privacyBoundary: Self.privacyBoundaryTitle
+        case .version: Self.versionTitle
         }
     }
 

@@ -131,6 +131,13 @@ package protocol SoftwareUpdateDriving: AnyObject {
 }
 
 package struct SoftwareUpdateState: Equatable, Sendable {
+    package static let developmentBuildMessage = "检查更新仅用于正式发布版本。"
+    package static let invalidConfigurationMessage =
+        "正式更新配置无效；已停止检查更新。"
+    package static let startFailedMessage =
+        "更新服务启动失败；请重新打开 Speaker 后重试。"
+    package static let notCheckableMessage = "当前无法检查更新。"
+
     package let isAvailable: Bool
     package let canCheckForUpdates: Bool
     package let automaticallyChecksForUpdates: Bool
@@ -151,13 +158,13 @@ package struct SoftwareUpdateState: Equatable, Sendable {
         guard !isAvailable else { return nil }
         return switch statusCode {
         case .developmentBuild:
-            "检查更新仅用于正式发布版本。"
+            Self.developmentBuildMessage
         case .invalidFeed, .invalidPublicKey:
-            "正式更新配置无效；已停止检查更新。"
+            Self.invalidConfigurationMessage
         case .startFailed:
-            "更新服务启动失败；请重新打开 Speaker 后重试。"
+            Self.startFailedMessage
         case .notStarted, .ready:
-            "当前无法检查更新。"
+            Self.notCheckableMessage
         }
     }
 

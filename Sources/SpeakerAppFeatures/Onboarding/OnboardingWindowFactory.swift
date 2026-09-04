@@ -2,6 +2,9 @@ import AppKit
 
 @MainActor
 package enum OnboardingWindowFactory {
+    /// The onboarding window's title bar text.
+    package static let windowTitle = "开始使用 Speaker"
+
     package static func make(
         visibleFrame: CGRect,
         contentView: NSView
@@ -24,7 +27,7 @@ package enum OnboardingWindowFactory {
             backing: .buffered,
             defer: false
         )
-        window.title = "开始使用 Speaker"
+        window.title = windowTitle
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.minSize = layout.effectiveMinimumSize

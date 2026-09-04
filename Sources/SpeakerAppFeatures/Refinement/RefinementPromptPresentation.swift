@@ -14,8 +14,8 @@ package struct RefinementPromptEditorState: Equatable, Sendable {
 
     package var title: String {
         switch mode {
-        case .conciseCleanup: "精简清理"
-        case .fullRewrite: "完整重写"
+        case .conciseCleanup: SpeakerCopy.RefinementMode.conciseCleanup
+        case .fullRewrite: SpeakerCopy.RefinementMode.fullRewrite
         }
     }
 
