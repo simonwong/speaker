@@ -35,6 +35,14 @@ package enum VersionedDocumentLoadOutcome<Document: Sendable>: Sendable {
     case failed(DocumentLoadFailure)
 }
 
+/// One load together with what the recovery-archive pruning that ran with it
+/// managed to do. Pruning cannot fail a load, so its result travels beside the
+/// outcome instead of replacing it.
+package struct VersionedDocumentLoad<Document: Sendable>: Sendable {
+    package let outcome: VersionedDocumentLoadOutcome<Document>
+    package let pruning: RecoveryArchivePruneSummary
+}
+
 /// The non-destructive counterpart of `VersionedDocumentLoadOutcome`: the
 /// file is inspected but never moved.
 package enum VersionedDocumentDecodeOutcome<Document: Sendable>: Sendable {
@@ -117,17 +125,20 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
     /// Loads the document, preserving a corrupt file as evidence so the
     /// location is usable again. Recovery archives are pruned first so a
     /// preserved copy never competes with unbounded older evidence.
-    package func load() -> VersionedDocumentLoadOutcome<Document> {
-        pruneBackups()
+    package func load() -> VersionedDocumentLoad<Document> {
+        let pruning = pruneBackups()
         switch decode() {
         case .absent:
-            return .absent
+            return VersionedDocumentLoad(outcome: .absent, pruning: pruning)
         case let .decoded(document, version):
-            return .loaded(document, version: version)
+            return VersionedDocumentLoad(
+                outcome: .loaded(document, version: version),
+                pruning: pruning
+            )
         case let .failed(failure):
-            return .failed(failure)
+            return VersionedDocumentLoad(outcome: .failed(failure), pruning: pruning)
         case let .corrupted(corruption):
-            return preserveCorruptFile(corruption: corruption)
+            return preserveCorruptFile(corruption: corruption, pruning: pruning)
         }
     }
 
@@ -179,7 +190,9 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         try OwnerOnlyFilePersistence.write(data, to: fileURL)
     }
 
-    package func pruneBackups(preserving preservedURL: URL? = nil) {
+    package func pruneBackups(
+        preserving preservedURL: URL? = nil
+    ) -> RecoveryArchivePruneSummary {
         RecoveryArchivePruner.pruneRegularFiles(
             in: backupDirectoryURL,
             prefix: backupNamePrefix,
@@ -205,8 +218,9 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
     }
 
     private func preserveCorruptFile(
-        corruption: DocumentCorruption
-    ) -> VersionedDocumentLoadOutcome<Document> {
+        corruption: DocumentCorruption,
+        pruning: RecoveryArchivePruneSummary
+    ) -> VersionedDocumentLoad<Document> {
         let timestamp = Int(Date().timeIntervalSince1970 * 1_000)
         let backupURL = backupDirectoryURL.appendingPathComponent(
             "\(backupNamePrefix)\(timestamp)-\(UUID().uuidString).json",
@@ -215,13 +229,21 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
         do {
             try FileManager.default.moveItem(at: fileURL, to: backupURL)
         } catch {
-            return .failed(.preservationFailed(
-                corruption: corruption,
-                detail: PrivacySafeText.reason(for: error)
-            ))
+            return VersionedDocumentLoad(
+                outcome: .failed(.preservationFailed(
+                    corruption: corruption,
+                    detail: PrivacySafeText.reason(for: error)
+                )),
+                pruning: pruning
+            )
         }
-        pruneBackups(preserving: backupURL)
-        return .corruptedPreserved(backupURL: backupURL, corruption: corruption)
+        // The archive just added has to fit inside the same budget, so this
+        // second pass — not the one before decoding — describes the directory
+        // the caller is left with.
+        return VersionedDocumentLoad(
+            outcome: .corruptedPreserved(backupURL: backupURL, corruption: corruption),
+            pruning: pruneBackups(preserving: backupURL)
+        )
     }
 
     private struct VersionHeader: Decodable {

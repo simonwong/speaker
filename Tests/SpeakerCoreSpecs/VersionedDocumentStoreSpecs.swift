@@ -150,13 +150,13 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
                 backupInfix: "recovery-"
             )
 
-            guard case .absent = store.load() else {
+            guard case .absent = store.load().outcome else {
                 throw SpecFailure(message: "a missing document was not reported absent")
             }
 
             try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "word": "legacy"])
                 .write(to: fileURL)
-            guard case let .loaded(document, version) = store.load() else {
+            guard case let .loaded(document, version) = store.load().outcome else {
                 throw SpecFailure(message: "version 1 document was not migrated")
             }
             try expect(document == ["legacy"])
@@ -165,7 +165,7 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             try expect(storedLegacy.word == "legacy", "loading rewrote the stored document")
 
             try store.write(JSONEncoder().encode(VersionedFixture(schemaVersion: 2, words: ["a", "b"])))
-            guard case let .loaded(current, currentVersion) = store.load() else {
+            guard case let .loaded(current, currentVersion) = store.load().outcome else {
                 throw SpecFailure(message: "current document was not loaded")
             }
             try expect(current == ["a", "b"] && currentVersion == 2)
@@ -177,7 +177,7 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             }
             let afterDecode = try siblingNames(of: fileURL)
             try expect(afterDecode == ["fixture.json"], "decode moved the file")
-            guard case let .corruptedPreserved(backupURL, .unsupportedVersion(7)) = store.load() else {
+            guard case let .corruptedPreserved(backupURL, .unsupportedVersion(7)) = store.load().outcome else {
                 throw SpecFailure(message: "load did not preserve the unsupported document")
             }
             try expect(backupURL.lastPathComponent.hasPrefix("fixture.recovery-"))
@@ -185,7 +185,7 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             try expect(afterPreserve == [backupURL.lastPathComponent])
 
             try Data("{\"schemaVersion\": \"two\"}".utf8).write(to: fileURL)
-            guard case .corruptedPreserved(_, .malformed) = store.load() else {
+            guard case .corruptedPreserved(_, .malformed) = store.load().outcome else {
                 throw SpecFailure(message: "a malformed version header was not preserved")
             }
 
@@ -217,7 +217,7 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
 
             // The owner-only boundary opens without following links, so the
             // link is refused before any bytes are read or moved aside.
-            let linkOutcome = store.load()
+            let linkOutcome = store.load().outcome
             guard case .failed = linkOutcome else {
                 throw SpecFailure(message: "a symbolic link was loaded or preserved: \(linkOutcome)")
             }
@@ -233,7 +233,7 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
                     throw SpecFailure(message: "protection refused")
                 }
             )
-            guard case .failed(.protectionFailed) = unprotectable.load() else {
+            guard case .failed(.protectionFailed) = unprotectable.load().outcome else {
                 throw SpecFailure(message: "a protection failure did not stop loading")
             }
             try expect(FileManager.default.fileExists(atPath: targetURL.path))
