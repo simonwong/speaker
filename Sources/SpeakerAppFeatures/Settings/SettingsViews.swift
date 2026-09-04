@@ -1645,40 +1645,98 @@ private struct DictionarySettingsPage: View {
                 )
             }
 
-            Divider()
+            capacityRow
 
             if model.entries.isEmpty {
-                HStack(spacing: 12) {
-                    Image(systemName: "text.book.closed")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("还没有词条")
-                            .font(.subheadline.weight(.medium))
-                        Text("添加产品名、人名或专业术语，识别更准。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 14)
+                SpeakerEmptyState(
+                    title: "还没有词条",
+                    description: "在上方输入一个词，回车即可添加。",
+                    systemImage: "text.book.closed"
+                )
             } else {
+                let omittedEntryIDs = model.omittedEntryIDs
                 DictionaryChipFlowLayout(spacing: 8) {
                     ForEach(model.entries) { entry in
-                        DictionaryEntryChip(word: entry.word) {
+                        DictionaryEntryChip(
+                            word: entry.word,
+                            isOmitted: omittedEntryIDs.contains(entry.id),
+                            qualityHint: model.qualityHint(for: entry)
+                        ) {
                             Task { await model.delete(entry.id) }
                         }
                     }
                 }
             }
 
-            Text("词条会随每次识别请求发送给豆包（仅词条文本），直接提升这些词的识别准确率。悬停词条可删除。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text("只有词条文本会随识别请求发送给豆包；启用需要 DeepSeek 的整理模式时，词条文本也会一并发送给 DeepSeek。")
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.tertiary)
 
             if let notice = model.notice {
                 SettingsNotice(text: notice)
             }
         }
+    }
+
+    private var hasOmittedEntries: Bool {
+        !model.omittedEntryIDs.isEmpty
+    }
+
+    private var capacityRow: some View {
+        HStack(spacing: 10) {
+            Label {
+                Text(model.sendingCountText)
+            } icon: {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 11))
+            }
+            .font(SpeakerTypography.footnote.weight(.medium))
+            .foregroundStyle(hasOmittedEntries ? Color.orange : Color.secondary)
+
+            Spacer(minLength: 12)
+
+            DictionaryCapacityBar(
+                filledRatio: capacityRatio,
+                isAtCapacity: capacityRatio >= 1 && hasOmittedEntries
+            )
+        }
+        .frame(height: 20)
+    }
+
+    private var capacityRatio: Double {
+        let maximum = DictionaryProviderCapacity.doubao.maximumHotwordCount
+        guard maximum > 0 else { return 0 }
+        return min(1, Double(model.sentEntryCount) / Double(maximum))
+    }
+}
+
+/// A silent companion to `sendingCountText`; the numbers stay in that text.
+private struct DictionaryCapacityBar: View {
+    let filledRatio: Double
+    let isAtCapacity: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var fillColor: Color {
+        if isAtCapacity { return .orange }
+        return colorScheme == .dark
+            ? SpeakerVisualIdentity.warmAccent
+            : SpeakerVisualIdentity.warmAccentDeep
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.08))
+                Capsule()
+                    .fill(fillColor)
+                    .frame(
+                        width: geometry.size.width
+                            * max(0, min(1, filledRatio))
+                    )
+            }
+        }
+        .frame(width: 120, height: 4)
+        .accessibilityHidden(true)
     }
 }
 

@@ -6964,6 +6964,42 @@ struct SpeakerCoreSpecs {
             })
         }
 
+        run("dictionary Entry quality policy preserves documented boundaries", failures: &failures) {
+            try expect(DictionaryEntryQualityPolicy.hint(for: "123456789") == .none)
+            try expect(DictionaryEntryQualityPolicy.hint(for: "1234567890") == .tooLong)
+            try expect(DictionaryEntryQualityPolicy.hint(for: "字") == .singleCharacter)
+            try expect(DictionaryEntryQualityPolicy.hint(for: " 123456789 ") == .none)
+            try expect(DictionaryEntryQualityPolicy.hint(for: "\n1234567890\t") == .tooLong)
+            try expect(DictionaryEntryQualityPolicy.hint(for: " 字\n") == .singleCharacter)
+        }
+
+        run("dictionary Entry candidates preserve supported runs and deduplicate case-insensitively", failures: &failures) {
+            let candidates = DictionaryEntryCandidateExtractor.candidates(
+                in: "Use a Swift-lang v2.0, I O'Reilly; SPEAKER speaker 123 42 中文"
+            )
+
+            try expect(
+                candidates == ["Use", "Swift-lang", "v2.0", "O'Reilly", "SPEAKER"]
+            )
+        }
+
+        run("dictionary Entry candidates stop at the fixed limit", failures: &failures) {
+            let text = (0...(DictionaryEntryCandidateExtractor.maximumCandidateCount + 2))
+                .map { "Term\($0)" }
+                .joined(separator: " ")
+            let candidates = DictionaryEntryCandidateExtractor.candidates(in: text)
+
+            try expect(
+                candidates.count
+                    == DictionaryEntryCandidateExtractor.maximumCandidateCount
+            )
+            try expect(candidates.first == "Term0")
+            try expect(
+                candidates.last
+                    == "Term\(DictionaryEntryCandidateExtractor.maximumCandidateCount - 1)"
+            )
+        }
+
         await runAsync("versioned personal dictionary store migrates v1 canonical terms", failures: &failures) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-dictionary-v1-spec-\(UUID().uuidString)")
