@@ -6,7 +6,7 @@ This page records the optional text-refinement contract implemented by Speaker. 
 
 ## Decision summary
 
-DeepSeek is an optional second stage. Default Smoothing never calls it. Concise cleanup, full rewrite, and Custom Modes send only the confirmed Doubao Stage Result and the selected rule. Audio, Input Target details, history, and Personal Dictionary contents are excluded.
+DeepSeek is an optional second stage. Default Smoothing never calls it. Concise cleanup, full rewrite, and Custom Modes send only the confirmed Doubao Stage Result, the selected rule, and the Entry words of the press-time Personal Dictionary snapshot. Audio, Input Target details, and history are excluded.
 
 Speaker uses the OpenAI-compatible chat-completions endpoint with the current Flash model, explicitly disables thinking, requests non-streaming JSON, and bounds the output. The expected content is a single non-empty `text` field.
 
@@ -44,11 +44,11 @@ User Cancellation stops local waiting and suppresses late results. It does not c
 
 The user supplies the API Key, and Speaker stores it in Keychain. The Key never enters settings files, Session Records, diagnostics, source, or release evidence.
 
-Speaker sends the minimum text required for the selected Refinement Mode. Product privacy copy must explain that DeepSeek-dependent modes disclose transcript text to a second provider, while Default Smoothing and all audio remain outside that seam.
+Speaker sends the minimum text required for the selected Refinement Mode: the transcript, the rule, and the Personal Dictionary Entry words. Product privacy copy must explain that DeepSeek-dependent modes disclose transcript text and Entry words to a second provider, while Default Smoothing and all audio remain outside that seam.
 
 ## Testing and live acceptance
 
-Deterministic adapter specifications cover the exact request shape, success validation, every stable failure class, output bounds, User Cancellation, and Doubao fallback. A live connection probe is insufficient for semantic acceptance.
+Deterministic adapter specifications cover the exact request shape — including the presence, JSON-string wrapping, and empty-dictionary absence of the Entry block and the fixed system-prompt clauses — success validation, every stable failure class, output bounds, User Cancellation, and Doubao fallback. A live connection probe is insufficient for semantic acceptance.
 
 The paid provider matrix covers concise cleanup, full rewrite, Custom Mode, cancellation, invalid credentials, malformed output, truncation, and abnormal expansion. Its evidence rules are defined in the [compatibility matrix](../compatibility.md).
 

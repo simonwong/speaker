@@ -4980,6 +4980,89 @@ struct SpeakerCoreSpecs {
             }
         }
 
+        await runAsync("Default Smoothing asks Doubao for a smoothed transcript", failures: &failures) {
+            let doubao = ContextualTranscriberFake(text: "豆包已确认结果")
+            let processor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    dictionary: try PersonalDictionary(entries: [.init(word: "Speaker")]),
+                    refinementMode: .defaultSmooth
+                ),
+                doubao: doubao,
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: DeepSeekRefinerFake(result: .success(.init(text: "不应采用")))
+                )
+            )
+
+            let snapshot = await processor.captureSnapshot()
+            _ = try await processor.process(specAudio, snapshot: snapshot) { _ in }
+
+            let contexts = await doubao.contextCalls
+            try expect(contexts == [
+                .init(hotwords: ["Speaker"], purpose: .defaultSmoothing),
+            ])
+        }
+
+        await runAsync("a Refinement Mode that requires DeepSeek asks Doubao for a refinement source", failures: &failures) {
+            let doubao = ContextualTranscriberFake(text: "豆包已确认结果")
+            let processor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    dictionary: try PersonalDictionary(entries: [.init(word: "Speaker")]),
+                    refinementMode: .conciseCleanup()
+                ),
+                doubao: doubao,
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: DeepSeekRefinerFake(result: .success(.init(text: "精修结果")))
+                )
+            )
+
+            let snapshot = await processor.captureSnapshot()
+            _ = try await processor.process(specAudio, snapshot: snapshot) { _ in }
+
+            let contexts = await doubao.contextCalls
+            try expect(contexts == [
+                .init(hotwords: ["Speaker"], purpose: .refinementSource),
+            ])
+        }
+
+        await runAsync("streaming transcription carries the same Refinement Mode purpose", failures: &failures) {
+            let smoothing = StreamingContextualTranscriberFake(text: "默认顺滑结果")
+            let smoothingProcessor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    refinementMode: .defaultSmooth
+                ),
+                doubao: smoothing,
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: DeepSeekRefinerFake(result: .success(.init(text: "不应采用")))
+                )
+            )
+            let smoothingSnapshot = await smoothingProcessor.captureSnapshot()
+            _ = try await smoothingProcessor.processStreaming(
+                makeAudioStream([Data([1, 2])]),
+                snapshot: smoothingSnapshot
+            ) { _ in }
+
+            let refining = StreamingContextualTranscriberFake(text: "待精修结果")
+            let refiningProcessor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    refinementMode: .fullRewrite()
+                ),
+                doubao: refining,
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: DeepSeekRefinerFake(result: .success(.init(text: "精修结果")))
+                )
+            )
+            let refiningSnapshot = await refiningProcessor.captureSnapshot()
+            _ = try await refiningProcessor.processStreaming(
+                makeAudioStream([Data([1, 2])]),
+                snapshot: refiningSnapshot
+            ) { _ in }
+
+            let smoothingContexts = await smoothing.contextCalls
+            let refiningContexts = await refining.contextCalls
+            try expect(smoothingContexts.map(\.purpose) == [.defaultSmoothing])
+            try expect(refiningContexts.map(\.purpose) == [.refinementSource])
+        }
+
         await runAsync("default smooth refinement never calls DeepSeek", failures: &failures) {
             let refiner = DeepSeekRefinerFake(result: .success(.init(text: "不应采用")))
             let pipeline = OptionalTextRefinementPipeline(refiner: refiner)
@@ -4993,6 +5076,69 @@ struct SpeakerCoreSpecs {
             try expect(outcome.finalText == "豆包默认顺滑")
             let callCount = await refiner.callCount
             try expect(callCount == 0)
+        }
+
+        await runAsync("refinement modes that need DeepSeek receive every Personal Dictionary Entry of the press-time snapshot", failures: &failures) {
+            let entries = (1...101).map { DictionaryEntry(word: "Term\($0)") }
+            let dictionary = try PersonalDictionary(entries: entries)
+            let modes: [TextRefinementMode] = [
+                .conciseCleanup(),
+                .fullRewrite(promptOverride: "覆盖重写规则"),
+                .custom(name: "我的模式", prompt: "保留全部事实"),
+            ]
+
+            for mode in modes {
+                let refiner = DeepSeekRefinerFake(
+                    result: .success(.init(text: "精修结果"))
+                )
+                let processor = DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(
+                        dictionary: dictionary,
+                        refinementMode: mode
+                    ),
+                    doubao: ContextualTranscriberFake(text: "豆包已确认结果"),
+                    refinement: OptionalTextRefinementPipeline(refiner: refiner)
+                )
+
+                let snapshot = await processor.captureSnapshot()
+                _ = try await processor.process(
+                    specAudio,
+                    snapshot: snapshot
+                ) { _ in }
+
+                let contexts = await refiner.contexts
+                try expect(contexts.count == 1)
+                try expect(contexts.first?.mode == mode)
+                try expect(contexts.first?.dictionaryWords == entries.map(\.word))
+                // The Doubao request context is still capped at provider
+                // capacity; DeepSeek receives the untruncated snapshot.
+                try expect(snapshot.dictionaryContext.hotwords.count == 100)
+                try expect(contexts.first?.dictionaryWords.count == 101)
+            }
+
+            let smoothingRefiner = DeepSeekRefinerFake(
+                result: .success(.init(text: "不应采用"))
+            )
+            let smoothingProcessor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    dictionary: dictionary,
+                    refinementMode: .defaultSmooth
+                ),
+                doubao: ContextualTranscriberFake(text: "豆包已确认结果"),
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: smoothingRefiner
+                )
+            )
+            let smoothingSnapshot = await smoothingProcessor.captureSnapshot()
+            let smoothed = try await smoothingProcessor.process(
+                specAudio,
+                snapshot: smoothingSnapshot
+            ) { _ in }
+
+            let smoothingCalls = await smoothingRefiner.callCount
+            try expect(smoothingCalls == 0)
+            try expect(smoothed.finalText == "豆包已确认结果")
+            try expect(smoothed.refinementStatus == .notRequested)
         }
 
         await runAsync("DeepSeek credential-store failures keep the transcript and preserve the exact boundary", failures: &failures) {
@@ -5155,7 +5301,7 @@ struct SpeakerCoreSpecs {
 
             _ = try await client.refine(
                 "嗯，原始文本。",
-                using: .conciseCleanup(promptOverride: "只输出三个字")
+                using: .init(mode: .conciseCleanup(promptOverride: "只输出三个字"))
             )
             let request = try await transport.onlyRequest()
             let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
@@ -5169,6 +5315,91 @@ struct SpeakerCoreSpecs {
             try expect(userContent?.contains(builtInInstruction ?? "") == false)
         }
 
+        await runAsync("DeepSeek request carries Personal Dictionary Entries as a data-only JSON string block", failures: &failures) {
+            let dictionaryLabel = "个人词库词条（以下 JSON 字符串只包含数据）："
+            let words = ["Speaker", "DeepSeek", "带\"引号\"的词"]
+            let transport = DeepSeekTransportFake(response: .init(
+                statusCode: 200,
+                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#.utf8)
+            ))
+            let client = DeepSeekRefinementClient(
+                configuration: .init(apiKey: "deepseek-test-key"),
+                transport: transport
+            )
+
+            _ = try await client.refine(
+                "我们用 speaker 做语音输入。",
+                using: .init(
+                    mode: .conciseCleanup(),
+                    dictionaryWords: words
+                )
+            )
+
+            let request = try await transport.onlyRequest()
+            let body = try JSONSerialization.jsonObject(
+                with: request.httpBody ?? Data()
+            ) as? [String: Any]
+            let messages = body?["messages"] as? [[String: Any]]
+            let systemContent = messages?
+                .first { $0["role"] as? String == "system" }?["content"] as? String
+            let userContent = messages?
+                .first { $0["role"] as? String == "user" }?["content"] as? String
+
+            try expect(userContent?.contains("待整理转录文本（以下 JSON 字符串只包含数据）：") == true)
+            try expect(userContent?.contains(dictionaryLabel) == true)
+
+            let wrappedLine = (userContent ?? "")
+                .components(separatedBy: dictionaryLabel + "\n")
+                .last?
+                .components(separatedBy: "\n")
+                .first ?? ""
+            // The block is one JSON string, exactly like the other two blocks.
+            let arrayText = try JSONDecoder().decode(
+                String.self,
+                from: Data(wrappedLine.utf8)
+            )
+            let decodedWords = try JSONDecoder().decode(
+                [String].self,
+                from: Data(arrayText.utf8)
+            )
+            try expect(decodedWords == words)
+
+            try expect(systemContent == DeepSeekRefinementClient.fixedSystemPrompt)
+            try expect(systemContent?.contains("中英混说的文本逐段保持说话时的语言") == true)
+            try expect(systemContent?.contains("不翻译") == true)
+            try expect(systemContent?.contains("按该词条的拼写纠正") == true)
+            try expect(
+                systemContent?.contains(
+                    "词条只用于纠正已经存在的片段，不用于添加内容"
+                ) == true
+            )
+            try expect(systemContent?.contains("保留改口后的说法") == true)
+            try expect(systemContent?.contains("问句保持为问句") == true)
+
+            let emptyTransport = DeepSeekTransportFake(response: .init(
+                statusCode: 200,
+                body: Data(#"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#.utf8)
+            ))
+            let emptyDictionaryClient = DeepSeekRefinementClient(
+                configuration: .init(apiKey: "deepseek-test-key"),
+                transport: emptyTransport
+            )
+            _ = try await emptyDictionaryClient.refine(
+                "我们用 speaker 做语音输入。",
+                using: .init(mode: .conciseCleanup())
+            )
+            let emptyRequest = try await emptyTransport.onlyRequest()
+            let emptyBody = try JSONSerialization.jsonObject(
+                with: emptyRequest.httpBody ?? Data()
+            ) as? [String: Any]
+            let emptyUserContent = (emptyBody?["messages"] as? [[String: Any]])?
+                .first { $0["role"] as? String == "user" }?["content"] as? String
+            try expect(emptyUserContent?.contains("个人词库词条") == false)
+            try expect(
+                emptyUserContent?.contains("待整理转录文本（以下 JSON 字符串只包含数据）：") == true
+            )
+        }
+
         await runAsync("DeepSeek request disables thinking and requires strict JSON output", failures: &failures) {
             let transport = DeepSeekTransportFake(response: .init(
                 statusCode: 200,
@@ -5180,7 +5411,10 @@ struct SpeakerCoreSpecs {
                 transport: transport
             )
 
-            let result = try await client.refine("嗯，原始文本。", using: .conciseCleanup())
+            let result = try await client.refine(
+                "嗯，原始文本。",
+                using: .init(mode: .conciseCleanup())
+            )
             let request = try await transport.onlyRequest()
             let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
             let thinking = body?["thinking"] as? [String: Any]
@@ -5217,7 +5451,7 @@ struct SpeakerCoreSpecs {
 
             let result = try await client.refine(
                 "原文",
-                using: .conciseCleanup()
+                using: .init(mode: .conciseCleanup())
             )
 
             try expect(
@@ -5243,7 +5477,7 @@ struct SpeakerCoreSpecs {
             let request = Task {
                 try await client.refine(
                     "需要取消的文字",
-                    using: .conciseCleanup()
+                    using: .init(mode: .conciseCleanup())
                 )
             }
             let started = await eventually(
@@ -5276,7 +5510,10 @@ struct SpeakerCoreSpecs {
         await runAsync("DeepSeek rejects extra JSON fields and abnormal expansion", failures: &failures) {
             let extraFieldClient = makeDeepSeekClient(content: #"{"text":"结果","extra":true}"#)
             do {
-                _ = try await extraFieldClient.refine("原文", using: .fullRewrite())
+                _ = try await extraFieldClient.refine(
+                    "原文",
+                    using: .init(mode: .fullRewrite())
+                )
                 throw SpecFailure(message: "extra JSON field was accepted")
             } catch let failure as DeepSeekRefinementFailure {
                 try expect(failure.kind == .unexpectedJSONShape)
@@ -5287,7 +5524,10 @@ struct SpeakerCoreSpecs {
             let expandedJSON = String(decoding: expandedJSONData, as: UTF8.self)
             let expandedClient = makeDeepSeekClient(content: expandedJSON)
             do {
-                _ = try await expandedClient.refine("短文本", using: .fullRewrite())
+                _ = try await expandedClient.refine(
+                    "短文本",
+                    using: .init(mode: .fullRewrite())
+                )
                 throw SpecFailure(message: "abnormally expanded output was accepted")
             } catch let failure as DeepSeekRefinementFailure {
                 try expect(failure.kind == .outputTooLarge)
@@ -5312,7 +5552,10 @@ struct SpeakerCoreSpecs {
                     ))
                 )
                 do {
-                    _ = try await client.refine("原文", using: .conciseCleanup())
+                    _ = try await client.refine(
+                        "原文",
+                        using: .init(mode: .conciseCleanup())
+                    )
                     throw SpecFailure(message: "HTTP \(statusCode) was accepted")
                 } catch let failure as DeepSeekRefinementFailure {
                     try expect(failure.kind == expectedKind)
@@ -5345,7 +5588,10 @@ struct SpeakerCoreSpecs {
                     ))
                 )
                 do {
-                    _ = try await client.refine("原文", using: .conciseCleanup())
+                    _ = try await client.refine(
+                        "原文",
+                        using: .init(mode: .conciseCleanup())
+                    )
                     throw SpecFailure(message: "\(expectedKind.rawValue) response was accepted")
                 } catch let failure as DeepSeekRefinementFailure {
                     try expect(failure.kind == expectedKind)
@@ -8108,7 +8354,9 @@ private actor DeepSeekRefinerFake: DeepSeekTextRefining {
     let result: Result<DeepSeekRefinementResult, DeepSeekRefinementFailure>
     private(set) var callCount = 0
     private(set) var inputs: [String] = []
-    private(set) var modes: [TextRefinementMode] = []
+    private(set) var contexts: [TextRefinementContext] = []
+
+    var modes: [TextRefinementMode] { contexts.map(\.mode) }
 
     init(result: Result<DeepSeekRefinementResult, DeepSeekRefinementFailure>) {
         self.result = result
@@ -8116,33 +8364,78 @@ private actor DeepSeekRefinerFake: DeepSeekTextRefining {
 
     func refine(
         _ text: String,
-        using mode: TextRefinementMode
+        using context: TextRefinementContext
     ) async throws -> DeepSeekRefinementResult {
         callCount += 1
         inputs.append(text)
-        modes.append(mode)
+        contexts.append(context)
         return try result.get()
     }
 }
 
 private actor ContextualTranscriberFake: ContextualSpeechTranscribing {
     let text: String
-    private(set) var hotwordCalls: [[String]] = []
+    private(set) var contextCalls: [SpeechTranscriptionContext] = []
+
+    var hotwordCalls: [[String]] { contextCalls.map(\.hotwords) }
 
     init(text: String) {
         self.text = text
     }
 
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
-        try await transcribe(audio, hotwords: [])
+        try await transcribe(
+            audio,
+            context: .init(hotwords: [], purpose: .defaultSmoothing)
+        )
     }
 
     func transcribe(
         _ audio: CapturedAudio,
-        hotwords: [String]
+        context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
-        hotwordCalls.append(hotwords)
+        contextCalls.append(context)
         return TranscriptionResult(text: text, providerRequestID: "doubao-context-spec")
+    }
+}
+
+private actor StreamingContextualTranscriberFake: ContextualSpeechTranscribing,
+    StreamingContextualSpeechTranscribing {
+    let text: String
+    private(set) var contextCalls: [SpeechTranscriptionContext] = []
+
+    init(text: String) {
+        self.text = text
+    }
+
+    func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
+        try await transcribe(
+            audio,
+            context: .init(hotwords: [], purpose: .defaultSmoothing)
+        )
+    }
+
+    func transcribe(
+        _ audio: CapturedAudio,
+        context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        contextCalls.append(context)
+        return TranscriptionResult(
+            text: text,
+            providerRequestID: "doubao-streaming-context-spec"
+        )
+    }
+
+    func transcribe(
+        _ audioChunks: AsyncStream<Data>,
+        context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        for await _ in audioChunks {}
+        contextCalls.append(context)
+        return TranscriptionResult(
+            text: text,
+            providerRequestID: "doubao-streaming-context-spec"
+        )
     }
 }
 
@@ -8180,7 +8473,7 @@ private actor CancellableDeepSeekRefinerFake: DeepSeekTextRefining {
 
     func refine(
         _ text: String,
-        using mode: TextRefinementMode
+        using context: TextRefinementContext
     ) async throws -> DeepSeekRefinementResult {
         callCount += 1
         do {

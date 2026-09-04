@@ -194,14 +194,38 @@ public struct DeepSeekRefinementResult: Equatable, Sendable {
     }
 }
 
+/// Everything the text-refinement seam knows about one refinement request: the
+/// Refinement Mode to execute and the Personal Dictionary Entry words captured
+/// when the shortcut was pressed. Default Smoothing never constructs one
+/// because it never reaches DeepSeek.
+public struct TextRefinementContext: Equatable, Sendable {
+    public let mode: TextRefinementMode
+    /// The Entry words of the press-time Personal Dictionary snapshot, in
+    /// snapshot order. DeepSeek has no provider token budget, so this is the
+    /// full snapshot rather than the Doubao-truncated request context.
+    public let dictionaryWords: [String]
+
+    public init(mode: TextRefinementMode, dictionaryWords: [String] = []) {
+        self.mode = mode
+        self.dictionaryWords = dictionaryWords
+    }
+}
+
 public protocol DeepSeekTextRefining: Sendable {
-    func refine(_ text: String, using mode: TextRefinementMode) async throws -> DeepSeekRefinementResult
+    func refine(
+        _ text: String,
+        using context: TextRefinementContext
+    ) async throws -> DeepSeekRefinementResult
 }
 
 public enum DeepSeekRefinementStatus: String, Equatable, Sendable {
     case notRequested
     case succeeded
     case fellBack
+    /// The user chose the confirmed Doubao Stage Result while DeepSeek
+    /// refinement was still pending. The selected Refinement Mode is kept on
+    /// the Session Record; no DeepSeek text was applied.
+    case userAcceptedDoubao
 }
 
 public struct TextRefinementOutcome: Equatable, Sendable {
@@ -243,7 +267,8 @@ public actor OptionalTextRefinementPipeline {
 
     public func refine(
         doubaoText: String,
-        mode: TextRefinementMode
+        mode: TextRefinementMode,
+        dictionaryWords: [String] = []
     ) async throws -> TextRefinementOutcome {
         guard mode.requiresDeepSeek else {
             return TextRefinementOutcome(
@@ -260,7 +285,13 @@ public actor OptionalTextRefinementPipeline {
         do {
             try Task.checkCancellation()
             let validatedMode = try mode.validated()
-            let result = try await refiner.refine(doubaoText, using: validatedMode)
+            let result = try await refiner.refine(
+                doubaoText,
+                using: TextRefinementContext(
+                    mode: validatedMode,
+                    dictionaryWords: dictionaryWords
+                )
+            )
             try Task.checkCancellation()
             return TextRefinementOutcome(
                 doubaoText: doubaoText,
