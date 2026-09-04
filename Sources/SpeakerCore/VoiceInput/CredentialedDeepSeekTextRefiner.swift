@@ -19,7 +19,7 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
 
     public func refine(
         _ text: String,
-        using mode: TextRefinementMode
+        using context: TextRefinementContext
     ) async throws -> DeepSeekRefinementResult {
         let apiKey: String
         do {
@@ -36,7 +36,7 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
             configuration: .init(apiKey: apiKey, endpoint: endpoint),
             transport: transport
         )
-        return try await client.refine(text, using: mode)
+        return try await client.refine(text, using: context)
     }
 
     public func hasAPIKey() async throws -> Bool {
@@ -54,7 +54,7 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
     public func checkConnection() async throws -> String? {
         try await refine(
             "连接检查。",
-            using: .conciseCleanup()
+            using: TextRefinementContext(mode: .conciseCleanup())
         ).providerRequestID
     }
 

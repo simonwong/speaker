@@ -288,7 +288,8 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         let refinementStarted = ContinuousClock.now
         let refinementOutcome = try await refinement.refine(
             doubaoText: doubaoResult.text,
-            mode: snapshot.refinementMode
+            mode: snapshot.refinementMode,
+            dictionaryWords: snapshot.dictionary.entries.map(\.word)
         )
         let refinementDuration = refinementStarted.duration(to: .now)
 

@@ -519,7 +519,10 @@ private struct SpeakerProviderSmoke {
         for (name, caseID, source, mode) in modes {
             do {
                 announceStarted(caseID)
-                let refined = try await service.refine(source, using: mode)
+                let refined = try await service.refine(
+                    source,
+                    using: TextRefinementContext(mode: mode)
+                )
                 guard deepSeekOracle(
                     source: source,
                     output: refined.text,
@@ -551,7 +554,7 @@ private struct SpeakerProviderSmoke {
         let request = Task {
             try await service.refine(
                 String(repeating: "这是等待中取消的固定非敏感测试文本。", count: 120),
-                using: .fullRewrite()
+                using: TextRefinementContext(mode: .fullRewrite())
             )
         }
         await Task.yield()
@@ -581,7 +584,10 @@ private struct SpeakerProviderSmoke {
         )
         do {
             announceStarted(.deepSeekInvalidCredential)
-            _ = try await service.refine("凭据边界检查。", using: .conciseCleanup())
+            _ = try await service.refine(
+                "凭据边界检查。",
+                using: TextRefinementContext(mode: .conciseCleanup())
+            )
             return result(.deepSeekInvalidCredential, .fail, .unexpected)
         } catch let failure as DeepSeekRefinementFailure
             where failure.kind == .authentication
