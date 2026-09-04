@@ -7,6 +7,7 @@ SCRIPT_DIR="${0:A:h}"
 /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppScenarioSpecs
 /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
 /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerProviderEvidenceSpecs
+/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAccuracyMetricsSpecs
 /bin/zsh "$SCRIPT_DIR/test-compatibility-smoke"
 /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
 /bin/zsh "$SCRIPT_DIR/test-workflow-security"
@@ -23,6 +24,9 @@ SCRIPT_DIR="${0:A:h}"
     -Xswiftc -warnings-as-errors
 /bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
     --product SpeakerDeliverySmokeTarget \
+    -Xswiftc -warnings-as-errors
+/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+    --product SpeakerAccuracyEvaluator \
     -Xswiftc -warnings-as-errors
 /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
     SpeakerUpdateSignatureVerifier --self-test
