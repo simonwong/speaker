@@ -1832,8 +1832,52 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.sendingCountText == "100/100 条")
             try expect(model.omittedEntryIDs == Set([model.entries[100].id]))
             try expect(model.qualityHint(for: model.entries[100]) == .tooLong)
-            let persisted = try await store.load()
+            let persisted = try await store.load().dictionary
             try expect(persisted.entries.last?.word == "1234567890")
+        }
+
+        await runAsync(
+            "dictionary settings reports a preserved corrupt dictionary and keeps saving",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-dictionary-recovery-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let fileURL = directory.appendingPathComponent("personal-dictionary.json")
+            try Data("not-json".utf8).write(to: fileURL)
+            let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
+            let model = DictionarySettingsModel(
+                store: store,
+                configuration: VoiceInputConfigurationController()
+            )
+
+            await model.load()
+
+            guard let recovery = model.recovery else {
+                throw SpecFailure(message: "corrupt dictionary produced no recovery")
+            }
+            try expect(model.entries.isEmpty)
+            try expect(
+                model.notice == DictionarySettingsModel.recoveryNotice(for: recovery)
+            )
+            try expect(
+                model.notice?.contains(recovery.backupURL.lastPathComponent) == true,
+                "notice does not name the preserved file"
+            )
+            let added = await model.add(word: "Speaker")
+            try expect(added, "saving after recovery was refused")
+            try expect(model.notice == nil)
+            let persisted = try await store.load()
+            try expect(persisted.dictionary.entries.map(\.word) == ["Speaker"])
+            try expect(persisted.recovery == nil)
+            try expect(FileManager.default.fileExists(atPath: recovery.backupURL.path))
         }
 
         await runAsync(
@@ -1881,7 +1925,7 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(added.kind == .success)
             try expect(record == retainedRecord)
-            let persisted = try await store.load()
+            let persisted = try await store.load().dictionary
             try expect(persisted.entries.map(\.word) == ["SpeakerBetaFixed"])
             let configured = await configuration.currentDictionary()
             try expect(configured.entries.map(\.word) == ["SpeakerBetaFixed"])
@@ -1892,7 +1936,7 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(duplicate.kind == .warning)
             try expect(duplicate.message.contains("已存在"))
-            let afterDuplicate = try await store.load()
+            let afterDuplicate = try await store.load().dictionary
             try expect(afterDuplicate.entries.count == 1)
 
             let noTextSessionID = VoiceInputSessionID()
@@ -3504,8 +3548,8 @@ private actor ScenarioPersonalDictionaryStore: PersonalDictionaryStoring {
         stored.entries.map(\.word)
     }
 
-    func load() -> PersonalDictionary {
-        stored
+    func load() -> PersonalDictionaryLoadResult {
+        PersonalDictionaryLoadResult(dictionary: stored)
     }
 
     func save(_ dictionary: PersonalDictionary) {

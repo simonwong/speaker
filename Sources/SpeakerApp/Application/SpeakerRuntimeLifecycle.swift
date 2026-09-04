@@ -130,7 +130,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
 
     func loadDictionary() async -> String? {
         await dictionary.load()
-        return nil
+        return dictionary.recovery.map(DictionarySettingsModel.recoveryNotice(for:))
     }
 
     func loadRefinement() async {

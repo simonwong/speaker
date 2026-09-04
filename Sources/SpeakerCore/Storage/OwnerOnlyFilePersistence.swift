@@ -19,7 +19,7 @@ package struct LocalFileProtection: Sendable {
     }
 }
 
-enum OwnerOnlyFilePersistenceError: Error {
+package enum OwnerOnlyFilePersistenceError: Error {
     case invalidFileURL
     case missingDirectory
     case nonRegularFile

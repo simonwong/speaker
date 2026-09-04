@@ -64,7 +64,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
     public static let defaultMaximumRecordCount = 10_000
     private static let maximumLegacyDocumentByteCount = 64 * 1_024 * 1_024
 
-    private let fileURL: URL
+    private let documents: VersionedOwnerOnlyDocumentStore<[VoiceInputHistoryRecord]>
     private let maximumRecordCount: Int
     private var storedRecords: [VoiceInputHistoryRecord]
     private var retentionPolicy: HistoryRetentionPolicy
@@ -90,22 +90,22 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         fileProtection: LocalFileProtection
     ) {
         let resolvedMaximumRecordCount = max(1, maximumRecordCount)
-        self.fileURL = fileURL
+        let documents = VersionedOwnerOnlyDocumentStore(
+            fileURL: fileURL,
+            schema: Self.schema,
+            maximumByteCount: Self.maximumLegacyDocumentByteCount,
+            backupInfix: "corrupt-",
+            fileProtection: fileProtection
+        )
+        self.documents = documents
         self.retentionPolicy = retentionPolicy
         self.maximumRecordCount = resolvedMaximumRecordCount
-        Self.pruneRecoveryArtifacts(for: fileURL)
-        do {
-            try fileProtection.protect(fileURL)
-        } catch {
-            storedRecords = []
-            notice = .privacyMigrationFailed(
-                reason: Self.safeReason(for: error)
-            )
-            return
-        }
 
-        switch Self.loadDocument(at: fileURL) {
-        case let .success(records):
+        switch documents.load() {
+        case .absent:
+            storedRecords = []
+            notice = nil
+        case let .loaded(records, _):
             storedRecords = SessionHistoryRecordPolicy.retained(
                 records,
                 policy: retentionPolicy,
@@ -113,11 +113,40 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
                 now: Date()
             )
             notice = nil
-        case let .failure(failure):
+        case let .corruptedPreserved(backupURL, corruption):
             storedRecords = []
-            notice = Self.preserveCorruptedDocument(at: fileURL, failure: failure)
+            notice = .corruptedDataPreserved(
+                backupURL: backupURL,
+                reason: corruption.summary
+            )
+        case let .failed(.protectionFailed(detail)):
+            storedRecords = []
+            notice = .privacyMigrationFailed(reason: detail)
+        case let .failed(.readFailed(detail)):
+            storedRecords = []
+            notice = .writeFailed(
+                reason: "History data could not be read safely: \(detail)"
+            )
+        case let .failed(.preservationFailed(_, detail)):
+            storedRecords = []
+            notice = .writeFailed(
+                reason: "History data is corrupt and could not be preserved: \(detail)"
+            )
         }
     }
+
+    /// This table is the migration seam: future schemas decode into their
+    /// own DTO and migrate to the current domain record here.
+    private static let schema = VersionedDocumentSchema<[VoiceInputHistoryRecord]>(
+        currentVersion: currentSchemaVersion,
+        versionKey: .schemaVersion,
+        decoders: [
+            1: { data in
+                try decoder.decode(HistoryDocumentV1.self, from: data)
+                    .records.map { try $0.domainRecord }
+            },
+        ]
+    )
 
     public static func defaultFileURL(
         fileManager: FileManager = .default,
@@ -263,8 +292,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
                 schemaVersion: Self.currentSchemaVersion,
                 records: storedRecords.map(HistoryRecordV1.init)
             )
-            let data = try Self.encoder.encode(document)
-            try OwnerOnlyFilePersistence.write(data, to: fileURL)
+            try documents.write(try Self.encoder.encode(document))
             return true
         } catch {
             notice = .writeFailed(reason: Self.safeReason(for: error))
@@ -273,39 +301,11 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
     }
 
     private func removeRecoveryArtifacts() throws {
-        let directory = fileURL.deletingLastPathComponent()
-        let baseName = fileURL.deletingPathExtension().lastPathComponent
-        let prefix = "\(baseName).corrupt-"
-        let candidates = try FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        for candidate in candidates where
-            candidate.lastPathComponent.hasPrefix(prefix)
-                && candidate.pathExtension == "json"
-        {
-            try FileManager.default.removeItem(at: candidate)
-        }
+        try documents.removeBackups()
     }
 }
 
 private extension VersionedLocalSessionHistory {
-    enum LoadFailure: Error {
-        case unreadable(Error)
-        case malformed(Error)
-        case unsupportedVersion(Int)
-    }
-
-    enum LoadResult {
-        case success([VoiceInputHistoryRecord])
-        case failure(LoadFailure)
-    }
-
-    struct DocumentVersion: Decodable {
-        let schemaVersion: Int
-    }
-
     static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -319,88 +319,10 @@ private extension VersionedLocalSessionHistory {
         return decoder
     }
 
-    static func loadDocument(at fileURL: URL) -> LoadResult {
-        let data: Data
-        do {
-            guard let storedData = try OwnerOnlyFilePersistence.read(
-                from: fileURL,
-                maximumByteCount: maximumLegacyDocumentByteCount
-            ) else {
-                return .success([])
-            }
-            data = storedData
-        } catch {
-            return .failure(.unreadable(error))
-        }
-
-        let version: Int
-        do {
-            version = try decoder.decode(DocumentVersion.self, from: data).schemaVersion
-        } catch {
-            return .failure(.malformed(error))
-        }
-
-        // This switch is the migration seam: future schemas decode into their
-        // own DTO and migrate to the current domain record before returning.
-        switch version {
-        case 1:
-            do {
-                let document = try decoder.decode(HistoryDocumentV1.self, from: data)
-                return .success(try document.records.map { try $0.domainRecord })
-            } catch {
-                return .failure(.malformed(error))
-            }
-        default:
-            return .failure(.unsupportedVersion(version))
-        }
-    }
-
-    static func preserveCorruptedDocument(
-        at fileURL: URL,
-        failure: LoadFailure
-    ) -> LocalHistoryPersistenceNotice {
-        let reason: String
-        switch failure {
-        case let .unreadable(error), let .malformed(error):
-            reason = safeReason(for: error)
-        case let .unsupportedVersion(version):
-            reason = "Unsupported history schema version \(version)."
-        }
-
-        let timestamp = Int(Date().timeIntervalSince1970 * 1_000)
-        let backupURL = fileURL
-            .deletingPathExtension()
-            .appendingPathExtension("corrupt-\(timestamp).json")
-
-        do {
-            try FileManager.default.moveItem(at: fileURL, to: backupURL)
-            pruneRecoveryArtifacts(for: fileURL, preserving: backupURL)
-            return .corruptedDataPreserved(backupURL: backupURL, reason: reason)
-        } catch {
-            return .writeFailed(
-                reason: "History data is corrupt and could not be preserved: \(safeReason(for: error))"
-            )
-        }
-    }
-
     static func safeReason(for error: Error) -> String {
-        let nsError = error as NSError
-        return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
+        VersionedOwnerOnlyDocumentStore<[VoiceInputHistoryRecord]>
+            .safeReason(for: error)
     }
-
-    static func pruneRecoveryArtifacts(
-        for fileURL: URL,
-        preserving preservedURL: URL? = nil
-    ) {
-        let baseName = fileURL.deletingPathExtension().lastPathComponent
-        RecoveryArchivePruner.pruneRegularFiles(
-            in: fileURL.deletingLastPathComponent(),
-            prefix: "\(baseName).corrupt-",
-            suffix: ".json",
-            preserving: preservedURL
-        )
-    }
-
 }
 
 private struct HistoryDocumentV1: Codable {

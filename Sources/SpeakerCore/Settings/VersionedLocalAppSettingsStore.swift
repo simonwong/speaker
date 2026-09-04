@@ -308,10 +308,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     }
 }
 
-public enum AppSettingsRecoveryReason: Equatable, Sendable {
-    case corrupted(reason: String)
-    case unsupportedVersion(Int)
-}
+public typealias AppSettingsRecoveryReason = DocumentCorruption
 
 public struct AppSettingsRecovery: Equatable, Sendable {
     public let backupURL: URL
@@ -385,21 +382,36 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     public static let currentSchemaVersion = 1
     private static let maximumDocumentByteCount = 1 * 1_024 * 1_024
 
-    private let fileURL: URL
-    private let fileProtection: LocalFileProtection
+    private let documents: VersionedOwnerOnlyDocumentStore<SpeakerAppSettings>
 
     public init(fileURL: URL) {
-        self.fileURL = fileURL
-        fileProtection = .ownerOnly
+        self.init(fileURL: fileURL, fileProtection: .ownerOnly)
     }
 
     package init(
         fileURL: URL,
         fileProtection: LocalFileProtection
     ) {
-        self.fileURL = fileURL
-        self.fileProtection = fileProtection
+        documents = VersionedOwnerOnlyDocumentStore(
+            fileURL: fileURL,
+            schema: Self.schema,
+            maximumByteCount: Self.maximumDocumentByteCount,
+            backupInfix: "recovery-",
+            fileProtection: fileProtection
+        )
     }
+
+    /// Version dispatch is the migration seam. Each future document version
+    /// decodes its own DTO and maps it into `SpeakerAppSettings` here.
+    private static let schema = VersionedDocumentSchema<SpeakerAppSettings>(
+        currentVersion: currentSchemaVersion,
+        versionKey: .schemaVersion,
+        decoders: [
+            1: { data in
+                try decoder.decode(SettingsDocumentV1.self, from: data).settings
+            },
+        ]
+    )
 
     public static func defaultFileURL(
         fileManager: FileManager = .default,
@@ -416,56 +428,31 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     }
 
     public func load() -> AppSettingsLoadResult {
-        Self.pruneRecoveryArtifacts(for: fileURL)
-        do {
-            try fileProtection.protect(fileURL)
-        } catch {
+        switch documents.load() {
+        case .absent:
+            return .defaults(.default)
+        case let .loaded(settings, _):
+            return .loaded(settings)
+        case let .corruptedPreserved(backupURL, corruption):
+            return .recovered(
+                .default,
+                recovery: AppSettingsRecovery(backupURL: backupURL, reason: corruption)
+            )
+        case .failed(.protectionFailed):
             return .recoveryFailed(
                 .default,
                 reason: "无法保护设置文件权限，已停止加载本机设置。"
             )
-        }
-        let data: Data
-        do {
-            guard let storedData = try OwnerOnlyFilePersistence.read(
-                from: fileURL,
-                maximumByteCount: Self.maximumDocumentByteCount
-            ) else {
-                return .defaults(.default)
-            }
-            data = storedData
-        } catch {
+        case let .failed(.readFailed(detail)):
             return .recoveryFailed(
                 .default,
-                reason: "无法安全读取设置文件，已停止加载：\(Self.safeReason(for: error))"
+                reason: "无法安全读取设置文件，已停止加载：\(detail)"
             )
-        }
-
-        let version: Int
-        do {
-            version = try Self.decoder
-                .decode(SettingsDocumentVersion.self, from: data)
-                .schemaVersion
-        } catch {
-            return recover(
-                reason: .corrupted(reason: Self.safeReason(for: error))
+        case let .failed(.preservationFailed(_, detail)):
+            return .recoveryFailed(
+                .default,
+                reason: "Settings could not be recovered: \(detail)"
             )
-        }
-
-        // Version dispatch is the migration seam. Each future document version
-        // can decode its own DTO and map it into `SpeakerAppSettings` here.
-        switch version {
-        case 1:
-            do {
-                let document = try Self.decoder.decode(SettingsDocumentV1.self, from: data)
-                return .loaded(document.settings)
-            } catch {
-                return recover(
-                    reason: .corrupted(reason: Self.safeReason(for: error))
-                )
-            }
-        default:
-            return recover(reason: .unsupportedVersion(version))
         }
     }
 
@@ -475,16 +462,11 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
                 schemaVersion: Self.currentSchemaVersion,
                 settings: settings
             )
-            let data = try Self.encoder.encode(document)
-            guard data.count <= Self.maximumDocumentByteCount else {
-                throw OwnerOnlyFilePersistenceError.fileTooLarge(
-                    maximumByteCount: Self.maximumDocumentByteCount
-                )
-            }
-            try OwnerOnlyFilePersistence.write(data, to: fileURL)
+            try documents.write(try Self.encoder.encode(document))
         } catch {
             throw AppSettingsStoreError.writeFailed(
-                reason: Self.safeReason(for: error)
+                reason: VersionedOwnerOnlyDocumentStore<SpeakerAppSettings>
+                    .safeReason(for: error)
             )
         }
     }
@@ -572,43 +554,6 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
             reason: "原设置文件无法安全读取，已保留原文件且拒绝覆盖：\(reason)"
         )
     }
-
-    private func recover(reason: AppSettingsRecoveryReason) -> AppSettingsLoadResult {
-        let timestamp = Int(Date().timeIntervalSince1970 * 1_000)
-        let backupURL = fileURL
-            .deletingPathExtension()
-            .appendingPathExtension("recovery-\(timestamp)-\(UUID().uuidString).json")
-
-        do {
-            try FileManager.default.moveItem(at: fileURL, to: backupURL)
-            Self.pruneRecoveryArtifacts(
-                for: fileURL,
-                preserving: backupURL
-            )
-            return .recovered(
-                .default,
-                recovery: AppSettingsRecovery(backupURL: backupURL, reason: reason)
-            )
-        } catch {
-            return .recoveryFailed(
-                .default,
-                reason: "Settings could not be recovered: \(Self.safeReason(for: error))"
-            )
-        }
-    }
-
-    private static func pruneRecoveryArtifacts(
-        for fileURL: URL,
-        preserving preservedURL: URL? = nil
-    ) {
-        let baseName = fileURL.deletingPathExtension().lastPathComponent
-        RecoveryArchivePruner.pruneRegularFiles(
-            in: fileURL.deletingLastPathComponent(),
-            prefix: "\(baseName).recovery-",
-            suffix: ".json",
-            preserving: preservedURL
-        )
-    }
 }
 
 private extension VersionedLocalAppSettingsStore {
@@ -621,15 +566,6 @@ private extension VersionedLocalAppSettingsStore {
     static var decoder: JSONDecoder {
         JSONDecoder()
     }
-
-    static func safeReason(for error: Error) -> String {
-        let nsError = error as NSError
-        return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
-    }
-}
-
-private struct SettingsDocumentVersion: Decodable {
-    let schemaVersion: Int
 }
 
 private struct SettingsDocumentV1: Codable {

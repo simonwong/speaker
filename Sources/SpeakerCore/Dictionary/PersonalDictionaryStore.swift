@@ -1,32 +1,57 @@
 import Foundation
 
 public enum PersonalDictionaryStoreError: Error, Equatable, Sendable {
-    case unsupportedVersion(Int)
-    case corruptedData
     case readFailed
     case writeFailed
     case privacyProtectionFailed
+    /// The file is corrupt and could not be moved aside; it stays in place and
+    /// must not be overwritten.
+    case corruptionPreservationFailed
 }
 
 extension PersonalDictionaryStoreError: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case let .unsupportedVersion(version):
-            "个人词库文件版本 \(version) 暂不受支持。"
-        case .corruptedData:
-            "个人词库文件已损坏，请恢复或重建词库。"
         case .readFailed:
             "无法读取本机个人词库。"
         case .writeFailed:
             "无法保存本机个人词库。"
         case .privacyProtectionFailed:
             "无法把个人词库限制为仅当前用户可读，已停止加载。"
+        case .corruptionPreservationFailed:
+            "个人词库文件已损坏且无法保留副本，已停止加载。"
         }
     }
 }
 
+/// A corrupt Personal Dictionary file that was moved aside before loading
+/// continued from an empty dictionary.
+public struct PersonalDictionaryRecovery: Equatable, Sendable {
+    public let backupURL: URL
+    public let reason: DocumentCorruption
+
+    public init(backupURL: URL, reason: DocumentCorruption) {
+        self.backupURL = backupURL
+        self.reason = reason
+    }
+}
+
+public struct PersonalDictionaryLoadResult: Equatable, Sendable {
+    public let dictionary: PersonalDictionary
+    /// Present when the stored file was corrupt and has been preserved.
+    public let recovery: PersonalDictionaryRecovery?
+
+    public init(
+        dictionary: PersonalDictionary,
+        recovery: PersonalDictionaryRecovery? = nil
+    ) {
+        self.dictionary = dictionary
+        self.recovery = recovery
+    }
+}
+
 public protocol PersonalDictionaryStoring: Sendable {
-    func load() async throws -> PersonalDictionary
+    func load() async throws -> PersonalDictionaryLoadResult
     func save(_ dictionary: PersonalDictionary) async throws
 }
 
@@ -42,10 +67,6 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
     public static let currentVersion = 2
     private static let maximumDocumentByteCount = 8 * 1_024 * 1_024
 
-    private struct VersionHeader: Decodable {
-        let version: Int
-    }
-
     private struct Envelope: Codable {
         let version: Int
         let entries: [DictionaryEntry]
@@ -60,21 +81,44 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         let canonicalTerm: String
     }
 
-    public nonisolated let fileURL: URL
-    private let fileProtection: LocalFileProtection
+    public nonisolated var fileURL: URL { documents.fileURL }
+    private let documents: VersionedOwnerOnlyDocumentStore<PersonalDictionary>
 
     public init(fileURL: URL) {
-        self.fileURL = fileURL
-        fileProtection = .ownerOnly
+        self.init(fileURL: fileURL, fileProtection: .ownerOnly)
     }
 
     package init(
         fileURL: URL,
         fileProtection: LocalFileProtection
     ) {
-        self.fileURL = fileURL
-        self.fileProtection = fileProtection
+        documents = VersionedOwnerOnlyDocumentStore(
+            fileURL: fileURL,
+            schema: Self.schema,
+            maximumByteCount: Self.maximumDocumentByteCount,
+            backupInfix: "corrupt-",
+            fileProtection: fileProtection
+        )
     }
+
+    /// Version dispatch is the migration seam. Version 1 stored canonical
+    /// terms with aliases and an enabled flag; only the term survives.
+    private static let schema = VersionedDocumentSchema<PersonalDictionary>(
+        currentVersion: currentVersion,
+        versionKey: .version,
+        decoders: [
+            2: { data in
+                let envelope = try JSONDecoder().decode(Envelope.self, from: data)
+                return try PersonalDictionary(entries: envelope.entries)
+            },
+            1: { data in
+                let envelope = try JSONDecoder().decode(LegacyEnvelopeV1.self, from: data)
+                return try PersonalDictionary(entries: envelope.entries.map {
+                    DictionaryEntry(id: $0.id, word: $0.canonicalTerm)
+                })
+            },
+        ]
+    )
 
     public static func defaultFileURL(
         fileManager: FileManager = .default,
@@ -131,9 +175,13 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
             let primaryStore = VersionedJSONPersonalDictionaryStore(
                 fileURL: primaryURL
             )
-            let dictionary = try await legacyStore.load()
+            // A corrupt legacy file must stay where the user can find it, so
+            // migration inspects it without preserving it as a sibling copy.
+            guard let dictionary = try await legacyStore.decodeWithoutRecovery() else {
+                return .failed
+            }
             try await primaryStore.save(dictionary)
-            guard try await primaryStore.load() == dictionary else {
+            guard try await primaryStore.load().dictionary == dictionary else {
                 return .failed
             }
             do {
@@ -147,74 +195,65 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         }
     }
 
-    public func load() async throws -> PersonalDictionary {
-        do {
-            try fileProtection.protect(fileURL)
-        } catch {
-            throw PersonalDictionaryStoreError.privacyProtectionFailed
-        }
-        let data: Data
-        do {
-            guard let storedData = try OwnerOnlyFilePersistence.read(
-                from: fileURL,
-                maximumByteCount: Self.maximumDocumentByteCount
-            ) else {
-                return .empty
+    /// Loads the dictionary. A corrupt file is preserved as a timestamped
+    /// sibling and the result carries that location together with an empty
+    /// dictionary, so the user can keep working and still recover the file.
+    /// A version 1 document is migrated and rewritten in the current version.
+    public func load() async throws -> PersonalDictionaryLoadResult {
+        switch documents.load() {
+        case .absent:
+            return PersonalDictionaryLoadResult(dictionary: .empty)
+        case let .loaded(dictionary, version):
+            if version != Self.currentVersion {
+                try await save(dictionary)
             }
-            data = storedData
-        } catch {
-            throw PersonalDictionaryStoreError.readFailed
+            return PersonalDictionaryLoadResult(dictionary: dictionary)
+        case let .corruptedPreserved(backupURL, corruption):
+            return PersonalDictionaryLoadResult(
+                dictionary: .empty,
+                recovery: PersonalDictionaryRecovery(
+                    backupURL: backupURL,
+                    reason: corruption
+                )
+            )
+        case let .failed(failure):
+            throw Self.error(for: failure)
         }
+    }
 
-        let version: Int
-        do {
-            version = try JSONDecoder().decode(VersionHeader.self, from: data).version
-        } catch {
-            throw PersonalDictionaryStoreError.corruptedData
-        }
-        switch version {
-        case Self.currentVersion:
-            do {
-                let envelope = try JSONDecoder().decode(Envelope.self, from: data)
-                return try PersonalDictionary(entries: envelope.entries)
-            } catch {
-                throw PersonalDictionaryStoreError.corruptedData
-            }
-        case 1:
-            let dictionary: PersonalDictionary
-            do {
-                let envelope = try JSONDecoder().decode(LegacyEnvelopeV1.self, from: data)
-                dictionary = try PersonalDictionary(entries: envelope.entries.map {
-                    DictionaryEntry(id: $0.id, word: $0.canonicalTerm)
-                })
-            } catch {
-                throw PersonalDictionaryStoreError.corruptedData
-            }
-            try await save(dictionary)
+    /// Decodes the stored dictionary without moving a corrupt file aside.
+    /// Returns nil when the file is corrupt.
+    package func decodeWithoutRecovery() async throws -> PersonalDictionary? {
+        switch documents.decode() {
+        case .absent:
+            return .empty
+        case let .decoded(dictionary, _):
             return dictionary
-        default:
-            throw PersonalDictionaryStoreError.unsupportedVersion(version)
+        case .corrupted:
+            return nil
+        case let .failed(failure):
+            throw Self.error(for: failure)
         }
     }
 
     public func save(_ dictionary: PersonalDictionary) async throws {
         let envelope = Envelope(version: Self.currentVersion, entries: dictionary.entries)
-        let data: Data
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            data = try encoder.encode(envelope)
-            guard data.count <= Self.maximumDocumentByteCount else {
-                throw PersonalDictionaryStoreError.writeFailed
-            }
+            try documents.write(try encoder.encode(envelope))
         } catch {
             throw PersonalDictionaryStoreError.writeFailed
         }
+    }
 
-        do {
-            try OwnerOnlyFilePersistence.write(data, to: fileURL)
-        } catch {
-            throw PersonalDictionaryStoreError.writeFailed
+    private static func error(
+        for failure: DocumentLoadFailure
+    ) -> PersonalDictionaryStoreError {
+        switch failure {
+        case .protectionFailed: .privacyProtectionFailed
+        case .readFailed: .readFailed
+        case .preservationFailed: .corruptionPreservationFailed
         }
     }
 }
