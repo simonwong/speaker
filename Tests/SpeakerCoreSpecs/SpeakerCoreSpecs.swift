@@ -15,6 +15,8 @@ struct SpeakerCoreSpecs {
         await SessionCancellationSpecs.run(failures: &failures)
         await PasteboardTransactionSpecs.run(failures: &failures)
         await DoubaoClientSpecs.run(failures: &failures)
+        await DoubaoFrameCodecSpecs.run(failures: &failures)
+        await DoubaoFailureClassifierSpecs.run(failures: &failures)
         await DeepSeekRefinementSpecs.run(failures: &failures)
         await CredentialStoreSpecs.run(failures: &failures)
         await SessionHistorySpecs.run(failures: &failures)
