@@ -172,6 +172,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
 
             await sessions.send(.pressed)
             await processor.waitUntilStarted()
+            // Streaming can begin before the deadline is armed; firing an
+            // unarmed deadline is a no-op and the case would wait forever.
+            await deadline.waitUntilStarted()
             await deadline.fire()
             let limitPresentation = await terminal.value
             while await processor.cancellationCount == 0 { await Task.yield() }
