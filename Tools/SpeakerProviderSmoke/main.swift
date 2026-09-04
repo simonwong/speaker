@@ -4,6 +4,14 @@ import Foundation
 import SpeakerCore
 import SpeakerProviderEvidence
 
+/// Environment variable that forbids every outbound provider connection.
+private let noNetworkGuardVariable = "SPEAKER_PROVIDER_SMOKE_NO_NETWORK"
+
+/// Dedicated exit status for a run stopped by `noNetworkGuardVariable`.
+/// Distinct from usage (64), evidence environment (65), evidence write (73),
+/// failing case (1), and skipped case (2).
+private let noNetworkGuardExitStatus: Int32 = 78
+
 private enum RequestedProvider: String, CaseIterable {
     case doubao
     case deepSeek = "deepseek"
@@ -158,6 +166,7 @@ private struct SpeakerProviderSmoke {
             printUsage()
             exit(64)
         }
+        enforceNoNetworkGuard()
 
         let developmentCredentials = LocalFileProviderCredentialStore()
         let results: [SmokeResult]
@@ -789,6 +798,22 @@ private struct SpeakerProviderSmoke {
 
     private static func printFixedError(_ message: String) {
         FileHandle.standardError.write(Data("\(message)\n".utf8))
+    }
+
+    /// Fails closed before any provider client is constructed when the caller
+    /// has declared the run must stay offline. `./scripts/test` sets this so the
+    /// deterministic gate can exercise the smoke tool's argument boundaries
+    /// without ever issuing a billed Doubao or DeepSeek request.
+    private static func enforceNoNetworkGuard() {
+        let value = ProcessInfo.processInfo
+            .environment[noNetworkGuardVariable]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let value, !value.isEmpty, value != "0", value != "false" else { return }
+        printFixedError(
+            "\(noNetworkGuardVariable) is set: refusing to open any provider connection."
+        )
+        exit(noNetworkGuardExitStatus)
     }
 
     private static func deepSeekOracle(
