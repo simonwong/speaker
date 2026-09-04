@@ -3,39 +3,67 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerCoreSpecs
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppScenarioSpecs
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerProviderEvidenceSpecs
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAccuracyMetricsSpecs
-/bin/zsh "$SCRIPT_DIR/test-skills-lock"
-/bin/zsh "$SCRIPT_DIR/test-compatibility-smoke"
-/bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
-/bin/zsh "$SCRIPT_DIR/test-workflow-security"
-/bin/zsh "$SCRIPT_DIR/test-brand-assets"
-/bin/zsh "$SCRIPT_DIR/test-development-build-identity"
-/bin/zsh "$SCRIPT_DIR/test-install-identity"
-/bin/zsh "$SCRIPT_DIR/test-release-evidence"
-/bin/zsh "$SCRIPT_DIR/test-release-identity"
-/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
-    --product SpeakerProviderSmoke \
-    -Xswiftc -warnings-as-errors
-/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
-    --product SpeakerProviderEvidenceVerifier \
-    -Xswiftc -warnings-as-errors
-/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
-    --product SpeakerDeliverySmokeTarget \
-    -Xswiftc -warnings-as-errors
-/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
-    --product SpeakerAccuracyEvaluator \
-    -Xswiftc -warnings-as-errors
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+source "$SCRIPT_DIR/test-runner-common"
+
+# These contract tests read the repository and write only inside their own
+# mktemp directory, so they run concurrently with the sequential lane below.
+# Every other step reenters SwiftPM against the shared .build directory,
+# bundles the App, or installs it, so it stays sequential.
+speaker_test_run_parallel "test-workflow-security" \
+    /bin/zsh "$SCRIPT_DIR/test-workflow-security"
+speaker_test_run_parallel "test-development-build-identity" \
+    /bin/zsh "$SCRIPT_DIR/test-development-build-identity"
+speaker_test_run_parallel "test-scripts-test-summary" \
+    /bin/zsh "$SCRIPT_DIR/test-scripts-test-summary"
+speaker_test_run_parallel "test-skills-lock" \
+    /bin/zsh "$SCRIPT_DIR/test-skills-lock"
+
+speaker_test_run "SpeakerCoreSpecs" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerCoreSpecs
+speaker_test_run "SpeakerAppScenarioSpecs" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppScenarioSpecs
+speaker_test_run "SpeakerAppUISpecs" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
+speaker_test_run "SpeakerProviderEvidenceSpecs" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerProviderEvidenceSpecs
+speaker_test_run "SpeakerAccuracyMetricsSpecs" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAccuracyMetricsSpecs
+speaker_test_run "test-compatibility-smoke" \
+    /bin/zsh "$SCRIPT_DIR/test-compatibility-smoke"
+speaker_test_run "test-provider-smoke-contract" \
+    /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
+speaker_test_run "test-brand-assets" \
+    /bin/zsh "$SCRIPT_DIR/test-brand-assets"
+speaker_test_run "test-install-identity" \
+    /bin/zsh "$SCRIPT_DIR/test-install-identity"
+speaker_test_run "test-release-evidence" \
+    /bin/zsh "$SCRIPT_DIR/test-release-evidence"
+speaker_test_run "test-release-identity" \
+    /bin/zsh "$SCRIPT_DIR/test-release-identity"
+speaker_test_run "SpeakerUpdateSignatureVerifier --self-test" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
     SpeakerUpdateSignatureVerifier --self-test
-/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
-    --product SpeakerUpdateSignatureVerifier \
-    -Xswiftc -warnings-as-errors
-/bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
+speaker_test_run "SpeakerReleaseEvidenceProtector --self-test" \
+    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox \
     SpeakerReleaseEvidenceProtector --self-test
-/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
-    --product SpeakerReleaseEvidenceProtector \
-    -Xswiftc -warnings-as-errors
+# SwiftPM's --product and --target are single-valued on Swift 6.3: a repeated
+# flag silently keeps only the last value, so the tool executables cannot be
+# merged into one invocation. A package-wide build is the only single-invocation
+# form and was measured slower, because it also rebuilds SpeakerApp and every
+# specification executable under the warnings-as-errors flags.
+for SPEAKER_WARNINGS_PRODUCT in \
+    SpeakerProviderSmoke \
+    SpeakerProviderEvidenceVerifier \
+    SpeakerDeliverySmokeTarget \
+    SpeakerAccuracyEvaluator \
+    SpeakerUpdateSignatureVerifier \
+    SpeakerReleaseEvidenceProtector
+do
+    speaker_test_run "warnings-as-errors build: $SPEAKER_WARNINGS_PRODUCT" \
+        /bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox \
+        --product "$SPEAKER_WARNINGS_PRODUCT" \
+        -Xswiftc -warnings-as-errors
+done
+
+speaker_test_collect_parallel
+speaker_test_summary

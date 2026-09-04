@@ -1,0 +1,121 @@
+#!/bin/zsh
+
+# Sourced by ./scripts/test and by ./scripts/test-scripts-test-summary.
+#
+# The gate runs every step even after one fails, records a name and an exit
+# status per step, and reports them together. A caller sources this file, runs
+# steps through the helpers below, and ends with speaker_test_summary, whose
+# non-zero return propagates under set -e.
+
+typeset -ga SPEAKER_TEST_STEP_NAMES
+typeset -ga SPEAKER_TEST_STEP_STATUSES
+typeset -ga SPEAKER_TEST_PARALLEL_NAMES
+typeset -ga SPEAKER_TEST_PARALLEL_PIDS
+typeset -ga SPEAKER_TEST_PARALLEL_LOGS
+typeset -g SPEAKER_TEST_PARALLEL_LOG_ROOT
+
+SPEAKER_TEST_STEP_NAMES=()
+SPEAKER_TEST_STEP_STATUSES=()
+SPEAKER_TEST_PARALLEL_NAMES=()
+SPEAKER_TEST_PARALLEL_PIDS=()
+SPEAKER_TEST_PARALLEL_LOGS=()
+SPEAKER_TEST_PARALLEL_LOG_ROOT=""
+
+speaker_test_record_step() {
+    SPEAKER_TEST_STEP_NAMES+=("$1")
+    SPEAKER_TEST_STEP_STATUSES+=("$2")
+}
+
+# Runs one step in the foreground, so its output streams to the terminal while
+# the step runs, and records its status instead of aborting the gate.
+speaker_test_run() {
+    local name="$1"
+    local step_status=0
+
+    shift
+    print -r -- ""
+    print -r -- "==> $name"
+    "$@" || step_status=$?
+    speaker_test_record_step "$name" "$step_status"
+}
+
+# Starts a step that shares no mutable state with any other step. Concurrent
+# output is buffered per step so lines cannot interleave, and is replayed in
+# start order by speaker_test_collect_parallel.
+speaker_test_run_parallel() {
+    local name="$1"
+    local log
+
+    shift
+    if [[ -z "$SPEAKER_TEST_PARALLEL_LOG_ROOT" ]]; then
+        SPEAKER_TEST_PARALLEL_LOG_ROOT="$(
+            mktemp -d "${TMPDIR:-/tmp}/speaker-test-parallel.XXXXXX"
+        )"
+    fi
+    log="$SPEAKER_TEST_PARALLEL_LOG_ROOT/step-${#SPEAKER_TEST_PARALLEL_NAMES}.log"
+    print -r -- ""
+    print -r -- "==> $name (started concurrently)"
+    ( "$@" ) > "$log" 2>&1 &
+    SPEAKER_TEST_PARALLEL_NAMES+=("$name")
+    SPEAKER_TEST_PARALLEL_PIDS+=("$!")
+    SPEAKER_TEST_PARALLEL_LOGS+=("$log")
+}
+
+speaker_test_collect_parallel() {
+    local index
+    local step_status
+
+    for (( index = 1; index <= ${#SPEAKER_TEST_PARALLEL_NAMES}; index++ )); do
+        step_status=0
+        wait "${SPEAKER_TEST_PARALLEL_PIDS[index]}" || step_status=$?
+        print -r -- ""
+        print -r -- "==> ${SPEAKER_TEST_PARALLEL_NAMES[index]} (concurrent output)"
+        cat "${SPEAKER_TEST_PARALLEL_LOGS[index]}" || true
+        speaker_test_record_step \
+            "${SPEAKER_TEST_PARALLEL_NAMES[index]}" \
+            "$step_status"
+    done
+    SPEAKER_TEST_PARALLEL_NAMES=()
+    SPEAKER_TEST_PARALLEL_PIDS=()
+    SPEAKER_TEST_PARALLEL_LOGS=()
+    if [[ -n "$SPEAKER_TEST_PARALLEL_LOG_ROOT" ]]; then
+        rm -rf "$SPEAKER_TEST_PARALLEL_LOG_ROOT"
+        SPEAKER_TEST_PARALLEL_LOG_ROOT=""
+    fi
+}
+
+# Prints one PASS/FAIL row per recorded step and fails when any step failed.
+speaker_test_summary() {
+    local index
+    local width=0
+    local failures=0
+    local verdict
+
+    for (( index = 1; index <= ${#SPEAKER_TEST_STEP_NAMES}; index++ )); do
+        if (( ${#SPEAKER_TEST_STEP_NAMES[index]} > width )); then
+            width=${#SPEAKER_TEST_STEP_NAMES[index]}
+        fi
+    done
+    print -r -- ""
+    print -r -- "Gate summary"
+    for (( index = 1; index <= ${#SPEAKER_TEST_STEP_NAMES}; index++ )); do
+        if [[ "${SPEAKER_TEST_STEP_STATUSES[index]}" == "0" ]]; then
+            verdict="PASS"
+        else
+            verdict="FAIL"
+            failures=$(( failures + 1 ))
+        fi
+        printf '  %-4s  %-*s  exit %s\n' \
+            "$verdict" \
+            "$width" \
+            "${SPEAKER_TEST_STEP_NAMES[index]}" \
+            "${SPEAKER_TEST_STEP_STATUSES[index]}"
+    done
+    print -r -- ""
+    if (( failures > 0 )); then
+        print -u2 -r -- \
+            "FAIL: $failures of ${#SPEAKER_TEST_STEP_NAMES} gate steps failed."
+        return 1
+    fi
+    print -r -- "PASS: all ${#SPEAKER_TEST_STEP_NAMES} gate steps passed."
+}

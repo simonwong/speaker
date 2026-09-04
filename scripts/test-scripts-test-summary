@@ -1,0 +1,83 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-test-summary.XXXXXX")"
+
+cleanup() {
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
+
+FAILING_SCENARIO="$TEST_ROOT/failing-scenario"
+PASSING_SCENARIO="$TEST_ROOT/passing-scenario"
+
+print -r -- '#!/bin/zsh
+
+set -euo pipefail
+
+source "$1/test-runner-common"
+
+speaker_test_run "first sequential step" \
+    /bin/zsh -c "print first-step-output; exit 3"
+speaker_test_run "second sequential step" \
+    /bin/zsh -c "print second-step-output; exit 0"
+speaker_test_run_parallel "concurrent step" \
+    /bin/zsh -c "print concurrent-step-output; exit 4"
+speaker_test_collect_parallel
+speaker_test_summary' > "$FAILING_SCENARIO"
+
+print -r -- '#!/bin/zsh
+
+set -euo pipefail
+
+source "$1/test-runner-common"
+
+speaker_test_run "only step" /bin/zsh -c "print only-step-output"
+speaker_test_summary' > "$PASSING_SCENARIO"
+
+set +e
+FAILING_OUTPUT="$(/bin/zsh "$FAILING_SCENARIO" "$SCRIPT_DIR" 2>&1)"
+FAILING_STATUS=$?
+PASSING_OUTPUT="$(/bin/zsh "$PASSING_SCENARIO" "$SCRIPT_DIR" 2>&1)"
+PASSING_STATUS=$?
+set -e
+
+[[ "$FAILING_STATUS" != "0" ]] || {
+    print -u2 "The gate summary exited 0 while steps failed."
+    exit 1
+}
+for expected in first-step-output second-step-output concurrent-step-output; do
+    [[ "$FAILING_OUTPUT" == *"$expected"* ]] || {
+        print -u2 "A step ran but its output was dropped: $expected"
+        exit 1
+    }
+done
+grep -Eq '^  FAIL  first sequential step +exit 3$' <<< "$FAILING_OUTPUT" || {
+    print -u2 "The summary did not report the first failing step and its status."
+    exit 1
+}
+grep -Eq '^  PASS  second sequential step +exit 0$' <<< "$FAILING_OUTPUT" || {
+    print -u2 "The summary did not report the passing step."
+    exit 1
+}
+grep -Eq '^  FAIL  concurrent step +exit 4$' <<< "$FAILING_OUTPUT" || {
+    print -u2 "The summary did not report the concurrent failing step."
+    exit 1
+}
+[[ "$FAILING_OUTPUT" == *"2 of 3 gate steps failed"* ]] || {
+    print -u2 "The summary did not count every failed step."
+    exit 1
+}
+
+[[ "$PASSING_STATUS" == "0" ]] || {
+    print -u2 "The gate summary failed while every step passed."
+    exit 1
+}
+[[ "$PASSING_OUTPUT" == *"PASS: all 1 gate steps passed."* ]] || {
+    print -u2 "The summary did not report an all-passing gate."
+    exit 1
+}
+
+print "PASS: the gate runs every step and summarizes each failure"
