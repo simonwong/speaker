@@ -71,7 +71,7 @@ package final class HistoryModel: ObservableObject {
     @discardableResult
     package func copy(_ record: VoiceInputHistoryRecord) async -> Bool {
         guard activeOperation == nil,
-              let text = HistoryPresentation.retainedText(for: record)
+            let text = HistoryPresentation.retainedText(for: record)
         else { return false }
         activeOperation = .copying(record.sessionID)
         defer { activeOperation = nil }
@@ -159,14 +159,13 @@ package final class HistoryModel: ObservableObject {
         feedbackTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled,
-                  self?.feedback?.id == feedback.id
+                self?.feedback?.id == feedback.id
             else { return }
             self?.feedback = nil
         }
     }
 
 }
-
 
 package struct HistoryView: View {
     @ObservedObject var model: HistoryModel

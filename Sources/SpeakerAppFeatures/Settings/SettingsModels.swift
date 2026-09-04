@@ -235,7 +235,7 @@ package final class RefinementSettingsModel: ObservableObject {
         let loadedMode = loadedSettings.refinement.textRefinementMode
             .applyingPromptOverrides(loadedSettings.refinementPromptOverrides)
         let savedCustomMode = loadedSettings.savedCustomRefinement?.textRefinementMode
-        if case let .custom(name, prompt) = savedCustomMode ?? loadedMode {
+        if case .custom(let name, let prompt) = savedCustomMode ?? loadedMode {
             customName = name
             customPrompt = prompt
         }
@@ -327,8 +327,8 @@ package final class RefinementSettingsModel: ObservableObject {
             }
 
             guard let self,
-                  generation == connectionGeneration,
-                  !Task.isCancelled
+                generation == connectionGeneration,
+                !Task.isCancelled
             else { return }
             connectionTask = nil
             isCheckingConnection = false
@@ -336,12 +336,12 @@ package final class RefinementSettingsModel: ObservableObject {
             case .success:
                 isConnectionVerified = true
                 connectionFailure = nil
-            case let .failure(failure as DeepSeekRefinementFailure):
+            case .failure(let failure as DeepSeekRefinementFailure):
                 isConnectionVerified = false
                 connectionFailure = Self.connectionMessage(
                     for: failure.kind
                 )
-            case let .failure(error):
+            case .failure(let error):
                 isConnectionVerified = false
                 connectionFailure = SpeakerCopy.Failure.message(for: error)
             }
@@ -373,7 +373,8 @@ package final class RefinementSettingsModel: ObservableObject {
 
         if choice == .custom {
             isEditingCustomMode = true
-            notice = hasStoredKey
+            notice =
+                hasStoredKey
                 ? nil
                 : "可先编辑规则；保存 DeepSeek API Key 后才能启用。"
             return
@@ -386,9 +387,11 @@ package final class RefinementSettingsModel: ObservableObject {
             return
         }
 
-        guard let selectedMode = choice.refinementMode(
-            promptOverrides: promptOverrides
-        ) else { return }
+        guard
+            let selectedMode = choice.refinementMode(
+                promptOverrides: promptOverrides
+            )
+        else { return }
 
         do {
             try await configuration.selectRefinementMode(selectedMode)
@@ -478,7 +481,7 @@ package final class RefinementSettingsModel: ObservableObject {
             try await settingsStore.updateSavedCustomRefinement(
                 RefinementPreference(mode: customMode)
             )
-            if case let .custom(name, prompt) = customMode {
+            if case .custom(let name, let prompt) = customMode {
                 customName = name
                 customPrompt = prompt
             }
@@ -660,9 +663,11 @@ package struct ShortcutRecorderModifierPolicy {
         keyCode: UInt16,
         flags: NSEvent.ModifierFlags
     ) -> CustomHotKey? {
-        guard let modifier = CustomHotKey.PhysicalModifier(
-            keyCode: UInt32(keyCode)
-        ) else {
+        guard
+            let modifier = CustomHotKey.PhysicalModifier(
+                keyCode: UInt32(keyCode)
+            )
+        else {
             candidate = nil
             return nil
         }
@@ -670,11 +675,12 @@ package struct ShortcutRecorderModifierPolicy {
             modifier,
             displayName: modifier.displayName
         )
-        let expectedFlag: NSEvent.ModifierFlags = switch modifier {
-        case .leftOption, .rightOption: .option
-        case .leftControl, .rightControl: .control
-        case .leftShift, .rightShift: .shift
-        }
+        let expectedFlag: NSEvent.ModifierFlags =
+            switch modifier {
+            case .leftOption, .rightOption: .option
+            case .leftControl, .rightControl: .control
+            case .leftShift, .rightShift: .shift
+            }
         let relevantFlags = flags.intersection([.command, .option, .control, .shift])
         if flags.contains(expectedFlag) {
             candidate = relevantFlags == expectedFlag ? hotKey : nil
@@ -690,8 +696,8 @@ package struct ShortcutRecorderModifierPolicy {
     }
 }
 
-private extension CustomHotKey.PhysicalModifier {
-    var displayName: String {
+extension CustomHotKey.PhysicalModifier {
+    fileprivate var displayName: String {
         switch self {
         case .leftOption: "左 ⌥"
         case .rightOption: "右 ⌥"
@@ -736,17 +742,17 @@ package struct ShortcutRecorderPolicy {
         _ input: ShortcutRecorderInput
     ) -> ShortcutRecorderDecision {
         switch input {
-        case let .flagsChanged(keyCode, flags):
+        case .flagsChanged(let keyCode, let flags):
             if let hotKey = modifierPolicy.handle(keyCode: keyCode, flags: flags) {
                 return .capture(hotKey)
             }
             if [kVK_Command, kVK_RightCommand].contains(Int(keyCode)),
-               !flags.contains(.command)
+                !flags.contains(.command)
             {
                 return .reject(Self.soloCommandPrompt)
             }
             return .consume
-        case let .keyDown(keyCode, flags, charactersIgnoringModifiers):
+        case .keyDown(let keyCode, let flags, let charactersIgnoringModifiers):
             modifierPolicy.reset()
             guard keyCode != UInt16(kVK_Escape) else { return .cancel }
             let modifiers = Self.carbonModifiers(flags)
@@ -795,13 +801,14 @@ package struct ShortcutRecorderPolicy {
         if flags.contains(.option) { prefix += "⌥" }
         if flags.contains(.shift) { prefix += "⇧" }
         if flags.contains(.command) { prefix += "⌘" }
-        let key: String = switch Int(keyCode) {
-        case kVK_Return: "Return"
-        case kVK_Tab: "Tab"
-        case kVK_Space: "Space"
-        case kVK_Escape: "Esc"
-        default: charactersIgnoringModifiers?.uppercased() ?? "Key \(keyCode)"
-        }
+        let key: String =
+            switch Int(keyCode) {
+            case kVK_Return: "Return"
+            case kVK_Tab: "Tab"
+            case kVK_Space: "Space"
+            case kVK_Escape: "Esc"
+            default: charactersIgnoringModifiers?.uppercased() ?? "Key \(keyCode)"
+            }
         return prefix + key
     }
 }
@@ -821,27 +828,28 @@ final class ShortcutRecorderModel: ObservableObject {
             matching: [.flagsChanged, .keyDown]
         ) { [weak self] event in
             guard let self else { return event }
-            let input: ShortcutRecorderInput = if event.type == .flagsChanged {
-                .flagsChanged(
-                    keyCode: event.keyCode,
-                    flags: event.modifierFlags
-                )
-            } else {
-                .keyDown(
-                    keyCode: event.keyCode,
-                    flags: event.modifierFlags,
-                    charactersIgnoringModifiers: event.charactersIgnoringModifiers
-                )
-            }
+            let input: ShortcutRecorderInput =
+                if event.type == .flagsChanged {
+                    .flagsChanged(
+                        keyCode: event.keyCode,
+                        flags: event.modifierFlags
+                    )
+                } else {
+                    .keyDown(
+                        keyCode: event.keyCode,
+                        flags: event.modifierFlags,
+                        charactersIgnoringModifiers: event.charactersIgnoringModifiers
+                    )
+                }
             switch self.policy.handle(input) {
             case .consume:
                 break
             case .cancel:
                 self.stop()
-            case let .capture(hotKey):
+            case .capture(let hotKey):
                 self.stop()
                 onCapture(hotKey)
-            case let .reject(message):
+            case .reject(let message):
                 self.notice = message
             }
             return nil

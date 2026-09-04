@@ -64,8 +64,9 @@ package struct PasteboardSnapshot: Equatable, Sendable {
             guard let types = pasteboard.itemTypes(itemIndex) else {
                 return nil
             }
-            guard types.count
-                <= budget.maximumRepresentationCount - representationCount
+            guard
+                types.count
+                    <= budget.maximumRepresentationCount - representationCount
             else { return nil }
             representationCount += types.count
 
@@ -73,9 +74,9 @@ package struct PasteboardSnapshot: Equatable, Sendable {
             representations.reserveCapacity(types.count)
             for type in types {
                 guard representations[type] == nil,
-                      let data = pasteboard.data(itemIndex, type),
-                      data.count <= budget.maximumBytesPerRepresentation,
-                      data.count <= budget.maximumTotalBytes - totalBytes
+                    let data = pasteboard.data(itemIndex, type),
+                    data.count <= budget.maximumBytesPerRepresentation,
+                    data.count <= budget.maximumTotalBytes - totalBytes
                 else { return nil }
                 representations[type] = data
                 totalBytes += data.count
@@ -100,10 +101,12 @@ package struct PasteboardReplacementTransaction: Sendable {
         pasteboard: ClipboardPasteboardAccess,
         budget: PasteboardSnapshotBudget = .standard
     ) -> Self? {
-        guard let snapshot = PasteboardSnapshot.capture(
-            from: pasteboard,
-            budget: budget
-        ), pasteboard.changeCount() == snapshot.changeCount else { return nil }
+        guard
+            let snapshot = PasteboardSnapshot.capture(
+                from: pasteboard,
+                budget: budget
+            ), pasteboard.changeCount() == snapshot.changeCount
+        else { return nil }
 
         let marker = UUID().uuidString
         let clearedChangeCount = pasteboard.clearContents()
@@ -191,8 +194,7 @@ package struct PasteCommandEventPlan: Sendable {
 package struct PasteboardDeliveryTransaction: Sendable {
     private let replacement: PasteboardReplacementTransaction
     private let conditionalRestoreDelay: Duration
-    private let sleepBeforeRestore:
-        @Sendable (Duration) async throws -> Void
+    private let sleepBeforeRestore: @Sendable (Duration) async throws -> Void
     private let conditionalRestoreDidFinish: @Sendable () async -> Void
 
     package static func prepare(
@@ -208,11 +210,13 @@ package struct PasteboardDeliveryTransaction: Sendable {
             @escaping @Sendable () async -> Void = {}
     ) async -> Self? {
         await MainActor.run {
-            guard let replacement = PasteboardReplacementTransaction.prepare(
-                text: text,
-                pasteboard: pasteboard,
-                budget: snapshotBudget
-            ) else { return nil }
+            guard
+                let replacement = PasteboardReplacementTransaction.prepare(
+                    text: text,
+                    pasteboard: pasteboard,
+                    budget: snapshotBudget
+                )
+            else { return nil }
             guard replacement.verifies(text) else {
                 replacement.restoreIfOwned()
                 return nil
@@ -279,11 +283,13 @@ package struct PasteboardDeliveryTransaction: Sendable {
                 case .commandUp:
                     (CGKeyCode(kVK_Command), false, [])
                 }
-            guard let event = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: descriptor.keyCode,
-                keyDown: descriptor.keyDown
-            ) else { return nil }
+            guard
+                let event = CGEvent(
+                    keyboardEventSource: source,
+                    virtualKey: descriptor.keyCode,
+                    keyDown: descriptor.keyDown
+                )
+            else { return nil }
             event.flags = descriptor.flags
             return event
         }

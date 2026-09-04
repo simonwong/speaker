@@ -21,15 +21,15 @@ enum SQLiteHistoryError: Error {
 extension SQLiteHistoryError: PrivacySafeDescribing {
     var privacySafeDescription: String {
         switch self {
-        case let .sqlite(_, message):
+        case .sqlite(_, let message):
             message
         case .openFailed:
             "Unable to open the local history database."
         case .encoding:
             "A local history record could not be decoded."
-        case let .integrityCheckFailed(message):
+        case .integrityCheckFailed(let message):
             "The local history database failed its integrity check: \(message)"
-        case let .unsupportedSchema(version):
+        case .unsupportedSchema(let version):
             "The local history database uses unsupported schema version \(version)."
         }
     }
@@ -57,7 +57,7 @@ final class SQLiteConnection: @unchecked Sendable {
         var connection: OpaquePointer?
         let flags = SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(fileURL.path, &connection, flags, nil) == SQLITE_OK,
-              let connection
+            let connection
         else {
             if let connection { sqlite3_close(connection) }
             throw SQLiteHistoryError.openFailed
@@ -113,7 +113,7 @@ final class SQLiteConnection: @unchecked Sendable {
         let handle = try requireHandle()
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK,
-              let statement
+            let statement
         else {
             throw lastError()
         }
@@ -187,8 +187,8 @@ final class SQLiteConnection: @unchecked Sendable {
         }
         let walURL = URL(fileURLWithPath: fileURL.path + "-wal")
         if let attributes = try? FileManager.default.attributesOfItem(atPath: walURL.path),
-           let size = attributes[.size] as? NSNumber,
-           size.int64Value != 0
+            let size = attributes[.size] as? NSNumber,
+            size.int64Value != 0
         {
             throw SQLiteHistoryError.sqlite(
                 code: SQLITE_BUSY,

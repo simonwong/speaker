@@ -1,14 +1,18 @@
 import Foundation
+import SQLite3
 import SpeakerCore
 import SpeakerSpecSupport
-import SQLite3
 
 enum SessionHistorySpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("versioned local history omits empty records and excludes sensitive fields", failures: &failures) {
+        await runAsync(
+            "versioned local history omits empty records and excludes sensitive fields",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-history-spec-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent(
+                    "speaker-history-spec-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("history.json")
             let firstID = VoiceInputSessionID()
@@ -16,54 +20,56 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let snapshotID = UUID()
             let dictionaryEntry = DictionaryEntry(word: "豆包")
             let store = VersionedLocalSessionHistory(fileURL: fileURL)
-            await store.save(.init(
-                sessionID: firstID,
-                startedAt: Date(timeIntervalSince1970: 100),
-                applicationName: "TextEdit",
-                transcription: "豆包原文 alpha",
-                finalText: "最终文本",
-                transcriptionProvider: "doubao",
-                providerRequestID: "request-log-1",
-                providerErrorCode: nil,
-                deliveryDiagnosticCode:
-                    "pasteReceipt.unconfirmed",
-                deepSeekText: "DeepSeek 结果 beta",
-                deepSeekRequestID: "deepseek-log-1",
-                refinementModeName: "精简清理",
-                refinementPrompt: "只清理口语杂质",
-                refinementStatus: "succeeded",
-                dictionarySnapshotID: snapshotID,
-                dictionarySnapshotEntries: [RecordedDictionaryEntry(dictionaryEntry)],
-                dictionaryRequestContext: .init(
-                    snapshotID: snapshotID,
-                    hotwords: ["豆包"],
-                    includedEntryIDs: [dictionaryEntry.id],
-                    omissions: []
-                ),
-                dictionaryReplacements: [
-                    .init(
-                        entryID: UUID(),
-                        alias: "豆宝",
-                        canonicalTerm: "豆包",
-                        matchedText: "豆宝",
-                        utf16Location: 0,
-                        utf16Length: 2
+            await store.save(
+                .init(
+                    sessionID: firstID,
+                    startedAt: Date(timeIntervalSince1970: 100),
+                    applicationName: "TextEdit",
+                    transcription: "豆包原文 alpha",
+                    finalText: "最终文本",
+                    transcriptionProvider: "doubao",
+                    providerRequestID: "request-log-1",
+                    providerErrorCode: nil,
+                    deliveryDiagnosticCode:
+                        "pasteReceipt.unconfirmed",
+                    deepSeekText: "DeepSeek 结果 beta",
+                    deepSeekRequestID: "deepseek-log-1",
+                    refinementModeName: "精简清理",
+                    refinementPrompt: "只清理口语杂质",
+                    refinementStatus: "succeeded",
+                    dictionarySnapshotID: snapshotID,
+                    dictionarySnapshotEntries: [RecordedDictionaryEntry(dictionaryEntry)],
+                    dictionaryRequestContext: .init(
+                        snapshotID: snapshotID,
+                        hotwords: ["豆包"],
+                        includedEntryIDs: [dictionaryEntry.id],
+                        omissions: []
                     ),
-                ],
-                durationMilliseconds: 1_234,
-                stageDurationsMilliseconds: ["doubao": 500, "deepseek": 300],
-                outcome: .delivered(firstID, applicationName: "TextEdit", text: "最终文本")
-            ))
-            await store.save(.init(
-                sessionID: secondID,
-                startedAt: Date(timeIntervalSince1970: 200),
-                applicationName: "Notes",
-                transcription: " \n ",
-                finalText: "\t",
-                providerRequestID: "request-log-2",
-                providerErrorCode: "invalidCredential",
-                outcome: .failed(secondID, .providerNotConfigured)
-            ))
+                    dictionaryReplacements: [
+                        .init(
+                            entryID: UUID(),
+                            alias: "豆宝",
+                            canonicalTerm: "豆包",
+                            matchedText: "豆宝",
+                            utf16Location: 0,
+                            utf16Length: 2
+                        )
+                    ],
+                    durationMilliseconds: 1_234,
+                    stageDurationsMilliseconds: ["doubao": 500, "deepseek": 300],
+                    outcome: .delivered(firstID, applicationName: "TextEdit", text: "最终文本")
+                ))
+            await store.save(
+                .init(
+                    sessionID: secondID,
+                    startedAt: Date(timeIntervalSince1970: 200),
+                    applicationName: "Notes",
+                    transcription: " \n ",
+                    finalText: "\t",
+                    providerRequestID: "request-log-2",
+                    providerErrorCode: "invalidCredential",
+                    outcome: .failed(secondID, .providerNotConfigured)
+                ))
 
             let reloaded = VersionedLocalSessionHistory(fileURL: fileURL)
             let allRecords = await reloaded.allRecords()
@@ -102,7 +108,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(recordsAfterClear.isEmpty)
         }
 
-        await runAsync("legacy history aliases survive JSON import and SQLite rewrite", failures: &failures) {
+        await runAsync(
+            "legacy history aliases survive JSON import and SQLite rewrite", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-history-dictionary-v1-\(UUID().uuidString)",
@@ -114,32 +122,36 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let sessionID = VoiceInputSessionID()
             let entryID = UUID()
             let writer = VersionedLocalSessionHistory(fileURL: legacyURL)
-            await writer.save(.init(
-                sessionID: sessionID,
-                startedAt: Date(timeIntervalSince1970: 100),
-                applicationName: "TextEdit",
-                transcription: "旧记录",
-                finalText: "旧记录",
-                dictionarySnapshotEntries: [RecordedDictionaryEntry(
-                    id: entryID,
-                    word: "豆包",
-                    legacyAliases: ["豆宝"]
-                )],
-                outcome: .delivered(
-                    sessionID,
+            await writer.save(
+                .init(
+                    sessionID: sessionID,
+                    startedAt: Date(timeIntervalSince1970: 100),
                     applicationName: "TextEdit",
-                    text: "旧记录"
-                )
-            ))
+                    transcription: "旧记录",
+                    finalText: "旧记录",
+                    dictionarySnapshotEntries: [
+                        RecordedDictionaryEntry(
+                            id: entryID,
+                            word: "豆包",
+                            legacyAliases: ["豆宝"]
+                        )
+                    ],
+                    outcome: .delivered(
+                        sessionID,
+                        applicationName: "TextEdit",
+                        text: "旧记录"
+                    )
+                ))
 
-            guard var document = try JSONSerialization.jsonObject(
-                with: Data(contentsOf: legacyURL)
-            ) as? [String: Any],
-                  var records = document["records"] as? [[String: Any]],
-                  !records.isEmpty,
-                  var entries = records[0]["dictionarySnapshotEntries"]
+            guard
+                var document = try JSONSerialization.jsonObject(
+                    with: Data(contentsOf: legacyURL)
+                ) as? [String: Any],
+                var records = document["records"] as? [[String: Any]],
+                !records.isEmpty,
+                var entries = records[0]["dictionarySnapshotEntries"]
                     as? [[String: Any]],
-                  !entries.isEmpty
+                !entries.isEmpty
             else {
                 throw SpecFailure(message: "legacy history fixture was not encoded")
             }
@@ -170,7 +182,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("SQLite history scrubs provider response text written by older builds", failures: &failures) {
+        await runAsync(
+            "SQLite history scrubs provider response text written by older builds",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-history-message-scrub-\(UUID().uuidString)",
@@ -180,17 +195,18 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("history.sqlite3")
             let id = VoiceInputSessionID()
             let store = SQLiteSessionHistory(fileURL: fileURL)
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: "TextEdit",
-                transcription: "诊断记录",
-                finalText: nil,
-                providerErrorCode: "authentication",
-                providerMessage: "future-api-key-secret",
-                refinementFailureMessage: "private-refinement-context",
-                outcome: .failed(id, .providerAuthenticationFailed)
-            ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: "TextEdit",
+                    transcription: "诊断记录",
+                    finalText: nil,
+                    providerErrorCode: "authentication",
+                    providerMessage: "future-api-key-secret",
+                    refinementFailureMessage: "private-refinement-context",
+                    outcome: .failed(id, .providerAuthenticationFailed)
+                ))
             try injectLegacyProviderMessages(into: fileURL)
 
             let scrubbed = await store.scrubUntrustedProviderMessages()
@@ -207,7 +223,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("SQLite history drops malformed legacy rows that cannot be safely scrubbed", failures: &failures) {
+        await runAsync(
+            "SQLite history drops malformed legacy rows that cannot be safely scrubbed",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-history-malformed-message-scrub-\(UUID().uuidString)",
@@ -233,7 +252,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("SQLite privacy scrub failure survives later writes and retries physical sanitization", failures: &failures) {
+        await runAsync(
+            "SQLite privacy scrub failure survives later writes and retries physical sanitization",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-history-message-scrub-retry-\(UUID().uuidString)",
@@ -244,14 +266,15 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let id = VoiceInputSessionID()
             let secret = "retry-provider-secret-\(UUID().uuidString)"
             let store = SQLiteSessionHistory(fileURL: fileURL)
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: "TextEdit",
-                transcription: "诊断记录",
-                finalText: nil,
-                outcome: .failed(id, .providerAuthenticationFailed)
-            ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: "TextEdit",
+                    transcription: "诊断记录",
+                    finalText: nil,
+                    outcome: .failed(id, .providerAuthenticationFailed)
+                ))
             try injectProviderMessage(
                 secret,
                 into: fileURL
@@ -323,7 +346,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("SQLite history incrementally upserts reloads searches and securely clears", failures: &failures) {
+        await runAsync(
+            "SQLite history incrementally upserts reloads searches and securely clears",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-sqlite-history-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -333,37 +359,40 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 maximumRecordCount: 3
             )
             let emptyID = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: emptyID,
-                startedAt: Date().addingTimeInterval(1),
-                applicationName: nil,
-                transcription: " \n",
-                finalText: nil,
-                outcome: .failed(emptyID, .providerReturnedNoText)
-            ))
+            await store.save(
+                .init(
+                    sessionID: emptyID,
+                    startedAt: Date().addingTimeInterval(1),
+                    applicationName: nil,
+                    transcription: " \n",
+                    finalText: nil,
+                    outcome: .failed(emptyID, .providerReturnedNoText)
+                ))
             let recordsAfterEmptySave = await store.allRecords()
             try expect(recordsAfterEmptySave.isEmpty)
 
             let id = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: "TextEdit",
-                transcription: "第一阶段",
-                finalText: nil,
-                providerRequestID: "sqlite-request",
-                outcome: .processing(id, .transcribing, applicationName: "TextEdit")
-            ))
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: "TextEdit",
-                transcription: "豆包增量结果",
-                finalText: "最终增量结果",
-                providerRequestID: "sqlite-request",
-                deepSeekText: "最终增量结果",
-                outcome: .delivered(id, applicationName: "TextEdit", text: "最终增量结果")
-            ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: "TextEdit",
+                    transcription: "第一阶段",
+                    finalText: nil,
+                    providerRequestID: "sqlite-request",
+                    outcome: .processing(id, .transcribing, applicationName: "TextEdit")
+                ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: "TextEdit",
+                    transcription: "豆包增量结果",
+                    finalText: "最终增量结果",
+                    providerRequestID: "sqlite-request",
+                    deepSeekText: "最终增量结果",
+                    outcome: .delivered(id, applicationName: "TextEdit", text: "最终增量结果")
+                ))
 
             let reloaded = SQLiteSessionHistory(fileURL: fileURL)
             let records = await reloaded.allRecords()
@@ -387,7 +416,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let sqliteFiles = ["", "-wal", "-shm"].map {
                 URL(fileURLWithPath: fileURL.path + $0)
             }.filter { FileManager.default.fileExists(atPath: $0.path) }
-            try expect(sqliteFiles.count >= 2, "SQLite sidecars were not created for permission verification")
+            try expect(
+                sqliteFiles.count >= 2,
+                "SQLite sidecars were not created for permission verification")
             for sqliteFile in sqliteFiles {
                 try FileManager.default.setAttributes(
                     [.posixPermissions: 0o644],
@@ -427,7 +458,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(importedRecord?.finalText == "最终增量结果")
         }
 
-        await runAsync("SQLite startup recovery terminates sessions left active by a previous process", failures: &failures) {
+        await runAsync(
+            "SQLite startup recovery terminates sessions left active by a previous process",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-history-interrupted-session-\(UUID().uuidString)",
@@ -438,32 +472,34 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let store = SQLiteSessionHistory(fileURL: fileURL)
             let interruptedID = VoiceInputSessionID()
             let deliveredID = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: interruptedID,
-                startedAt: Date(),
-                applicationName: "TextEdit",
-                transcription: "已经确认的豆包文字",
-                finalText: nil,
-                transcriptionProvider: "doubao",
-                providerRequestID: "interrupted-request",
-                outcome: .processing(
-                    interruptedID,
-                    .refining,
-                    applicationName: "TextEdit"
-                )
-            ))
-            await store.save(.init(
-                sessionID: deliveredID,
-                startedAt: Date().addingTimeInterval(-1),
-                applicationName: "Notes",
-                transcription: "完成",
-                finalText: "完成",
-                outcome: .delivered(
-                    deliveredID,
+            await store.save(
+                .init(
+                    sessionID: interruptedID,
+                    startedAt: Date(),
+                    applicationName: "TextEdit",
+                    transcription: "已经确认的豆包文字",
+                    finalText: nil,
+                    transcriptionProvider: "doubao",
+                    providerRequestID: "interrupted-request",
+                    outcome: .processing(
+                        interruptedID,
+                        .refining,
+                        applicationName: "TextEdit"
+                    )
+                ))
+            await store.save(
+                .init(
+                    sessionID: deliveredID,
+                    startedAt: Date().addingTimeInterval(-1),
                     applicationName: "Notes",
-                    text: "完成"
-                )
-            ))
+                    transcription: "完成",
+                    finalText: "完成",
+                    outcome: .delivered(
+                        deliveredID,
+                        applicationName: "Notes",
+                        text: "完成"
+                    )
+                ))
 
             let reconciledCount =
                 await store.reconcileInterruptedSessions()
@@ -487,7 +523,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(delivered?.outcome.isDelivered == true)
         }
 
-        await runAsync("SQLite clear reports a busy checkpoint and completes sanitization after the reader releases", failures: &failures) {
+        await runAsync(
+            "SQLite clear reports a busy checkpoint and completes sanitization after the reader releases",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-sqlite-busy-clear-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -495,25 +534,31 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let store = SQLiteSessionHistory(fileURL: fileURL)
             let id = VoiceInputSessionID()
             let secret = "speaker-sensitive-clear-marker-\(UUID().uuidString)"
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: nil,
-                transcription: secret,
-                finalText: secret,
-                outcome: .pendingCopy(id, text: secret, reason: .missingTarget)
-            ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: secret,
+                    finalText: secret,
+                    outcome: .pendingCopy(id, text: secret, reason: .missingTarget)
+                ))
 
             var reader: OpaquePointer?
-            try expect(sqlite3_open_v2(fileURL.path, &reader, SQLITE_OPEN_READONLY, nil) == SQLITE_OK)
+            try expect(
+                sqlite3_open_v2(fileURL.path, &reader, SQLITE_OPEN_READONLY, nil) == SQLITE_OK)
             guard let reader else { throw SpecFailure(message: "could not open SQLite reader") }
             defer { sqlite3_close(reader) }
             try expect(sqlite3_exec(reader, "BEGIN", nil, nil, nil) == SQLITE_OK)
             var statement: OpaquePointer?
             try expect(
-                sqlite3_prepare_v2(reader, "SELECT payload FROM history_records LIMIT 1", -1, &statement, nil) == SQLITE_OK
+                sqlite3_prepare_v2(
+                    reader, "SELECT payload FROM history_records LIMIT 1", -1, &statement, nil)
+                    == SQLITE_OK
             )
-            guard let statement else { throw SpecFailure(message: "could not prepare SQLite reader") }
+            guard let statement else {
+                throw SpecFailure(message: "could not prepare SQLite reader")
+            }
             try expect(sqlite3_step(statement) == SQLITE_ROW)
 
             let firstClear = await store.clear()
@@ -532,11 +577,15 @@ enum SessionHistorySpecs: CoreSpecDomain {
             for suffix in ["", "-wal", "-journal"] {
                 let candidate = URL(fileURLWithPath: fileURL.path + suffix)
                 guard let data = try? Data(contentsOf: candidate) else { continue }
-                try expect(data.range(of: marker) == nil, "cleared SQLite file retained plaintext marker")
+                try expect(
+                    data.range(of: marker) == nil, "cleared SQLite file retained plaintext marker")
             }
         }
 
-        await runAsync("SQLite retention keeps the committed policy when a later checkpoint is busy", failures: &failures) {
+        await runAsync(
+            "SQLite retention keeps the committed policy when a later checkpoint is busy",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-sqlite-busy-retention-\(UUID().uuidString)"
@@ -546,18 +595,19 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let store = SQLiteSessionHistory(fileURL: fileURL)
             let now = Date()
             let oldID = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: oldID,
-                startedAt: now.addingTimeInterval(-90 * 86_400),
-                applicationName: "TextEdit",
-                transcription: "old",
-                finalText: "old",
-                outcome: .delivered(
-                    oldID,
+            await store.save(
+                .init(
+                    sessionID: oldID,
+                    startedAt: now.addingTimeInterval(-90 * 86_400),
                     applicationName: "TextEdit",
-                    text: "old"
-                )
-            ))
+                    transcription: "old",
+                    finalText: "old",
+                    outcome: .delivered(
+                        oldID,
+                        applicationName: "TextEdit",
+                        text: "old"
+                    )
+                ))
 
             var reader: OpaquePointer?
             try expect(
@@ -613,7 +663,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("SQLite cap pruning retries physical WAL sanitization after a busy reader", failures: &failures) {
+        await runAsync(
+            "SQLite cap pruning retries physical WAL sanitization after a busy reader",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-sqlite-cap-sanitization-\(UUID().uuidString)"
@@ -626,18 +679,19 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
             let secret = "pruned-history-secret-\(UUID().uuidString)"
             let oldID = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: oldID,
-                startedAt: Date(timeIntervalSince1970: 1),
-                applicationName: "TextEdit",
-                transcription: secret,
-                finalText: secret,
-                outcome: .delivered(
-                    oldID,
+            await store.save(
+                .init(
+                    sessionID: oldID,
+                    startedAt: Date(timeIntervalSince1970: 1),
                     applicationName: "TextEdit",
-                    text: secret
-                )
-            ))
+                    transcription: secret,
+                    finalText: secret,
+                    outcome: .delivered(
+                        oldID,
+                        applicationName: "TextEdit",
+                        text: secret
+                    )
+                ))
 
             var reader: OpaquePointer?
             try expect(
@@ -698,7 +752,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("SQLite history closes explicitly before owned files are erased", failures: &failures) {
+        await runAsync(
+            "SQLite history closes explicitly before owned files are erased", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-sqlite-erasure-close-\(UUID().uuidString)"
@@ -706,18 +762,19 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("history.sqlite3")
             let store = SQLiteSessionHistory(fileURL: fileURL)
             let id = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: "TextEdit",
-                transcription: "must not return",
-                finalText: "must not return",
-                outcome: .delivered(
-                    id,
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
                     applicationName: "TextEdit",
-                    text: "must not return"
-                )
-            ))
+                    transcription: "must not return",
+                    finalText: "must not return",
+                    outcome: .delivered(
+                        id,
+                        applicationName: "TextEdit",
+                        text: "must not return"
+                    )
+                ))
 
             let firstClose = await store.closeForErasure()
             let secondClose = await store.closeForErasure()
@@ -725,45 +782,50 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(secondClose)
             try FileManager.default.removeItem(at: directory)
             let lateID = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: lateID,
-                startedAt: Date(),
-                applicationName: nil,
-                transcription: "late write",
-                finalText: "late write",
-                outcome: .failed(
-                    lateID,
-                    .recordingFailed
-                )
-            ))
+            await store.save(
+                .init(
+                    sessionID: lateID,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "late write",
+                    finalText: "late write",
+                    outcome: .failed(
+                        lateID,
+                        .recordingFailed
+                    )
+                ))
             try expect(!FileManager.default.fileExists(atPath: directory.path))
             let status = await store.persistenceStatus()
             try expect(status.recordCount == 0)
         }
 
-        await runAsync("SQLite recovers a corrupt database as one protected recovery set", failures: &failures) {
+        await runAsync(
+            "SQLite recovers a corrupt database as one protected recovery set", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-sqlite-corrupt-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             let fileURL = directory.appendingPathComponent("history.sqlite3")
             try Data("not-a-sqlite-database".utf8).write(to: fileURL)
 
             let store = SQLiteSessionHistory(fileURL: fileURL)
             let status = await store.persistenceStatus()
-            guard case let .corruptedDataPreserved(backupURL, _) = status.notice else {
+            guard case .corruptedDataPreserved(let backupURL, _) = status.notice else {
                 throw SpecFailure(message: "corrupt SQLite database was not preserved")
             }
             try expect(FileManager.default.fileExists(atPath: backupURL.path))
             let id = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: nil,
-                transcription: "recovered",
-                finalText: "recovered",
-                outcome: .pendingCopy(id, text: "recovered", reason: .missingTarget)
-            ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "recovered",
+                    finalText: "recovered",
+                    outcome: .pendingCopy(id, text: "recovered", reason: .missingTarget)
+                ))
             let recoveredRecord = await store.record(sessionID: id)
             try expect(recoveredRecord != nil)
             let cleared = await store.clear()
@@ -771,7 +833,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(!FileManager.default.fileExists(atPath: backupURL.path))
         }
 
-        await runAsync("SQLite skips malformed rows without misreporting a write failure", failures: &failures) {
+        await runAsync(
+            "SQLite skips malformed rows without misreporting a write failure", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-sqlite-malformed-row-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -828,7 +892,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(statusAfterClear.notice == nil)
         }
 
-        await runAsync("SQLite legacy import applies retention and cap before verifying the final set", failures: &failures) {
+        await runAsync(
+            "SQLite legacy import applies retention and cap before verifying the final set",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-sqlite-import-retention-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -841,17 +908,19 @@ enum SessionHistorySpecs: CoreSpecDomain {
             var records: [VoiceInputHistoryRecord] = []
             for offset in 0..<5 {
                 let id = VoiceInputSessionID()
-                let date = offset == 0
+                let date =
+                    offset == 0
                     ? now.addingTimeInterval(-100 * 86_400)
                     : now.addingTimeInterval(Double(offset))
-                records.append(.init(
-                    sessionID: id,
-                    startedAt: date,
-                    applicationName: nil,
-                    transcription: "legacy-\(offset)",
-                    finalText: "legacy-\(offset)",
-                    outcome: .pendingCopy(id, text: "legacy-\(offset)", reason: .missingTarget)
-                ))
+                records.append(
+                    .init(
+                        sessionID: id,
+                        startedAt: date,
+                        applicationName: nil,
+                        transcription: "legacy-\(offset)",
+                        finalText: "legacy-\(offset)",
+                        outcome: .pendingCopy(id, text: "legacy-\(offset)", reason: .missingTarget)
+                    ))
             }
             let imported = await store.importLegacyRecords(records)
             let retained = await store.allRecords()
@@ -860,17 +929,21 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(retained.map(\.finalText) == ["legacy-4", "legacy-3", "legacy-2"])
         }
 
-        await runAsync("corrupt history is preserved with a recoverable notice", failures: &failures) {
+        await runAsync(
+            "corrupt history is preserved with a recoverable notice", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-history-corrupt-spec-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent(
+                    "speaker-history-corrupt-spec-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             let fileURL = directory.appendingPathComponent("history.json")
             try Data("not-json".utf8).write(to: fileURL)
 
             let store = VersionedLocalSessionHistory(fileURL: fileURL)
             let status = await store.persistenceStatus()
-            if case let .corruptedDataPreserved(backupURL, _) = status.notice {
+            if case .corruptedDataPreserved(let backupURL, _) = status.notice {
                 try expect(FileManager.default.fileExists(atPath: backupURL.path))
                 let cleared = await store.clear()
                 try expect(cleared)
@@ -878,13 +951,16 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 let clearedStatus = await store.persistenceStatus()
                 try expect(clearedStatus.notice == nil)
             } else {
-                throw SpecFailure(message: "corrupt history did not produce a preserved recovery notice")
+                throw SpecFailure(
+                    message: "corrupt history did not produce a preserved recovery notice")
             }
             let recoveredRecords = await store.allRecords()
             try expect(recoveredRecords.isEmpty)
         }
 
-        await runAsync("history retention prunes by age and enforces a hard safety cap", failures: &failures) {
+        await runAsync(
+            "history retention prunes by age and enforces a hard safety cap", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-history-retention-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -895,14 +971,15 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let now = Date()
             for offset in 0..<4 {
                 let id = VoiceInputSessionID()
-                await capped.save(.init(
-                    sessionID: id,
-                    startedAt: now.addingTimeInterval(Double(offset)),
-                    applicationName: nil,
-                    transcription: "record-\(offset)",
-                    finalText: "record-\(offset)",
-                    outcome: .pendingCopy(id, text: "record-\(offset)", reason: .missingTarget)
-                ))
+                await capped.save(
+                    .init(
+                        sessionID: id,
+                        startedAt: now.addingTimeInterval(Double(offset)),
+                        applicationName: nil,
+                        transcription: "record-\(offset)",
+                        finalText: "record-\(offset)",
+                        outcome: .pendingCopy(id, text: "record-\(offset)", reason: .missingTarget)
+                    ))
             }
             let cappedRecords = await capped.allRecords()
             try expect(cappedRecords.count == 3)
@@ -913,29 +990,33 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
             let oldID = VoiceInputSessionID()
             let currentID = VoiceInputSessionID()
-            await aged.save(.init(
-                sessionID: oldID,
-                startedAt: now.addingTimeInterval(-100 * 86_400),
-                applicationName: nil,
-                transcription: "old",
-                finalText: "old",
-                outcome: .pendingCopy(oldID, text: "old", reason: .missingTarget)
-            ))
-            await aged.save(.init(
-                sessionID: currentID,
-                startedAt: now,
-                applicationName: nil,
-                transcription: "current",
-                finalText: "current",
-                outcome: .pendingCopy(currentID, text: "current", reason: .missingTarget)
-            ))
+            await aged.save(
+                .init(
+                    sessionID: oldID,
+                    startedAt: now.addingTimeInterval(-100 * 86_400),
+                    applicationName: nil,
+                    transcription: "old",
+                    finalText: "old",
+                    outcome: .pendingCopy(oldID, text: "old", reason: .missingTarget)
+                ))
+            await aged.save(
+                .init(
+                    sessionID: currentID,
+                    startedAt: now,
+                    applicationName: nil,
+                    transcription: "current",
+                    finalText: "current",
+                    outcome: .pendingCopy(currentID, text: "current", reason: .missingTarget)
+                ))
             let appliedRetention = await aged.applyRetentionPolicy(.thirtyDays, now: now)
             try expect(appliedRetention)
             let agedRecords = await aged.allRecords()
             try expect(agedRecords.map(\.sessionID) == [currentID])
         }
 
-        await runAsync("disabled history preserves existing records and skips new saves", failures: &failures) {
+        await runAsync(
+            "disabled history preserves existing records and skips new saves", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-history-disabled-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -950,50 +1031,53 @@ enum SessionHistorySpecs: CoreSpecDomain {
 
             for store in stores {
                 let existingID = VoiceInputSessionID()
-                await store.save(.init(
-                    sessionID: existingID,
-                    startedAt: Date(),
-                    applicationName: nil,
-                    transcription: "existing",
-                    finalText: "existing",
-                    outcome: .pendingCopy(
-                        existingID,
-                        text: "existing",
-                        reason: .missingTarget
-                    )
-                ))
+                await store.save(
+                    .init(
+                        sessionID: existingID,
+                        startedAt: Date(),
+                        applicationName: nil,
+                        transcription: "existing",
+                        finalText: "existing",
+                        outcome: .pendingCopy(
+                            existingID,
+                            text: "existing",
+                            reason: .missingTarget
+                        )
+                    ))
                 let disabled = await store.applyRetentionPolicy(
                     .disabled,
                     now: Date()
                 )
                 try expect(disabled)
 
-                await store.save(.init(
-                    sessionID: existingID,
-                    startedAt: Date(),
-                    applicationName: nil,
-                    transcription: "updated",
-                    finalText: "updated",
-                    outcome: .pendingCopy(
-                        existingID,
-                        text: "updated",
-                        reason: .missingTarget
-                    )
-                ))
+                await store.save(
+                    .init(
+                        sessionID: existingID,
+                        startedAt: Date(),
+                        applicationName: nil,
+                        transcription: "updated",
+                        finalText: "updated",
+                        outcome: .pendingCopy(
+                            existingID,
+                            text: "updated",
+                            reason: .missingTarget
+                        )
+                    ))
 
                 let skippedID = VoiceInputSessionID()
-                await store.save(.init(
-                    sessionID: skippedID,
-                    startedAt: Date(),
-                    applicationName: nil,
-                    transcription: "skipped",
-                    finalText: "skipped",
-                    outcome: .pendingCopy(
-                        skippedID,
-                        text: "skipped",
-                        reason: .missingTarget
-                    )
-                ))
+                await store.save(
+                    .init(
+                        sessionID: skippedID,
+                        startedAt: Date(),
+                        applicationName: nil,
+                        transcription: "skipped",
+                        finalText: "skipped",
+                        outcome: .pendingCopy(
+                            skippedID,
+                            text: "skipped",
+                            reason: .missingTarget
+                        )
+                    ))
 
                 let policy = await store.currentRetentionPolicy()
                 let records = await store.allRecords()
@@ -1003,7 +1087,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("history delete and clear roll back when disk write fails", failures: &failures) {
+        await runAsync(
+            "history delete and clear roll back when disk write fails", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-history-write-failure-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -1012,14 +1098,15 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 fileURL: directory.appendingPathComponent("history.json")
             )
             let id = VoiceInputSessionID()
-            await store.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: nil,
-                transcription: "需要保留",
-                finalText: "需要保留",
-                outcome: .pendingCopy(id, text: "需要保留", reason: .missingTarget)
-            ))
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "需要保留",
+                    finalText: "需要保留",
+                    outcome: .pendingCopy(id, text: "需要保留", reason: .missingTarget)
+                ))
 
             let deleted = await store.delete(sessionID: id)
             let cleared = await store.clear()
@@ -1029,7 +1116,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(records.map(\.sessionID) == [id])
         }
 
-        await runAsync("legacy history refuses to load when owner-only protection fails", failures: &failures) {
+        await runAsync(
+            "legacy history refuses to load when owner-only protection fails", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-history-protection-\(UUID().uuidString)",
@@ -1039,18 +1128,19 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("history.json")
             let writer = VersionedLocalSessionHistory(fileURL: fileURL)
             let id = VoiceInputSessionID()
-            await writer.save(.init(
-                sessionID: id,
-                startedAt: Date(),
-                applicationName: nil,
-                transcription: "private history",
-                finalText: "private history",
-                outcome: .pendingCopy(
-                    id,
-                    text: "private history",
-                    reason: .missingTarget
-                )
-            ))
+            await writer.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    applicationName: nil,
+                    transcription: "private history",
+                    finalText: "private history",
+                    outcome: .pendingCopy(
+                        id,
+                        text: "private history",
+                        reason: .missingTarget
+                    )
+                ))
 
             let protected = VersionedLocalSessionHistory(
                 fileURL: fileURL,

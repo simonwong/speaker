@@ -95,9 +95,9 @@ package enum SpeakerCopy {
             switch failure {
             case .protectionFailed:
                 "无法保护设置文件权限，已停止加载本机设置。"
-            case let .readFailed(detail):
+            case .readFailed(let detail):
                 "无法安全读取设置文件，已停止加载：\(detail)"
-            case let .preservationFailed(detail):
+            case .preservationFailed(let detail):
                 "Settings could not be recovered: \(detail)"
             }
         }
@@ -131,7 +131,7 @@ package enum SpeakerCopy {
                 nil
             case .migratedLegacyFileRemains:
                 "会话历史已迁移，但旧版 history.json 未能删除。"
-            case let .legacyCorrupted(backupName):
+            case .legacyCorrupted(let backupName):
                 "旧版历史文件损坏，已保留为 \(backupName)。"
             case .legacyProtectionFailed:
                 "旧版会话历史的文件权限无法收紧，已停止迁移并保留原文件。"
@@ -150,7 +150,7 @@ package enum SpeakerCopy {
             switch reason {
             case .databaseUnavailable:
                 "本地历史数据库不可用。"
-            case let .detail(detail):
+            case .detail(let detail):
                 detail
             }
         }
@@ -159,11 +159,11 @@ package enum SpeakerCopy {
             _ notice: LocalHistoryPersistenceNotice
         ) -> String {
             switch notice {
-            case let .privacyMigrationFailed(failure):
+            case .privacyMigrationFailed(let failure):
                 "旧版会话历史的隐私清理失败：\(reason(failure))"
-            case let .writeFailed(detail):
+            case .writeFailed(let detail):
                 "会话历史写入失败：\(detail)"
-            case let .corruptedRecordsSkipped(count):
+            case .corruptedRecordsSkipped(let count):
                 "有 \(count) 条本地历史记录已损坏，其他记录仍可使用。"
             case .corruptedDataPreserved, .recoveryArchivePruneFailed:
                 pageNotice(notice)
@@ -174,15 +174,15 @@ package enum SpeakerCopy {
             _ notice: LocalHistoryPersistenceNotice
         ) -> String {
             switch notice {
-            case let .corruptedDataPreserved(_, detail):
+            case .corruptedDataPreserved(_, let detail):
                 "已保留损坏的历史文件：\(detail)"
-            case let .corruptedRecordsSkipped(count):
+            case .corruptedRecordsSkipped(let count):
                 "有 \(count) 条历史记录已损坏，已跳过；其他记录仍可使用。"
-            case let .privacyMigrationFailed(failure):
+            case .privacyMigrationFailed(let failure):
                 "旧版历史隐私清理未完成：\(reason(failure))"
-            case let .writeFailed(detail):
+            case .writeFailed(let detail):
                 "历史写入失败：\(detail)"
-            case let .recoveryArchivePruneFailed(detail):
+            case .recoveryArchivePruneFailed(let detail):
                 "旧的历史损坏备份未能清理：\(detail)"
             }
         }
@@ -229,9 +229,9 @@ package enum SpeakerCopy {
 
         package static func message(for error: AppSettingsStoreError) -> String {
             switch error {
-            case let .writeFailed(reason):
+            case .writeFailed(let reason):
                 "无法保存 Speaker 设置：\(reason)"
-            case let .sourceUnreadable(failure):
+            case .sourceUnreadable(let failure):
                 "原设置文件无法安全读取，已保留原文件且拒绝覆盖："
                     + Startup.settingsLoadFailed(failure)
             }
@@ -258,7 +258,7 @@ package enum SpeakerCopy {
             switch issue {
             case .emptyWord:
                 "词条不能为空。"
-            case let .duplicateWord(word, _):
+            case .duplicateWord(let word, _):
                 "词条“\(word)”已存在。"
             }
         }

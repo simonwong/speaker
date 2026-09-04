@@ -1,7 +1,7 @@
 import Foundation
 
-public extension Notification.Name {
-    static let speakerHistoryDidChange = Notification.Name(
+extension Notification.Name {
+    public static let speakerHistoryDidChange = Notification.Name(
         "com.local.speaker.history-did-change"
     )
 }
@@ -21,8 +21,8 @@ public protocol LocalSessionHistoryStoring: SessionHistoryRecording {
     func usageStatistics() async -> VoiceInputUsageSummary
 }
 
-public extension LocalSessionHistoryStoring {
-    func latestRecord() async -> VoiceInputHistoryRecord? {
+extension LocalSessionHistoryStoring {
+    public func latestRecord() async -> VoiceInputHistoryRecord? {
         await allRecords().first
     }
 
@@ -31,7 +31,7 @@ public extension LocalSessionHistoryStoring {
     /// The default implementation folds `allRecords()`; stores backed by a
     /// database should override it to stream rows instead of loading the whole
     /// table into memory.
-    func usageStatistics() async -> VoiceInputUsageSummary {
+    public func usageStatistics() async -> VoiceInputUsageSummary {
         VoiceInputUsageStatistics.summarize(await allRecords())
     }
 }
@@ -116,7 +116,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         case .absent:
             storedRecords = []
             notice = nil
-        case let .loaded(records, _):
+        case .loaded(let records, _):
             storedRecords = SessionHistoryRecordPolicy.retained(
                 records,
                 policy: retentionPolicy,
@@ -124,21 +124,21 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
                 now: Date()
             )
             notice = nil
-        case let .corruptedPreserved(backupURL, corruption):
+        case .corruptedPreserved(let backupURL, let corruption):
             storedRecords = []
             notice = .corruptedDataPreserved(
                 backupURL: backupURL,
                 reason: corruption.summary
             )
-        case let .failed(.protectionFailed(detail)):
+        case .failed(.protectionFailed(let detail)):
             storedRecords = []
             notice = .privacyMigrationFailed(reason: .detail(detail))
-        case let .failed(.readFailed(detail)):
+        case .failed(.readFailed(let detail)):
             storedRecords = []
             notice = .writeFailed(
                 reason: "History data could not be read safely: \(detail)"
             )
-        case let .failed(.preservationFailed(_, detail)):
+        case .failed(.preservationFailed(_, let detail)):
             storedRecords = []
             notice = .writeFailed(
                 reason: "History data is corrupt and could not be preserved: \(detail)"
@@ -163,7 +163,7 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
             1: { data in
                 try decoder.decode(HistoryDocumentV1.self, from: data)
                     .records.map { try $0.domainRecord }
-            },
+            }
         ]
     )
 
@@ -171,12 +171,14 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
         fileManager: FileManager = .default,
         applicationDirectoryName: String = "Speaker"
     ) -> URL {
-        let baseDirectory = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.homeDirectoryForCurrentUser
+        let baseDirectory =
+            fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.homeDirectoryForCurrentUser
 
-        return baseDirectory
+        return
+            baseDirectory
             .appendingPathComponent(applicationDirectoryName, isDirectory: true)
             .appendingPathComponent("history.json", isDirectory: false)
     }
@@ -324,15 +326,15 @@ public actor VersionedLocalSessionHistory: LocalSessionHistoryStoring {
     }
 }
 
-private extension VersionedLocalSessionHistory {
-    static var encoder: JSONEncoder {
+extension VersionedLocalSessionHistory {
+    fileprivate static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .millisecondsSince1970
         return encoder
     }
 
-    static var decoder: JSONDecoder {
+    fileprivate static var decoder: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         return decoder
@@ -465,32 +467,32 @@ package struct HistoryOutcomeV1: Codable {
         switch outcome {
         case .idle:
             self.init(kind: .idle)
-        case let .preparing(id):
+        case .preparing(let id):
             self.init(kind: .preparing, sessionID: id.rawValue)
-        case let .recording(id):
+        case .recording(let id):
             self.init(kind: .recording, sessionID: id.rawValue)
-        case let .processing(id, stage, _):
+        case .processing(let id, let stage, _):
             self.init(
                 kind: .processing,
                 sessionID: id.rawValue,
                 processingStage: Self.encode(stage)
             )
-        case let .delivered(id, _, text):
+        case .delivered(let id, _, let text):
             self.init(
                 kind: .delivered,
                 sessionID: id.rawValue,
                 text: text
             )
-        case let .pendingCopy(id, text, reason):
+        case .pendingCopy(let id, let text, let reason):
             self.init(
                 kind: .pendingCopy,
                 sessionID: id.rawValue,
                 text: text,
                 pendingCopyReason: reason.rawValue
             )
-        case let .cancelled(id):
+        case .cancelled(let id):
             self.init(kind: .cancelled, sessionID: id.rawValue)
-        case let .failed(id, failure):
+        case .failed(let id, let failure):
             self.init(
                 kind: .failed,
                 sessionID: id.rawValue,

@@ -16,12 +16,14 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             ])
 
             try expect(issues.contains(.emptyWord(entryID: emptyID)))
-            try expect(issues.contains { issue in
-                if case .duplicateWord = issue { true } else { false }
-            })
+            try expect(
+                issues.contains { issue in
+                    if case .duplicateWord = issue { true } else { false }
+                })
         }
 
-        run("dictionary Entry quality policy preserves documented boundaries", failures: &failures) {
+        run("dictionary Entry quality policy preserves documented boundaries", failures: &failures)
+        {
             try expect(DictionaryEntryQualityPolicy.hint(for: "123456789") == .none)
             try expect(DictionaryEntryQualityPolicy.hint(for: "1234567890") == .tooLong)
             try expect(DictionaryEntryQualityPolicy.hint(for: "字") == .singleCharacter)
@@ -30,7 +32,10 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             try expect(DictionaryEntryQualityPolicy.hint(for: " 字\n") == .singleCharacter)
         }
 
-        run("dictionary Entry candidates preserve supported runs and deduplicate case-insensitively", failures: &failures) {
+        run(
+            "dictionary Entry candidates preserve supported runs and deduplicate case-insensitively",
+            failures: &failures
+        ) {
             let candidates = DictionaryEntryCandidateExtractor.candidates(
                 in: "Use a Swift-lang v2.0, I O'Reilly; SPEAKER speaker 123 42 中文"
             )
@@ -57,7 +62,9 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("versioned personal dictionary store migrates v1 canonical terms", failures: &failures) {
+        await runAsync(
+            "versioned personal dictionary store migrates v1 canonical terms", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-dictionary-v1-spec-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -91,21 +98,24 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
 
             let dictionary = try await store.load().dictionary
             let migratedData = try Data(contentsOf: fileURL)
-            let migratedDocument = try JSONSerialization.jsonObject(with: migratedData)
+            let migratedDocument =
+                try JSONSerialization.jsonObject(with: migratedData)
                 as? [String: Any]
             let migratedEntries = migratedDocument?["entries"] as? [[String: Any]]
 
             try expect(dictionary.entries.map(\.word) == ["Speaker", "DeepSeek"])
             try expect(migratedDocument?["version"] as? Int == 2)
-            try expect(migratedEntries?.allSatisfy { entry in
-                entry["word"] != nil
-                    && entry["canonicalTerm"] == nil
-                    && entry["aliases"] == nil
-                    && entry["isEnabled"] == nil
-            } == true)
+            try expect(
+                migratedEntries?.allSatisfy { entry in
+                    entry["word"] != nil
+                        && entry["canonicalTerm"] == nil
+                        && entry["aliases"] == nil
+                        && entry["isEnabled"] == nil
+                } == true)
         }
 
-        run("dictionary snapshot preserves entry order before provider guard", failures: &failures) {
+        run("dictionary snapshot preserves entry order before provider guard", failures: &failures)
+        {
             let alpha = DictionaryEntry(
                 id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
                 word: "Alpha"
@@ -133,9 +143,12 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             try expect(context.omissions.allSatisfy { $0.reason == .providerCountLimit })
         }
 
-        await runAsync("versioned personal dictionary store round trips locally", failures: &failures) {
+        await runAsync(
+            "versioned personal dictionary store round trips locally", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-dictionary-spec-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent(
+                    "speaker-dictionary-spec-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("dictionary.json")
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
@@ -154,7 +167,9 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("versioned personal dictionary rejects whitespace-only v2 words", failures: &failures) {
+        await runAsync(
+            "versioned personal dictionary rejects whitespace-only v2 words", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-dictionary-blank-v2-spec-\(UUID().uuidString)"
@@ -167,10 +182,12 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("dictionary.json")
             let document: [String: Any] = [
                 "version": 2,
-                "entries": [[
-                    "id": UUID().uuidString,
-                    "word": "   ",
-                ]],
+                "entries": [
+                    [
+                        "id": UUID().uuidString,
+                        "word": "   ",
+                    ]
+                ],
             ]
             try JSONSerialization.data(withJSONObject: document).write(to: fileURL)
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
@@ -186,18 +203,21 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("personal dictionary refuses an unreadable oversized save and retains the old file", failures: &failures) {
+        await runAsync(
+            "personal dictionary refuses an unreadable oversized save and retains the old file",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-dictionary-size-spec-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("dictionary.json")
             let store = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
             let retained = try PersonalDictionary(entries: [
-                .init(word: "retained-term"),
+                .init(word: "retained-term")
             ])
             try await store.save(retained)
             let oversized = try PersonalDictionary(entries: [
-                .init(word: String(repeating: "字", count: 3 * 1_024 * 1_024)),
+                .init(word: String(repeating: "字", count: 3 * 1_024 * 1_024))
             ])
 
             do {
@@ -213,7 +233,10 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("personal dictionary refuses to load when owner-only protection fails", failures: &failures) {
+        await runAsync(
+            "personal dictionary refuses to load when owner-only protection fails",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-dictionary-protection-\(UUID().uuidString)",
@@ -224,7 +247,7 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             let writer = VersionedJSONPersonalDictionaryStore(fileURL: fileURL)
             try await writer.save(
                 PersonalDictionary(entries: [
-                    .init(word: "private term"),
+                    .init(word: "private term")
                 ])
             )
             let protected = VersionedJSONPersonalDictionaryStore(
@@ -242,24 +265,30 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("personal dictionary migration verifies the stable copy before removing legacy data", failures: &failures) {
+        await runAsync(
+            "personal dictionary migration verifies the stable copy before removing legacy data",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-dictionary-migration-\(UUID().uuidString)",
                     isDirectory: true
                 )
             defer { try? FileManager.default.removeItem(at: directory) }
-            let legacyURL = directory
+            let legacyURL =
+                directory
                 .appendingPathComponent("legacy/dictionary.json")
-            let primaryURL = directory
+            let primaryURL =
+                directory
                 .appendingPathComponent("Speaker/personal-dictionary.json")
             let dictionary = try PersonalDictionary(entries: [
-                .init(word: "豆包"),
+                .init(word: "豆包")
             ])
             try await VersionedJSONPersonalDictionaryStore(fileURL: legacyURL)
                 .save(dictionary)
 
-            let outcome = await VersionedJSONPersonalDictionaryStore
+            let outcome =
+                await VersionedJSONPersonalDictionaryStore
                 .migrateLegacyFileIfNeeded(
                     from: legacyURL,
                     to: primaryURL
@@ -276,7 +305,10 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("personal dictionary migration never overwrites an existing stable dictionary", failures: &failures) {
+        await runAsync(
+            "personal dictionary migration never overwrites an existing stable dictionary",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-dictionary-existing-\(UUID().uuidString)",
@@ -286,17 +318,18 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             let legacyURL = directory.appendingPathComponent("legacy.json")
             let primaryURL = directory.appendingPathComponent("primary.json")
             let legacyDictionary = try PersonalDictionary(entries: [
-                .init(word: "旧词条"),
+                .init(word: "旧词条")
             ])
             let primaryDictionary = try PersonalDictionary(entries: [
-                .init(word: "新词条"),
+                .init(word: "新词条")
             ])
             try await VersionedJSONPersonalDictionaryStore(fileURL: legacyURL)
                 .save(legacyDictionary)
             try await VersionedJSONPersonalDictionaryStore(fileURL: primaryURL)
                 .save(primaryDictionary)
 
-            let outcome = await VersionedJSONPersonalDictionaryStore
+            let outcome =
+                await VersionedJSONPersonalDictionaryStore
                 .migrateLegacyFileIfNeeded(
                     from: legacyURL,
                     to: primaryURL
@@ -313,7 +346,9 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("corrupted legacy dictionary is preserved when migration fails", failures: &failures) {
+        await runAsync(
+            "corrupted legacy dictionary is preserved when migration fails", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-dictionary-corrupt-\(UUID().uuidString)",
@@ -328,7 +363,8 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
             let primaryURL = directory.appendingPathComponent("primary.json")
             try Data("not-json".utf8).write(to: legacyURL)
 
-            let outcome = await VersionedJSONPersonalDictionaryStore
+            let outcome =
+                await VersionedJSONPersonalDictionaryStore
                 .migrateLegacyFileIfNeeded(
                     from: legacyURL,
                     to: primaryURL

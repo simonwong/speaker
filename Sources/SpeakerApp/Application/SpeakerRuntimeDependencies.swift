@@ -84,7 +84,8 @@ struct SpeakerWorkspaceAccess {
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
             .map { _ in () }
         return SpeakerWorkspaceAccess(
-            applicationActivations: speakerActivation
+            applicationActivations:
+                speakerActivation
                 .merge(with: workspaceActivation)
                 .eraseToAnyPublisher(),
             openURL: { NSWorkspace.shared.open($0) },
@@ -149,8 +150,8 @@ struct SpeakerRuntimeDependencies {
             dictionaryStore: VersionedJSONPersonalDictionaryStore(
                 fileURL: VersionedJSONPersonalDictionaryStore.defaultFileURL()
             ),
-            legacyDictionaryFileURL: try?
-                VersionedJSONPersonalDictionaryStore.applicationSupportFileURL(),
+            legacyDictionaryFileURL:
+                try? VersionedJSONPersonalDictionaryStore.applicationSupportFileURL(),
             credentials: .production(bundle: bundle),
             dataErasureIntentFileURL: SpeakerDataErasureIntentStore.defaultIntentFileURL(),
             localDataEraser: SpeakerOwnedLocalDataEraser(

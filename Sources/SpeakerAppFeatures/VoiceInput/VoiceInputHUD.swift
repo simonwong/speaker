@@ -3,8 +3,7 @@ import SwiftUI
 
 package struct VoiceInputHUD: View {
     let presentation: VoiceInputOverlayPresentation
-    let performAction:
-        (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
+    let performAction: (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
     @Environment(\.voiceInputPanelDismissal) private var activityDismissal
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
@@ -48,12 +47,16 @@ package struct VoiceInputHUD: View {
     @ViewBuilder
     private var noticeBody: some View {
         switch presentation {
-        case let .pendingCopy(
+        case .pendingCopy(
             _,
-            text,
-            copyButtonTitle,
-            copyAction,
-            dismissAction
+            let
+                text,
+            let
+                copyButtonTitle,
+            let
+                copyAction,
+            let
+                dismissAction
         ):
             PendingCopyStrip(
                 text: text,
@@ -62,7 +65,7 @@ package struct VoiceInputHUD: View {
                 copy: { _ = performAction(copyAction) },
                 dismiss: { _ = performAction(dismissAction) }
             )
-        case let .problem(icon, title, guidance, _, dismissAction):
+        case .problem(let icon, let title, let guidance, _, let dismissAction):
             ProblemStrip(
                 icon: icon,
                 title: title,
@@ -95,13 +98,13 @@ private struct ActivityPillModel: Equatable {
 
     init?(_ presentation: VoiceInputOverlayPresentation) {
         switch presentation {
-        case let .recording(peakPower, cancelAction):
+        case .recording(let peakPower, let cancelAction):
             phase = .recording(peakPower: peakPower)
             layout = .recording
             accessibilityTitle = "正在录音"
             cancelHint = "停止录音并忽略本次内容"
             self.cancelAction = cancelAction
-        case let .processing(title, cancelAction):
+        case .processing(let title, let cancelAction):
             phase = .processing
             layout = .processing
             accessibilityTitle = title
@@ -187,13 +190,14 @@ private struct ActivityPill: View {
             }
         }
         .onChange(of: dismissal) { _, dismissal in
-            let animation: Animation? = if reduceMotion {
-                nil
-            } else if let dismissal {
-                .easeIn(duration: dismissal.fadeDuration)
-            } else {
-                .smooth(duration: 0.3, extraBounce: 0.03)
-            }
+            let animation: Animation? =
+                if reduceMotion {
+                    nil
+                } else if let dismissal {
+                    .easeIn(duration: dismissal.fadeDuration)
+                } else {
+                    .smooth(duration: 0.3, extraBounce: 0.03)
+                }
             withAnimation(animation) {
                 isRevealed = dismissal == nil
             }
@@ -230,8 +234,8 @@ private struct ActivityPill: View {
     /// noise near the floor so silence reads as a flat dotted line while
     /// normal speech still spans most of the pill height.
     private var liveStrength: Double {
-        guard case let .recording(peakPower) = model.phase,
-              let peakPower
+        guard case .recording(let peakPower) = model.phase,
+            let peakPower
         else { return 0 }
         let normalized = min(1, max(0, (Double(peakPower) + 52) / 44))
         return pow(normalized, 1.4)
@@ -304,7 +308,8 @@ private struct ActivityWaveform: View {
         case .processing:
             let position = Double(index) / Double(Self.barCount - 1)
             let envelope = 0.7 + 0.3 * sin(position * .pi)
-            let swell = reduceMotion
+            let swell =
+                reduceMotion
                 ? 0.35
                 : 0.5 + 0.5 * sin(time * 3.4 - Double(index) * 0.55)
             return 3 + 13 * envelope * swell
@@ -342,21 +347,21 @@ private struct ActivityHUDSurface<Content: View>: View {
         surface
             .overlay {
                 surfaceShape
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            .primary.opacity(
-                                palette.darkBorderOpacity + 0.03
-                            ),
-                            .primary.opacity(
-                                max(0.04, palette.darkBorderOpacity * 0.55)
-                            ),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: palette.darkBorderLineWidth
-                )
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                .primary.opacity(
+                                    palette.darkBorderOpacity + 0.03
+                                ),
+                                .primary.opacity(
+                                    max(0.04, palette.darkBorderOpacity * 0.55)
+                                ),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: palette.darkBorderLineWidth
+                    )
             }
             .environment(
                 \.colorScheme,

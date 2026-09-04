@@ -100,11 +100,12 @@ package final class RuntimeStartupSequence {
         let loadedSettings = await stages.loadSettings()
         guard !Task.isCancelled else { return }
         switch loadedSettings {
-        case let .recovered(_, recovery):
-            publish(SpeakerCopy.Startup.settingsRecovered(
-                backupName: recovery.backupURL.lastPathComponent
-            ))
-        case let .recoveryFailed(_, failure):
+        case .recovered(_, let recovery):
+            publish(
+                SpeakerCopy.Startup.settingsRecovered(
+                    backupName: recovery.backupURL.lastPathComponent
+                ))
+        case .recoveryFailed(_, let failure):
             publish(SpeakerCopy.Startup.settingsLoadFailed(failure))
         case .defaults, .loaded:
             break
@@ -119,7 +120,8 @@ package final class RuntimeStartupSequence {
         }
         guard !Task.isCancelled else { return }
         if let notice = await stages.migrateLegacyDictionary()
-            .flatMap(SpeakerCopy.Startup.legacyDictionaryNotice) {
+            .flatMap(SpeakerCopy.Startup.legacyDictionaryNotice)
+        {
             publish(notice)
         }
         guard !Task.isCancelled else { return }

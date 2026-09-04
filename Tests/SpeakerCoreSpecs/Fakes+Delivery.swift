@@ -1,5 +1,5 @@
-import Foundation
 import ApplicationServices
+import Foundation
 import SpeakerCore
 import SpeakerSpecSupport
 
@@ -59,7 +59,7 @@ final class ClipboardPasteboardFake {
             data: { itemIndex, type in
                 guard !self.unreadableTypes.contains(type) else { return nil }
                 if self.mutatesWhileReadingRepresentations,
-                   !self.didMutateWhileReading
+                    !self.didMutateWhileReading
                 {
                     // Another application copied while Speaker was still
                     // materializing representations.
@@ -249,8 +249,7 @@ struct LifecycleAccessibilityTargetSystem: AccessibilityTargetSystem {
 actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     private let evidence: AccessibilityTargetEvidence
     private var valueResponses: [AccessibilityOperationResult<String?>]
-    private var selectionResponses:
-        [AccessibilityOperationResult<NSRange?>]
+    private var selectionResponses: [AccessibilityOperationResult<NSRange?>]
     private var subroleResponses: [AccessibilityOperationResult<String?>]
     private var roleResponses: [AccessibilityOperationResult<String?>]
     private var focusResponses: [AccessibilityOperationResult<Bool>]
@@ -299,7 +298,7 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     ) async -> AccessibilityTargetCapture {
         captureTargetCallCount += 1
         guard target.processID == evidence.processID,
-              target.reference == evidence.reference
+            target.reference == evidence.reference
         else {
             return .unavailable(.invalidatedTarget)
         }
@@ -381,10 +380,11 @@ actor ReleaseTimeTargetCaptureFake: InputTargetCapturing {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
         }
-        return .writable(.init(
-            id: UUID(),
-            applicationName: capturedApplicationName
-        ))
+        return .writable(
+            .init(
+                id: UUID(),
+                applicationName: capturedApplicationName
+            ))
     }
 
     func resume() {

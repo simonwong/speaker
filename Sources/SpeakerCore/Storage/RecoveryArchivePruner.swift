@@ -110,7 +110,7 @@ package enum RecoveryArchivePruner {
         let candidates = entries.compactMap { url -> Candidate? in
             let name = url.lastPathComponent
             guard name.hasPrefix(prefix),
-                  suffix.isEmpty || name.hasSuffix(suffix)
+                suffix.isEmpty || name.hasSuffix(suffix)
             else { return nil }
             return candidate(at: url, kind: kind)
         }.sorted {
@@ -128,11 +128,14 @@ package enum RecoveryArchivePruner {
             let isPreserved = candidate.url.standardizedFileURL.path == preservedPath
             let isNewestUsable = retainedCount == 0
             let age = max(0, now.timeIntervalSince(candidate.modificationDate))
-            let fitsBytes = candidate.byteCount <= maximumTotalByteCount - min(
-                retainedBytes,
-                maximumTotalByteCount
-            )
-            let fitsBudget = retainedCount < maximumArchiveCount
+            let fitsBytes =
+                candidate.byteCount <= maximumTotalByteCount
+                - min(
+                    retainedBytes,
+                    maximumTotalByteCount
+                )
+            let fitsBudget =
+                retainedCount < maximumArchiveCount
                 && fitsBytes
                 && age <= maximumAge
             if isPreserved || isNewestUsable || fitsBudget {
@@ -170,15 +173,15 @@ package enum RecoveryArchivePruner {
             )
         case .flatDirectory:
             guard rootMetadata.kind == S_IFDIR,
-                  let children = try? FileManager.default.contentsOfDirectory(
-                      at: url,
-                      includingPropertiesForKeys: nil
-                  )
+                let children = try? FileManager.default.contentsOfDirectory(
+                    at: url,
+                    includingPropertiesForKeys: nil
+                )
             else { return nil }
             var total = 0
             for child in children {
                 guard let childMetadata = metadata(at: child),
-                      childMetadata.kind == S_IFREG
+                    childMetadata.kind == S_IFREG
                 else { return nil }
                 let (sum, overflow) = total.addingReportingOverflow(
                     childMetadata.byteCount
@@ -199,9 +202,9 @@ package enum RecoveryArchivePruner {
     ) -> (kind: mode_t, byteCount: Int, modificationDate: Date)? {
         var status = stat()
         guard url.path.withCString({ Darwin.lstat($0, &status) }) == 0,
-              status.st_uid == geteuid(),
-              status.st_size >= 0,
-              status.st_size <= off_t(Int.max)
+            status.st_uid == geteuid(),
+            status.st_size >= 0,
+            status.st_size <= off_t(Int.max)
         else { return nil }
         return (
             status.st_mode & S_IFMT,

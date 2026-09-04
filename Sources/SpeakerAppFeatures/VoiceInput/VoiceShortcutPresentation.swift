@@ -1,24 +1,24 @@
 import SpeakerCore
 
-package extension VoiceShortcutNotice {
-    static let accessibilityRequiredMessage =
+extension VoiceShortcutNotice {
+    package static let accessibilityRequiredMessage =
         "需要辅助功能权限；授权后，已选择的快捷键会自动生效。"
-    static let persistenceFailedMessage = "无法保存快捷键设置"
-    static let functionKeyActiveMessage = "Fn 快捷键已启用。"
-    static let functionKeyEventTapUnavailableMessage =
+    package static let persistenceFailedMessage = "无法保存快捷键设置"
+    package static let functionKeyActiveMessage = "Fn 快捷键已启用。"
+    package static let functionKeyEventTapUnavailableMessage =
         "无法创建 Fn 键的系统事件监听。"
-    static let functionKeyRunLoopSourceUnavailableMessage =
+    package static let functionKeyRunLoopSourceUnavailableMessage =
         "Fn 键监听无法接入系统事件循环。"
 
-    var message: String {
+    package var message: String {
         switch kind {
         case .accessibilityRequired:
             Self.accessibilityRequiredMessage
-        case let .functionKeyActivationFailed(result):
+        case .functionKeyActivationFailed(let result):
             Self.functionKeyFailureMessage(result)
-        case let .fellBackToFunctionKey(reason):
+        case .fellBackToFunctionKey(let reason):
             "\(Self.fallbackReasonMessage(reason))，已继续使用 Fn。"
-        case let .fallbackUnavailable(reason, result):
+        case .fallbackUnavailable(let reason, let result):
             "\(Self.fallbackReasonMessage(reason))；\(Self.functionKeyFailureMessage(result))"
         case .persistenceFailed:
             Self.persistenceFailedMessage
@@ -37,7 +37,7 @@ package extension VoiceShortcutNotice {
             "这个组合键可能与 macOS 或当前 App 的菜单命令冲突"
         case .unsafeShortcut:
             "请使用单独的左/右 ⌥、⌃、⇧，或安全的组合键"
-        case let .activationFailed(result):
+        case .activationFailed(let result):
             customShortcutFailureMessage(result)
         }
     }
@@ -73,13 +73,13 @@ package extension VoiceShortcutNotice {
     }
 }
 
-package extension VoiceShortcutPreference {
+extension VoiceShortcutPreference {
     /// Announced once a chosen shortcut becomes the live one.
-    var activationAnnouncement: String {
+    package var activationAnnouncement: String {
         "\(displayName) 快捷键已启用"
     }
 
-    var persistenceConfirmationMessage: String {
+    package var persistenceConfirmationMessage: String {
         "\(displayName) 快捷键设置已保存。"
     }
 }

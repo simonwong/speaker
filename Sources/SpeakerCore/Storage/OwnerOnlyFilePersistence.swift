@@ -36,11 +36,13 @@ package enum OwnerOnlyFilePersistenceError: Error {
 package enum OwnerOnlyFilePersistence {
     package static func protectExistingFile(at fileURL: URL) throws {
         try withDirectoryDescriptor(for: fileURL, createIfMissing: true) { directoryFD, name in
-            guard let fileFD = try openExistingFile(
-                in: directoryFD,
-                name: name,
-                pathForError: fileURL.path
-            ) else {
+            guard
+                let fileFD = try openExistingFile(
+                    in: directoryFD,
+                    name: name,
+                    pathForError: fileURL.path
+                )
+            else {
                 return
             }
             defer { Darwin.close(fileFD) }
@@ -64,11 +66,13 @@ package enum OwnerOnlyFilePersistence {
             for: fileURL,
             createIfMissing: true
         ) { directoryFD, name in
-            guard let fileFD = try openExistingFile(
-                in: directoryFD,
-                name: name,
-                pathForError: fileURL.path
-            ) else {
+            guard
+                let fileFD = try openExistingFile(
+                    in: directoryFD,
+                    name: name,
+                    pathForError: fileURL.path
+                )
+            else {
                 return nil
             }
             defer { Darwin.close(fileFD) }
@@ -78,7 +82,7 @@ package enum OwnerOnlyFilePersistence {
                 pathForError: fileURL.path
             )
             guard initialStatus.st_size >= 0,
-                  initialStatus.st_size <= off_t(maximumByteCount)
+                initialStatus.st_size <= off_t(maximumByteCount)
             else {
                 throw OwnerOnlyFilePersistenceError.fileTooLarge(
                     maximumByteCount: maximumByteCount
@@ -190,11 +194,13 @@ package enum OwnerOnlyFilePersistence {
                 for: fileURL,
                 createIfMissing: false
             ) { directoryFD, name in
-                guard let fileFD = try openExistingFile(
-                    in: directoryFD,
-                    name: name,
-                    pathForError: fileURL.path
-                ) else {
+                guard
+                    let fileFD = try openExistingFile(
+                        in: directoryFD,
+                        name: name,
+                        pathForError: fileURL.path
+                    )
+                else {
                     return false
                 }
                 defer { Darwin.close(fileFD) }
@@ -216,11 +222,13 @@ package enum OwnerOnlyFilePersistence {
                 for: fileURL,
                 createIfMissing: false
             ) { directoryFD, name in
-                guard let fileFD = try openExistingFile(
-                    in: directoryFD,
-                    name: name,
-                    pathForError: fileURL.path
-                ) else {
+                guard
+                    let fileFD = try openExistingFile(
+                        in: directoryFD,
+                        name: name,
+                        pathForError: fileURL.path
+                    )
+                else {
                     return false
                 }
                 defer { Darwin.close(fileFD) }
@@ -295,8 +303,8 @@ package enum OwnerOnlyFilePersistence {
     }
 }
 
-private extension OwnerOnlyFilePersistence {
-    static func withDirectoryDescriptor<Result>(
+extension OwnerOnlyFilePersistence {
+    fileprivate static func withDirectoryDescriptor<Result>(
         for fileURL: URL,
         createIfMissing: Bool,
         operation: (Int32, String) throws -> Result
@@ -345,7 +353,7 @@ private extension OwnerOnlyFilePersistence {
         return try operation(directoryFD, name)
     }
 
-    static func openExistingFile(
+    fileprivate static func openExistingFile(
         in directoryFD: Int32,
         name: String,
         pathForError: String
@@ -365,7 +373,7 @@ private extension OwnerOnlyFilePersistence {
     }
 
     @discardableResult
-    static func validateRegularOwnerOnlyFile(
+    fileprivate static func validateRegularOwnerOnlyFile(
         _ fileFD: Int32,
         pathForError: String
     ) throws -> stat {
@@ -385,7 +393,7 @@ private extension OwnerOnlyFilePersistence {
         return status
     }
 
-    static func validateExistingDestination(
+    fileprivate static func validateExistingDestination(
         in directoryFD: Int32,
         name: String,
         pathForError: String
@@ -406,7 +414,7 @@ private extension OwnerOnlyFilePersistence {
         }
     }
 
-    static func posixError(path: String) -> NSError {
+    fileprivate static func posixError(path: String) -> NSError {
         NSError(
             domain: NSPOSIXErrorDomain,
             code: Int(errno),

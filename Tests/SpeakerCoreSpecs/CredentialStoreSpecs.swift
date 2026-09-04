@@ -20,7 +20,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             }
         }
 
-        await runAsync("credential store refuses oversized keys without replacing the saved key", failures: &failures) {
+        await runAsync(
+            "credential store refuses oversized keys without replacing the saved key",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-credentials-size-spec-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -45,7 +48,9 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("credential store round trips and deletes isolated API key", failures: &failures) {
+        await runAsync(
+            "credential store round trips and deletes isolated API key", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-credentials-spec-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -69,7 +74,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("stable signed credential store migrates local keys then deletes plaintext", failures: &failures) {
+        await runAsync(
+            "stable signed credential store migrates local keys then deletes plaintext",
+            failures: &failures
+        ) {
             let keychain = ProviderCredentialStoreFake()
             let local = ProviderCredentialStoreFake(values: [.doubao: "legacy-key"])
             let store = MigratingProviderCredentialStore(
@@ -85,7 +93,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             try expect(localValue == nil)
         }
 
-        await runAsync("credential migration verifies Keychain readback and does not block a valid primary on cleanup failure", failures: &failures) {
+        await runAsync(
+            "credential migration verifies Keychain readback and does not block a valid primary on cleanup failure",
+            failures: &failures
+        ) {
             let mismatchedPrimary = ProviderCredentialStoreFake(corruptsSavedValues: true)
             let retainedLegacy = ProviderCredentialStoreFake(values: [.doubao: "legacy-key"])
             let mismatchedStore = MigratingProviderCredentialStore(
@@ -116,7 +127,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             try expect(unmigrated == [.doubao])
         }
 
-        await runAsync("credential migration keeps a conflicting legacy key when primary already exists", failures: &failures) {
+        await runAsync(
+            "credential migration keeps a conflicting legacy key when primary already exists",
+            failures: &failures
+        ) {
             let primary = ProviderCredentialStoreFake(
                 values: [.doubao: "keychain-key"]
             )
@@ -142,7 +156,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             try expect(unmigrated.contains(.doubao))
         }
 
-        await runAsync("credential deletion keeps the primary key when legacy cleanup fails", failures: &failures) {
+        await runAsync(
+            "credential deletion keeps the primary key when legacy cleanup fails",
+            failures: &failures
+        ) {
             let primary = ProviderCredentialStoreFake(
                 values: [.doubao: "keychain-key"]
             )
@@ -176,7 +193,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("credential migration preserves every legacy source when values conflict", failures: &failures) {
+        await runAsync(
+            "credential migration preserves every legacy source when values conflict",
+            failures: &failures
+        ) {
             let primary = ProviderCredentialStoreFake()
             let oldKeychain = ProviderCredentialStoreFake(
                 values: [.doubao: "old-keychain-key"]
@@ -210,7 +230,10 @@ enum CredentialStoreSpecs: CoreSpecDomain {
             try expect(unmigrated.contains(.doubao))
         }
 
-        await runAsync("credential migration never cleans readable legacy data when another source cannot be inspected", failures: &failures) {
+        await runAsync(
+            "credential migration never cleans readable legacy data when another source cannot be inspected",
+            failures: &failures
+        ) {
             let primary = ProviderCredentialStoreFake()
             let unreadable = ProviderCredentialStoreFake(
                 readError: .interactionUnavailable

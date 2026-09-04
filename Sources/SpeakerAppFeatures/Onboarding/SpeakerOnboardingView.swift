@@ -198,7 +198,7 @@ package struct SpeakerOnboardingView: View {
                 announce("正在检查豆包连接")
             case .success:
                 announce("豆包连接成功")
-            case let .failure(message):
+            case .failure(let message):
                 announce("豆包连接失败：\(message)")
             case .loading, .unconfigured, .configured:
                 break

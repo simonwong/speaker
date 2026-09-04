@@ -148,7 +148,9 @@ public enum SpecSummary {
     public static func finish(failures: [String], label: String) {
         if let filter = SpecSelection.filter, SpecSelection.executed == 0 {
             FileHandle.standardError.write(
-                Data("FAIL: no \(label) matched \"\(filter)\" (\(SpecSelection.skipped) skipped)\n".utf8)
+                Data(
+                    "FAIL: no \(label) matched \"\(filter)\" (\(SpecSelection.skipped) skipped)\n"
+                        .utf8)
             )
             Darwin.exit(noMatchStatus)
         }

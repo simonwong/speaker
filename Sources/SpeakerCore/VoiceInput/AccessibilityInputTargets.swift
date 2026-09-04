@@ -22,15 +22,15 @@ private final class AccessibilityReleaseCaptureCache: @unchecked Sendable {
 }
 
 public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscarding,
-    TextDelivering {
+    TextDelivering
+{
     private struct StoredTarget {
         let evidence: AccessibilityTargetEvidence
     }
 
     private var targets: [UUID: StoredTarget] = [:]
     private let system: any AccessibilityTargetSystem
-    private nonisolated let releaseCapture:
-        @Sendable () -> AccessibilityReleaseCapture
+    private nonisolated let releaseCapture: @Sendable () -> AccessibilityReleaseCapture
     private nonisolated let releaseCaptureCache =
         AccessibilityReleaseCaptureCache()
 
@@ -61,20 +61,20 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         matching hint: InputTargetCaptureHint
     ) async -> InputTargetCaptureResult {
         guard let token = hint.targetToken,
-              let releaseCapture = releaseCaptureCache.take(token)
+            let releaseCapture = releaseCaptureCache.take(token)
         else {
             return .unavailable(.invalidatedTarget)
         }
         switch releaseCapture {
-        case let .process(processID):
+        case .process(let processID):
             guard processID == hint.processID else {
                 return .unavailable(.invalidatedTarget)
             }
             let capture = await system.captureFocusedTarget(in: processID)
             return store(capture, expectedProcessID: processID)
-        case let .unavailable(_, reason):
+        case .unavailable(_, let reason):
             return .unavailable(reason)
-        case let .target(target):
+        case .target(let target):
             guard target.processID == hint.processID else {
                 return .unavailable(.invalidatedTarget)
             }
@@ -86,7 +86,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                     expectedProcessID: hint.processID
                 )
             case .unavailable(.invalidatedTarget),
-                 .unavailable(.missingTarget):
+                .unavailable(.missingTarget):
                 let currentCapture = await system.captureFocusedTarget(
                     in: hint.processID
                 )
@@ -142,20 +142,22 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         expectedProcessID: Int32?
     ) -> InputTargetCaptureResult {
         switch capture {
-        case let .unavailable(reason):
+        case .unavailable(let reason):
             return .unavailable(reason)
-        case let .writable(evidence):
-            guard expectedProcessID == nil
+        case .writable(let evidence):
+            guard
+                expectedProcessID == nil
                     || evidence.processID == expectedProcessID
             else {
                 return .unavailable(.invalidatedTarget)
             }
             let id = UUID()
             targets[id] = StoredTarget(evidence: evidence)
-            return .writable(.init(
-                id: id,
-                applicationName: evidence.applicationName
-            ))
+            return .writable(
+                .init(
+                    id: id,
+                    applicationName: evidence.applicationName
+                ))
         }
     }
 
@@ -170,13 +172,13 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         let evidence = stored.evidence
 
         switch await system.subrole(of: evidence.reference) {
-        case let .success(subrole?) where subrole == "AXSecureTextField":
+        case .success(let subrole?) where subrole == "AXSecureTextField":
             return .pendingCopy(.secureTarget)
         case .failure(.attributeUnsupported), .failure(.notImplemented),
-             .success:
+            .success:
             // Normal text controls are not required to expose a subrole.
             break
-        case let .failure(failure):
+        case .failure(let failure):
             return Self.failedOperation(
                 stage: .securityRead,
                 failure: failure
@@ -187,11 +189,11 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         }
 
         switch await system.role(of: evidence.reference) {
-        case let .success(role?) where !role.isEmpty:
+        case .success(let role?) where !role.isEmpty:
             break
         case .success:
             return .pendingCopy(.invalidatedTarget)
-        case let .failure(failure):
+        case .failure(let failure):
             return Self.failedOperation(
                 stage: .roleRead,
                 failure: failure
@@ -200,14 +202,14 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
 
         if let originalValue = evidence.originalValue {
             switch await system.value(of: evidence.reference) {
-            case let .success(value?) where value == originalValue:
+            case .success(let value?) where value == originalValue:
                 break
             case .success:
                 return .pendingCopyDiagnosed(
                     .changedTarget,
                     .init(stage: .valueRead, cause: .changed)
                 )
-            case let .failure(failure):
+            case .failure(let failure):
                 return Self.failedOperation(
                     stage: .valueRead,
                     failure: failure
@@ -236,7 +238,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             break
         case .success(false):
             return .pendingCopy(.invalidatedTarget)
-        case let .failure(failure):
+        case .failure(let failure):
             return Self.failedOperation(
                 stage: .focusRead,
                 failure: failure
@@ -244,11 +246,11 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         }
         if let originalValue = evidence.originalValue {
             switch await system.value(of: evidence.reference) {
-            case let .success(value?) where value == originalValue:
+            case .success(let value?) where value == originalValue:
                 break
             case .success:
                 return .pendingCopy(.changedTarget)
-            case let .failure(failure):
+            case .failure(let failure):
                 return Self.failedOperation(
                     stage: .valueRead,
                     failure: failure
@@ -257,11 +259,11 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         }
         if let selection = evidence.selection {
             switch await system.selection(of: evidence.reference) {
-            case let .success(current?) where current == selection:
+            case .success(let current?) where current == selection:
                 break
             case .success:
                 return .pendingCopy(.changedTarget)
-            case let .failure(failure):
+            case .failure(let failure):
                 return Self.failedOperation(
                     stage: .fallbackSelection,
                     failure: failure
@@ -284,7 +286,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         ) {
         case .posted:
             if let expectedValue,
-               let originalValue = evidence.originalValue
+                let originalValue = evidence.originalValue
             {
                 return await verifyMutationReceipt(
                     expectedValue,
@@ -293,15 +295,16 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                     diagnosticStage: .pasteReceipt
                 )
             }
-            return .pasteCommandPosted(.init(
-                stage: .pasteReceipt,
-                cause: .unconfirmed
-            ))
+            return .pasteCommandPosted(
+                .init(
+                    stage: .pasteReceipt,
+                    cause: .unconfirmed
+                ))
         case .secureTarget:
             return .pendingCopy(.secureTarget)
         case .targetChanged:
             return .pendingCopy(.invalidatedTarget)
-        case let .targetFailure(failure):
+        case .targetFailure(let failure):
             return Self.failedOperation(stage: .focusRead, failure: failure)
         case .clipboardFailed, .eventFailed:
             return .pendingCopyDiagnosed(
@@ -332,9 +335,9 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         let deadline = clock.now.advanced(by: .seconds(1))
         while true {
             switch await system.value(of: target) {
-            case let .success(value?) where value == expectedValue:
+            case .success(let value?) where value == expectedValue:
                 return .delivered
-            case let .success(value?) where value == originalValue:
+            case .success(let value?) where value == originalValue:
                 break
             case .success(nil), .failure(.cannotComplete):
                 break
@@ -385,11 +388,11 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         with text: String
     ) -> String? {
         guard let originalValue = evidence.originalValue,
-              let range = evidence.selection
+            let range = evidence.selection
         else { return nil }
         let original = originalValue as NSString
         guard range.location >= 0, range.length >= 0,
-              NSMaxRange(range) <= original.length
+            NSMaxRange(range) <= original.length
         else { return nil }
         return original.replacingCharacters(in: range, with: text)
     }
@@ -398,13 +401,14 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         stage: DeliveryDiagnostic.Stage,
         failure: AccessibilityOperationFailure
     ) -> DeliveryDiagnostic {
-        let cause: DeliveryDiagnostic.Cause = switch failure {
-        case .invalidUIElement: .invalidUIElement
-        case .attributeUnsupported: .attributeUnsupported
-        case .notImplemented: .notImplemented
-        case .cannotComplete: .cannotComplete
-        case .other: .other
-        }
+        let cause: DeliveryDiagnostic.Cause =
+            switch failure {
+            case .invalidUIElement: .invalidUIElement
+            case .attributeUnsupported: .attributeUnsupported
+            case .notImplemented: .notImplemented
+            case .cannotComplete: .cannotComplete
+            case .other: .other
+            }
         return DeliveryDiagnostic(stage: stage, cause: cause)
     }
 

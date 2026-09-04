@@ -358,7 +358,7 @@ private struct ContributionHeatmapGrid: View {
 
     private var rowMajorCells: [ContributionHeatmap.Cell] {
         guard let rowCount = heatmap.columns.first?.count else { return [] }
-        return (0 ..< rowCount).flatMap { row in
+        return (0..<rowCount).flatMap { row in
             heatmap.columns.map { $0[row] }
         }
     }
@@ -412,7 +412,7 @@ private struct HeatmapLegend: View {
             Text("少")
                 .font(SpeakerTypography.footnote)
                 .foregroundStyle(.secondary)
-            ForEach(0 ... 4, id: \.self) { level in
+            ForEach(0...4, id: \.self) { level in
                 RoundedRectangle(
                     cornerRadius: HeatmapMetrics.corner,
                     style: .continuous

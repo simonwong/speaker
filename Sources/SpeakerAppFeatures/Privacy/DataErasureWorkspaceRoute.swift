@@ -4,8 +4,8 @@ package enum DataErasureWorkspaceRoute: Equatable, Sendable {
     case aboutRecovery
 }
 
-package extension SpeakerDataErasureState {
-    var workspaceRoute: DataErasureWorkspaceRoute {
+extension SpeakerDataErasureState {
+    package var workspaceRoute: DataErasureWorkspaceRoute {
         switch self {
         case .idle: .normal
         case .erasing: .erasing

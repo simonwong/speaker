@@ -162,18 +162,22 @@ enum RuntimeLifecycleSpecs {
 
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("startup restores persisted state in migration order and activates the shortcut last", failures: &failures) {
+        await runAsync(
+            "startup restores persisted state in migration order and activates the shortcut last",
+            failures: &failures
+        ) {
             let stages = StartupStagesFake()
             let customShortcut = VoiceShortcutPreference.custom(
                 keyCode: 49,
                 modifiers: 0x100,
                 displayName: "⌘Space"
             )
-            stages.settings = .loaded(SpeakerAppSettings(
-                shortcut: customShortcut,
-                launchAtLogin: true,
-                historyRetention: .thirtyDays
-            ))
+            stages.settings = .loaded(
+                SpeakerAppSettings(
+                    shortcut: customShortcut,
+                    launchAtLogin: true,
+                    historyRetention: .thirtyDays
+                ))
             var notices: [String] = []
             let sequence = RuntimeStartupSequence(stages: stages) { notices.append($0) }
 
@@ -189,7 +193,10 @@ enum RuntimeLifecycleSpecs {
             try expect(!sequence.isRunning)
         }
 
-        await runAsync("startup cancelled mid-migration never activates the shortcut or presents onboarding", failures: &failures) {
+        await runAsync(
+            "startup cancelled mid-migration never activates the shortcut or presents onboarding",
+            failures: &failures
+        ) {
             let stages = StartupStagesFake()
             let gate = StageGate()
             stages.scrubGate = gate
@@ -207,14 +214,21 @@ enum RuntimeLifecycleSpecs {
             gate.open()
             await sequence.waitUntilFinished()
 
-            try expect(stages.calls.last == "scrubHistory", "stages ran after cancellation: \(stages.calls)")
-            try expect(!stages.calls.contains("restoreShortcut"), "a cancelled startup activated the shortcut")
+            try expect(
+                stages.calls.last == "scrubHistory",
+                "stages ran after cancellation: \(stages.calls)")
+            try expect(
+                !stages.calls.contains("restoreShortcut"),
+                "a cancelled startup activated the shortcut")
             try expect(!stages.calls.contains("presentOnboarding"))
             try expect(notices.isEmpty)
             try expect(!sequence.isRunning)
         }
 
-        await runAsync("startup publishes recovery and migration notices from stage outcomes", failures: &failures) {
+        await runAsync(
+            "startup publishes recovery and migration notices from stage outcomes",
+            failures: &failures
+        ) {
             let stages = StartupStagesFake()
             let backupURL = URL(fileURLWithPath: "/tmp/settings.recovery-1.json")
             stages.settings = .recovered(
@@ -236,21 +250,25 @@ enum RuntimeLifecycleSpecs {
             await sequence.waitUntilFinished()
 
             try expect(stages.calls == fullStartupOrder, "unexpected order \(stages.calls)")
-            try expect(notices == [
-                SpeakerCopy.Startup.settingsRecovered(backupName: "settings.recovery-1.json"),
-                SpeakerCopy.Startup.credentialMigrationIncomplete(
-                    providers: [.deepSeek, .doubao]
-                )!,
-                SpeakerCopy.Startup.legacyDictionaryMigrationFailed,
-                "dictionary recovered",
-                SpeakerCopy.Startup.legacyHistoryNotice(
-                    .legacyCorrupted(backupName: "history.corrupt-1.json")
-                )!,
-                SpeakerCopy.Startup.interruptedSessionsNotReconciled,
-            ], "unexpected notices \(notices)")
+            try expect(
+                notices == [
+                    SpeakerCopy.Startup.settingsRecovered(backupName: "settings.recovery-1.json"),
+                    SpeakerCopy.Startup.credentialMigrationIncomplete(
+                        providers: [.deepSeek, .doubao]
+                    )!,
+                    SpeakerCopy.Startup.legacyDictionaryMigrationFailed,
+                    "dictionary recovered",
+                    SpeakerCopy.Startup.legacyHistoryNotice(
+                        .legacyCorrupted(backupName: "history.corrupt-1.json")
+                    )!,
+                    SpeakerCopy.Startup.interruptedSessionsNotReconciled,
+                ], "unexpected notices \(notices)")
         }
 
-        await runAsync("unreadable legacy dictionary source is reported once and does not stop startup", failures: &failures) {
+        await runAsync(
+            "unreadable legacy dictionary source is reported once and does not stop startup",
+            failures: &failures
+        ) {
             let stages = StartupStagesFake()
             stages.legacyDictionary = .failed
             var notices: [String] = []
@@ -279,7 +297,10 @@ enum RuntimeLifecycleSpecs {
             )
         }
 
-        await runAsync("incomplete history privacy scrub skips history migration but still restores the shortcut", failures: &failures) {
+        await runAsync(
+            "incomplete history privacy scrub skips history migration but still restores the shortcut",
+            failures: &failures
+        ) {
             let stages = StartupStagesFake()
             stages.scrubSucceeds = false
             var notices: [String] = []
@@ -288,23 +309,26 @@ enum RuntimeLifecycleSpecs {
             sequence.start()
             await sequence.waitUntilFinished()
 
-            try expect(stages.calls == [
-                "loadSettings",
-                "loadDoubaoResource",
-                "migrateCredentials",
-                "migrateLegacyDictionary",
-                "loadDictionary",
-                "loadRefinement",
-                "scrubHistory",
-                "refreshHistory",
-                "restoreLoginItem",
-                "restoreShortcut",
-                "presentOnboarding",
-            ], "unexpected order \(stages.calls)")
+            try expect(
+                stages.calls == [
+                    "loadSettings",
+                    "loadDoubaoResource",
+                    "migrateCredentials",
+                    "migrateLegacyDictionary",
+                    "loadDictionary",
+                    "loadRefinement",
+                    "scrubHistory",
+                    "refreshHistory",
+                    "restoreLoginItem",
+                    "restoreShortcut",
+                    "presentOnboarding",
+                ], "unexpected order \(stages.calls)")
             try expect(notices == [SpeakerCopy.Startup.historyPrivacyScrubIncomplete])
         }
 
-        await runAsync("shutdown converges through every stage in order exactly once", failures: &failures) {
+        await runAsync(
+            "shutdown converges through every stage in order exactly once", failures: &failures
+        ) {
             let stages = ShutdownStagesFake()
             let coordinator = RuntimeShutdownCoordinator(stages: stages)
             try expect(!coordinator.hasStarted)
@@ -315,10 +339,14 @@ enum RuntimeLifecycleSpecs {
             try expect(coordinator.hasStarted)
 
             await coordinator.converge()
-            try expect(stages.calls == shutdownOrder, "a second convergence repeated stages: \(stages.calls)")
+            try expect(
+                stages.calls == shutdownOrder,
+                "a second convergence repeated stages: \(stages.calls)")
         }
 
-        await runAsync("termination and erasure quiesce share one in-flight convergence", failures: &failures) {
+        await runAsync(
+            "termination and erasure quiesce share one in-flight convergence", failures: &failures
+        ) {
             let stages = ShutdownStagesFake()
             let gate = StageGate()
             stages.voiceInputGate = gate
@@ -336,7 +364,8 @@ enum RuntimeLifecycleSpecs {
             }
             await Task.yield()
             try expect(!erasureFinished, "the second caller returned before convergence finished")
-            try expect(stages.calls.count == 8, "the second caller restarted stages: \(stages.calls)")
+            try expect(
+                stages.calls.count == 8, "the second caller restarted stages: \(stages.calls)")
 
             gate.open()
             await termination.value

@@ -98,28 +98,28 @@ public enum VoiceInputActivity: Equatable, Sendable {
     }
 
     public var stage: VoiceInputProcessingStage? {
-        if case let .processing(_, stage, _) = self { stage } else { nil }
+        if case .processing(_, let stage, _) = self { stage } else { nil }
     }
 
     public var pendingCopyReason: PendingCopyReason? {
-        if case let .pendingCopy(_, _, reason) = self { reason } else { nil }
+        if case .pendingCopy(_, _, let reason) = self { reason } else { nil }
     }
 
     public var pendingText: String? {
-        if case let .pendingCopy(_, text, _) = self { text } else { nil }
+        if case .pendingCopy(_, let text, _) = self { text } else { nil }
     }
 
     package var sessionID: VoiceInputSessionID? {
         switch self {
         case .idle:
             nil
-        case let .preparing(id),
-             let .recording(id),
-             let .processing(id, _, _),
-             let .delivered(id, _, _),
-             let .pendingCopy(id, _, _),
-             let .cancelled(id),
-             let .failed(id, _):
+        case .preparing(let id),
+            .recording(let id),
+            .processing(let id, _, _),
+            .delivered(let id, _, _),
+            .pendingCopy(let id, _, _),
+            .cancelled(let id),
+            .failed(let id, _):
             id
         }
     }
@@ -249,16 +249,16 @@ public enum DeliveryOutcome: Equatable, Sendable {
     public var pendingCopyReason: PendingCopyReason? {
         switch self {
         case .delivered, .pasteCommandPosted: nil
-        case let .pendingCopy(reason),
-             let .pendingCopyDiagnosed(reason, _):
+        case .pendingCopy(let reason),
+            .pendingCopyDiagnosed(let reason, _):
             reason
         }
     }
 
     public var deliveryDiagnostic: DeliveryDiagnostic? {
         switch self {
-        case let .pasteCommandPosted(diagnostic),
-             let .pendingCopyDiagnosed(_, diagnostic):
+        case .pasteCommandPosted(let diagnostic),
+            .pendingCopyDiagnosed(_, let diagnostic):
             diagnostic
         case .delivered, .pendingCopy:
             nil
@@ -359,7 +359,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
 
 extension InputTargetCaptureResult {
     var applicationName: String? {
-        if case let .writable(snapshot) = self {
+        if case .writable(let snapshot) = self {
             snapshot.applicationName
         } else {
             nil

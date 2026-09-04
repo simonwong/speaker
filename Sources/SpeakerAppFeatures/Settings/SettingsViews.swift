@@ -102,7 +102,7 @@ package struct DataErasureRecoveryView: View {
     }
 
     private var failureText: String {
-        guard case let .failed(failure) = dataErasure.state else {
+        guard case .failed(let failure) = dataErasure.state else {
             return "Speaker 正在完成剩余的清除步骤。"
         }
         return SpeakerCopy.LocalDataErase.failureMessage(failure)

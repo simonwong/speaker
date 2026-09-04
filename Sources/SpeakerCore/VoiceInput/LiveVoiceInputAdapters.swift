@@ -92,7 +92,8 @@ package enum AudioCaptureQualityPolicy {
 }
 
 public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
-    AudioCaptureFailureProviding, AudioCaptureEnvironmentProviding {
+    AudioCaptureFailureProviding, AudioCaptureEnvironmentProviding
+{
     /// Caps audio waiting to be consumed by the provider transport. This is a
     /// memory/resource boundary, not a deadline: healthy consumers keep the
     /// buffer close to empty regardless of recording duration.
@@ -106,12 +107,8 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
     private var configurationObserver: NSObjectProtocol?
     private var activeRuntimeFailure: AudioCaptureError?
     private var latestEnvironmentSnapshot: AudioCaptureEnvironmentSnapshot?
-    private var telemetryObservers: [
-        UUID: AsyncStream<RecordingTelemetry>.Continuation
-    ] = [:]
-    private var failureObservers: [
-        UUID: AsyncStream<AudioCaptureError>.Continuation
-    ] = [:]
+    private var telemetryObservers: [UUID: AsyncStream<RecordingTelemetry>.Continuation] = [:]
+    private var failureObservers: [UUID: AsyncStream<AudioCaptureError>.Continuation] = [:]
 
     public init() {}
 
@@ -153,13 +150,13 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         refreshCaptureEnvironment(input: input)
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.channelCount > 0,
-              let outputFormat = AVAudioFormat(
+            let outputFormat = AVAudioFormat(
                 commonFormat: .pcmFormatInt16,
                 sampleRate: 16_000,
                 channels: 1,
                 interleaved: true
-              ),
-              let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+            ),
+            let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
         else {
             audioStream.finish()
             throw AudioCaptureError.couldNotPrepare
@@ -368,8 +365,9 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
 
     private static func milliseconds(_ duration: Duration) -> Int {
         let components = duration.components
-        return Int(clamping:
-            components.seconds * 1_000
+        return Int(
+            clamping:
+                components.seconds * 1_000
                 + components.attoseconds / 1_000_000_000_000_000
         )
     }
@@ -536,10 +534,12 @@ private final class PCMStreamingBridge: @unchecked Sendable {
     private func convert(_ input: AVAudioPCMBuffer) -> [Data]? {
         let ratio = outputFormat.sampleRate / input.format.sampleRate
         let capacity = AVAudioFrameCount(ceil(Double(input.frameLength) * ratio)) + 16
-        guard let output = AVAudioPCMBuffer(
-            pcmFormat: outputFormat,
-            frameCapacity: capacity
-        ) else {
+        guard
+            let output = AVAudioPCMBuffer(
+                pcmFormat: outputFormat,
+                frameCapacity: capacity
+            )
+        else {
             return nil
         }
 
@@ -557,8 +557,8 @@ private final class PCMStreamingBridge: @unchecked Sendable {
             return input
         }
         guard conversionError == nil,
-              status == .haveData || status == .inputRanDry,
-              output.frameLength > 0
+            status == .haveData || status == .inputRanDry,
+            output.frameLength > 0
         else {
             return nil
         }
@@ -701,7 +701,7 @@ package struct ClipboardPasteboardAccess: Sendable {
         writeText: { text, marker in
             let item = NSPasteboardItem()
             guard item.setString(text, forType: .string),
-                  item.setString(marker, forType: PasteboardTransactionMarker.type)
+                item.setString(marker, forType: PasteboardTransactionMarker.type)
             else { return false }
             return NSPasteboard.general.writeObjects([item])
         },
@@ -746,11 +746,13 @@ public struct SystemClipboardWriter: ClipboardWriting {
 
     public func copy(_ text: String) async -> Bool {
         await MainActor.run {
-            guard let transaction = PasteboardReplacementTransaction.prepare(
-                text: text,
-                pasteboard: pasteboard,
-                budget: snapshotBudget
-            ) else { return false }
+            guard
+                let transaction = PasteboardReplacementTransaction.prepare(
+                    text: text,
+                    pasteboard: pasteboard,
+                    budget: snapshotBudget
+                )
+            else { return false }
             guard transaction.verifies(text) else {
                 transaction.restoreIfOwned()
                 return false

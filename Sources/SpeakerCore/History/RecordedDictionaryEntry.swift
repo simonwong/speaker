@@ -32,12 +32,14 @@ public struct RecordedDictionaryEntry: Codable, Equatable, Identifiable, Sendabl
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
-        word = try container.decodeIfPresent(String.self, forKey: .word)
+        word =
+            try container.decodeIfPresent(String.self, forKey: .word)
             ?? container.decode(String.self, forKey: .canonicalTerm)
-        legacyAliases = try container.decodeIfPresent(
-            [String].self,
-            forKey: .aliases
-        ) ?? []
+        legacyAliases =
+            try container.decodeIfPresent(
+                [String].self,
+                forKey: .aliases
+            ) ?? []
     }
 
     public func encode(to encoder: any Encoder) throws {

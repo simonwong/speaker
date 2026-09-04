@@ -48,12 +48,14 @@ public actor LocalFileProviderCredentialStore: ProviderCredentialStoring {
         fileManager: FileManager = .default,
         applicationDirectoryName: String = "Speaker"
     ) -> URL {
-        let baseDirectory = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.homeDirectoryForCurrentUser
+        let baseDirectory =
+            fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.homeDirectoryForCurrentUser
 
-        return baseDirectory
+        return
+            baseDirectory
             .appendingPathComponent(applicationDirectoryName, isDirectory: true)
             .appendingPathComponent("credentials.json", isDirectory: false)
     }
@@ -106,10 +108,12 @@ public actor LocalFileProviderCredentialStore: ProviderCredentialStoring {
             throw ProviderCredentialStoreError.storageUnavailable
         }
         do {
-            guard let data = try OwnerOnlyFilePersistence.read(
-                from: fileURL,
-                maximumByteCount: Self.maximumDocumentByteCount
-            ) else {
+            guard
+                let data = try OwnerOnlyFilePersistence.read(
+                    from: fileURL,
+                    maximumByteCount: Self.maximumDocumentByteCount
+                )
+            else {
                 return Document(schemaVersion: Self.currentSchemaVersion, apiKeys: [:])
             }
             let document = try JSONDecoder().decode(Document.self, from: data)
@@ -173,7 +177,9 @@ public actor KeychainProviderCredentialStore: ProviderCredentialStoring {
             return
         case errSecItemNotFound:
             var item = query
-            attributes.forEach { item[$0] = $1 }
+            for (attribute, value) in attributes {
+                item[attribute] = value
+            }
             try validate(SecItemAdd(item as CFDictionary, nil))
         default:
             try validate(updateStatus)

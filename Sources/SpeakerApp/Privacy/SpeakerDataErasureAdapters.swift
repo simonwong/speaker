@@ -15,8 +15,9 @@ actor SpeakerProviderCredentialEraser {
         self.localFileURL = localFileURL
         var services = [KeychainProviderCredentialStore.defaultService]
         if let currentKeychainService,
-           !currentKeychainService.isEmpty,
-           !services.contains(currentKeychainService) {
+            !currentKeychainService.isEmpty,
+            !services.contains(currentKeychainService)
+        {
             services.append(currentKeychainService)
         }
         keychainServices = services
@@ -45,9 +46,11 @@ actor SpeakerProviderCredentialEraser {
 
     func verify() async throws {
         do {
-            guard try !OwnerOnlyFilePersistence.regularFileExists(
-                at: localFileURL
-            ) else {
+            guard
+                try !OwnerOnlyFilePersistence.regularFileExists(
+                    at: localFileURL
+                )
+            else {
                 throw SpeakerDataErasureReason.verificationMismatch
             }
         } catch let reason as SpeakerDataErasureReason {
@@ -78,7 +81,8 @@ actor SpeakerProviderCredentialEraser {
             _ = try OwnerOnlyFilePersistence.removeRegularFile(at: localFileURL)
         } catch let error as CocoaError
             where error.code == .fileWriteNoPermission
-                || error.code == .fileReadNoPermission {
+            || error.code == .fileReadNoPermission
+        {
             throw SpeakerDataErasureReason.accessDenied
         } catch {
             throw SpeakerDataErasureReason.unsafePath
@@ -94,7 +98,7 @@ actor SpeakerProviderCredentialEraser {
         case .interactionUnavailable:
             .interactionUnavailable
         case .emptyAPIKey, .apiKeyTooLarge, .malformedStoredValue, .conflictingStoredValues,
-             .storageUnavailable:
+            .storageUnavailable:
             .io
         }
     }

@@ -1,6 +1,6 @@
-import Foundation
 import ApplicationServices
 @preconcurrency import Carbon
+import Foundation
 import SpeakerCore
 import SpeakerSpecSupport
 
@@ -59,47 +59,53 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(!optionC.conflictsWithCommonEditingShortcut)
 
             let commandMenuCases: [(UInt32, UInt32)] = [
-                (4, 256),       // Command-H
-                (46, 256),      // Command-M
-                (31, 256),      // Command-O
-                (15, 256),      // Command-R
-                (43, 256),      // Command-comma
-                (6, 256 | 512), // Command-Shift-Z
+                (4, 256),  // Command-H
+                (46, 256),  // Command-M
+                (31, 256),  // Command-O
+                (15, 256),  // Command-R
+                (43, 256),  // Command-comma
+                (6, 256 | 512),  // Command-Shift-Z
             ]
             for (keyCode, modifiers) in commandMenuCases {
-                try expect(CustomHotKey(
-                    keyCode: keyCode,
-                    modifiers: modifiers,
-                    displayName: "menu shortcut"
-                ).conflictsWithCommonEditingShortcut)
+                try expect(
+                    CustomHotKey(
+                        keyCode: keyCode,
+                        modifiers: modifiers,
+                        displayName: "menu shortcut"
+                    ).conflictsWithCommonEditingShortcut)
             }
         }
 
         run("global voice triggers cannot overlap ordinary modified typing", failures: &failures) {
             let unsafeCases: [(UInt32, UInt32)] = [
-                (0, 512),         // Shift-A
-                (0, 2_048),       // Option-A / dead-key and symbol input
-                (0, 4_096),       // Control-A / terminal input
-                (0, 512 | 4_096), // Control-Shift-A still has one intent modifier
-                (49, 512),        // Shift-Space
+                (0, 512),  // Shift-A
+                (0, 2_048),  // Option-A / dead-key and symbol input
+                (0, 4_096),  // Control-A / terminal input
+                (0, 512 | 4_096),  // Control-Shift-A still has one intent modifier
+                (49, 512),  // Shift-Space
             ]
             for (keyCode, modifiers) in unsafeCases {
-                try expect(!CustomHotKey(
-                    keyCode: keyCode,
-                    modifiers: modifiers,
-                    displayName: "unsafe typing chord"
-                ).isSafeForGlobalVoiceInput)
+                try expect(
+                    !CustomHotKey(
+                        keyCode: keyCode,
+                        modifiers: modifiers,
+                        displayName: "unsafe typing chord"
+                    ).isSafeForGlobalVoiceInput)
             }
 
             try expect(CustomHotKey.optionSpace.isSafeForGlobalVoiceInput)
-            try expect(CustomHotKey(
-                keyCode: 40,
-                modifiers: 2_048 | 4_096,
-                displayName: "⌃⌥ K"
-            ).isSafeForGlobalVoiceInput)
+            try expect(
+                CustomHotKey(
+                    keyCode: 40,
+                    modifiers: 2_048 | 4_096,
+                    displayName: "⌃⌥ K"
+                ).isSafeForGlobalVoiceInput)
         }
 
-        run("a selected physical Option Control or Shift key is a safe exclusive trigger", failures: &failures) {
+        run(
+            "a selected physical Option Control or Shift key is a safe exclusive trigger",
+            failures: &failures
+        ) {
             let supportedModifiers: [CustomHotKey.PhysicalModifier] = [
                 .leftOption, .rightOption,
                 .leftControl, .rightControl,
@@ -133,9 +139,11 @@ enum ShortcutSpecs: CoreSpecDomain {
                 .rightOption,
                 displayName: "right Option"
             )
-            guard var policy = ModifierOnlyFlagEventPolicy(
-                hotKey: rightOption
-            ) else {
+            guard
+                var policy = ModifierOnlyFlagEventPolicy(
+                    hotKey: rightOption
+                )
+            else {
                 throw SpecFailure(message: "right Option policy was unavailable")
             }
             try expect(
@@ -158,7 +166,10 @@ enum ShortcutSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("shortcut feature waits for Accessibility and activates the saved choice later", failures: &failures) {
+        await runAsync(
+            "shortcut feature waits for Accessibility and activates the saved choice later",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -191,7 +202,10 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(feature.activation == .active(.init(customHotKey: custom)))
         }
 
-        await runAsync("shortcut feature rejects editing conflicts and persists its Fn fallback", failures: &failures) {
+        await runAsync(
+            "shortcut feature rejects editing conflicts and persists its Fn fallback",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -222,7 +236,9 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(persistedFallback == [.functionKey])
         }
 
-        await runAsync("shortcut feature rejects unsafe single-modifier typing chords", failures: &failures) {
+        await runAsync(
+            "shortcut feature rejects unsafe single-modifier typing chords", failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -253,7 +269,10 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(persistedFallback == [.functionKey])
         }
 
-        await runAsync("shortcut feature reports when both a custom key and Fn cannot activate", failures: &failures) {
+        await runAsync(
+            "shortcut feature reports when both a custom key and Fn cannot activate",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake(
                 startResult: .eventTapUnavailable
             )
@@ -276,19 +295,23 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(customMonitor.registeredKeys == [.optionSpace])
             try expect(functionMonitor.startCount == 1)
             try expect(
-                feature.notice?.kind == .fallbackUnavailable(
-                    .activationFailed(
-                        .hotKeyRegistrationUnavailable(status: -9876)
-                    ),
-                    .eventTapUnavailable
-                )
+                feature.notice?.kind
+                    == .fallbackUnavailable(
+                        .activationFailed(
+                            .hotKeyRegistrationUnavailable(status: -9876)
+                        ),
+                        .eventTapUnavailable
+                    )
             )
             try expect(feature.activation == .unavailable(.functionKey))
             let persistedFallback = await persistence.values
             try expect(persistedFallback == [.functionKey])
         }
 
-        await runAsync("shortcut feature load and synchronization never rewrite a valid preference", failures: &failures) {
+        await runAsync(
+            "shortcut feature load and synchronization never rewrite a valid preference",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -309,7 +332,9 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(persistedPreferences.isEmpty)
         }
 
-        await runAsync("shortcut feature stops every trigger source before shutdown", failures: &failures) {
+        await runAsync(
+            "shortcut feature stops every trigger source before shutdown", failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -335,7 +360,9 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(!functionMonitor.isRunning)
         }
 
-        await runAsync("shortcut feature persists rapid selections in command order", failures: &failures) {
+        await runAsync(
+            "shortcut feature persists rapid selections in command order", failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -365,7 +392,10 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(feature.preference == .functionKey)
         }
 
-        await runAsync("shortcut feature ignores a late settings restore after user selection", failures: &failures) {
+        await runAsync(
+            "shortcut feature ignores a late settings restore after user selection",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = ShortcutPersistenceFake()
@@ -390,7 +420,10 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(persistedPreferences == [selected])
         }
 
-        await runAsync("shortcut feature persists an explicit Fn choice even when activation fails", failures: &failures) {
+        await runAsync(
+            "shortcut feature persists an explicit Fn choice even when activation fails",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake(
                 startResult: .eventTapUnavailable
             )
@@ -417,7 +450,10 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(persistedPreferences == [.functionKey])
         }
 
-        await runAsync("shortcut feature retries the failed settings write instead of only restarting monitors", failures: &failures) {
+        await runAsync(
+            "shortcut feature retries the failed settings write instead of only restarting monitors",
+            failures: &failures
+        ) {
             let functionMonitor = FunctionKeyMonitorFake()
             let customMonitor = CustomShortcutMonitorFake()
             let persistence = FailOnceShortcutPersistenceFake()
@@ -444,7 +480,8 @@ enum ShortcutSpecs: CoreSpecDomain {
             try expect(persistedPreferences == [.functionKey])
         }
 
-        run("Fn trigger ignores secondary-function flags from navigation keys", failures: &failures) {
+        run("Fn trigger ignores secondary-function flags from navigation keys", failures: &failures)
+        {
             var policy = FunctionKeyFlagEventPolicy()
 
             for modifier in [CGEventFlags.maskCommand, .maskAlternate] {

@@ -11,8 +11,8 @@ public enum DictionaryEntryCandidateExtractor {
 
         func appendToken() {
             guard candidates.count < maximumCandidateCount,
-                  token.unicodeScalars.count >= minimumCandidateLength,
-                  token.unicodeScalars.contains(where: isLatinLetter)
+                token.unicodeScalars.count >= minimumCandidateLength,
+                token.unicodeScalars.contains(where: isLatinLetter)
             else {
                 token.removeAll(keepingCapacity: true)
                 return

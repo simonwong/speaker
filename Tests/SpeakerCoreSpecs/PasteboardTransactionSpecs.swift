@@ -25,10 +25,12 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
 
-            guard let snapshot = PasteboardSnapshot.capture(
-                from: pasteboard.access,
-                budget: .standard
-            ) else {
+            guard
+                let snapshot = PasteboardSnapshot.capture(
+                    from: pasteboard.access,
+                    budget: .standard
+                )
+            else {
                 throw SpecFailure(
                     message: "a clipboard within budget produced no snapshot"
                 )
@@ -73,10 +75,12 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            guard let transaction = PasteboardReplacementTransaction.prepare(
-                text: "Speaker 文本",
-                pasteboard: pasteboard.access
-            ) else {
+            guard
+                let transaction = PasteboardReplacementTransaction.prepare(
+                    text: "Speaker 文本",
+                    pasteboard: pasteboard.access
+                )
+            else {
                 throw SpecFailure(
                     message: "the replacement transaction refused a safe clipboard"
                 )
@@ -110,13 +114,15 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let externalItems = [
-                ["public.utf8-plain-text": Data("用户新复制".utf8)],
+                ["public.utf8-plain-text": Data("用户新复制".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            guard let transaction = PasteboardReplacementTransaction.prepare(
-                text: "Speaker 文本",
-                pasteboard: pasteboard.access
-            ) else {
+            guard
+                let transaction = PasteboardReplacementTransaction.prepare(
+                    text: "Speaker 文本",
+                    pasteboard: pasteboard.access
+                )
+            else {
                 throw SpecFailure(
                     message: "the replacement transaction refused a safe clipboard"
                 )
@@ -143,16 +149,18 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
             let sleeper = ControlledPasteboardRestoreSleep()
-            guard let transaction = await PasteboardDeliveryTransaction.prepare(
-                text: "Speaker 文本",
-                pasteboard: pasteboard.access,
-                sleepBeforeRestore: { duration in
-                    try await sleeper.sleep(for: duration)
-                },
-                conditionalRestoreDidFinish: {
-                    await sleeper.markRestoreCompleted()
-                }
-            ) else {
+            guard
+                let transaction = await PasteboardDeliveryTransaction.prepare(
+                    text: "Speaker 文本",
+                    pasteboard: pasteboard.access,
+                    sleepBeforeRestore: { duration in
+                        try await sleeper.sleep(for: duration)
+                    },
+                    conditionalRestoreDidFinish: {
+                        await sleeper.markRestoreCompleted()
+                    }
+                )
+            else {
                 throw SpecFailure(
                     message: "the delivery transaction refused a safe clipboard"
                 )

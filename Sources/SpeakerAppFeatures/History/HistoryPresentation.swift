@@ -40,7 +40,7 @@ package enum HistoryRecordStatus: Equatable, Sendable {
         case .deliveryUnconfirmed: Self.deliveryUnconfirmedLabel
         case .refinementFellBack: Self.refinementFellBackLabel
         case .pendingCopy: Self.pendingCopyLabel
-        case let .failed(failure): failure.userTitle
+        case .failed(let failure): failure.userTitle
         }
     }
 
@@ -50,7 +50,7 @@ package enum HistoryRecordStatus: Equatable, Sendable {
         case .deliveryUnconfirmed: "questionmark.circle"
         case .refinementFellBack: "exclamationmark.triangle"
         case .pendingCopy: "doc.on.clipboard"
-        case let .failed(failure): failure.userIcon
+        case .failed(let failure): failure.userIcon
         }
     }
 
@@ -154,7 +154,7 @@ package enum HistoryPresentation {
             return .delivered
         case .pendingCopy:
             return .pendingCopy
-        case let .failed(_, failure):
+        case .failed(_, let failure):
             return .failed(failure)
         case .idle, .preparing, .recording, .processing, .cancelled:
             return .failed(.sessionInterrupted)
@@ -246,14 +246,14 @@ package enum HistoryPresentation {
 
 /// Interface labels for the retention picker; the policy's single home is
 /// 设置-通用.
-package extension HistoryRetentionPolicy {
-    static let disabledDisplayName = "不保存"
-    static let thirtyDaysDisplayName = "最近 30 天"
-    static let ninetyDaysDisplayName = "最近 90 天"
-    static let oneYearDisplayName = "最近一年"
-    static let foreverDisplayName = "不按日期清理"
+extension HistoryRetentionPolicy {
+    package static let disabledDisplayName = "不保存"
+    package static let thirtyDaysDisplayName = "最近 30 天"
+    package static let ninetyDaysDisplayName = "最近 90 天"
+    package static let oneYearDisplayName = "最近一年"
+    package static let foreverDisplayName = "不按日期清理"
 
-    var displayName: String {
+    package var displayName: String {
         switch self {
         case .disabled: Self.disabledDisplayName
         case .thirtyDays: Self.thirtyDaysDisplayName

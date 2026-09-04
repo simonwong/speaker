@@ -133,17 +133,17 @@ public enum VoiceInputUsageStatistics {
     }
 }
 
-public extension VoiceInputHistoryRecord {
+extension VoiceInputHistoryRecord {
     /// The delivered text's length, falling back to the raw transcription.
     ///
     /// Redacted or secure sessions retain no body text, so they contribute zero.
-    var recognizedCharacterCount: Int {
+    public var recognizedCharacterCount: Int {
         (finalText ?? transcription).map(\.count) ?? 0
     }
 
     /// The measured recording duration for this session, or zero when recording
     /// never completed. This is speaking time only, not total session wall clock.
-    var speakingMilliseconds: Int {
+    public var speakingMilliseconds: Int {
         max(0, stageDurationsMilliseconds["recording"] ?? 0)
     }
 }

@@ -33,9 +33,10 @@ package final class DoubaoSettingsModel: ObservableObject {
     }
 
     package func loadResource(rawValue: String?) async {
-        let selected = rawValue.flatMap(
-            DoubaoStreamingResource.init(rawValue:)
-        ) ?? .default
+        let selected =
+            rawValue.flatMap(
+                DoubaoStreamingResource.init(rawValue:)
+            ) ?? .default
         let token = invalidateConnectionCheck()
         resource = selected
         await service.setResource(selected)
@@ -100,17 +101,17 @@ package final class DoubaoSettingsModel: ObservableObject {
                 result = .failure(error)
             }
             guard let self,
-                  token == generation,
-                  resource == checkedResource,
-                  hasStoredKey
+                token == generation,
+                resource == checkedResource,
+                hasStoredKey
             else { return }
             checkTask = nil
             switch result {
-            case let .success(requestID):
+            case .success(let requestID):
                 status = .success(requestID)
-            case let .failure(failure as DoubaoASRFailure):
+            case .failure(let failure as DoubaoASRFailure):
                 status = .failure(Self.message(for: failure))
-            case let .failure(error):
+            case .failure(let error):
                 status = .failure(SpeakerCopy.Failure.message(for: error))
             }
         }
@@ -152,9 +153,9 @@ package final class DoubaoSettingsModel: ObservableObject {
             "已保存在这台 Mac"
         case .checking:
             "正在检查连接…"
-        case let .success(requestID):
+        case .success(let requestID):
             requestID.map { "连接成功 · \($0)" } ?? "连接成功"
-        case let .failure(message):
+        case .failure(let message):
             message
         }
     }

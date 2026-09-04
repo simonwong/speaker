@@ -85,7 +85,7 @@ public struct CustomHotKey: Codable, Equatable, Sendable {
 
     public var trigger: Trigger {
         if let modifier = PhysicalModifier(keyCode: keyCode),
-           modifier.carbonModifiers == modifiers
+            modifier.carbonModifiers == modifiers
         {
             return .modifierOnly(modifier)
         }
@@ -97,7 +97,7 @@ public struct CustomHotKey: Codable, Equatable, Sendable {
     }
 
     package var modifierOnlyEventFlag: CGEventFlags? {
-        guard case let .modifierOnly(modifier) = trigger else { return nil }
+        guard case .modifierOnly(let modifier) = trigger else { return nil }
         return modifier.eventFlag
     }
 
@@ -130,17 +130,19 @@ public struct CustomHotKey: Codable, Equatable, Sendable {
     /// every other chord needs two intent modifiers.
     public var isSafeForGlobalVoiceInput: Bool {
         if isModifierOnly { return true }
-        let relevantModifiers = modifiers
+        let relevantModifiers =
+            modifiers
             & UInt32(cmdKey | optionKey | controlKey | shiftKey)
         guard relevantModifiers != 0, !isReservedForCancellation else {
             return false
         }
         if keyCode == UInt32(kVK_Space),
-           relevantModifiers == UInt32(optionKey)
+            relevantModifiers == UInt32(optionKey)
         {
             return true
         }
-        let intentModifiers = relevantModifiers
+        let intentModifiers =
+            relevantModifiers
             & UInt32(cmdKey | optionKey | controlKey)
         return intentModifiers.nonzeroBitCount >= 2
     }
@@ -233,7 +235,7 @@ package final class CustomHotKeyMonitor {
                 return .eventHandlerUnavailable(status: handlerStatus)
             }
 
-            let hotKeyID = EventHotKeyID(signature: 0x53504B52, id: 1)
+            let hotKeyID = EventHotKeyID(signature: 0x5350_4B52, id: 1)
             let registerStatus = RegisterEventHotKey(
                 hotKey.keyCode,
                 hotKey.modifiers,
@@ -248,28 +250,33 @@ package final class CustomHotKeyMonitor {
             }
         }
 
-        var eventMask = (CGEventMask(1) << CGEventType.keyDown.rawValue)
+        var eventMask =
+            (CGEventMask(1) << CGEventType.keyDown.rawValue)
             | (CGEventMask(1) << CGEventType.keyUp.rawValue)
         if box.modifierOnlyPolicy != nil {
             eventMask |= CGEventMask(1) << CGEventType.flagsChanged.rawValue
         }
-        guard let eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: eventMask,
-            callback: customShortcutEventTapCallback,
-            userInfo: Unmanaged.passUnretained(box).toOpaque()
-        ) else {
+        guard
+            let eventTap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: eventMask,
+                callback: customShortcutEventTapCallback,
+                userInfo: Unmanaged.passUnretained(box).toOpaque()
+            )
+        else {
             if let reference { UnregisterEventHotKey(reference) }
             if let eventHandler { RemoveEventHandler(eventHandler) }
             return .shortcutEventTapUnavailable
         }
-        guard let eventSource = CFMachPortCreateRunLoopSource(
-            kCFAllocatorDefault,
-            eventTap,
-            0
-        ) else {
+        guard
+            let eventSource = CFMachPortCreateRunLoopSource(
+                kCFAllocatorDefault,
+                eventTap,
+                0
+            )
+        else {
             CFMachPortInvalidate(eventTap)
             if let reference { UnregisterEventHotKey(reference) }
             if let eventHandler { RemoveEventHandler(eventHandler) }
@@ -362,7 +369,7 @@ private final class CustomHotKeyBox: @unchecked Sendable {
                 flags: event.flags
             )
             self.modifierOnlyPolicy = modifierOnlyPolicy
-            guard case let .consume(trigger) = disposition else { return false }
+            guard case .consume(let trigger) = disposition else { return false }
             switch trigger {
             case .pressed: pressed()
             case .released: released()

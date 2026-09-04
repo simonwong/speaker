@@ -5,9 +5,13 @@ import SpeakerSpecSupport
 enum AppSettingsStoreSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("versioned app settings round trip shortcut refinement and login launch", failures: &failures) {
+        await runAsync(
+            "versioned app settings round trip shortcut refinement and login launch",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-settings-spec-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent(
+                    "speaker-settings-spec-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("settings.json")
             let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
@@ -60,31 +64,43 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             try expect(afterBuiltInSwitch.savedCustomRefinement == savedCustom)
         }
 
-        await runAsync("legacy settings without retention preserve existing history", failures: &failures) {
+        await runAsync(
+            "legacy settings without retention preserve existing history", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-settings-legacy-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             let fileURL = directory.appendingPathComponent("settings.json")
-            let legacy = Data(#"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"defaultSmooth"},"launchAtLogin":false}}"#.utf8)
+            let legacy = Data(
+                #"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"defaultSmooth"},"launchAtLogin":false}}"#
+                    .utf8)
             try legacy.write(to: fileURL)
 
             let loaded = await VersionedLocalAppSettingsStore(fileURL: fileURL).load()
             try expect(loaded.settings.historyRetention == .forever)
         }
 
-        await runAsync("refinement prompt overrides persist incrementally and stay optional for legacy settings", failures: &failures) {
+        await runAsync(
+            "refinement prompt overrides persist incrementally and stay optional for legacy settings",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-settings-prompts-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             let fileURL = directory.appendingPathComponent("settings.json")
-            let legacy = Data(#"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"conciseCleanup"},"launchAtLogin":false}}"#.utf8)
+            let legacy = Data(
+                #"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"conciseCleanup"},"launchAtLogin":false}}"#
+                    .utf8)
             try legacy.write(to: fileURL)
 
             let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
             let legacyLoaded = await store.load()
-            try expect(legacyLoaded.settings.refinementPromptOverrides == RefinementPromptOverrides())
+            try expect(
+                legacyLoaded.settings.refinementPromptOverrides == RefinementPromptOverrides())
             try expect(
                 legacyLoaded.settings.refinement.textRefinementMode
                     .applyingPromptOverrides(legacyLoaded.settings.refinementPromptOverrides)
@@ -115,7 +131,9 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             try expect(restored.refinementPromptOverrides.fullRewrite == "重组但别发挥")
         }
 
-        await runAsync("disabling history remembers the enabled retention across restart", failures: &failures) {
+        await runAsync(
+            "disabling history remembers the enabled retention across restart", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("speaker-settings-history-toggle-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -141,7 +159,9 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             try expect(enabled.historyRetention == .thirtyDays)
         }
 
-        await runAsync("settings refuse to load when owner-only protection fails", failures: &failures) {
+        await runAsync(
+            "settings refuse to load when owner-only protection fails", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-settings-protection-\(UUID().uuidString)",
@@ -163,31 +183,38 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             let result = await protected.load()
 
             try expect(result.settings == .default)
-            guard case let .recoveryFailed(_, failure) = result else {
+            guard case .recoveryFailed(_, let failure) = result else {
                 throw SpecFailure(message: "settings protection failure was hidden")
             }
             try expect(failure == .protectionFailed)
         }
 
-        run("app settings persistence errors stay structured for presentation", failures: &failures) {
+        run("app settings persistence errors stay structured for presentation", failures: &failures)
+        {
             let error = AppSettingsStoreError.writeFailed(reason: "disk unavailable")
-            guard case let .writeFailed(reason) = error else {
+            guard case .writeFailed(let reason) = error else {
                 throw SpecFailure(message: "write failure lost its reason")
             }
             try expect(reason == "disk unavailable")
-            try expect(!(error is any LocalizedError), "SpeakerCore must not own user-facing sentences")
+            try expect(
+                !(error is any LocalizedError), "SpeakerCore must not own user-facing sentences")
         }
 
-        await runAsync("corrupt app settings recover to defaults without overwriting evidence", failures: &failures) {
+        await runAsync(
+            "corrupt app settings recover to defaults without overwriting evidence",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-settings-corrupt-spec-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent(
+                    "speaker-settings-corrupt-spec-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
             let fileURL = directory.appendingPathComponent("settings.json")
             try Data("broken".utf8).write(to: fileURL)
 
             let result = await VersionedLocalAppSettingsStore(fileURL: fileURL).load()
-            if case let .recovered(settings, recovery) = result {
+            if case .recovered(let settings, let recovery) = result {
                 try expect(settings == .default)
                 try expect(FileManager.default.fileExists(atPath: recovery.backupURL.path))
             } else {

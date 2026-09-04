@@ -1,7 +1,7 @@
-import Darwin
 import AppKit
 @preconcurrency import Carbon
 import Combine
+import Darwin
 import Foundation
 import SpeakerAppFeatures
 import SpeakerCore
@@ -14,7 +14,10 @@ struct SpeakerAppScenarioSpecs {
     static func main() async {
         var failures: [String] = []
 
-        run("Doubao refresh preserves a verified connection for an existing key", failures: &failures) {
+        run(
+            "Doubao refresh preserves a verified connection for an existing key",
+            failures: &failures
+        ) {
             let status = DoubaoConnectionStatus.success("request-id")
             try expect(
                 status.afterCredentialRefresh(keyExists: true)
@@ -29,7 +32,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("Doubao refresh clears a stale connection error for an existing key", failures: &failures) {
+        run(
+            "Doubao refresh clears a stale connection error for an existing key",
+            failures: &failures
+        ) {
             try expect(
                 DoubaoConnectionStatus.failure("旧错误")
                     .afterCredentialRefresh(keyExists: true) == .configured
@@ -73,81 +79,98 @@ struct SpeakerAppScenarioSpecs {
         run("shortcut recorder captures one physical modifier on release", failures: &failures) {
             var policy = ShortcutRecorderPolicy()
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Option),
-                    flags: [.option]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Option),
+                        flags: [.option]
+                    )) == .consume
             )
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Option),
-                    flags: []
-                )) == .capture(
-                    CustomHotKey.modifierOnly(
-                        .leftOption,
-                        displayName: "左 ⌥"
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Option),
+                        flags: []
+                    ))
+                    == .capture(
+                        CustomHotKey.modifierOnly(
+                            .leftOption,
+                            displayName: "左 ⌥"
+                        )
                     )
-                )
             )
 
             policy.reset()
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_RightOption),
-                    flags: [.option]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_RightOption),
+                        flags: [.option]
+                    )) == .consume
             )
             try expect(
-                policy.handle(.keyDown(
-                    keyCode: UInt16(kVK_Space),
-                    flags: [.option],
-                    charactersIgnoringModifiers: " "
-                )) == .capture(CustomHotKey(
-                    keyCode: UInt32(kVK_Space),
-                    modifiers: UInt32(optionKey),
-                    displayName: "⌥Space"
-                ))
+                policy.handle(
+                    .keyDown(
+                        keyCode: UInt16(kVK_Space),
+                        flags: [.option],
+                        charactersIgnoringModifiers: " "
+                    ))
+                    == .capture(
+                        CustomHotKey(
+                            keyCode: UInt32(kVK_Space),
+                            modifiers: UInt32(optionKey),
+                            displayName: "⌥Space"
+                        ))
             )
 
             policy.reset()
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Option),
-                    flags: [.option]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Option),
+                        flags: [.option]
+                    )) == .consume
             )
-            guard case .reject = policy.handle(.keyDown(
-                keyCode: UInt16(kVK_ANSI_A),
-                flags: [.option],
-                charactersIgnoringModifiers: "a"
-            )) else {
+            guard
+                case .reject = policy.handle(
+                    .keyDown(
+                        keyCode: UInt16(kVK_ANSI_A),
+                        flags: [.option],
+                        charactersIgnoringModifiers: "a"
+                    ))
+            else {
                 throw SpecFailure(message: "unsafe Option chord was accepted")
             }
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Option),
-                    flags: []
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Option),
+                        flags: []
+                    )) == .consume
             )
 
             policy.reset()
             try expect(
-                policy.handle(.keyDown(
-                    keyCode: UInt16(kVK_Escape),
-                    flags: [],
-                    charactersIgnoringModifiers: nil
-                )) == .cancel
+                policy.handle(
+                    .keyDown(
+                        keyCode: UInt16(kVK_Escape),
+                        flags: [],
+                        charactersIgnoringModifiers: nil
+                    )) == .cancel
             )
             try expect(
-                policy.handle(.flagsChanged(
-                    keyCode: UInt16(kVK_Command),
-                    flags: [.command]
-                )) == .consume
+                policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Command),
+                        flags: [.command]
+                    )) == .consume
             )
-            guard case .reject = policy.handle(.flagsChanged(
-                keyCode: UInt16(kVK_Command),
-                flags: []
-            )) else {
+            guard
+                case .reject = policy.handle(
+                    .flagsChanged(
+                        keyCode: UInt16(kVK_Command),
+                        flags: []
+                    ))
+            else {
                 throw SpecFailure(message: "Command alone was accepted")
             }
         }
@@ -205,7 +228,7 @@ struct SpeakerAppScenarioSpecs {
                     .microphone: .init(
                         accessibility: .denied,
                         microphone: .granted
-                    ),
+                    )
                 ]
             )
             let grantedPermissions = PermissionModel(access: grantedAccess)
@@ -236,7 +259,7 @@ struct SpeakerAppScenarioSpecs {
                         .microphone: .init(
                             accessibility: .denied,
                             microphone: terminalState
-                        ),
+                        )
                     ]
                 )
                 let stoppedPermissions = PermissionModel(access: stoppedAccess)
@@ -390,7 +413,7 @@ struct SpeakerAppScenarioSpecs {
 
             let outcome = await coordinator.eraseAllAndExit()
 
-            guard case let .incomplete(failure) = outcome else {
+            guard case .incomplete(let failure) = outcome else {
                 throw SpecFailure(message: "failure was reported as success")
             }
             try expect(
@@ -416,7 +439,7 @@ struct SpeakerAppScenarioSpecs {
 
             let outcome = await coordinator.eraseAllAndExit()
 
-            guard case let .incomplete(failure) = outcome else {
+            guard case .incomplete(let failure) = outcome else {
                 throw SpecFailure(message: "partial deletion was reported as success")
             }
             try expect(harness.calls.contains("legacy"))
@@ -439,7 +462,7 @@ struct SpeakerAppScenarioSpecs {
 
             let outcome = await coordinator.eraseAllAndExit()
 
-            guard case let .incomplete(failure) = outcome else {
+            guard case .incomplete(let failure) = outcome else {
                 throw SpecFailure(message: "verification failure was reported as success")
             }
             try expect(failure.issues.first?.stage == .verification)
@@ -501,19 +524,20 @@ struct SpeakerAppScenarioSpecs {
                     library.appendingPathComponent(
                         "Caches/com.local.speaker",
                         isDirectory: true
-                    ),
+                    )
                 ],
                 savedApplicationState: [
                     library.appendingPathComponent(
                         "Saved Application State/com.local.speaker.savedState",
                         isDirectory: true
-                    ),
+                    )
                 ]
             )
-            let allLocations = [
-                locations.applicationSupport,
-                locations.legacyApplicationSupport,
-            ] + locations.caches + locations.savedApplicationState
+            let allLocations =
+                [
+                    locations.applicationSupport,
+                    locations.legacyApplicationSupport,
+                ] + locations.caches + locations.savedApplicationState
             for location in allLocations {
                 try FileManager.default.createDirectory(
                     at: location,
@@ -638,7 +662,8 @@ struct SpeakerAppScenarioSpecs {
             }
             try expect(
                 FileManager.default.fileExists(
-                    atPath: outsideCaches
+                    atPath:
+                        outsideCaches
                         .appendingPathComponent("Speaker")
                         .path
                 )
@@ -774,7 +799,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(!unknown.permitsLocalDeliverySmoke)
         }
 
-        run("build identity presents version, numeric build and source revision", failures: &failures) {
+        run(
+            "build identity presents version, numeric build and source revision",
+            failures: &failures
+        ) {
             let identity = SpeakerBuildIdentity(
                 version: "1.2.3",
                 build: "45",
@@ -938,17 +966,19 @@ struct SpeakerAppScenarioSpecs {
             try expect(local?.triggerURL == nil)
             let triggerURL = reportURL.deletingLastPathComponent()
                 .appendingPathComponent("trigger.txt")
-            let armedArguments = arguments + [
-                "--speaker-delivery-smoke-trigger",
-            ]
+            let armedArguments =
+                arguments + [
+                    "--speaker-delivery-smoke-trigger"
+                ]
             let armed = DeliverySmokeLaunchRequest(
                 arguments: armedArguments,
                 signingMode: .developmentSigned
             )
             try expect(armed?.triggerURL == triggerURL.standardizedFileURL)
-            let sessionArguments = arguments + [
-                "--speaker-delivery-smoke-session",
-            ]
+            let sessionArguments =
+                arguments + [
+                    "--speaker-delivery-smoke-session"
+                ]
             let session = DeliverySmokeLaunchRequest(
                 arguments: sessionArguments,
                 signingMode: .developmentSigned
@@ -997,7 +1027,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("startup privacy cleanup removes only the obsolete installation identifier", failures: &failures) {
+        run(
+            "startup privacy cleanup removes only the obsolete installation identifier",
+            failures: &failures
+        ) {
             let suiteName = "speaker-privacy-spec-\(UUID().uuidString)"
             let legacySuiteName = "speaker-legacy-privacy-spec-\(UUID().uuidString)"
             guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -1138,7 +1171,8 @@ struct SpeakerAppScenarioSpecs {
             try expect(functionMonitor.startCount == 2)
             try expect(
                 announcements.filter {
-                    $0 == VoiceShortcutPreference.functionKey
+                    $0
+                        == VoiceShortcutPreference.functionKey
                         .activationAnnouncement
                 }.count == 2
             )
@@ -1171,20 +1205,23 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(
                 VoiceInputNotice.persistenceFailure(.writeFailed(reason: "磁盘不可用"))
-                    .userMessage == SpeakerCopy.History.urgentNotice(
+                    .userMessage
+                    == SpeakerCopy.History.urgentNotice(
                         .writeFailed(reason: "磁盘不可用")
                     )
             )
             try expect(
                 VoiceInputNotice.persistenceFailure(
                     .privacyMigrationFailed(reason: .databaseUnavailable)
-                ).userMessage == SpeakerCopy.History.urgentNotice(
-                    .privacyMigrationFailed(reason: .databaseUnavailable)
-                )
+                ).userMessage
+                    == SpeakerCopy.History.urgentNotice(
+                        .privacyMigrationFailed(reason: .databaseUnavailable)
+                    )
             )
             try expect(
                 VoiceInputNotice.persistenceFailure(.corruptedRecordsSkipped(count: 2))
-                    .userMessage == SpeakerCopy.History.urgentNotice(
+                    .userMessage
+                    == SpeakerCopy.History.urgentNotice(
                         .corruptedRecordsSkipped(count: 2)
                     )
             )
@@ -1248,38 +1285,40 @@ struct SpeakerAppScenarioSpecs {
             func report(
                 _ environment: AudioCaptureEnvironmentSnapshot?
             ) -> String {
-                SpeakerDiagnosticReport.make(from: .init(
-                    version: "1.2.3",
-                    build: "45",
-                    sourceRevision: "abc123",
-                    bundleIdentifier: "com.example.speaker",
-                    signingMode: "development",
-                    operatingSystem: "macOS test",
-                    credentialStorage: "keychain",
-                    accessibility: .granted,
-                    microphone: .granted,
-                    shortcut: "Fn",
-                    activity: "idle",
-                    refinement: "defaultSmooth",
-                    doubaoConfigured: true,
-                    doubaoResource: "volc.bigasr.sauc.duration",
-                    deepSeekConfigured: false,
-                    deepSeekVerified: false,
-                    historyRecordCount: 0,
-                    historyPersistence: "none",
-                    audioCaptureEnvironment: environment,
-                    latestRecord: nil
-                ))
+                SpeakerDiagnosticReport.make(
+                    from: .init(
+                        version: "1.2.3",
+                        build: "45",
+                        sourceRevision: "abc123",
+                        bundleIdentifier: "com.example.speaker",
+                        signingMode: "development",
+                        operatingSystem: "macOS test",
+                        credentialStorage: "keychain",
+                        accessibility: .granted,
+                        microphone: .granted,
+                        shortcut: "Fn",
+                        activity: "idle",
+                        refinement: "defaultSmooth",
+                        doubaoConfigured: true,
+                        doubaoResource: "volc.bigasr.sauc.duration",
+                        deepSeekConfigured: false,
+                        deepSeekVerified: false,
+                        historyRecordCount: 0,
+                        historyPersistence: "none",
+                        audioCaptureEnvironment: environment,
+                        latestRecord: nil
+                    ))
             }
 
-            let current = report(.init(
-                voiceProcessingRequested: true,
-                voiceProcessingActive: false,
-                voiceProcessingEnableFailure: .audioSystem,
-                automaticGainControlEnabled: false,
-                preferredMicrophoneMode: .voiceIsolation,
-                activeMicrophoneMode: .standard
-            ))
+            let current = report(
+                .init(
+                    voiceProcessingRequested: true,
+                    voiceProcessingActive: false,
+                    voiceProcessingEnableFailure: .audioSystem,
+                    automaticGainControlEnabled: false,
+                    preferredMicrophoneMode: .voiceIsolation,
+                    activeMicrophoneMode: .standard
+                ))
             try expect(current.contains("audioCaptureVoiceProcessingRequested: true"))
             try expect(current.contains("audioCaptureVoiceProcessingActive: false"))
             try expect(current.contains("audioCaptureVoiceProcessingEnableFailure: audioSystem"))
@@ -1328,7 +1367,7 @@ struct SpeakerAppScenarioSpecs {
                 refinementFailureMessage: "SECRET REFINEMENT MESSAGE",
                 cancelledAtStage: "doubao",
                 dictionarySnapshotEntries: [
-                    RecordedDictionaryEntry(word: "SECRET TERM"),
+                    RecordedDictionaryEntry(word: "SECRET TERM")
                 ],
                 durationMilliseconds: 1_234,
                 stageDurationsMilliseconds: [
@@ -1340,35 +1379,36 @@ struct SpeakerAppScenarioSpecs {
                     .providerUnavailable
                 )
             )
-            let report = SpeakerDiagnosticReport.make(from: .init(
-                version: "1.2.3",
-                build: "45",
-                sourceRevision: "abc123def456-dirty",
-                bundleIdentifier: "com.example.speaker",
-                signingMode: "developer-id",
-                operatingSystem: "macOS test",
-                credentialStorage: "keychain",
-                accessibility: .granted,
-                microphone: .granted,
-                shortcut: "Fn",
-                activity: "failed.providerUnavailable",
-                refinement: "custom",
-                doubaoConfigured: true,
-                doubaoResource: "volc.bigasr.sauc.duration",
-                deepSeekConfigured: true,
-                deepSeekVerified: false,
-                historyRecordCount: 7,
-                historyPersistence: "none",
-                activeProvider: .init(
-                    provider: "doubao",
-                    operation: .voiceInput,
-                    phase: .awaitingFinal,
-                    requestID: "active-safe-id",
-                    providerRequestID: "active-server-safe-id",
-                    httpStatusCode: 101
-                ),
-                latestRecord: record
-            ))
+            let report = SpeakerDiagnosticReport.make(
+                from: .init(
+                    version: "1.2.3",
+                    build: "45",
+                    sourceRevision: "abc123def456-dirty",
+                    bundleIdentifier: "com.example.speaker",
+                    signingMode: "developer-id",
+                    operatingSystem: "macOS test",
+                    credentialStorage: "keychain",
+                    accessibility: .granted,
+                    microphone: .granted,
+                    shortcut: "Fn",
+                    activity: "failed.providerUnavailable",
+                    refinement: "custom",
+                    doubaoConfigured: true,
+                    doubaoResource: "volc.bigasr.sauc.duration",
+                    deepSeekConfigured: true,
+                    deepSeekVerified: false,
+                    historyRecordCount: 7,
+                    historyPersistence: "none",
+                    activeProvider: .init(
+                        provider: "doubao",
+                        operation: .voiceInput,
+                        phase: .awaitingFinal,
+                        requestID: "active-safe-id",
+                        providerRequestID: "active-server-safe-id",
+                        httpStatusCode: 101
+                    ),
+                    latestRecord: record
+                ))
 
             try expect(report.contains("activeProviderPhase: awaitingFinal"))
             try expect(
@@ -1538,7 +1578,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(router.shortcutTarget.shouldConsumeEscape())
         }
 
-        run("onboarding fits the visible screen and keeps a useful resizable minimum", failures: &failures) {
+        run(
+            "onboarding fits the visible screen and keeps a useful resizable minimum",
+            failures: &failures
+        ) {
             let largeScreen = OnboardingWindowLayout(
                 visibleFrame: .init(x: 0, y: 0, width: 1_440, height: 900)
             )
@@ -1606,7 +1649,8 @@ struct SpeakerAppScenarioSpecs {
             try expect(standard.fallbackTintBottomOpacity < 0.25)
         }
 
-        run("glass surfaces honor native availability and Reduce Transparency", failures: &failures) {
+        run("glass surfaces honor native availability and Reduce Transparency", failures: &failures)
+        {
             try expect(
                 AdaptiveGlassSurfacePolicy.resolve(
                     reduceTransparency: false,
@@ -1648,7 +1692,8 @@ struct SpeakerAppScenarioSpecs {
             try expect(presentation.isReady)
         }
 
-        run("login item awaiting approval stays enabled and exposes recovery", failures: &failures) {
+        run("login item awaiting approval stays enabled and exposes recovery", failures: &failures)
+        {
             let presentation = LoginItemPresentation(
                 desiredEnabled: true,
                 serviceState: .requiresApproval
@@ -1677,7 +1722,8 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("unavailable login item never presents an effective enabled state", failures: &failures) {
+        run("unavailable login item never presents an effective enabled state", failures: &failures)
+        {
             let presentation = LoginItemPresentation(
                 desiredEnabled: true,
                 serviceState: .notFound
@@ -1688,7 +1734,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(presentation.notice != nil)
         }
 
-        await runAsync("login item model respects a system-disabled registration until the user acts", failures: &failures) {
+        await runAsync(
+            "login item model respects a system-disabled registration until the user acts",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-login-item-restore-\(UUID().uuidString)",
@@ -1739,7 +1788,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(persistedSettings.launchAtLogin)
         }
 
-        await runAsync("login item model rolls the system registration back when persistence fails", failures: &failures) {
+        await runAsync(
+            "login item model rolls the system registration back when persistence fails",
+            failures: &failures
+        ) {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-login-item-failure-\(UUID().uuidString)",
@@ -2106,7 +2158,8 @@ struct SpeakerAppScenarioSpecs {
             try expect(currentMode == expectedMode)
         }
 
-        await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures) {
+        await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures)
+        {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-doubao-settings-\(UUID().uuidString)",
@@ -2144,7 +2197,9 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.status == .unconfigured)
         }
 
-        await runAsync("Doubao connection result is bound to the checked resource", failures: &failures) {
+        await runAsync(
+            "Doubao connection result is bound to the checked resource", failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-doubao-resource-\(UUID().uuidString)",
@@ -2317,7 +2372,8 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("processing is not presented as active recording in the menu bar", failures: &failures) {
+        run("processing is not presented as active recording in the menu bar", failures: &failures)
+        {
             let activity = VoiceInputActivity.processing(
                 VoiceInputSessionID(),
                 .transcribing,
@@ -2367,7 +2423,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(regular.overviewMetricDividerPadding == 34)
         }
 
-        run("settings and main window expose the approved information architecture", failures: &failures) {
+        run(
+            "settings and main window expose the approved information architecture",
+            failures: &failures
+        ) {
             try expect(
                 SettingsGroup.allCases == [
                     .shortcut,
@@ -2429,7 +2488,8 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("API key cards show a persistent input only before a key is saved", failures: &failures) {
+        run("API key cards show a persistent input only before a key is saved", failures: &failures)
+        {
             try expect(
                 APIKeyCardPresentation.mode(
                     hasStoredKey: false,
@@ -2456,7 +2516,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("main window visibility drives dock activation policy once per transition", failures: &failures) {
+        run(
+            "main window visibility drives dock activation policy once per transition",
+            failures: &failures
+        ) {
             var appliedPolicies: [MainWindowActivationPolicy] = []
             let feature = MainWindowVisibilityFeature {
                 appliedPolicies.append($0)
@@ -2526,7 +2589,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("menu bar presents only compact contextual shortcuts in exact order", failures: &failures) {
+        run(
+            "menu bar presents only compact contextual shortcuts in exact order",
+            failures: &failures
+        ) {
             let idle = MenuBarVoiceCapabilities()
             let active = MenuBarVoiceCapabilities(
                 showsStatus: true,
@@ -2670,7 +2736,8 @@ struct SpeakerAppScenarioSpecs {
             try expect(events.last == "terminate")
         }
 
-        run("voice activity presentation is shared across experience surfaces", failures: &failures) {
+        run("voice activity presentation is shared across experience surfaces", failures: &failures)
+        {
             let id = VoiceInputSessionID()
             let transcribing = VoiceInputActivity.processing(
                 id,
@@ -2735,7 +2802,7 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(
                 announcements == [
-                    VoiceShortcutPreference.functionKey.activationAnnouncement,
+                    VoiceShortcutPreference.functionKey.activationAnnouncement
                 ]
             )
             withExtendedLifetime(coordinator) {}
@@ -2753,13 +2820,14 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(
                 announcements == [
-                    VoiceShortcutNotice.functionKeyEventTapUnavailableMessage,
+                    VoiceShortcutNotice.functionKeyEventTapUnavailableMessage
                 ]
             )
             withExtendedLifetime(coordinator) {}
         }
 
-        await runAsync("persistence retry announces both failure and recovery", failures: &failures) {
+        await runAsync("persistence retry announces both failure and recovery", failures: &failures)
+        {
             let persistence = FailOncePersistence()
             let feature = VoiceShortcutFeature(
                 functionKeyMonitor: FunctionMonitorFake(),
@@ -2798,7 +2866,10 @@ struct SpeakerAppScenarioSpecs {
             withExtendedLifetime(coordinator) {}
         }
 
-        await runAsync("voice experience owns Esc immediately and fences triggers after shutdown", failures: &failures) {
+        await runAsync(
+            "voice experience owns Esc immediately and fences triggers after shutdown",
+            failures: &failures
+        ) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -2822,7 +2893,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("voice experience consumes Esc while processing and cancels the processor", failures: &failures) {
+        await runAsync(
+            "voice experience consumes Esc while processing and cancels the processor",
+            failures: &failures
+        ) {
             let processor = HangingVoiceTextProcessor()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -2871,7 +2945,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("successful automatic input stays visually silent but announces completion", failures: &failures) {
+        await runAsync(
+            "successful automatic input stays visually silent but announces completion",
+            failures: &failures
+        ) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -2900,11 +2977,12 @@ struct SpeakerAppScenarioSpecs {
             let delivered = await waitUntil {
                 experience.state.diagnosticCode == "delivered"
             }
-            let overlayIsHidden = if case .hidden = experience.state.overlay {
-                true
-            } else {
-                false
-            }
+            let overlayIsHidden =
+                if case .hidden = experience.state.overlay {
+                    true
+                } else {
+                    false
+                }
             await experience.shutdown()
 
             try expect(delivered)
@@ -2961,12 +3039,14 @@ struct SpeakerAppScenarioSpecs {
                 experience.state.diagnosticCode
                     == "failed.providerReturnedNoText"
             }
-            let overlayIsHidden = if case .hidden = experience.state.overlay {
-                true
-            } else {
-                false
-            }
-            let menuIsIdle = experience.state.menu.status == nil
+            let overlayIsHidden =
+                if case .hidden = experience.state.overlay {
+                    true
+                } else {
+                    false
+                }
+            let menuIsIdle =
+                experience.state.menu.status == nil
                 && experience.state.menu.dismissAction == nil
                 && experience.state.menu.recoveryAction == nil
             let announcedEmptyResult = announcements.messages.contains {
@@ -2987,7 +3067,9 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("clipboard failure produces one retained-result announcement", failures: &failures) {
+        await runAsync(
+            "clipboard failure produces one retained-result announcement", failures: &failures
+        ) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -3014,13 +3096,16 @@ struct SpeakerAppScenarioSpecs {
             _ = await waitUntil {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
-            guard case let .pendingCopy(
-                _,
-                _,
-                _,
-                copyAction,
-                _
-            ) = experience.state.overlay else {
+            guard
+                case .pendingCopy(
+                    _,
+                    _,
+                    _,
+                    let
+                        copyAction,
+                    _
+                ) = experience.state.overlay
+            else {
                 throw SpecFailure(message: "pending-copy action was not presented")
             }
             let announcementCountBeforeCopy = announcements.messages.count
@@ -3039,13 +3124,15 @@ struct SpeakerAppScenarioSpecs {
                 copyAnnouncements == [
                     VoiceInputActivity.pendingCopyAnnouncement(
                         .clipboardFailed
-                    ),
+                    )
                 ],
                 "clipboard failure announced overlapping messages: \(copyAnnouncements)"
             )
         }
 
-        await runAsync("successful copy is announced without leaving a stale menu notice", failures: &failures) {
+        await runAsync(
+            "successful copy is announced without leaving a stale menu notice", failures: &failures
+        ) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -3058,13 +3145,16 @@ struct SpeakerAppScenarioSpecs {
             _ = await waitUntil {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
-            guard case let .pendingCopy(
-                _,
-                _,
-                _,
-                copyAction,
-                _
-            ) = experience.state.overlay else {
+            guard
+                case .pendingCopy(
+                    _,
+                    _,
+                    _,
+                    let
+                        copyAction,
+                    _
+                ) = experience.state.overlay
+            else {
                 throw SpecFailure(message: "pending-copy action was not presented")
             }
 
@@ -3072,7 +3162,7 @@ struct SpeakerAppScenarioSpecs {
             let copied = await waitUntil {
                 experience.state.diagnosticCode == "idle"
                     && fixture.announcements.messages.last
-                    == SpeakerCopy.Clipboard.textCopied
+                        == SpeakerCopy.Clipboard.textCopied
             }
             let menuNotice = experience.state.menu.notice
             await experience.shutdown()
@@ -3084,7 +3174,9 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("history failure announces only the newly reported problem", failures: &failures) {
+        await runAsync(
+            "history failure announces only the newly reported problem", failures: &failures
+        ) {
             let announcements = AnnouncementRecorder()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -3121,9 +3213,10 @@ struct SpeakerAppScenarioSpecs {
                 $0.contains(fallbackMessage)
             }.count
             let historyFailureCount = announcements.messages.filter {
-                $0 == SpeakerCopy.History.urgentNotice(
-                    .writeFailed(reason: "磁盘不可用")
-                )
+                $0
+                    == SpeakerCopy.History.urgentNotice(
+                        .writeFailed(reason: "磁盘不可用")
+                    )
             }.count
             await experience.shutdown()
 
@@ -3138,7 +3231,10 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        await runAsync("voice experience replaces retained text on a new press and rejects stale actions", failures: &failures) {
+        await runAsync(
+            "voice experience replaces retained text on a new press and rejects stale actions",
+            failures: &failures
+        ) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -3157,13 +3253,16 @@ struct SpeakerAppScenarioSpecs {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
             try expect(retainedTextPresented, "pending copy never presented")
-            guard case let .pendingCopy(
-                _,
-                _,
-                _,
-                staleCopyAction,
-                _
-            ) = experience.state.overlay else {
+            guard
+                case .pendingCopy(
+                    _,
+                    _,
+                    _,
+                    let
+                        staleCopyAction,
+                    _
+                ) = experience.state.overlay
+            else {
                 throw SpecFailure(message: "pending-copy actions were not presented")
             }
 
@@ -3206,7 +3305,9 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        await runAsync("voice experience projects terminal persistence notices", failures: &failures) {
+        await runAsync(
+            "voice experience projects terminal persistence notices", failures: &failures
+        ) {
             let fixture = makeVoiceExperienceFixture(
                 history: SessionHistoryFake(
                     failureNotice: .writeFailed(reason: "磁盘不可用")
@@ -3232,7 +3333,9 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        await runAsync("stale cancel capability cannot cancel a newer recording", failures: &failures) {
+        await runAsync(
+            "stale cancel capability cannot cancel a newer recording", failures: &failures
+        ) {
             let fixture = makeVoiceExperienceFixture()
             let experience = fixture.experience
             experience.start()
@@ -3304,7 +3407,7 @@ struct SpeakerAppScenarioSpecs {
                     == VoiceInputFailurePresentation
                     .recordingLimitReached.guidance
             )
-            if case let .problem(icon, title, guidance, recovery, _) =
+            if case .problem(let icon, let title, let guidance, let recovery, _) =
                 experience.state.overlay
             {
                 try expect(icon == "timer")
@@ -3325,7 +3428,10 @@ struct SpeakerAppScenarioSpecs {
             await experience.shutdown()
         }
 
-        await runAsync("recovery action routes to speech settings and dismisses the failure", failures: &failures) {
+        await runAsync(
+            "recovery action routes to speech settings and dismisses the failure",
+            failures: &failures
+        ) {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
@@ -3526,8 +3632,7 @@ extension Duration {
 
 private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {
     private var hasKey: Bool
-    private var checkContinuation:
-        CheckedContinuation<Result<String?, Error>, Never>?
+    private var checkContinuation: CheckedContinuation<Result<String?, Error>, Never>?
 
     init(hasKey: Bool) {
         self.hasKey = hasKey
@@ -3643,9 +3748,10 @@ private actor ScenarioPersonalDictionaryStore: PersonalDictionaryStoring {
     private var stored: PersonalDictionary
 
     init(words: [String]) {
-        stored = (try? PersonalDictionary(
-            entries: words.map { DictionaryEntry(word: $0) }
-        )) ?? .empty
+        stored =
+            (try? PersonalDictionary(
+                entries: words.map { DictionaryEntry(word: $0) }
+            )) ?? .empty
     }
 
     var storedWords: [String] {
@@ -3786,13 +3892,13 @@ private final class CustomMonitorFake: CustomShortcutMonitoring {
 private final class SoftwareUpdateDriverFake: SoftwareUpdateDriving {
     private(set) var checkCount = 0
     private(set) var automaticChecksEnabled = false
-    private var observer:
-        (@MainActor @Sendable (SoftwareUpdateDriverSnapshot) -> Void)?
+    private var observer: (@MainActor @Sendable (SoftwareUpdateDriverSnapshot) -> Void)?
 
     func start(
-        observing: @escaping @MainActor @Sendable (
-            SoftwareUpdateDriverSnapshot
-        ) -> Void
+        observing:
+            @escaping @MainActor @Sendable (
+                SoftwareUpdateDriverSnapshot
+            ) -> Void
     ) throws -> SoftwareUpdateDriverSnapshot {
         observer = observing
         return snapshot

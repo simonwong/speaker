@@ -46,14 +46,16 @@ enum VoiceInputTerminalRecordBuilder {
         now: Date = Date()
     ) -> Output {
         let processedText = termination.processedText
-        let notice: VoiceInputNotice? = if processedText?.refinementStatus == .fellBack {
-            .refinementFellBack(processedText?.refinementFailure?.kind)
-        } else {
-            nil
-        }
+        let notice: VoiceInputNotice? =
+            if processedText?.refinementStatus == .fellBack {
+                .refinementFellBack(processedText?.refinementFailure?.kind)
+            } else {
+                nil
+            }
         let measuredStageDurations = (processedText?.stageDurationsMilliseconds ?? [:])
             .merging(termination.additionalStageDurations) { _, latest in latest }
-        let stageDurations = auditedStageDurations
+        let stageDurations =
+            auditedStageDurations
             .merging(measuredStageDurations) { _, measured in measured }
         let providerDiagnostic = termination.problem?.diagnostic
         let refinementDiagnostic = processedText?.refinementFailure?.providerDiagnostic
@@ -113,7 +115,7 @@ enum VoiceInputTerminalRecordBuilder {
         mayPersistBody: Bool
     ) -> VoiceInputActivity {
         guard !mayPersistBody,
-              case let .pendingCopy(id, _, reason) = activity
+            case .pendingCopy(let id, _, let reason) = activity
         else { return activity }
         return .pendingCopy(id, text: "", reason: reason)
     }

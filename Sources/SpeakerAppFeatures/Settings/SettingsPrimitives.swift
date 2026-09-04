@@ -83,19 +83,19 @@ package struct StatusBadge: View {
                 .font(SpeakerTypography.footnote.weight(.semibold))
                 .foregroundStyle(color)
         }
-            .font(SpeakerTypography.footnote.weight(.medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                color.opacity(contrast == .increased ? 0.2 : 0.12),
-                in: Capsule()
-            )
-            .overlay {
-                if contrast == .increased {
-                    Capsule().stroke(color.opacity(0.75), lineWidth: 1)
-                }
+        .font(SpeakerTypography.footnote.weight(.medium))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            color.opacity(contrast == .increased ? 0.2 : 0.12),
+            in: Capsule()
+        )
+        .overlay {
+            if contrast == .increased {
+                Capsule().stroke(color.opacity(0.75), lineWidth: 1)
             }
-            .lineLimit(1)
+        }
+        .lineLimit(1)
     }
 }
 
@@ -128,22 +128,22 @@ package struct SettingsNotice: View {
             Image(systemName: "info.circle.fill")
                 .foregroundStyle(isNeutral ? Color.secondary : color)
         }
-            .font(SpeakerTypography.caption)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                isNeutral && contrast != .increased
-                    ? Color.primary.opacity(0.04)
-                    : color.opacity(contrast == .increased ? 0.16 : 0.07),
-                in: shape
-            )
-            .overlay {
-                if contrast == .increased {
-                    shape.stroke(color.opacity(0.7), lineWidth: 1)
-                }
+        .font(SpeakerTypography.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            isNeutral && contrast != .increased
+                ? Color.primary.opacity(0.04)
+                : color.opacity(contrast == .increased ? 0.16 : 0.07),
+            in: shape
+        )
+        .overlay {
+            if contrast == .increased {
+                shape.stroke(color.opacity(0.7), lineWidth: 1)
             }
-            .textSelection(.enabled)
+        }
+        .textSelection(.enabled)
     }
 }
 

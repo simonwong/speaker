@@ -7,7 +7,7 @@ package struct HistoryDictionaryEntryComposerState: Equatable, Sendable {
 
     package init?(transcription: String?) {
         guard let transcription,
-              !transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return nil }
         candidates = DictionaryEntryCandidateExtractor.candidates(in: transcription)
     }

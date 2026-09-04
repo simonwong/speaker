@@ -12,7 +12,8 @@ func makeAudioStream(_ chunks: [Data]) -> AsyncStream<Data> {
 }
 
 actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
-    AudioCaptureFailureProviding {
+    AudioCaptureFailureProviding
+{
     private var continuation: AsyncStream<Data>.Continuation?
     private var failureContinuation: AsyncStream<AudioCaptureError>.Continuation?
     private var activeFailure: AudioCaptureError?

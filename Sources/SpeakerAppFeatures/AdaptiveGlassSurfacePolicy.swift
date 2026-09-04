@@ -10,8 +10,8 @@ private struct AdaptiveGlassSurfaceStyleOverrideKey: EnvironmentKey {
     static let defaultValue: AdaptiveGlassSurfaceStyle? = nil
 }
 
-package extension EnvironmentValues {
-    var adaptiveGlassSurfaceStyleOverride: AdaptiveGlassSurfaceStyle? {
+extension EnvironmentValues {
+    package var adaptiveGlassSurfaceStyleOverride: AdaptiveGlassSurfaceStyle? {
         get { self[AdaptiveGlassSurfaceStyleOverrideKey.self] }
         set { self[AdaptiveGlassSurfaceStyleOverrideKey.self] = newValue }
     }

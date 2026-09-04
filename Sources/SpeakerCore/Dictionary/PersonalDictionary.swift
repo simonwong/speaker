@@ -40,7 +40,8 @@ public enum DictionaryEntryQualityHint: Equatable, Sendable {
 
 public enum DictionaryEntryQualityPolicy {
     public static func hint(for word: String) -> DictionaryEntryQualityHint {
-        let length = word
+        let length =
+            word
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .count
         if length >= 10 { return .tooLong }
@@ -72,7 +73,8 @@ public struct PersonalDictionaryValidationError: Error, Equatable, Sendable {
 }
 
 public enum PersonalDictionaryValidator {
-    public static func validate(_ entries: [DictionaryEntry]) -> [PersonalDictionaryValidationIssue] {
+    public static func validate(_ entries: [DictionaryEntry]) -> [PersonalDictionaryValidationIssue]
+    {
         var issues: [PersonalDictionaryValidationIssue] = []
 
         for entry in entries where entry.word.isEmpty {
@@ -104,9 +106,9 @@ public enum PersonalDictionaryValidator {
 
     private static func issueKey(_ issue: PersonalDictionaryValidationIssue) -> String {
         switch issue {
-        case let .emptyWord(id):
+        case .emptyWord(let id):
             "0:\(id.uuidString)"
-        case let .duplicateWord(word, _):
+        case .duplicateWord(let word, _):
             "1:\(DictionaryTermKey(word).value)"
         }
     }
@@ -159,7 +161,8 @@ struct DictionaryTermKey: Hashable, Sendable {
     let value: String
 
     init(_ term: String) {
-        value = term
+        value =
+            term
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .precomposedStringWithCanonicalMapping
             .folding(

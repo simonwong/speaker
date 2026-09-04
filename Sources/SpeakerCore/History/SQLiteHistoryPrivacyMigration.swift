@@ -29,7 +29,8 @@ enum SQLiteHistoryPrivacyMigration {
     ) throws -> Outcome {
         let plan = try scrubPlan(on: connection)
         let completedVersion = try scrubVersion(on: connection)
-        let requiresPhysicalSanitization = plan.hasChanges
+        let requiresPhysicalSanitization =
+            plan.hasChanges
             || completedVersion < currentVersion
 
         if plan.hasChanges {
@@ -94,16 +95,18 @@ enum SQLiteHistoryPrivacyMigration {
                 throw SQLiteHistoryError.encoding
             }
             guard statement.int32(at: 2) == SQLiteHistorySchema.version,
-                  let payload = statement.blob(at: 1)
+                let payload = statement.blob(at: 1)
             else {
                 plan.deletions.append(sessionID)
                 plan.corruptedDeletionCount += 1
                 continue
             }
 
-            guard var object = try? JSONSerialization.jsonObject(
-                with: payload
-            ) as? [String: Any] else {
+            guard
+                var object = try? JSONSerialization.jsonObject(
+                    with: payload
+                ) as? [String: Any]
+            else {
                 plan.deletions.append(sessionID)
                 plan.corruptedDeletionCount += 1
                 continue
@@ -115,13 +118,16 @@ enum SQLiteHistoryPrivacyMigration {
             object.removeValue(forKey: "providerMessage")
             object.removeValue(forKey: "refinementFailureMessage")
 
-            guard let sanitizedPayload = try? JSONSerialization.data(
-                withJSONObject: object,
-                options: [.sortedKeys]
-            ), let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
-                HistoryRecordV1.self,
-                from: sanitizedPayload
-            ), let record = try? stored.domainRecord else {
+            guard
+                let sanitizedPayload = try? JSONSerialization.data(
+                    withJSONObject: object,
+                    options: [.sortedKeys]
+                ),
+                let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
+                    HistoryRecordV1.self,
+                    from: sanitizedPayload
+                ), let record = try? stored.domainRecord
+            else {
                 plan.deletions.append(sessionID)
                 plan.corruptedDeletionCount += 1
                 continue
@@ -133,10 +139,11 @@ enum SQLiteHistoryPrivacyMigration {
             }
 
             if containedUntrustedText {
-                plan.rewrites.append(.init(
-                    sessionID: sessionID,
-                    payload: sanitizedPayload
-                ))
+                plan.rewrites.append(
+                    .init(
+                        sessionID: sessionID,
+                        payload: sanitizedPayload
+                    ))
             }
         }
         return plan

@@ -25,10 +25,10 @@ final class DeepSeekURLProtocolProbe: @unchecked Sendable {
 }
 
 final class BlockingDeepSeekURLProtocol: URLProtocol,
-    @unchecked Sendable {
+    @unchecked Sendable
+{
     private static let probeLock = NSLock()
-    nonisolated(unsafe) private static var installedProbe:
-        DeepSeekURLProtocolProbe?
+    nonisolated(unsafe) private static var installedProbe: DeepSeekURLProtocolProbe?
 
     static func install(_ probe: DeepSeekURLProtocolProbe?) {
         probeLock.withLock {
@@ -116,7 +116,8 @@ actor AudioChunkConsumptionProbe {
 }
 
 struct DoubaoFailingWebSocketConnectorFake:
-    DoubaoWebSocketConnecting {
+    DoubaoWebSocketConnecting
+{
     let error: URLError
 
     func connect(
@@ -305,7 +306,8 @@ actor ContextualTranscriberFake: ContextualSpeechTranscribing {
 }
 
 actor StreamingContextualTranscriberFake: ContextualSpeechTranscribing,
-    StreamingContextualSpeechTranscribing {
+    StreamingContextualSpeechTranscribing
+{
     let text: String
     private(set) var contextCalls: [SpeechTranscriptionContext] = []
 
@@ -387,7 +389,8 @@ actor CancellableDeepSeekRefinerFake: DeepSeekTextRefining {
 func makeDeepSeekClient(content: String) -> DeepSeekRefinementClient {
     let encodedContent = try! JSONEncoder().encode(content)
     let body = Data(
-        "{\"choices\":[{\"message\":{\"content\":\(String(decoding: encodedContent, as: UTF8.self))},\"finish_reason\":\"stop\"}]}".utf8
+        "{\"choices\":[{\"message\":{\"content\":\(String(decoding: encodedContent, as: UTF8.self))},\"finish_reason\":\"stop\"}]}"
+            .utf8
     )
     return DeepSeekRefinementClient(
         configuration: .init(apiKey: "deepseek-test-key"),
@@ -502,7 +505,8 @@ actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextPr
 }
 
 actor LateCompletingStreamingProcessor: VoiceTextProcessing,
-    StreamingVoiceTextProcessing {
+    StreamingVoiceTextProcessing
+{
     private var continuation: CheckedContinuation<Void, Never>?
     private var started = false
     private(set) var cancellationCount = 0
@@ -557,7 +561,8 @@ actor LateCompletingStreamingProcessor: VoiceTextProcessing,
 }
 
 actor ManuallyFailingStreamingProcessor: VoiceTextProcessing,
-    StreamingVoiceTextProcessing {
+    StreamingVoiceTextProcessing
+{
     private var continuation: CheckedContinuation<Void, Never>?
     private var started = false
 

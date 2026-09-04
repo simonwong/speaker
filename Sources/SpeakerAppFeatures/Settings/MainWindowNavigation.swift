@@ -45,8 +45,10 @@ package struct MainWindowTabSeparatorHider: NSViewRepresentable {
     }
 
     package func updateNSView(_ nsView: NSView, context: Context) {
-        guard let configurator = nsView
-            as? MainWindowTabSeparatorConfiguratorView else { return }
+        guard
+            let configurator = nsView
+                as? MainWindowTabSeparatorConfiguratorView
+        else { return }
         configurator.scheduleConfiguration()
     }
 }
@@ -70,29 +72,32 @@ private final class MainWindowTabSeparatorConfiguratorView: NSView {
 
     private func removeSeparators() {
         guard let frameView = window?.contentView?.superview,
-              let tabs = segmentedControls(in: frameView).first(where: {
-                  $0.segmentCount == MainWindowTab.allCases.count
-                      && $0.segmentStyle == .automatic
-              }),
-              let container = tabs.superview else { return }
+            let tabs = segmentedControls(in: frameView).first(where: {
+                $0.segmentCount == MainWindowTab.allCases.count
+                    && $0.segmentStyle == .automatic
+            }),
+            let container = tabs.superview
+        else { return }
 
         container.wantsLayer = true
         let mask = CAShapeLayer()
         mask.frame = container.bounds
         let path = CGMutablePath()
-        let segmentWidth = container.bounds.width
+        let segmentWidth =
+            container.bounds.width
             / CGFloat(tabs.segmentCount)
         let gap: CGFloat = 1
 
         for index in 0..<tabs.segmentCount {
             let leadingGap = index == 0 ? 0 : gap / 2
             let trailingGap = index == tabs.segmentCount - 1 ? 0 : gap / 2
-            path.addRect(CGRect(
-                x: CGFloat(index) * segmentWidth + leadingGap,
-                y: 0,
-                width: segmentWidth - leadingGap - trailingGap,
-                height: container.bounds.height
-            ))
+            path.addRect(
+                CGRect(
+                    x: CGFloat(index) * segmentWidth + leadingGap,
+                    y: 0,
+                    width: segmentWidth - leadingGap - trailingGap,
+                    height: container.bounds.height
+                ))
         }
 
         mask.path = path

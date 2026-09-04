@@ -50,7 +50,7 @@ func usageRecord(
 
 extension VoiceInputActivity {
     var failure: VoiceInputFailure? {
-        if case let .failed(_, failure) = self { failure } else { nil }
+        if case .failed(_, let failure) = self { failure } else { nil }
     }
 
     var isCancelled: Bool {

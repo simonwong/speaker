@@ -62,7 +62,8 @@ package enum VoiceDiagnosticSanitizer {
         let withoutControls = value.unicodeScalars.map { scalar -> String in
             CharacterSet.controlCharacters.contains(scalar) ? " " : String(scalar)
         }.joined()
-        let collapsed = withoutControls
+        let collapsed =
+            withoutControls
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
         guard !collapsed.isEmpty else { return nil }
@@ -85,18 +86,19 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
     }
 
     public init(doubaoFailure: DoubaoASRFailure) {
-        failure = switch doubaoFailure.kind {
-        case .invalidCredential: .providerAuthenticationFailed
-        case .silence: .noSpeechDetected
-        case .emptyAudio: .providerReceivedNoAudio
-        case .emptyTranscript: .providerReturnedNoText
-        case .resourceNotActivated: .providerResourceUnavailable
-        case .rateLimited: .providerRateLimited
-        case .network: .networkUnavailable
-        case .serverBusy, .serviceUnavailable: .providerUnavailable
-        case .cancelled, .invalidRequest, .invalidAudioFormat, .invalidResponse:
-            .transcriptionFailed
-        }
+        failure =
+            switch doubaoFailure.kind {
+            case .invalidCredential: .providerAuthenticationFailed
+            case .silence: .noSpeechDetected
+            case .emptyAudio: .providerReceivedNoAudio
+            case .emptyTranscript: .providerReturnedNoText
+            case .resourceNotActivated: .providerResourceUnavailable
+            case .rateLimited: .providerRateLimited
+            case .network: .networkUnavailable
+            case .serverBusy, .serviceUnavailable: .providerUnavailable
+            case .cancelled, .invalidRequest, .invalidAudioFormat, .invalidResponse:
+                .transcriptionFailed
+            }
         diagnostic = VoiceProviderDiagnostic(
             provider: "doubao",
             operation: .transcription,
@@ -108,7 +110,8 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
     }
 
     public init(doubaoCredentialFailure: ProviderCredentialStoreError) {
-        failure = doubaoCredentialFailure == .emptyAPIKey
+        failure =
+            doubaoCredentialFailure == .emptyAPIKey
             ? .providerNotConfigured
             : .providerCredentialUnavailable
         diagnostic = VoiceProviderDiagnostic(
@@ -163,7 +166,7 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
                 code: "audio.microphone_permission_denied"
             )
         case .alreadyRecording, .couldNotPrepare, .couldNotStart,
-             .noActiveRecording:
+            .noActiveRecording:
             failure = .recordingFailed
             diagnostic = VoiceProviderDiagnostic(
                 provider: "local",
@@ -175,8 +178,8 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
 
 }
 
-public extension DeepSeekRefinementFailure {
-    var providerDiagnostic: VoiceProviderDiagnostic {
+extension DeepSeekRefinementFailure {
+    public var providerDiagnostic: VoiceProviderDiagnostic {
         VoiceProviderDiagnostic(
             provider: "deepseek",
             operation: .refinement,

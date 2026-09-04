@@ -104,10 +104,11 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: StreamingAudioCaptureFake(),
                 targetCapture: TargetCaptureFake(
-                    result: .writable(.init(
-                        id: UUID(),
-                        applicationName: "TextEdit"
-                    ))
+                    result: .writable(
+                        .init(
+                            id: UUID(),
+                            applicationName: "TextEdit"
+                        ))
                 ),
                 textProcessor: StreamingVoiceTextProcessorFake(),
                 delivery: delivery,
@@ -688,7 +689,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             try expect(pasteboard.items == originalItems)
         }
 
-        await runAsync("pending-copy trigger rejection resets the next shortcut gesture", failures: &failures) {
+        await runAsync(
+            "pending-copy trigger rejection resets the next shortcut gesture", failures: &failures
+        ) {
             let audio = AudioCaptureFake()
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
@@ -744,7 +747,10 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("trigger dispatcher shutdown cancels in-flight processing before waiting", failures: &failures) {
+        await runAsync(
+            "trigger dispatcher shutdown cancels in-flight processing before waiting",
+            failures: &failures
+        ) {
             let transcriber = SpeechTranscriberFake(text: "不得送达", delaysResponse: true)
             let delivery = TextDeliveryFake(result: .delivered)
             let history = SessionHistoryFake()
@@ -776,7 +782,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             try expect(record?.stageDurationsMilliseconds["doubao"] != nil)
         }
 
-        await runAsync("trigger dispatcher shutdown flushes queued history writes", failures: &failures) {
+        await runAsync(
+            "trigger dispatcher shutdown flushes queued history writes", failures: &failures
+        ) {
             let history = BlockingSessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -807,7 +815,10 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             try expect(saveCallCount >= 2)
         }
 
-        await runAsync("shutdown flushes a history write enqueued while an earlier one is still pending", failures: &failures) {
+        await runAsync(
+            "shutdown flushes a history write enqueued while an earlier one is still pending",
+            failures: &failures
+        ) {
             let history = BlockingSessionHistoryFake()
             let transcriber = SpeechTranscriberFake(
                 text: "unused",
@@ -876,7 +887,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("queued trigger cancel preempts an in-flight provider request", failures: &failures) {
+        await runAsync(
+            "queued trigger cancel preempts an in-flight provider request", failures: &failures
+        ) {
             let transcriber = SpeechTranscriberFake(text: "不得送达", delaysResponse: true)
             let delivery = TextDeliveryFake(result: .delivered)
             let history = SessionHistoryFake()
@@ -905,7 +918,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             dispatcher.finish()
         }
 
-        await runAsync("trigger cancellation fence cannot cancel a later session", failures: &failures) {
+        await runAsync(
+            "trigger cancellation fence cannot cancel a later session", failures: &failures
+        ) {
             let delivery = TextDeliveryFake(result: .delivered)
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),

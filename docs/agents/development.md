@@ -79,7 +79,7 @@ Formatting is checked with the `swift-format` shipped with the toolchain against
 swift format lint --strict --parallel --recursive Sources Tests
 ```
 
-The tree is not formatted to that configuration yet, so the CI step carries `continue-on-error: true` and only reports findings. Reformatting the sources and making the step blocking is separate work; do not reformat unrelated files to silence it.
+The whole tree is formatted to that configuration and the CI step is blocking, so any finding fails the job. Run the lint before committing, and run `swift format format --in-place` on the files you touched to fix what it reports; do not reformat files your change does not touch.
 
 Use `./scripts/build` for the ordinary debug App build. For a focused warnings gate, use:
 

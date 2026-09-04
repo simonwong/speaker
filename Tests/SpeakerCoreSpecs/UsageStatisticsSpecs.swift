@@ -5,13 +5,17 @@ import SpeakerSpecSupport
 enum UsageStatisticsSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        run("usage statistics aggregate recognized characters and speaking time per local day", failures: &failures) {
+        run(
+            "usage statistics aggregate recognized characters and speaking time per local day",
+            failures: &failures
+        ) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
             func day(_ y: Int, _ mo: Int, _ d: Int, _ h: Int) -> Date {
-                calendar.date(from: DateComponents(
-                    year: y, month: mo, day: d, hour: h
-                ))!
+                calendar.date(
+                    from: DateComponents(
+                        year: y, month: mo, day: d, hour: h
+                    ))!
             }
             let records = [
                 usageRecord(startedAt: day(2026, 7, 18, 10), text: "你好世界", recordingMs: 3_000),
@@ -39,7 +43,10 @@ enum UsageStatisticsSpecs: CoreSpecDomain {
             try expect(second.sessionCount == 2)
         }
 
-        await runAsync("SQLite usage statistics stream to the same result as folding every record", failures: &failures) {
+        await runAsync(
+            "SQLite usage statistics stream to the same result as folding every record",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
                     "speaker-usage-stats-\(UUID().uuidString)",
@@ -53,16 +60,18 @@ enum UsageStatisticsSpecs: CoreSpecDomain {
             try expect(empty == .empty)
 
             let now = Date()
-            await history.save(usageRecord(
-                startedAt: now,
-                text: "语音输入",
-                recordingMs: 2_400
-            ))
-            await history.save(usageRecord(
-                startedAt: now.addingTimeInterval(-3_600),
-                text: "键盘",
-                recordingMs: 1_100
-            ))
+            await history.save(
+                usageRecord(
+                    startedAt: now,
+                    text: "语音输入",
+                    recordingMs: 2_400
+                ))
+            await history.save(
+                usageRecord(
+                    startedAt: now.addingTimeInterval(-3_600),
+                    text: "键盘",
+                    recordingMs: 1_100
+                ))
 
             let streamed = await history.usageStatistics()
             let folded = VoiceInputUsageStatistics.summarize(

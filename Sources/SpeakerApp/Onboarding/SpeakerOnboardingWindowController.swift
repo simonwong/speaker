@@ -43,7 +43,8 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
             announce: announce,
             completion: completion
         )
-        let visibleFrame = NSScreen.main?.visibleFrame
+        let visibleFrame =
+            NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 640, height: 680)
         let window = OnboardingWindowFactory.make(
             visibleFrame: visibleFrame,
@@ -62,42 +63,46 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
         window = nil
     }
 
-#if DEBUG
-    func resizeDebug(to size: CGSize) {
-        let debugMinimum = CGSize(width: 360, height: 360)
-        window?.minSize = debugMinimum
-        window?.contentMinSize = debugMinimum
-        window?.setContentSize(size)
-        window?.center()
-    }
+    #if DEBUG
+        func resizeDebug(to size: CGSize) {
+            let debugMinimum = CGSize(width: 360, height: 360)
+            window?.minSize = debugMinimum
+            window?.contentMinSize = debugMinimum
+            window?.setContentSize(size)
+            window?.center()
+        }
 
-    func captureDebugSnapshot(to url: URL) throws {
-        guard let contentView = window?.contentView else {
-            throw OnboardingSnapshotError.windowUnavailable
+        func captureDebugSnapshot(to url: URL) throws {
+            guard let contentView = window?.contentView else {
+                throw OnboardingSnapshotError.windowUnavailable
+            }
+            contentView.layoutSubtreeIfNeeded()
+            let bounds = contentView.bounds
+            guard
+                let representation = contentView.bitmapImageRepForCachingDisplay(
+                    in: bounds
+                )
+            else {
+                throw OnboardingSnapshotError.bitmapUnavailable
+            }
+            contentView.cacheDisplay(in: bounds, to: representation)
+            guard
+                let data = representation.representation(
+                    using: .png,
+                    properties: [:]
+                )
+            else {
+                throw OnboardingSnapshotError.pngEncodingFailed
+            }
+            try data.write(to: url, options: .atomic)
         }
-        contentView.layoutSubtreeIfNeeded()
-        let bounds = contentView.bounds
-        guard let representation = contentView.bitmapImageRepForCachingDisplay(
-            in: bounds
-        ) else {
-            throw OnboardingSnapshotError.bitmapUnavailable
-        }
-        contentView.cacheDisplay(in: bounds, to: representation)
-        guard let data = representation.representation(
-            using: .png,
-            properties: [:]
-        ) else {
-            throw OnboardingSnapshotError.pngEncodingFailed
-        }
-        try data.write(to: url, options: .atomic)
-    }
-#endif
+    #endif
 }
 
 #if DEBUG
-private enum OnboardingSnapshotError: Error {
-    case windowUnavailable
-    case bitmapUnavailable
-    case pngEncodingFailed
-}
+    private enum OnboardingSnapshotError: Error {
+        case windowUnavailable
+        case bitmapUnavailable
+        case pngEncodingFailed
+    }
 #endif

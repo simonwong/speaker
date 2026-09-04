@@ -28,8 +28,8 @@ struct LocalDataSettingsPage: View {
                 }
                 Button(
                     dataErasure.state == .erasing
-                    ? "正在清除…"
-                    : "清除本地数据并退出",
+                        ? "正在清除…"
+                        : "清除本地数据并退出",
                     role: .destructive
                 ) {
                     confirmsDataErasure = true

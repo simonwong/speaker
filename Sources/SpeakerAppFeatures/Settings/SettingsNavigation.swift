@@ -43,8 +43,7 @@ package struct SettingsPresentationRequest: Equatable {
 
 @MainActor
 package final class SettingsNavigationModel: ObservableObject {
-    @Published package private(set) var presentationRequest:
-        SettingsPresentationRequest?
+    @Published package private(set) var presentationRequest: SettingsPresentationRequest?
     private var nextPresentationSequence: UInt = 0
 
     package var presentationRevision: UInt { nextPresentationSequence }

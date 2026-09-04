@@ -15,9 +15,10 @@ final class OnboardingPresenter {
 
     init(
         preferences: UserDefaults,
-        makeController: @escaping @MainActor (
-            _ completion: @escaping () -> Void
-        ) -> SpeakerOnboardingWindowController
+        makeController:
+            @escaping @MainActor (
+                _ completion: @escaping () -> Void
+            ) -> SpeakerOnboardingWindowController
     ) {
         self.preferences = preferences
         self.makeController = makeController
@@ -44,15 +45,15 @@ final class OnboardingPresenter {
         controller = nil
     }
 
-#if DEBUG
-    func resizeDebug(to size: CGSize) {
-        controller?.resizeDebug(to: size)
-    }
+    #if DEBUG
+        func resizeDebug(to size: CGSize) {
+            controller?.resizeDebug(to: size)
+        }
 
-    func captureDebugSnapshot(to url: URL) throws {
-        try controller?.captureDebugSnapshot(to: url)
-    }
-#endif
+        func captureDebugSnapshot(to url: URL) throws {
+            try controller?.captureDebugSnapshot(to: url)
+        }
+    #endif
 }
 
 /// The production startup stages: each one forwards to the collaborator that
@@ -148,7 +149,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         let legacy = VersionedLocalSessionHistory(fileURL: legacyHistoryFileURL)
         if let notice = await legacy.persistenceStatus().notice {
             switch notice {
-            case let .corruptedDataPreserved(backupURL, _):
+            case .corruptedDataPreserved(let backupURL, _):
                 return .legacyCorrupted(backupName: backupURL.lastPathComponent)
             case .privacyMigrationFailed:
                 return .legacyProtectionFailed
@@ -193,28 +194,28 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func presentOnboarding() {
-#if DEBUG
-        if let captureURL = SpeakerDebugLaunchOptions.onboardingCaptureURL(
-            in: launchArguments
-        ) {
-            onboarding.present(force: true)
-            if let size = SpeakerDebugLaunchOptions.onboardingCaptureSize(
+        #if DEBUG
+            if let captureURL = SpeakerDebugLaunchOptions.onboardingCaptureURL(
                 in: launchArguments
             ) {
-                onboarding.resizeDebug(to: size)
-            }
-            Task { @MainActor [onboarding] in
-                await Task.yield()
-                do {
-                    try onboarding.captureDebugSnapshot(to: captureURL)
-                    NSLog("Speaker onboarding captured: \(captureURL.path)")
-                } catch {
-                    NSLog("Speaker onboarding capture failed: \(error)")
+                onboarding.present(force: true)
+                if let size = SpeakerDebugLaunchOptions.onboardingCaptureSize(
+                    in: launchArguments
+                ) {
+                    onboarding.resizeDebug(to: size)
                 }
+                Task { @MainActor [onboarding] in
+                    await Task.yield()
+                    do {
+                        try onboarding.captureDebugSnapshot(to: captureURL)
+                        NSLog("Speaker onboarding captured: \(captureURL.path)")
+                    } catch {
+                        NSLog("Speaker onboarding capture failed: \(error)")
+                    }
+                }
+                return
             }
-            return
-        }
-#endif
+        #endif
         onboarding.present(force: false)
     }
 }
@@ -265,46 +266,46 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
 }
 
 #if DEBUG
-/// Debug-only launch options used by screenshot automation.
-enum SpeakerDebugLaunchOptions {
-    static func value(after option: String, in arguments: [String]) -> String? {
-        guard let optionIndex = arguments.firstIndex(of: option),
-              arguments.indices.contains(optionIndex + 1)
-        else {
-            return nil
+    /// Debug-only launch options used by screenshot automation.
+    enum SpeakerDebugLaunchOptions {
+        static func value(after option: String, in arguments: [String]) -> String? {
+            guard let optionIndex = arguments.firstIndex(of: option),
+                arguments.indices.contains(optionIndex + 1)
+            else {
+                return nil
+            }
+            return arguments[optionIndex + 1]
         }
-        return arguments[optionIndex + 1]
-    }
 
-    static func onboardingCaptureURL(in arguments: [String]) -> URL? {
-        value(after: "--speaker-onboarding-capture", in: arguments)
-            .map { URL(fileURLWithPath: $0) }
-    }
-
-    static func onboardingCaptureSize(in arguments: [String]) -> CGSize? {
-        guard let raw = value(after: "--speaker-onboarding-size", in: arguments) else {
-            return nil
+        static func onboardingCaptureURL(in arguments: [String]) -> URL? {
+            value(after: "--speaker-onboarding-capture", in: arguments)
+                .map { URL(fileURLWithPath: $0) }
         }
-        let components = raw.split(separator: "x")
-        guard components.count == 2,
-              let width = Double(components[0]),
-              let height = Double(components[1]),
-              width >= 360,
-              height >= 360
-        else {
-            return nil
+
+        static func onboardingCaptureSize(in arguments: [String]) -> CGSize? {
+            guard let raw = value(after: "--speaker-onboarding-size", in: arguments) else {
+                return nil
+            }
+            let components = raw.split(separator: "x")
+            guard components.count == 2,
+                let width = Double(components[0]),
+                let height = Double(components[1]),
+                width >= 360,
+                height >= 360
+            else {
+                return nil
+            }
+            return CGSize(width: width, height: height)
         }
-        return CGSize(width: width, height: height)
-    }
 
-    static func visualScenario(in arguments: [String]) -> VoiceInputVisualScenario? {
-        value(after: "--speaker-visual-scenario", in: arguments)
-            .flatMap(VoiceInputVisualScenario.init(rawValue:))
-    }
+        static func visualScenario(in arguments: [String]) -> VoiceInputVisualScenario? {
+            value(after: "--speaker-visual-scenario", in: arguments)
+                .flatMap(VoiceInputVisualScenario.init(rawValue:))
+        }
 
-    static func visualCaptureURL(in arguments: [String]) -> URL? {
-        value(after: "--speaker-visual-capture", in: arguments)
-            .map { URL(fileURLWithPath: $0) }
+        static func visualCaptureURL(in arguments: [String]) -> URL? {
+            value(after: "--speaker-visual-capture", in: arguments)
+                .map { URL(fileURLWithPath: $0) }
+        }
     }
-}
 #endif

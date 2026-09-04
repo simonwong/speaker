@@ -6,7 +6,9 @@ import SpeakerSpecSupport
 enum SessionCancellationSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("cancel wins over a late recorder stop failure and discards target", failures: &failures) {
+        await runAsync(
+            "cancel wins over a late recorder stop failure and discards target", failures: &failures
+        ) {
             let audio = DelayedFailingStopAudioCapture()
             let target = DiscardingTargetCaptureFake(
                 snapshot: .init(id: UUID(), applicationName: "TextEdit")
@@ -43,7 +45,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("cancel wins delivery commit gate before any text mutation", failures: &failures) {
+        await runAsync(
+            "cancel wins delivery commit gate before any text mutation", failures: &failures
+        ) {
             let delivery = DelayedCommitDeliveryFake()
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -72,7 +76,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             try expect(record?.cancelledAtStage == "delivery")
         }
 
-        await runAsync("cancel is visible before blocked history persistence completes", failures: &failures) {
+        await runAsync(
+            "cancel is visible before blocked history persistence completes", failures: &failures
+        ) {
             let history = BlockingSessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -96,7 +102,10 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await history.unblock()
         }
 
-        await runAsync("cancel hides committed delivery while its truthful history finishes", failures: &failures) {
+        await runAsync(
+            "cancel hides committed delivery while its truthful history finishes",
+            failures: &failures
+        ) {
             let delivery = BlockingDeliveryFake(commitsBeforeBlocking: true)
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -178,7 +187,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             try expect(cancellationCount == 1, "active provider request was not cancelled")
         }
 
-        await runAsync("cancel propagates through DeepSeek without fallback delivery", failures: &failures) {
+        await runAsync(
+            "cancel propagates through DeepSeek without fallback delivery", failures: &failures
+        ) {
             let refiner = CancellableDeepSeekRefinerFake()
             let history = SessionHistoryFake()
             let delivery = TextDeliveryFake(result: .delivered)
@@ -225,7 +236,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             try expect(record?.finalText == nil)
         }
 
-        await runAsync("slow presentation observers receive the current terminal state", failures: &failures) {
+        await runAsync(
+            "slow presentation observers receive the current terminal state", failures: &failures
+        ) {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(
@@ -249,7 +262,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
         }
 
-        await runAsync("live PCM reaches streaming processor before shortcut release", failures: &failures) {
+        await runAsync(
+            "live PCM reaches streaming processor before shortcut release", failures: &failures
+        ) {
             let audio = StreamingAudioCaptureFake()
             let processor = StreamingVoiceTextProcessorFake()
             let delivery = TextDeliveryFake(result: .delivered)
@@ -280,7 +295,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             try expect(deliveredTexts == ["流式结果"])
         }
 
-        await runAsync("definite local silence cancels streaming without delivering text", failures: &failures) {
+        await runAsync(
+            "definite local silence cancels streaming without delivering text", failures: &failures
+        ) {
             let audio = StreamingAudioCaptureFake(
                 stoppedAudio: CapturedAudio(
                     data: Data(),
@@ -293,10 +310,11 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(
-                    result: .writable(.init(
-                        id: UUID(),
-                        applicationName: "TextEdit"
-                    ))
+                    result: .writable(
+                        .init(
+                            id: UUID(),
+                            applicationName: "TextEdit"
+                        ))
                 ),
                 textProcessor: StreamingVoiceTextProcessorFake(),
                 delivery: delivery,
@@ -313,7 +331,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 before: .seconds(2)
             )
 
-            if case let .failed(_, failure) = terminal?.activity {
+            if case .failed(_, let failure) = terminal?.activity {
                 try expect(failure == .localSilenceDetected)
             } else {
                 throw SpecFailure(message: "local silence was not reported")
@@ -326,7 +344,10 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             try expect(record?.transcriptionProvider == "local")
         }
 
-        await runAsync("definite streaming provider failure stops an active recording immediately", failures: &failures) {
+        await runAsync(
+            "definite streaming provider failure stops an active recording immediately",
+            failures: &failures
+        ) {
             let audio = StreamingAudioCaptureFake()
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -345,7 +366,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 before: .seconds(2)
             )
 
-            if case let .failed(_, failure) = terminal?.activity {
+            if case .failed(_, let failure) = terminal?.activity {
                 try expect(failure == .providerAuthenticationFailed)
             } else {
                 throw SpecFailure(message: "recording ignored the provider's early failure")
@@ -357,7 +378,10 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             try expect(record?.providerRequestID == "early-provider-failure")
         }
 
-        await runAsync("an asynchronous terminal failure clears a latched short-press gesture", failures: &failures) {
+        await runAsync(
+            "an asynchronous terminal failure clears a latched short-press gesture",
+            failures: &failures
+        ) {
             let audio = StreamingAudioCaptureFake()
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
@@ -387,7 +411,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             await dispatcher.shutdown()
         }
 
-        await runAsync("audio device changes stop recording with a local diagnostic", failures: &failures) {
+        await runAsync(
+            "audio device changes stop recording with a local diagnostic", failures: &failures
+        ) {
             let audio = StreamingAudioCaptureFake()
             let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
@@ -407,7 +433,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 before: .seconds(2)
             )
 
-            if case let .failed(_, failure) = terminal?.activity {
+            if case .failed(_, let failure) = terminal?.activity {
                 try expect(failure == .audioDeviceChanged)
             } else {
                 throw SpecFailure(message: "device change did not close the recording")

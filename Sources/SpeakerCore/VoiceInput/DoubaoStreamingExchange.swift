@@ -66,7 +66,8 @@ package struct DoubaoStreamingExchange: Sendable {
                 await closeGate.close()
                 await runtimeDiagnostics?.finishDoubao(requestID: requestID)
                 if !Task.isCancelled,
-                   let failure = await failurePriority.preferredFailure() {
+                    let failure = await failurePriority.preferredFailure()
+                {
                     throw failure
                 }
                 throw DoubaoASRFailure(kind: .cancelled, providerRequestID: requestID)
@@ -144,7 +145,7 @@ package struct DoubaoStreamingExchange: Sendable {
                 switch event {
                 case .audioSent:
                     didFinishSending = true
-                case let .finalResult(result):
+                case .finalResult(let result):
                     finalResult = result
                 }
                 if didFinishSending, let finalResult {
@@ -222,7 +223,8 @@ package struct DoubaoStreamingExchange: Sendable {
                     )
                 }
                 if let text = body.result?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !text.isEmpty {
+                    !text.isEmpty
+                {
                     latestText = text
                 }
                 if frame.isFinal {

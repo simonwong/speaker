@@ -25,8 +25,8 @@ public protocol InputTargetCapturing: Sendable {
     ) async -> InputTargetCaptureResult
 }
 
-public extension InputTargetCapturing {
-    func capture(
+extension InputTargetCapturing {
+    public func capture(
         matching hint: InputTargetCaptureHint
     ) async -> InputTargetCaptureResult {
         await capture()
@@ -50,8 +50,8 @@ public protocol TextDelivering: Sendable {
     func shutdown() async
 }
 
-public extension TextDelivering {
-    func shutdown() async {}
+extension TextDelivering {
+    public func shutdown() async {}
 }
 
 public protocol ClipboardWriting: Sendable {
@@ -64,6 +64,6 @@ public protocol SessionHistoryRecording: Sendable {
     func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice?
 }
 
-public extension SessionHistoryRecording {
-    func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? { nil }
+extension SessionHistoryRecording {
+    public func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? { nil }
 }

@@ -6,11 +6,16 @@ import SpeakerSpecSupport
 enum DoubaoFrameCodecSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
-        run("Doubao full client request frame carries a JSON header and its payload size", failures: &failures) {
+        run(
+            "Doubao full client request frame carries a JSON header and its payload size",
+            failures: &failures
+        ) {
             let payload = Data(#"{"user":{"uid":"u"}}"#.utf8)
             let frame = DoubaoStreamingFrameCodec.fullClientRequest(payload: payload)
 
-            try expect(Array(frame.prefix(4)) == [0x11, 0x10, 0x10, 0x00], "header bytes were \(Array(frame.prefix(4)))")
+            try expect(
+                Array(frame.prefix(4)) == [0x11, 0x10, 0x10, 0x00],
+                "header bytes were \(Array(frame.prefix(4)))")
             try expect(Array(frame[4..<8]) == [0x00, 0x00, 0x00, UInt8(payload.count)])
             try expect(frame.suffix(payload.count) == payload)
         }
@@ -26,18 +31,26 @@ enum DoubaoFrameCodecSpecs: CoreSpecDomain {
             try expect(streaming.suffix(3) == audio && final.suffix(3) == audio)
         }
 
-        run("Doubao decoder reads the error code that precedes an error payload", failures: &failures) {
+        run(
+            "Doubao decoder reads the error code that precedes an error payload",
+            failures: &failures
+        ) {
             let frame = try DoubaoStreamingFrameCodec.decode(
                 makeDoubaoServerError(code: 55_000_031, message: "busy")
             )
 
             try expect(frame.messageType == 0x0F)
-            try expect(frame.errorCode == 55_000_031, "error code was \(String(describing: frame.errorCode))")
+            try expect(
+                frame.errorCode == 55_000_031,
+                "error code was \(String(describing: frame.errorCode))")
             try expect(frame.sequence == nil)
             try expect(frame.payload == Data(#"{"message":"busy"}"#.utf8))
         }
 
-        run("Doubao decoder reads the sequence and final flag of a result frame", failures: &failures) {
+        run(
+            "Doubao decoder reads the sequence and final flag of a result frame",
+            failures: &failures
+        ) {
             let sequenced = try DoubaoStreamingFrameCodec.decode(
                 makeDoubaoServerFrame(
                     messageType: 0x09,
@@ -46,7 +59,8 @@ enum DoubaoFrameCodecSpecs: CoreSpecDomain {
                     payload: Data(#"{"result":{"text":"好"}}"#.utf8)
                 )
             )
-            try expect(sequenced.sequence == -7, "sequence was \(String(describing: sequenced.sequence))")
+            try expect(
+                sequenced.sequence == -7, "sequence was \(String(describing: sequenced.sequence))")
             try expect(sequenced.isFinal)
             try expect(sequenced.serialization == 0x01)
             try expect(sequenced.errorCode == nil)
@@ -64,7 +78,10 @@ enum DoubaoFrameCodecSpecs: CoreSpecDomain {
             try expect(!unsequenced.isFinal)
         }
 
-        run("Doubao decoder rejects truncated and compressed frames as invalid responses", failures: &failures) {
+        run(
+            "Doubao decoder rejects truncated and compressed frames as invalid responses",
+            failures: &failures
+        ) {
             let truncated = Data([0x11, 0x90, 0x10, 0x00, 0x00, 0x00, 0x00])
             try expectDecodeFailure(truncated, "seven bytes cannot hold a header")
 

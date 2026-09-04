@@ -57,7 +57,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             resolvedConnection = try Self.openStore(at: fileURL)
         } catch let error as SQLiteHistoryError where error.isRecoverableCorruption {
             do {
-                let preserved = try SQLiteHistoryCorruptionRecovery
+                let preserved =
+                    try SQLiteHistoryCorruptionRecovery
                     .preserveCorruptedDatabase(at: fileURL)
                 pruning = preserved.pruning
                 resolvedConnection = try Self.openStore(at: fileURL)
@@ -96,11 +97,13 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         fileManager: FileManager = .default,
         applicationDirectoryName: String = "Speaker"
     ) -> URL {
-        let baseDirectory = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.homeDirectoryForCurrentUser
-        return baseDirectory
+        let baseDirectory =
+            fileManager.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.homeDirectoryForCurrentUser
+        return
+            baseDirectory
             .appendingPathComponent(applicationDirectoryName, isDirectory: true)
             .appendingPathComponent("history.sqlite3", isDirectory: false)
     }
@@ -116,7 +119,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             }
             return
         }
-        guard retentionPolicy.savesNewRecords
+        guard
+            retentionPolicy.savesNewRecords
                 || !loadRecords(
                     whereClause: "WHERE session_id = ?",
                     binding: record.sessionID.rawValue.uuidString
@@ -166,12 +170,14 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             defer { statement.finalize() }
             while try statement.step() {
                 guard statement.int32(at: 1) == SQLiteHistorySchema.version,
-                      let payload = statement.blob(at: 0)
+                    let payload = statement.blob(at: 0)
                 else { continue }
-                guard let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
-                    HistoryRecordV1.self,
-                    from: payload
-                ), let record = try? stored.domainRecord else { continue }
+                guard
+                    let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
+                        HistoryRecordV1.self,
+                        from: payload
+                    ), let record = try? stored.domainRecord
+                else { continue }
                 guard SessionHistoryRecordPolicy.shouldRetain(record)
                 else { continue }
                 accumulator.add(record)
@@ -347,11 +353,11 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     public func persistenceFailureNotice() async -> LocalHistoryPersistenceNotice? {
         switch visibleNotice {
-        case let .privacyMigrationFailed(reason):
+        case .privacyMigrationFailed(let reason):
             return .privacyMigrationFailed(reason: reason)
-        case let .writeFailed(reason):
+        case .writeFailed(let reason):
             return .writeFailed(reason: reason)
-        case let .corruptedRecordsSkipped(count):
+        case .corruptedRecordsSkipped(let count):
             return .corruptedRecordsSkipped(count: count)
         // Preserved evidence and an unpruned archive directory are both
         // reported through the History page instead of this urgent surface.
@@ -442,10 +448,12 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 let expectedPayload = try SQLiteHistorySchema.payloadEncoder.encode(
                     HistoryRecordV1(expectedRecord)
                 )
-                guard try storedPayload(
-                    sessionID: expectedRecord.sessionID,
-                    on: connection
-                ) == expectedPayload else {
+                guard
+                    try storedPayload(
+                        sessionID: expectedRecord.sessionID,
+                        on: connection
+                    ) == expectedPayload
+                else {
                     throw SQLiteHistoryError.encoding
                 }
             }
@@ -522,7 +530,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     ) -> [VoiceInputHistoryRecord] {
         guard let connection = openConnection else { return [] }
         do {
-            let sql = "SELECT payload, payload_schema FROM history_records \(whereClause ?? "") ORDER BY started_at DESC, session_id DESC"
+            let sql =
+                "SELECT payload, payload_schema FROM history_records \(whereClause ?? "") ORDER BY started_at DESC, session_id DESC"
             let statement = try connection.prepare(sql)
             defer { statement.finalize() }
             if let binding { try statement.bind(binding, at: 1) }
@@ -585,13 +594,14 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             stage = "preparing"
         case .recording:
             stage = "recording"
-        case let .processing(_, processingStage, _):
-            stage = switch processingStage {
-            case .capturingTarget: "capturingTarget"
-            case .transcribing: "transcribing"
-            case .refining: "refining"
-            case .delivering: "delivering"
-            }
+        case .processing(_, let processingStage, _):
+            stage =
+                switch processingStage {
+                case .capturingTarget: "capturingTarget"
+                case .transcribing: "transcribing"
+                case .refining: "refining"
+                case .delivering: "delivering"
+                }
         case .idle, .delivered, .pendingCopy, .cancelled, .failed:
             return nil
         }
@@ -644,7 +654,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     private func count() -> Int {
         guard let connection = openConnection,
-              let statement = try? connection.prepare("SELECT COUNT(*) FROM history_records")
+            let statement = try? connection.prepare("SELECT COUNT(*) FROM history_records")
         else { return 0 }
         defer { statement.finalize() }
         guard (try? statement.step()) == true else { return 0 }
@@ -654,11 +664,12 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     private func prune(now: Date, on connection: SQLiteConnection) throws -> Bool {
         var deletedRecord = false
         if let days = retentionPolicy.maximumAgeDays,
-           let cutoff = Calendar(identifier: .gregorian).date(
-               byAdding: .day,
-               value: -days,
-               to: now
-           ) {
+            let cutoff = Calendar(identifier: .gregorian).date(
+                byAdding: .day,
+                value: -days,
+                to: now
+            )
+        {
             let statement = try connection.prepare(
                 "DELETE FROM history_records WHERE started_at < ?"
             )

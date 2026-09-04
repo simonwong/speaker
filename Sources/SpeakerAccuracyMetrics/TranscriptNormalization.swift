@@ -17,8 +17,9 @@ public enum TranscriptNormalizer {
         for (index, scalar) in scalars.enumerated() {
             if isApostrophe(scalar) {
                 if index > 0, index + 1 < scalars.count,
-                   isLatinLetter(scalars[index - 1]),
-                   isLatinLetter(scalars[index + 1]) {
+                    isLatinLetter(scalars[index - 1]),
+                    isLatinLetter(scalars[index + 1])
+                {
                     output.append("'")
                 } else {
                     output.append(" ")
@@ -52,9 +53,9 @@ public enum TranscriptNormalizer {
         if scalar.properties.isWhitespace { return true }
         switch scalar.properties.generalCategory {
         case .connectorPunctuation, .dashPunctuation, .openPunctuation,
-             .closePunctuation, .initialPunctuation, .finalPunctuation,
-             .otherPunctuation, .mathSymbol, .currencySymbol, .modifierSymbol,
-             .otherSymbol, .control, .format:
+            .closePunctuation, .initialPunctuation, .finalPunctuation,
+            .otherPunctuation, .mathSymbol, .currencySymbol, .modifierSymbol,
+            .otherSymbol, .control, .format:
             return true
         default:
             return false

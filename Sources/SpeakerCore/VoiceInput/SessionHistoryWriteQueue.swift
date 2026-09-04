@@ -15,10 +15,11 @@ struct TerminalHistoryPresentation: Sendable {
 /// newer write replaced it is ignored. The owner drives shutdown convergence
 /// through `firstPending` and `discard(_:for:)` until the queue is empty.
 struct SessionHistoryWriteQueue {
-    typealias Completion = @Sendable (
-        _ token: UUID,
-        _ persistenceNotice: LocalHistoryPersistenceNotice?
-    ) async -> Void
+    typealias Completion =
+        @Sendable (
+            _ token: UUID,
+            _ persistenceNotice: LocalHistoryPersistenceNotice?
+        ) async -> Void
 
     private var tasks: [VoiceInputSessionID: Task<Void, Never>] = [:]
     private var tokens: [VoiceInputSessionID: UUID] = [:]
@@ -46,7 +47,8 @@ struct SessionHistoryWriteQueue {
         let task = Task {
             await previous?.value
             await history.save(record)
-            let persistenceNotice = reportsPersistenceFailure
+            let persistenceNotice =
+                reportsPersistenceFailure
                 ? await history.persistenceFailureNotice()
                 : nil
             await completion(token, persistenceNotice)
