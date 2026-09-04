@@ -3124,7 +3124,7 @@ struct SpeakerAppScenarioSpecs {
             "recording limit guidance reaches the production HUD and menu state",
             failures: &failures
         ) {
-            let deadline = ScenarioRecordingDeadline()
+            let clock = ScenarioVoiceInputClock()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
@@ -3136,9 +3136,7 @@ struct SpeakerAppScenarioSpecs {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
                 maximumRecordingDuration: .seconds(600),
-                sleepUntilRecordingLimit: { duration in
-                    try await deadline.sleep(for: duration)
-                }
+                clock: clock
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
@@ -3148,8 +3146,8 @@ struct SpeakerAppScenarioSpecs {
 
             experience.shortcutTarget.receive(.pressed)
             _ = await waitUntil { experience.state.isRecording }
-            await deadline.waitUntilStarted()
-            await deadline.fire()
+            await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(600))
             let presented = await waitUntil {
                 experience.state.diagnosticCode
                     == "failed.recordingLimitReached"
@@ -3313,24 +3311,68 @@ private func refinementFallbackProcessor() -> VoiceTextProcessorFake {
     )
 }
 
-private actor ScenarioRecordingDeadline {
-    private var continuation: CheckedContinuation<Void, Error>?
-    private var started = false
+/// A clock the scenario advances by hand. Sleepers resume only when the
+/// clock passes their deadline, so a recording limit fires exactly when the
+/// scenario says it does.
+private final class ScenarioVoiceInputClock: VoiceInputClock, @unchecked Sendable {
+    private struct Sleeper {
+        let deadline: Duration
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private let lock = NSLock()
+    private var now: Duration = .zero
+    private var sleepers: [Sleeper] = []
+
+    var monotonicNow: Duration {
+        lock.withLock { now }
+    }
+
+    var date: Date {
+        Date(timeIntervalSinceReferenceDate: 0)
+            .addingTimeInterval(monotonicNow.timeInterval)
+    }
 
     func sleep(for duration: Duration) async throws {
-        started = true
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.withLock {
+                    sleepers.append(
+                        Sleeper(deadline: now + duration, continuation: continuation)
+                    )
+                }
+            }
+        } onCancel: {
+            let cancelled = lock.withLock {
+                let cancelled = sleepers
+                sleepers.removeAll()
+                return cancelled
+            }
+            for sleeper in cancelled {
+                sleeper.continuation.resume(throwing: CancellationError())
+            }
         }
     }
 
-    func waitUntilStarted() async {
-        while !started { await Task.yield() }
+    func advance(by duration: Duration) {
+        let due = lock.withLock {
+            now += duration
+            let due = sleepers.filter { $0.deadline <= now }
+            sleepers.removeAll { $0.deadline <= now }
+            return due
+        }
+        for sleeper in due { sleeper.continuation.resume() }
     }
 
-    func fire() {
-        continuation?.resume()
-        continuation = nil
+    func waitUntilSleeping(count: Int) async {
+        while lock.withLock({ sleepers.count }) < count { await Task.yield() }
+    }
+}
+
+extension Duration {
+    fileprivate var timeInterval: TimeInterval {
+        let (seconds, attoseconds) = components
+        return TimeInterval(seconds) + TimeInterval(attoseconds) / 1e18
     }
 }
 
