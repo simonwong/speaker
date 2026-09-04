@@ -25,6 +25,8 @@ final class ClipboardPasteboardFake {
     private let failedReplacementItems: [[String: Data]]?
     private let externalItemsAfterReplacement: [[String: Data]]?
     private let unreadableTypes: Set<String>
+    private let mutatesWhileReadingRepresentations: Bool
+    private var didMutateWhileReading = false
 
     init(
         items: [[String: Data]],
@@ -32,7 +34,8 @@ final class ClipboardPasteboardFake {
         replacementReadback: String? = nil,
         failedReplacementItems: [[String: Data]]? = nil,
         externalItemsAfterReplacement: [[String: Data]]? = nil,
-        unreadableTypes: Set<String> = []
+        unreadableTypes: Set<String> = [],
+        mutatesWhileReadingRepresentations: Bool = false
     ) {
         self.items = items
         self.replacementWriteSucceeds = replacementWriteSucceeds
@@ -40,6 +43,8 @@ final class ClipboardPasteboardFake {
         self.failedReplacementItems = failedReplacementItems
         self.externalItemsAfterReplacement = externalItemsAfterReplacement
         self.unreadableTypes = unreadableTypes
+        self.mutatesWhileReadingRepresentations =
+            mutatesWhileReadingRepresentations
     }
 
     var access: ClipboardPasteboardAccess {
@@ -53,6 +58,14 @@ final class ClipboardPasteboardFake {
             },
             data: { itemIndex, type in
                 guard !self.unreadableTypes.contains(type) else { return nil }
+                if self.mutatesWhileReadingRepresentations,
+                   !self.didMutateWhileReading
+                {
+                    // Another application copied while Speaker was still
+                    // materializing representations.
+                    self.didMutateWhileReading = true
+                    self.changeCount += 1
+                }
                 return self.items[itemIndex][type]
             },
             clearContents: {
