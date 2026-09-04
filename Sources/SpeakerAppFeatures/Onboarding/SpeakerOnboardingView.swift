@@ -9,6 +9,7 @@ package struct SpeakerOnboardingView: View {
     let requestPermission: (PermissionKind) async -> Void
     let refreshPermissions: () -> Void
     let announce: AccessibilityAnnounce
+    let buildInfo: SpeakerBuildInfoReader
 
     package init(
         permissions: PermissionModel,
@@ -16,6 +17,7 @@ package struct SpeakerOnboardingView: View {
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
         announce: @escaping AccessibilityAnnounce,
+        buildInfo: SpeakerBuildInfoReader = .main,
         completion: @escaping () -> Void
     ) {
         self.permissions = permissions
@@ -24,6 +26,7 @@ package struct SpeakerOnboardingView: View {
         self.requestPermission = requestPermission
         self.refreshPermissions = refreshPermissions
         self.announce = announce
+        self.buildInfo = buildInfo
     }
 
     private var ready: Bool {
@@ -43,11 +46,7 @@ package struct SpeakerOnboardingView: View {
     }
 
     private var signingMode: SpeakerSigningMode {
-        SpeakerSigningMode(
-            infoValue: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSigningMode"
-            ) as? String
-        )
+        buildInfo.signingMode
     }
 
     package var body: some View {
@@ -146,9 +145,7 @@ package struct SpeakerOnboardingView: View {
 
                     Link(
                         "在火山引擎控制台获取 Key",
-                        destination: URL(
-                            string: "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default"
-                        )!
+                        destination: ExternalLinks.doubaoConsoleAPIKeys
                     )
                     .font(.caption)
                 }
@@ -233,10 +230,11 @@ package struct SpeakerOnboardingView: View {
     }
 
     private var providerStatus: some View {
-        StatusBadge(
-            text: connectionStatusText,
-            icon: connectionStatusIcon,
-            color: connectionStatusColor
+        let status = DoubaoStatusPresentation(status: doubao.status)
+        return StatusBadge(
+            text: status.text,
+            icon: status.symbolName,
+            color: status.tint
         )
     }
 
@@ -348,38 +346,6 @@ package struct SpeakerOnboardingView: View {
             SettingsNotice(text: "连接成功，当前资源可以使用。", color: .green)
         case .failure:
             SettingsNotice(text: doubao.summary, color: .red)
-        }
-    }
-
-    private var connectionStatusText: String {
-        switch doubao.status {
-        case .success: "连接成功"
-        case .checking: "检查中"
-        case .failure: "连接失败"
-        case .configured: "待验证"
-        case .loading: "读取中"
-        case .unconfigured: "待配置"
-        }
-    }
-
-    private var connectionStatusIcon: String {
-        switch doubao.status {
-        case .success: "checkmark.circle.fill"
-        case .checking: "arrow.triangle.2.circlepath"
-        case .failure: "xmark.circle.fill"
-        case .configured: "exclamationmark.circle.fill"
-        case .loading: "clock"
-        case .unconfigured: "ellipsis"
-        }
-    }
-
-    private var connectionStatusColor: Color {
-        switch doubao.status {
-        case .success: .green
-        case .checking: .blue
-        case .failure: .red
-        case .configured, .unconfigured: .orange
-        case .loading: .secondary
         }
     }
 

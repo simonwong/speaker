@@ -252,29 +252,7 @@ package struct DataErasureRecoveryView: View {
         guard case let .failed(failure) = dataErasure.state else {
             return "Speaker 正在完成剩余的清除步骤。"
         }
-        return Self.failureMessage(failure)
-    }
-
-    static func failureMessage(
-        _ failure: SpeakerDataErasureFailure
-    ) -> String {
-        guard let issue = failure.issues.first else {
-            return "本地数据未能全部清除，请重试。"
-        }
-        return switch issue.reason {
-        case .accessDenied:
-            "macOS 拒绝删除部分数据，请检查文件权限后重试。"
-        case .interactionUnavailable:
-            "无法访问凭据存储，请解锁 Mac 后重试。"
-        case .busy:
-            "本地历史仍在使用中，未删除数据库。请重试。"
-        case .unsafePath:
-            "待删除路径未通过安全校验，Speaker 已停止清除。"
-        case .verificationMismatch:
-            "清除结果未通过验证，Speaker 没有报告成功；请重试。"
-        case .io:
-            "部分本地数据无法删除，请关闭可能占用文件的程序后重试。"
-        }
+        return SpeakerCopy.LocalDataErase.failureMessage(failure)
     }
 }
 
@@ -785,10 +763,6 @@ package struct AboutView: View {
     }
 }
 
-private let speakerRepositoryURL = URL(
-    string: "https://github.com/simonwong/speaker"
-)!
-
 private struct AboutSettingsPage: View {
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
     let routeEffects: SettingsRouteEffects
@@ -854,7 +828,7 @@ private struct AboutSettingsPage: View {
             SettingsRowDivider()
 
             HStack {
-                if let privacyPolicyURL = Self.privacyPolicyURL {
+                if let privacyPolicyURL = ExternalLinks.privacyPolicy {
                     Button("查看完整隐私说明") {
                         routeEffects.openURL(privacyPolicyURL)
                     }
@@ -894,7 +868,7 @@ private struct AboutSettingsPage: View {
             SettingsRowDivider()
 
             SpeakerRow("源码", detail: "github.com/simonwong/speaker") {
-                Link(destination: speakerRepositoryURL) {
+                Link(destination: ExternalLinks.speakerRepository) {
                     Label {
                         Text("在 GitHub 查看")
                             .font(SpeakerTypography.caption)
@@ -909,13 +883,6 @@ private struct AboutSettingsPage: View {
                 .help("在 GitHub 查看 Speaker")
             }
         }
-    }
-
-    private static var privacyPolicyURL: URL? {
-        Bundle.main.url(
-            forResource: "PRIVACY",
-            withExtension: "md"
-        )
     }
 }
 
@@ -1005,13 +972,10 @@ private struct GestureHint: View {
 private struct PermissionSettingsPage: View {
     @ObservedObject var permissions: PermissionModel
     let requestPermission: (PermissionKind) async -> Void
+    var buildInfo = SpeakerBuildInfoReader.main
 
     private var signingMode: SpeakerSigningMode {
-        SpeakerSigningMode(
-            infoValue: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSigningMode"
-            ) as? String
-        )
+        buildInfo.signingMode
     }
 
     var body: some View {
@@ -1137,17 +1101,15 @@ private struct DoubaoSettingsCard: View {
         ) {
             HStack {
                 StatusBadge(
-                    text: statusText,
-                    icon: statusIcon,
-                    color: statusColor
+                    text: status.text,
+                    icon: status.symbolName,
+                    color: status.tint
                 )
                 .help(model.summary)
                 Spacer()
                 Link(
                     "打开豆包控制台",
-                    destination: URL(
-                        string: "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default"
-                    )!
+                    destination: ExternalLinks.doubaoConsoleAPIKeys
                 )
                 .font(SpeakerTypography.caption)
             }
@@ -1252,35 +1214,8 @@ private struct DoubaoSettingsCard: View {
         if case .checking = model.status { true } else { false }
     }
 
-    private var statusIcon: String {
-        switch model.status {
-        case .loading: "clock"
-        case .unconfigured: "key.slash"
-        case .configured: "checkmark.shield"
-        case .checking: "arrow.triangle.2.circlepath"
-        case .success: "checkmark.circle.fill"
-        case .failure: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var statusText: String {
-        switch model.status {
-        case .loading: "正在读取本机配置"
-        case .unconfigured: "未配置"
-        case .configured: "已配置"
-        case .checking: "正在检查连接"
-        case .success: "连接成功"
-        case .failure: model.summary
-        }
-    }
-
-    private var statusColor: Color {
-        switch model.status {
-        case .success, .configured: .green
-        case .failure: .red
-        case .checking: .blue
-        case .loading, .unconfigured: .secondary
-        }
+    private var status: DoubaoStatusPresentation {
+        DoubaoStatusPresentation(status: model.status)
     }
 }
 
@@ -1311,9 +1246,7 @@ private struct DeepSeekSettingsCard: View {
                 Spacer()
                 Link(
                     "打开 DeepSeek 平台",
-                    destination: URL(
-                        string: "https://platform.deepseek.com/api_keys"
-                    )!
+                    destination: ExternalLinks.deepSeekAPIKeys
                 )
                 .font(SpeakerTypography.caption)
             }

@@ -659,6 +659,82 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        run(
+            "every surface reads one Doubao status presentation",
+            failures: &failures
+        ) {
+            let checking = DoubaoStatusPresentation(status: .checking)
+            try expect(checking.text == "正在检查连接")
+            try expect(checking.symbolName == "arrow.triangle.2.circlepath")
+
+            try expect(
+                DoubaoStatusPresentation(status: .loading).text
+                    == "正在读取本机配置"
+            )
+            try expect(
+                DoubaoStatusPresentation(status: .unconfigured).symbolName
+                    == "key.slash"
+            )
+            try expect(
+                DoubaoStatusPresentation(status: .configured).text == "已配置"
+            )
+            try expect(
+                DoubaoStatusPresentation(status: .success("id")).text
+                    == "连接成功"
+            )
+            try expect(
+                DoubaoStatusPresentation(status: .failure("网络中断")).text
+                    == "网络中断"
+            )
+        }
+
+        run(
+            "every erase entry point explains a reason with one sentence",
+            failures: &failures
+        ) {
+            let failure = SpeakerDataErasureFailure(
+                issues: [
+                    .init(stage: .caches, reason: .unsafePath),
+                    .init(stage: .preferences, reason: .io),
+                ],
+                remaining: [.caches]
+            )
+
+            try expect(
+                SpeakerCopy.LocalDataErase.failureMessage(failure)
+                    == SpeakerCopy.LocalDataErase.message(for: .unsafePath)
+            )
+            try expect(
+                SpeakerCopy.LocalDataErase.failureMessage(
+                    SpeakerDataErasureFailure(issues: [], remaining: [])
+                ) == SpeakerCopy.LocalDataErase.incomplete
+            )
+        }
+
+        run(
+            "build info reads signing mode and version from one bundle reader",
+            failures: &failures
+        ) {
+            let reader = SpeakerBuildInfoReader { key in
+                switch key {
+                case "SpeakerSigningMode": "developer-id"
+                case "CFBundleShortVersionString": "1.2.3"
+                case "CFBundleVersion": "45"
+                case "SpeakerSourceRevision": "abc123"
+                default: nil
+                }
+            }
+
+            try expect(reader.signingMode == .developerID)
+            try expect(
+                reader.buildIdentity.displayText
+                    == "版本 1.2.3（45）· 源码 abc123"
+            )
+            try expect(
+                SpeakerBuildInfoReader { _ in nil }.signingMode == .unknown
+            )
+        }
+
         run("build signing mode exposes the permission identity boundary", failures: &failures) {
             let adHoc = SpeakerSigningMode(infoValue: "development-ad-hoc")
             try expect(adHoc == .developmentAdHoc)

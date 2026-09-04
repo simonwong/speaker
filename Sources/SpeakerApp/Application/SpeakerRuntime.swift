@@ -175,11 +175,7 @@ final class SpeakerRuntime: ObservableObject {
         )
         let bundleIdentifier = Bundle.main.bundleIdentifier
             ?? "com.local.speaker"
-        let signingMode = SpeakerSigningMode(
-            infoValue: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSigningMode"
-            ) as? String
-        )
+        let signingMode = SpeakerBuildInfoReader.main.signingMode
         softwareUpdate = SoftwareUpdateFeature(
             configuration: .init(
                 signingMode: signingMode,
@@ -372,7 +368,7 @@ final class SpeakerRuntime: ObservableObject {
                 if case let .incomplete(failure) = outcome {
                     self.mainWindow.select(.about)
                     self.diagnostics.publish(
-                        Self.dataErasureMessage(for: failure)
+                        SpeakerCopy.LocalDataErase.failureMessage(failure)
                     )
                 }
             }
@@ -555,11 +551,7 @@ final class SpeakerRuntime: ObservableObject {
         let credentialStorage = Bundle.main.object(
             forInfoDictionaryKey: "SpeakerCredentialStorage"
         ) as? String ?? "unknown"
-        let signingMode = SpeakerSigningMode(
-            infoValue: Bundle.main.object(
-                forInfoDictionaryKey: "SpeakerSigningMode"
-            ) as? String
-        )
+        let signingMode = SpeakerBuildInfoReader.main.signingMode
         let activity = voiceInput.state.diagnosticCode
         let historyNotice: String = switch historyStatus.notice {
         case nil: "none"
@@ -695,28 +687,6 @@ final class SpeakerRuntime: ObservableObject {
         await voiceInput.shutdown()
         await startupTask?.value
         await shortcut.flushPersistence()
-    }
-
-    private static func dataErasureMessage(
-        for failure: SpeakerDataErasureFailure
-    ) -> String {
-        guard let issue = failure.issues.first else {
-            return "本地数据未能全部清除，请重试。"
-        }
-        return switch issue.reason {
-        case .accessDenied:
-            "macOS 拒绝删除部分 Speaker 数据，请检查文件权限后重试。"
-        case .interactionUnavailable:
-            "凭据存储当前不可用，请解锁 Mac 后重试清除。"
-        case .busy:
-            "本地历史仍在使用中，Speaker 未删除数据库；请重试。"
-        case .unsafePath:
-            "Speaker 拒绝删除未通过安全校验的路径。"
-        case .verificationMismatch:
-            "清除结果未通过验证，Speaker 已保留重试状态。"
-        case .io:
-            "部分 Speaker 本地数据无法删除，请关闭占用后重试。"
-        }
     }
 
 #if DEBUG
