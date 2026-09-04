@@ -647,18 +647,6 @@ package struct PCMChunkBuffer: Sendable {
     }
 }
 
-public struct LocalPreviewTranscriber: SpeechTranscribing {
-    private let text: String
-
-    public init(text: String = "本地语音输入 tracer 已完成。") {
-        self.text = text
-    }
-
-    public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
-        TranscriptionResult(text: text, providerRequestID: "local-preview")
-    }
-}
-
 package struct ClipboardPasteboardAccess: Sendable {
     let changeCount: @MainActor @Sendable () -> Int
     let itemCount: @MainActor @Sendable () -> Int
