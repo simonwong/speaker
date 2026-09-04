@@ -188,7 +188,7 @@ package enum VoiceInputVisualScenario: String, Sendable {
 /// hidden behind this seam.
 @MainActor
 package final class VoiceInputExperience: ObservableObject {
-    package typealias Announce = @MainActor (String) -> Void
+    package typealias Announce = AccessibilityAnnounce
 
     @Published package private(set) var state = VoiceInputExperienceState.idle
     package let shortcutTarget: VoiceTriggerTarget

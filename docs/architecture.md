@@ -55,7 +55,9 @@ The implementation owns the trigger dispatcher, hold/short-press gesture, synchr
 
 `SettingsNavigationModel` is the single page-selection source for the six settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
 
-`OnboardingPresentation` owns permission actions, provider-check availability, resource selection, and completion rules. Production window configuration comes from a dedicated factory that the AppKit specifications exercise through the same interface.
+`OnboardingPresentation` owns permission actions, provider-check availability, resource selection, and completion rules. The onboarding view, its copy, and its SF Symbols live in the application feature module; the App scene keeps only the window controller. Production window configuration comes from a dedicated factory that the AppKit specifications exercise through the same interface.
+
+`AccessibilityAnnounce` names the single accessibility announcement seam. Voice Input, the shortcut coordinator, and onboarding hand messages to an injected closure; the App scene owns the one `NSAccessibility` announcement post behind it.
 
 `PermissionRefreshCoordinator` turns an external macOS permission change and shortcut recovery into one ordered operation. It observes Speaker and workspace-application activation so returning from System Settings can restore the shortcut without first activating Speaker.
 

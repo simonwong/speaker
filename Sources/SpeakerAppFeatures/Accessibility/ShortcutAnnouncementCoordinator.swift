@@ -3,7 +3,7 @@ import SpeakerCore
 
 @MainActor
 package final class ShortcutAnnouncementCoordinator {
-    package typealias Announce = @MainActor (String) -> Void
+    package typealias Announce = AccessibilityAnnounce
 
     private var cancellables = Set<AnyCancellable>()
 

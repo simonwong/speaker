@@ -614,6 +614,7 @@ final class SpeakerRuntime: ObservableObject {
             doubao: doubaoSettings,
             requestPermission: requestOnboardingPermission,
             refreshPermissions: refreshPermissions,
+            announce: Self.announceAccessibility,
             completion: { [weak self] in self?.completeOnboarding() }
         )
         onboardingController = controller
