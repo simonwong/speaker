@@ -14,8 +14,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  verify:
-    name: Test, build, and bundle
+  # The fast lane a pull request waits on: deterministic specifications, the
+  # shell contract tests, the warnings-as-errors builds, and the formatting
+  # check. It gates the slow bundling lane below, so a broken specification is
+  # reported in minutes instead of after a release build and an install.
+  specifications:
+    name: Specifications, warnings, and formatting
     runs-on: macos-26
     timeout-minutes: 20
     env:
@@ -44,6 +48,28 @@ jobs:
           echo "SPEAKER_SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
           echo "Selected SDK: $SDK_CANONICAL_NAME ($SDK_PATH)"
 
+      # SwiftPM build products are reusable only for the exact resolved
+      # dependency graph, so the key carries the Package.resolved hash. The
+      # commit suffix keeps every run publishing a fresh incremental cache while
+      # the prefix restore key still matches the newest cache for that graph.
+      # The slow lane deliberately does not restore this cache: it builds the
+      # release bundle in an isolated scratch path.
+      - name: Cache SwiftPM build products
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-
+
+      # The repository is not formatted to this configuration yet, so the check
+      # reports findings without failing the job. Reformatting the tree and
+      # making this step blocking lands in a later ticket; this one only adds
+      # the check and the root .swift-format configuration.
+      - name: Check Swift formatting
+        continue-on-error: true
+        run: swift format lint --strict --parallel --recursive Sources Tests
+
       - name: Run deterministic specifications
         run: ./scripts/test
 
@@ -68,6 +94,44 @@ jobs:
           --configuration release
           --product SpeakerApp
           -Xswiftc -warnings-as-errors
+
+      - name: Check scripts and patch hygiene
+        run: |
+          zsh -n scripts/*
+          git diff --check
+
+  # The slow lane, gated by the fast one. `Test, build, and bundle` is the
+  # required status check on main; keep this name.
+  verify:
+    name: Test, build, and bundle
+    needs: specifications
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Record toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          SDK_CANONICAL_NAME="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CanonicalName' \
+              "$SDK_PATH/SDKSettings.plist"
+          )"
+          SDK_MAJOR="${SDK_CANONICAL_NAME#macosx}"
+          SDK_MAJOR="${SDK_MAJOR%%.*}"
+          test "$SDK_MAJOR" -ge 26
+          echo "SPEAKER_SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
+          echo "Selected SDK: $SDK_CANONICAL_NAME ($SDK_PATH)"
 
       - name: Build and validate isolated release bundle
         env:
@@ -120,11 +184,6 @@ jobs:
 
       - name: Verify reviewed release identity guard
         run: ./scripts/test-release-identity
-
-      - name: Check scripts and patch hygiene
-        run: |
-          zsh -n scripts/*
-          git diff --check
 
   development-prerelease:
     name: Publish development prerelease
