@@ -123,21 +123,20 @@ private struct AboutSettingsPage: View {
 
             SettingsRowDivider()
 
-            SpeakerRow("源码", detail: "github.com/simonwong/speaker") {
-                Link(destination: ExternalLinks.speakerRepository) {
-                    Label {
-                        Text("在 GitHub 查看")
-                            .font(SpeakerTypography.caption)
-                    } icon: {
-                        GitHubMark()
-                            .fill(Color.primary)
-                            .frame(width: 14, height: 14)
-                    }
+            Link(destination: ExternalLinks.speakerRepository) {
+                Label {
+                    Text("在 GitHub 查看")
+                        .font(SpeakerTypography.caption)
+                } icon: {
+                    GitHubMark()
+                        .fill(Color.primary)
+                        .frame(width: 14, height: 14)
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("在 GitHub 查看 Speaker")
-                .help("在 GitHub 查看 Speaker")
             }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilityLabel("在 GitHub 查看 Speaker")
+            .help("在 GitHub 查看 Speaker")
         }
     }
 }
