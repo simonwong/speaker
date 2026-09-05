@@ -12,7 +12,7 @@ Writing a custom updater would mean re-implementing signature verification, atom
 
 ## Decision
 
-Speaker updates through Sparkle, pinned in `Package.swift` as `exact: "2.9.4"`. The dependency is attached only to the `SpeakerApp` target; `SpeakerCore` and `SpeakerAppFeatures` never import Sparkle. A newer Sparkle arrives only through a reviewed dependency-update pull request that moves the pin to another exact version; Speaker never tracks `2.x`, a branch, or a prerelease.
+Speaker updates through Sparkle, pinned in `Package.swift` as `exact: "2.9.6"`. The dependency is attached only to the `SpeakerApp` target; `SpeakerCore` and `SpeakerAppFeatures` never import Sparkle. A newer Sparkle arrives only through a reviewed dependency-update pull request that moves the pin to another exact version; Speaker never tracks `2.x`, a branch, or a prerelease.
 
 The update chain has three independent verifications, and each one answers a different question:
 

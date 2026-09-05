@@ -98,16 +98,26 @@ jobs:
           git diff --check
 
   # The slow lane, gated by the fast one. `Test, build, and bundle` is the
-  # required status check on main; keep this name.
+  # required status check on main; keep this name. The job runs even when the
+  # fast lane fails and reports that failure itself: branch protection treats
+  # a skipped required check as passing, so skipping here would let a broken
+  # specification merge.
   verify:
     name: Test, build, and bundle
     needs: specifications
+    if: ${{ !cancelled() }}
     runs-on: macos-26
     timeout-minutes: 20
     env:
       CI: "true"
 
     steps:
+      - name: Require the fast lane to pass
+        if: ${{ needs.specifications.result != 'success' }}
+        run: |
+          echo "::error::Specifications, warnings, and formatting did not pass (${{ needs.specifications.result }})."
+          exit 1
+
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
