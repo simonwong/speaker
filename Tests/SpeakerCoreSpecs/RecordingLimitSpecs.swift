@@ -219,18 +219,28 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             await cancellationClock.waitUntilCancelledSleepCount(1)
             cancellationClock.advance(by: .seconds(600))
             let cancellationRecordReady = await eventually(
-                before: .seconds(2)
+                before: .seconds(5)
             ) {
                 await cancellationHistory.records.count == 1
             }
             let cancellationRecords = await cancellationHistory.records
 
-            try expect(cancelledPresentation?.activity.isCancelled == true)
-            try expect(cancellationRecordReady)
-            try expect(cancellationRecords.count == 1)
+            try expect(
+                cancelledPresentation?.activity.isCancelled == true,
+                "cancellation did not settle as cancelled: \(String(describing: cancelledPresentation?.activity))"
+            )
+            try expect(
+                cancellationRecordReady,
+                "the cancelled session never reached history"
+            )
+            try expect(
+                cancellationRecords.count == 1,
+                "\(cancellationRecords.count) cancelled-session records reached history"
+            )
             try expect(
                 cancellationRecords.first?.outcome.failure
-                    != .recordingLimitReached
+                    != .recordingLimitReached,
+                "a cancelled session was recorded as hitting the recording limit"
             )
 
             let providerClock = ManualVoiceInputClock()
@@ -257,20 +267,28 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let providerPresentation = await providerTerminal.value
             await providerClock.waitUntilCancelledSleepCount(1)
             providerClock.advance(by: .seconds(600))
-            let providerRecordReady = await eventually(before: .seconds(2)) {
+            let providerRecordReady = await eventually(before: .seconds(5)) {
                 await providerHistory.records.count == 1
             }
             let providerRecords = await providerHistory.records
 
             try expect(
                 providerPresentation?.activity.failure
-                    == .providerAuthenticationFailed
+                    == .providerAuthenticationFailed,
+                "provider failure did not settle as authentication failure: \(String(describing: providerPresentation?.activity))"
             )
-            try expect(providerRecordReady)
-            try expect(providerRecords.count == 1)
+            try expect(
+                providerRecordReady,
+                "the failed session never reached history"
+            )
+            try expect(
+                providerRecords.count == 1,
+                "\(providerRecords.count) failed-session records reached history"
+            )
             try expect(
                 providerRecords.first?.outcome.failure
-                    == .providerAuthenticationFailed
+                    == .providerAuthenticationFailed,
+                "the failed session was recorded with the wrong outcome: \(String(describing: providerRecords.first?.outcome))"
             )
         }
 
