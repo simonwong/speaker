@@ -17,8 +17,8 @@ final class ManualVoiceInputClock: VoiceInputClock, @unchecked Sendable {
     private let lock = NSLock()
     private let honoursCancellation: Bool
     private var now: Duration
-    private var sleepers: [Int: Sleeper] = [:]
-    private var requests: [Duration] = []
+    private var sleepers: [UUID: Sleeper] = [:]
+    private var requests: [(id: UUID, duration: Duration)] = []
     private var cancelledCount = 0
 
     init(honoursCancellation: Bool = true, startingAt now: Duration = .zero) {
@@ -36,7 +36,7 @@ final class ManualVoiceInputClock: VoiceInputClock, @unchecked Sendable {
 
     /// Every duration requested so far, in arrival order, cancelled or not.
     var sleepRequests: [Duration] {
-        lock.withLock { requests }
+        lock.withLock { requests.map(\.duration) }
     }
 
     var sleepRequestCount: Int {
@@ -54,13 +54,11 @@ final class ManualVoiceInputClock: VoiceInputClock, @unchecked Sendable {
     }
 
     func sleep(for duration: Duration) async throws {
-        let requestID = lock.withLock {
-            requests.append(duration)
-            return requests.count - 1
-        }
+        let requestID = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let alreadyCancelled = lock.withLock {
+                    requests.append((id: requestID, duration: duration))
                     if honoursCancellation, Task.isCancelled {
                         cancelledCount += 1
                         return true
@@ -101,22 +99,37 @@ final class ManualVoiceInputClock: VoiceInputClock, @unchecked Sendable {
     /// Resumes one sleep request by its order of arrival whether or not its
     /// deadline has passed. Returns false when that request is not suspended.
     @discardableResult
-    func resume(sleepRequest requestID: Int) -> Bool {
-        let sleeper = lock.withLock { sleepers.removeValue(forKey: requestID) }
+    func resume(sleepRequest requestIndex: Int) -> Bool {
+        let sleeper: Sleeper? = lock.withLock {
+            guard requests.indices.contains(requestIndex) else { return nil }
+            return sleepers.removeValue(forKey: requests[requestIndex].id)
+        }
         sleeper?.continuation.resume()
         return sleeper != nil
     }
 
-    func waitUntilSleepRequestCount(_ expected: Int) async {
-        while sleepRequestCount < expected { await Task.yield() }
+    func waitUntilSleepRequestCount(_ expected: Int, before timeout: Duration = .seconds(2))
+        async throws
+    {
+        let ready = await eventually(before: timeout) { self.sleepRequestCount >= expected }
+        try expect(
+            ready, "expected \(expected) registered clock sleeps, observed \(sleepRequestCount)")
     }
 
-    func waitUntilPendingSleepCount(_ expected: Int) async {
-        while pendingSleepCount < expected { await Task.yield() }
+    func waitUntilPendingSleepCount(_ expected: Int, before timeout: Duration = .seconds(2))
+        async throws
+    {
+        let ready = await eventually(before: timeout) { self.pendingSleepCount >= expected }
+        try expect(
+            ready, "expected \(expected) pending clock sleeps, observed \(pendingSleepCount)")
     }
 
-    func waitUntilCancelledSleepCount(_ expected: Int) async {
-        while cancelledSleepCount < expected { await Task.yield() }
+    func waitUntilCancelledSleepCount(_ expected: Int, before timeout: Duration = .seconds(2))
+        async throws
+    {
+        let ready = await eventually(before: timeout) { self.cancelledSleepCount >= expected }
+        try expect(
+            ready, "expected \(expected) cancelled clock sleeps, observed \(cancelledSleepCount)")
     }
 }
 
