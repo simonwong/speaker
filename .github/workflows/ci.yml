@@ -68,6 +68,8 @@ jobs:
         run: swift format lint --strict --parallel --recursive Sources Tests
 
       - name: Run deterministic specifications
+        env:
+          SPEAKER_SPEC_TRACE: "1"
         run: ./scripts/test
 
       - name: Verify resolved dependencies are pristine

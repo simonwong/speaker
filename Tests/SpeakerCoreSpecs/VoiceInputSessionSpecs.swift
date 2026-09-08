@@ -1118,7 +1118,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             await audio.resumeStart()
             await press.value
-            await clock.waitUntilSleepRequestCount(1)
+            try await clock.waitUntilSleepRequestCount(1)
             let recordingRequestCount = clock.sleepRequestCount
             try expect(recordingRequestCount == 1)
             await sessions.shutdown()
