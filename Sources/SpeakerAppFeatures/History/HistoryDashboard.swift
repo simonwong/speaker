@@ -89,8 +89,13 @@ package struct HistoryDashboard: View {
     @Binding private var query: String
     let actions: HistoryDashboardActions
     @State private var expandedRecordID: VoiceInputSessionID?
+    /// Hover lives here, not in the row, so only one row can read as hovered
+    /// and so a row divider knows whether either neighbour is lit.
+    @State private var hoveredRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
+    @FocusState private var searchIsFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(
@@ -116,11 +121,16 @@ package struct HistoryDashboard: View {
 
             statusFooter
         }
+        // Every other tab sits on the window ground through `SpeakerPage`;
+        // History composes its own chrome, so it paints the same ground here.
+        .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: state.records.map(\.sessionID)) { _, ids in
-            guard let expandedRecordID,
-                !ids.contains(expandedRecordID)
-            else { return }
-            self.expandedRecordID = nil
+            if let expandedRecordID, !ids.contains(expandedRecordID) {
+                self.expandedRecordID = nil
+            }
+            if let hoveredRecordID, !ids.contains(hoveredRecordID) {
+                self.hoveredRecordID = nil
+            }
         }
         .confirmationDialog(
             "清空所有会话历史？",
@@ -143,6 +153,7 @@ package struct HistoryDashboard: View {
                 TextField("搜索历史…", text: $query)
                     .textFieldStyle(.plain)
                     .font(SpeakerTypography.body)
+                    .focused($searchIsFocused)
                     .onSubmit(actions.refresh)
                 if !query.isEmpty {
                     Button {
@@ -170,8 +181,12 @@ package struct HistoryDashboard: View {
                     cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
                     style: .continuous
                 )
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(
+                    searchBorderColor,
+                    lineWidth: searchIsFocused ? 1.5 : 0.5
+                )
             }
+            .animation(reduceMotion ? nil : .historyHover, value: searchIsFocused)
 
             Menu {
                 Button("刷新", systemImage: "arrow.clockwise", action: actions.refresh)
@@ -185,6 +200,7 @@ package struct HistoryDashboard: View {
             } label: {
                 Image(systemName: "ellipsis.circle")
                     .font(.title3)
+                    .foregroundStyle(.secondary)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -197,19 +213,22 @@ package struct HistoryDashboard: View {
         .padding(.vertical, 10)
     }
 
+    private var searchBorderColor: Color {
+        if searchIsFocused { return .accentColor.opacity(0.7) }
+        return Color.primary.opacity(contrast == .increased ? 0.28 : 0.08)
+    }
+
+    private var isSearching: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var emptyState: some View {
-        ContentUnavailableView(
-            query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "还没有会话记录"
-                : "没有找到匹配记录",
-            systemImage: query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "clock.arrow.circlepath"
-                : "magnifyingglass",
-            description: Text(
-                query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? "完成第一次语音输入后，记录会出现在这里。"
-                    : "尝试缩短关键词，或清空搜索后查看全部记录。"
-            )
+        SpeakerEmptyState(
+            title: isSearching ? "没有找到匹配记录" : "还没有会话记录",
+            description: isSearching
+                ? "尝试缩短关键词，或清空搜索后查看全部记录。"
+                : "完成第一次语音输入后，记录会出现在这里。",
+            systemImage: isSearching ? "magnifyingglass" : "clock.arrow.circlepath"
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -218,52 +237,21 @@ package struct HistoryDashboard: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(sections, id: \.day) { section in
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(section.title)
-                            .font(SpeakerTypography.sectionHeader)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 12)
-                        Text("\(section.records.count) 条")
-                            .font(SpeakerTypography.footnote)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.top, 20)
-                    .padding(.bottom, 6)
-                    .padding(.horizontal, 8)
+                    sectionHeader(section)
 
                     ForEach(
                         Array(section.records.enumerated()),
                         id: \.element.sessionID
                     ) { index, record in
-                        HistoryRecordRow(
-                            record: record,
-                            isExpanded: expandedRecordID == record.sessionID,
-                            isBusy: state.isBusy,
-                            reduceMotion: reduceMotion,
-                            copy: { actions.copy(record) },
-                            addDictionaryEntry: actions.addDictionaryEntry,
-                            toggleDetails: {
-                                withAnimation(
-                                    reduceMotion
-                                        ? nil
-                                        : .easeOut(duration: 0.18)
-                                ) {
-                                    expandedRecordID =
-                                        expandedRecordID
-                                            == record.sessionID
-                                        ? nil
-                                        : record.sessionID
-                                }
-                            },
-                            delete: {
-                                actions.delete(record.sessionID)
-                            }
-                        )
+                        row(for: record)
 
                         if index < section.records.count - 1 {
-                            Divider()
-                                .opacity(0.45)
-                                .padding(.leading, 64)
+                            rowDivider(
+                                isHidden: isHighlighted(record.sessionID)
+                                    || isHighlighted(
+                                        section.records[index + 1].sessionID
+                                    )
+                            )
                         }
                     }
                 }
@@ -275,32 +263,94 @@ package struct HistoryDashboard: View {
         }
     }
 
+    private func sectionHeader(_ section: HistoryDaySection) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(section.title)
+                .font(SpeakerTypography.sectionHeader)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text("\(section.records.count) 条")
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.top, 20)
+        .padding(.bottom, 6)
+        .padding(.horizontal, 8)
+    }
+
+    private func row(for record: VoiceInputHistoryRecord) -> some View {
+        HistoryRecordRow(
+            record: record,
+            isExpanded: expandedRecordID == record.sessionID,
+            isHovered: hoveredRecordID == record.sessionID,
+            isBusy: state.isBusy,
+            reduceMotion: reduceMotion,
+            setHovered: { hovering in
+                if hovering {
+                    hoveredRecordID = record.sessionID
+                } else if hoveredRecordID == record.sessionID {
+                    hoveredRecordID = nil
+                }
+            },
+            copy: { actions.copy(record) },
+            addDictionaryEntry: actions.addDictionaryEntry,
+            toggleDetails: {
+                withAnimation(reduceMotion ? nil : .historyExpand) {
+                    expandedRecordID =
+                        expandedRecordID == record.sessionID
+                        ? nil
+                        : record.sessionID
+                }
+            },
+            delete: { actions.delete(record.sessionID) }
+        )
+    }
+
+    /// A divider between two rows fades out while either neighbour carries the
+    /// hover or expanded fill, so the fill reads as one continuous shape.
+    private func rowDivider(isHidden: Bool) -> some View {
+        Divider()
+            .opacity(isHidden ? 0 : 0.45)
+            .padding(.leading, 64)
+            .animation(reduceMotion ? nil : .historyHover, value: isHidden)
+    }
+
+    /// True while a row carries the hover or expanded fill.
+    private func isHighlighted(_ id: VoiceInputSessionID) -> Bool {
+        hoveredRecordID == id || expandedRecordID == id
+    }
+
     @ViewBuilder
     private var statusFooter: some View {
-        if let feedback = state.feedback {
+        if let footer {
             Divider()
-            Label(
-                feedback.message,
-                systemImage: feedback.kind.systemImage
-            )
-            .font(SpeakerTypography.caption)
-            .foregroundStyle(feedback.kind.color)
-            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityLabel(feedback.message)
-        } else if let notice = state.notice {
-            Divider()
-            Label(
-                notice,
-                systemImage: "exclamationmark.circle.fill"
-            )
-            .font(SpeakerTypography.caption)
-            .foregroundStyle(.red)
-            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Label(footer.message, systemImage: footer.icon)
+                .font(SpeakerTypography.caption)
+                .foregroundStyle(footer.color)
+                .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(footer.message)
         }
+    }
+
+    /// Transient feedback outranks the persistent store notice.
+    private var footer: HistoryFooterLine? {
+        if let feedback = state.feedback {
+            return HistoryFooterLine(
+                message: feedback.message,
+                icon: feedback.kind.systemImage,
+                color: feedback.kind.color
+            )
+        }
+        if let notice = state.notice {
+            return HistoryFooterLine(
+                message: notice,
+                icon: "exclamationmark.circle.fill",
+                color: .red
+            )
+        }
+        return nil
     }
 
     private var sections: [HistoryDaySection] {
@@ -308,21 +358,43 @@ package struct HistoryDashboard: View {
     }
 }
 
+/// The one line the tab can print under the list: whichever of the transient
+/// feedback and the persistent store notice is showing.
+private struct HistoryFooterLine {
+    let message: String
+    let icon: String
+    let color: Color
+}
+
+/// The tab's two motion rungs. Callers still gate them on Reduce Motion.
+extension Animation {
+    fileprivate static let historyHover = Animation.easeOut(duration: 0.12)
+    fileprivate static let historyExpand = Animation.easeOut(duration: 0.18)
+}
+
 private struct HistoryRecordRow: View {
     let record: VoiceInputHistoryRecord
     let isExpanded: Bool
+    let isHovered: Bool
     let isBusy: Bool
     let reduceMotion: Bool
+    let setHovered: (Bool) -> Void
     let copy: () -> Void
     let addDictionaryEntry: (String) -> Void
     let toggleDetails: () -> Void
     let delete: () -> Void
-    @State private var isHovered = false
     @State private var confirmsDelete = false
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    /// Collapsed rows all reserve two lines, so the list keeps one rhythm and
+    /// no row changes height when the pointer arrives.
+    private static let collapsedLineLimit = 2
 
     private var presentation: HistoryRecordRowPresentation {
         HistoryPresentation.row(for: record)
     }
+
+    private var showsActions: Bool { isHovered || isExpanded }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -333,12 +405,7 @@ private struct HistoryRecordRow: View {
                     .frame(width: 44, alignment: .leading)
                     .padding(.top, 2)
 
-                Text(presentation.text)
-                    .font(SpeakerTypography.body)
-                    .lineSpacing(2)
-                    .lineLimit(isExpanded ? nil : 2)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                recordText
 
                 if presentation.status.showsStatusIcon {
                     Image(systemName: presentation.status.icon)
@@ -349,39 +416,13 @@ private struct HistoryRecordRow: View {
                         .accessibilityLabel(presentation.status.label)
                 }
 
-                if isHovered && !isExpanded {
-                    HStack(spacing: 2) {
-                        if presentation.canCopy {
-                            Button(action: copy) {
-                                Image(systemName: "doc.on.doc")
-                                    .frame(width: 24, height: 24)
-                                    .contentShape(Rectangle())
-                            }
-                            .disabled(isBusy)
-                            .help("复制")
-                            .accessibilityLabel("复制")
-                        }
-                        Button {
-                            confirmsDelete = true
-                        } label: {
-                            Image(systemName: "trash")
-                                .frame(width: 24, height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .disabled(isBusy)
-                        .help("删除")
-                        .accessibilityLabel("删除")
-                    }
-                    .buttonStyle(.plain)
-                    .font(SpeakerTypography.body)
-                    .foregroundStyle(.secondary)
-                    .transition(.opacity)
-                }
+                // The action cluster always occupies its width, whether or not
+                // it is visible: revealing it must never reflow the text.
+                rowActions
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 10)
             .contentShape(Rectangle())
-            .onHover { isHovered = $0 }
             .onTapGesture(perform: toggleDetails)
 
             if isExpanded {
@@ -397,9 +438,11 @@ private struct HistoryRecordRow: View {
             }
         }
         .background(
-            Color.primary.opacity(isHovered || isExpanded ? 0.045 : 0),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(fillOpacity))
         )
+        .onHover(perform: setHovered)
+        .animation(reduceMotion ? nil : .historyHover, value: isHovered)
         .confirmationDialog(
             "删除这条会话记录？",
             isPresented: $confirmsDelete,
@@ -410,6 +453,102 @@ private struct HistoryRecordRow: View {
         } message: {
             Text("记录只保存在本机，删除后无法恢复。")
         }
+    }
+
+    private var fillOpacity: Double {
+        let increased = contrast == .increased
+        if isExpanded { return increased ? 0.12 : 0.06 }
+        if isHovered { return increased ? 0.09 : 0.04 }
+        return 0
+    }
+
+    @ViewBuilder
+    private var recordText: some View {
+        let text = Text(presentation.text)
+            .font(SpeakerTypography.body)
+            .lineSpacing(2)
+
+        if isExpanded {
+            text
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            text
+                .lineLimit(Self.collapsedLineLimit, reservesSpace: true)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The cluster keeps its width whether or not a button is in it, so the
+    /// text column never resizes; the buttons themselves only exist while
+    /// visible, staying out of the focus ring and the accessibility tree.
+    private var rowActions: some View {
+        HStack(spacing: HistoryRowActionButton.spacing) {
+            if showsActions {
+                if presentation.canCopy {
+                    HistoryRowActionButton(
+                        symbol: "doc.on.doc",
+                        label: "复制",
+                        isEnabled: !isBusy,
+                        action: copy
+                    )
+                }
+                HistoryRowActionButton(
+                    symbol: "trash",
+                    label: "删除",
+                    isEnabled: !isBusy
+                ) {
+                    confirmsDelete = true
+                }
+            }
+        }
+        .frame(width: HistoryRowActionButton.clusterWidth, alignment: .trailing)
+    }
+}
+
+/// One icon button in a record row, with its own hover fill so the pointer
+/// lands on something that answers back.
+private struct HistoryRowActionButton: View {
+    static let spacing: CGFloat = 2
+    private static let side: CGFloat = 24
+    /// Two buttons plus the gap: the width a row reserves for the cluster.
+    static let clusterWidth = side * 2 + spacing
+
+    let symbol: String
+    let label: String
+    let isEnabled: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.iconTileCornerRadius,
+            style: .continuous
+        )
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                // A glyph centred in a fixed hit box: the size belongs to the
+                // box, not to the text ladder.
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: Self.side, height: Self.side)
+                .background(
+                    shape.fill(
+                        Color.primary.opacity(
+                            isHovered && isEnabled ? 0.09 : 0
+                        )
+                    )
+                )
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { isHovered = $0 }
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
