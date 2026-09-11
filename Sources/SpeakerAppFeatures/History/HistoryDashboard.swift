@@ -89,8 +89,8 @@ package struct HistoryDashboard: View {
     @Binding private var query: String
     let actions: HistoryDashboardActions
     @State private var expandedRecordID: VoiceInputSessionID?
-    /// Hover lives here, not in the row, so only one row can read as hovered
-    /// and so a row divider knows whether either neighbour is lit.
+    /// Hover lives here, not in the row, so only one row can ever read as
+    /// hovered however fast the pointer crosses the list.
     @State private var hoveredRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
     @FocusState private var searchIsFocused: Bool
@@ -109,38 +109,40 @@ package struct HistoryDashboard: View {
     }
 
     package var body: some View {
-        VStack(spacing: 0) {
-            historyToolbar
-            Divider()
+        // The list is the root view, so the window hides its title bar
+        // separator while the list sits at the top, exactly as the scrolling
+        // tabs do. The search bar and the status line ride in the safe area
+        // instead of stacking above and below behind rules of their own.
+        content
+            .safeAreaInset(edge: .top, spacing: 0) { historyToolbar }
+            .safeAreaInset(edge: .bottom, spacing: 0) { statusFooter }
+            .background(Color.historyGround)
+            .onChange(of: state.records.map(\.sessionID)) { _, ids in
+                if let expandedRecordID, !ids.contains(expandedRecordID) {
+                    self.expandedRecordID = nil
+                }
+                if let hoveredRecordID, !ids.contains(hoveredRecordID) {
+                    self.hoveredRecordID = nil
+                }
+            }
+            .confirmationDialog(
+                "清空所有会话历史？",
+                isPresented: $confirmsClear,
+                titleVisibility: .visible
+            ) {
+                Button("清空历史", role: .destructive, action: actions.clear)
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("文字记录会从本机永久删除，此操作无法撤销。")
+            }
+    }
 
-            if state.records.isEmpty {
-                emptyState
-            } else {
-                historyList
-            }
-
-            statusFooter
-        }
-        // Every other tab sits on the window ground through `SpeakerPage`;
-        // History composes its own chrome, so it paints the same ground here.
-        .background(Color(nsColor: .windowBackgroundColor))
-        .onChange(of: state.records.map(\.sessionID)) { _, ids in
-            if let expandedRecordID, !ids.contains(expandedRecordID) {
-                self.expandedRecordID = nil
-            }
-            if let hoveredRecordID, !ids.contains(hoveredRecordID) {
-                self.hoveredRecordID = nil
-            }
-        }
-        .confirmationDialog(
-            "清空所有会话历史？",
-            isPresented: $confirmsClear,
-            titleVisibility: .visible
-        ) {
-            Button("清空历史", role: .destructive, action: actions.clear)
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("文字记录会从本机永久删除，此操作无法撤销。")
+    @ViewBuilder
+    private var content: some View {
+        if state.records.isEmpty {
+            emptyState
+        } else {
+            historyList
         }
     }
 
@@ -168,7 +170,7 @@ package struct HistoryDashboard: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: 28)
             .background(
                 Color.primary.opacity(0.05),
                 in: RoundedRectangle(
@@ -198,11 +200,16 @@ package struct HistoryDashboard: View {
                 }
                 .disabled(state.totalRecordCount == 0)
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.title3)
+                Image(systemName: "ellipsis")
+                    // A glyph centred in a fixed hit box, matched to the search
+                    // field's height: the size belongs to the box.
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
             .help("刷新与清空历史")
             .accessibilityLabel("历史选项")
@@ -211,6 +218,8 @@ package struct HistoryDashboard: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
         .padding(.vertical, 10)
+        // Opaque, because the list scrolls under it.
+        .background(Color.historyGround)
     }
 
     private var searchBorderColor: Color {
@@ -235,24 +244,18 @@ package struct HistoryDashboard: View {
 
     private var historyList: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            LazyVStack(
+                alignment: .leading,
+                spacing: HistoryRecordRow.spacing,
+                pinnedViews: [.sectionHeaders]
+            ) {
                 ForEach(sections, id: \.day) { section in
-                    sectionHeader(section)
-
-                    ForEach(
-                        Array(section.records.enumerated()),
-                        id: \.element.sessionID
-                    ) { index, record in
-                        row(for: record)
-
-                        if index < section.records.count - 1 {
-                            rowDivider(
-                                isHidden: isHighlighted(record.sessionID)
-                                    || isHighlighted(
-                                        section.records[index + 1].sessionID
-                                    )
-                            )
+                    Section {
+                        ForEach(section.records, id: \.sessionID) { record in
+                            row(for: record)
                         }
+                    } header: {
+                        sectionHeader(section)
                     }
                 }
             }
@@ -263,6 +266,8 @@ package struct HistoryDashboard: View {
         }
     }
 
+    /// The day heading stays pinned while its own records scroll, so a long
+    /// day never loses its date. Its ground is opaque for the same reason.
     private func sectionHeader(_ section: HistoryDaySection) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(section.title)
@@ -273,9 +278,10 @@ package struct HistoryDashboard: View {
                 .font(SpeakerTypography.footnote)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.top, 20)
-        .padding(.bottom, 6)
         .padding(.horizontal, 8)
+        .padding(.top, 16)
+        .padding(.bottom, 6)
+        .background(Color.historyGround)
     }
 
     private func row(for record: VoiceInputHistoryRecord) -> some View {
@@ -306,30 +312,29 @@ package struct HistoryDashboard: View {
         )
     }
 
-    /// A divider between two rows fades out while either neighbour carries the
-    /// hover or expanded fill, so the fill reads as one continuous shape.
-    private func rowDivider(isHidden: Bool) -> some View {
-        Divider()
-            .opacity(isHidden ? 0 : 0.45)
-            .padding(.leading, 64)
-            .animation(reduceMotion ? nil : .historyHover, value: isHidden)
-    }
-
-    /// True while a row carries the hover or expanded fill.
-    private func isHighlighted(_ id: VoiceInputSessionID) -> Bool {
-        hoveredRecordID == id || expandedRecordID == id
-    }
-
+    /// The status line reads as a tinted banner on the ground rather than a
+    /// strip behind a rule, so the tab carries no horizontal lines at all.
     @ViewBuilder
     private var statusFooter: some View {
         if let footer {
-            Divider()
             Label(footer.message, systemImage: footer.icon)
                 .font(SpeakerTypography.caption)
                 .foregroundStyle(footer.color)
-                .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    footer.color.opacity(0.10),
+                    in: RoundedRectangle(
+                        cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+                        style: .continuous
+                    )
+                )
+                .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+                .padding(.vertical, 10)
+                .background(Color.historyGround)
                 .accessibilityLabel(footer.message)
         }
     }
@@ -372,6 +377,13 @@ extension Animation {
     fileprivate static let historyExpand = Animation.easeOut(duration: 0.18)
 }
 
+extension Color {
+    /// The ground every other tab reaches through `SpeakerPage`. The search
+    /// bar, the pinned day headings, and the status line each paint it, so the
+    /// list scrolls under them and still reads as one surface.
+    fileprivate static let historyGround = Color(nsColor: .windowBackgroundColor)
+}
+
 private struct HistoryRecordRow: View {
     let record: VoiceInputHistoryRecord
     let isExpanded: Bool
@@ -386,8 +398,14 @@ private struct HistoryRecordRow: View {
     @State private var confirmsDelete = false
     @Environment(\.colorSchemeContrast) private var contrast
 
-    /// Collapsed rows all reserve two lines, so the list keeps one rhythm and
-    /// no row changes height when the pointer arrives.
+    /// The gap between two rows. Rows carry no rule between them: the hover
+    /// fill is what tells the pointer which record it is on.
+    static let spacing: CGFloat = 2
+
+    /// A collapsed row shows at most two lines. It does not reserve them: the
+    /// action cluster holds its width whether or not it is visible, so the
+    /// text column never resizes and a row's line count never changes under
+    /// the pointer.
     private static let collapsedLineLimit = 2
 
     private var presentation: HistoryRecordRowPresentation {
@@ -437,10 +455,14 @@ private struct HistoryRecordRow: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(fillOpacity))
-        )
+        .background(shape.fill(Color.primary.opacity(fillOpacity)))
+        // Nothing rules one record off from the next, so Increase Contrast
+        // gets the boundary back as a border around each record.
+        .overlay {
+            if contrast == .increased {
+                shape.strokeBorder(Color.primary.opacity(0.25), lineWidth: 1)
+            }
+        }
         .onHover(perform: setHovered)
         .animation(reduceMotion ? nil : .historyHover, value: isHovered)
         .confirmationDialog(
@@ -453,6 +475,13 @@ private struct HistoryRecordRow: View {
         } message: {
             Text("记录只保存在本机，删除后无法恢复。")
         }
+    }
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            style: .continuous
+        )
     }
 
     private var fillOpacity: Double {
@@ -468,15 +497,10 @@ private struct HistoryRecordRow: View {
             .font(SpeakerTypography.body)
             .lineSpacing(2)
 
-        if isExpanded {
-            text
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            text
-                .lineLimit(Self.collapsedLineLimit, reservesSpace: true)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        text
+            .lineLimit(isExpanded ? nil : Self.collapsedLineLimit)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The cluster keeps its width whether or not a button is in it, so the
