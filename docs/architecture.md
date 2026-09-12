@@ -51,13 +51,13 @@ Production uses live event-monitor adapters; specifications use deterministic ad
 - a `VoiceTriggerTarget` for the shortcut module; and
 - `start` and `shutdown` lifecycle operations.
 
-The implementation owns the trigger dispatcher, hold/short-press gesture, synchronous `Esc` fence, session observation, menu/HUD projections, VoiceOver phase deduplication, notices, and shutdown fencing. Actions are bound to the originating session, so a stale HUD cannot cancel, copy, or dismiss a newer session.
+The implementation owns the trigger dispatcher, hold/short-press gesture, synchronous `Esc` fence, session observation, menu/HUD projections, VoiceOver phase deduplication, notices, and shutdown fencing. Actions are bound to the originating session, so a stale HUD cannot cancel, copy, dismiss, or route recovery for a newer session. Recovery effects carry the application settings group: Permissions for microphone authorization, API Key for provider credentials and resources.
 
 ### Application feature modules
 
 `SettingsNavigationModel` is the single page-selection source for the six settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
 
-`OnboardingPresentation` owns permission actions, provider-check availability, resource selection, and completion rules. The onboarding view, its copy, and its SF Symbols live in the application feature module; the App scene keeps only the window controller. Production window configuration comes from a dedicated factory that the AppKit specifications exercise through the same interface.
+`OnboardingPresentation` owns permission actions, provider-check availability, resource selection, and completion rules. The onboarding view, its copy, and its SF Symbols live in the application feature module; the App scene keeps only the window controller. The secure credential editor remains available after saving and failed validation, so users can replace a Key in place without exposing its saved value. Production window configuration comes from a dedicated factory that the AppKit specifications exercise through the same interface.
 
 `AccessibilityAnnounce` names the single accessibility announcement seam. Voice Input, the shortcut coordinator, and onboarding hand messages to an injected closure; the App scene owns the one `NSAccessibility` announcement post behind it.
 
@@ -93,7 +93,7 @@ The global release callback snapshots only the frontmost PID, so it never blocks
 
 Every delivery attempt consumes the original bounded token and confirms the same process and strongest available focus identity. Element-scoped targets require the exact element; applications that expose no usable focused element require the exact focused window. A window-scoped target cannot prove movement between fields inside that window, so it is permitted only for the transactional paste path and remains protected by frontmost-process and Secure Input checks. Application identity remains transient adapter diagnostics and is neither displayed nor persisted in Session Records.
 
-There is one application-independent mutation path. While the frozen element or window remains current in the exact frontmost process and Secure Input is off, the live adapter preflights event-post access, snapshots every readable pasteboard representation, writes a private transaction marker, and posts one physical Command-V from `.combinedSessionState`. It restores only when both marker and change count still prove ownership. Exact AX value/range evidence may confirm the resulting edit, but it never selects another write API. A posted paste is a committed one-shot action even when no receipt is available because retrying it could duplicate text.
+There is one application-independent mutation path. While the frozen element or window remains current in the exact frontmost process and Secure Input is off, the live adapter preflights event-post access, snapshots every readable pasteboard representation, writes a private transaction marker, and posts one physical Command-V from `.combinedSessionState`. A failed pasteboard item enumeration refuses preparation before mutation; a valid empty item list remains supported. It restores only when both marker and change count still prove ownership. Exact AX value/range evidence may confirm the resulting edit, but it never selects another write API. A posted paste is a committed one-shot action even when no receipt is available because retrying it could duplicate text.
 
 AX `.cannotComplete` retains the precise operation stage: security read, role read, value read, selection read, focus read, or receipt. This maps to a target-application-unresponsive fact rather than a guessed timeout, focus change, or unsupported-control diagnosis.
 

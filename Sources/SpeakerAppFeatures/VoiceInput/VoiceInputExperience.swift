@@ -48,7 +48,7 @@ package struct VoiceInputExperienceAction: Equatable, Sendable {
 }
 
 package enum VoiceInputExperienceEffect: Equatable, Sendable {
-    case openSpeechSettings
+    case openSettings(SettingsGroup)
 }
 
 package struct VoiceInputMenuPresentation: Equatable, Sendable {
@@ -376,12 +376,16 @@ package final class VoiceInputExperience: ObservableObject {
             }
             return nil
         case .requestRecovery:
+            guard
+                case .failed(_, let failure) = currentPresentation.activity,
+                let destination = failure.settingsDestination
+            else { return nil }
             enqueue { [sessions] in
                 await sessions.dismissResult(
                     expectedSessionID: action.sessionID
                 )
             }
-            return .openSpeechSettings
+            return .openSettings(destination)
         }
     }
 

@@ -96,7 +96,9 @@ let package = Package(
         ),
         .executableTarget(
             name: "SpeakerAppUISpecs",
-            dependencies: ["SpeakerAppFeatures", "SpeakerCore", "SpeakerSpecSupport"],
+            dependencies: [
+                "SpeakerAppFeatures", "SpeakerCore", "SpeakerCoreSpecFakes", "SpeakerSpecSupport",
+            ],
             path: "Tests/SpeakerAppUISpecs"
         ),
         .executableTarget(

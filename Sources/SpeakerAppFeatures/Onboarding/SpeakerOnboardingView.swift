@@ -113,18 +113,16 @@ package struct SpeakerOnboardingView: View {
                     Text("Key 只保存在这台 Mac；语音会直接发送到你自己的豆包账号。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if !doubao.hasConfiguredKey {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 8) {
-                                apiKeyField
-                                saveAPIKeyButton
-                            }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            apiKeyField
+                            saveAPIKeyButton
+                        }
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                apiKeyField
-                                saveAPIKeyButton
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                            }
+                        VStack(alignment: .leading, spacing: 8) {
+                            apiKeyField
+                            saveAPIKeyButton
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
 
@@ -240,7 +238,7 @@ package struct SpeakerOnboardingView: View {
 
     private var apiKeyField: some View {
         SecureField(
-            "粘贴豆包语音 API Key",
+            doubao.hasStoredKey ? "粘贴新的 API Key 以替换" : "粘贴豆包语音 API Key",
             text: $doubao.apiKeyDraft
         )
         .accessibilityLabel("豆包语音 API Key")

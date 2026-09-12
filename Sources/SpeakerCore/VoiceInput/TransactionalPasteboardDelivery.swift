@@ -52,8 +52,10 @@ package struct PasteboardSnapshot: Equatable, Sendable {
         budget: PasteboardSnapshotBudget
     ) -> Self? {
         let capturedChangeCount = pasteboard.changeCount()
-        let itemCount = pasteboard.itemCount()
-        guard itemCount <= budget.maximumItemCount else { return nil }
+        guard let itemCount = pasteboard.itemCount(),
+            itemCount >= 0,
+            itemCount <= budget.maximumItemCount
+        else { return nil }
 
         var representationCount = 0
         var totalBytes = 0

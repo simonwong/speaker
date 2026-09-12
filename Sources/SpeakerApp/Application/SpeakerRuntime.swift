@@ -204,8 +204,8 @@ final class SpeakerRuntime: ObservableObject {
             experience: voiceInput,
             routeEffect: { effect in
                 switch effect {
-                case .openSpeechSettings:
-                    settingsNavigation.open(.apiKeys)
+                case .openSettings(let group):
+                    settingsNavigation.open(group)
                 }
             }
         )

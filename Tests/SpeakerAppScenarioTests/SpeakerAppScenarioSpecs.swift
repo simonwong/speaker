@@ -219,7 +219,7 @@ struct SpeakerAppScenarioSpecs {
             "onboarding advances from an explicit microphone grant only",
             failures: &failures
         ) {
-            let grantedAccess = ScenarioPermissionAccess(
+            let grantedAccess = PermissionAccessFake(
                 snapshot: .init(
                     accessibility: .denied,
                     microphone: .notDetermined
@@ -250,7 +250,7 @@ struct SpeakerAppScenarioSpecs {
                 PermissionState.denied,
                 PermissionState.restricted,
             ] {
-                let stoppedAccess = ScenarioPermissionAccess(
+                let stoppedAccess = PermissionAccessFake(
                     snapshot: .init(
                         accessibility: .denied,
                         microphone: .notDetermined
@@ -1067,7 +1067,7 @@ struct SpeakerAppScenarioSpecs {
             failures: &failures
         ) {
             let events = PassthroughSubject<Void, Never>()
-            let access = ScenarioPermissionAccess(
+            let access = PermissionAccessFake(
                 snapshot: .init(
                     accessibility: .denied,
                     microphone: .granted
@@ -1114,7 +1114,7 @@ struct SpeakerAppScenarioSpecs {
             "runtime permission revocation stops shortcuts without repeating VoiceOver warnings",
             failures: &failures
         ) {
-            let access = ScenarioPermissionAccess(
+            let access = PermissionAccessFake(
                 snapshot: .init(
                     accessibility: .granted,
                     microphone: .granted
@@ -3429,46 +3429,88 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
-            "recovery action routes to speech settings and dismisses the failure",
+            "recovery action opens the relevant settings and cannot affect a new session",
             failures: &failures
         ) {
-            let sessions = VoiceInputSessions(
-                audioCapture: AudioCaptureFake(),
-                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                textProcessor: FailingVoiceTextProcessor(
-                    failure: .init(userFailure: .providerNotConfigured)
-                ),
-                delivery: TextDeliveryFake(
-                    result: .pendingCopy(.deliveryFailed),
-                    commitsBeforeDelivering: false
-                ),
-                clipboard: ClipboardFake(),
-                history: SessionHistoryFake()
-            )
-            let experience = VoiceInputExperience(
-                sessions: sessions,
-                announce: { _ in }
-            )
-            experience.start()
-            experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
-            experience.shortcutTarget.receive(.released)
-            experience.shortcutTarget.receive(.pressed)
-            experience.shortcutTarget.receive(.released)
+            let cases: [(VoiceInputFailure, SettingsGroup)] = [
+                (.microphonePermissionDenied, .permissions),
+                (.providerNotConfigured, .apiKeys),
+                (.providerAuthenticationFailed, .apiKeys),
+                (.providerCredentialUnavailable, .apiKeys),
+                (.providerResourceUnavailable, .apiKeys),
+            ]
+            for (failure, destination) in cases {
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                    textProcessor: FailingVoiceTextProcessor(
+                        failure: .init(userFailure: failure)
+                    ),
+                    delivery: TextDeliveryFake(
+                        result: .pendingCopy(.deliveryFailed),
+                        commitsBeforeDelivering: false
+                    ),
+                    clipboard: ClipboardFake(),
+                    history: SessionHistoryFake()
+                )
+                let experience = VoiceInputExperience(
+                    sessions: sessions,
+                    announce: { _ in }
+                )
+                experience.start()
+                experience.shortcutTarget.receive(.pressed)
+                let recording = await waitUntil { experience.state.isRecording }
+                try expect(recording)
+                experience.shortcutTarget.receive(.released)
+                experience.shortcutTarget.receive(.pressed)
+                experience.shortcutTarget.receive(.released)
 
-            let failurePresented = await waitUntil {
-                if case .problem = experience.state.overlay { true } else { false }
+                let failurePresented = await waitUntil {
+                    if case .problem = experience.state.overlay { true } else { false }
+                }
+                try expect(failurePresented)
+                guard let recoveryAction = experience.state.menu.recoveryAction else {
+                    throw SpecFailure(message: "settings recovery was not exposed")
+                }
+                let navigation = SettingsNavigationModel()
+                var presentedTargets: [SettingsPresentationTarget] = []
+                let router = MenuBarCommandRouter(
+                    navigation: navigation,
+                    openOverview: {},
+                    openSettings: {
+                        if let target = navigation.presentationRequest?.target {
+                            presentedTargets.append(target)
+                        }
+                    },
+                    openDataErasureRecovery: {},
+                    activate: {},
+                    terminate: {}
+                )
+                guard let effect = experience.perform(recoveryAction) else {
+                    throw SpecFailure(message: "a current recovery action produced no route")
+                }
+                router.perform(effect)
+                try expect(
+                    presentedTargets == [.section(destination)],
+                    "a recoverable problem opened the wrong settings section"
+                )
+                let dismissed = await waitUntil {
+                    experience.state.diagnosticCode == "idle"
+                }
+                try expect(dismissed)
+                try expect(experience.perform(recoveryAction) == nil)
+                experience.shortcutTarget.receive(.pressed)
+                let nextRecording = await waitUntil { experience.state.isRecording }
+                try expect(nextRecording)
+                let revision = navigation.presentationRevision
+                if let staleEffect = experience.perform(recoveryAction) {
+                    router.perform(staleEffect)
+                    throw SpecFailure(message: "a stale recovery action escaped its session")
+                }
+                try expect(experience.state.isRecording)
+                try expect(navigation.presentationRevision == revision)
+                await experience.shutdown()
             }
-            try expect(failurePresented)
-            guard let recoveryAction = experience.state.menu.recoveryAction else {
-                throw SpecFailure(message: "settings recovery was not exposed")
-            }
-            try expect(experience.perform(recoveryAction) == .openSpeechSettings)
-            let dismissed = await waitUntil {
-                experience.state.diagnosticCode == "idle"
-            }
-            try expect(dismissed)
-            await experience.shutdown()
         }
 
         await ShortcutRecorderSpecs.run(failures: &failures)
@@ -3922,33 +3964,6 @@ private final class SoftwareUpdateDriverFake: SoftwareUpdateDriving {
             canCheckForUpdates: true,
             automaticallyChecksForUpdates: automaticChecksEnabled
         )
-    }
-}
-
-@MainActor
-private final class ScenarioPermissionAccess: PermissionAccess {
-    var snapshot: PermissionSnapshot
-    private(set) var requestedPermissions: [PermissionKind] = []
-    private let requestSnapshots: [PermissionKind: PermissionSnapshot]
-
-    init(
-        snapshot: PermissionSnapshot,
-        requestSnapshots: [PermissionKind: PermissionSnapshot] = [:]
-    ) {
-        self.snapshot = snapshot
-        self.requestSnapshots = requestSnapshots
-    }
-
-    func currentSnapshot() -> PermissionSnapshot {
-        snapshot
-    }
-
-    func request(_ permission: PermissionKind) async -> PermissionSnapshot {
-        requestedPermissions.append(permission)
-        if let requestedSnapshot = requestSnapshots[permission] {
-            snapshot = requestedSnapshot
-        }
-        return snapshot
     }
 }
 

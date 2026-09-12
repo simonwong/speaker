@@ -115,19 +115,6 @@ actor AudioChunkConsumptionProbe {
     }
 }
 
-struct DoubaoFailingWebSocketConnectorFake:
-    DoubaoWebSocketConnecting
-{
-    let error: URLError
-
-    func connect(
-        _ request: URLRequest
-    ) async throws -> any DoubaoWebSocketConnection {
-        _ = request
-        throw error
-    }
-}
-
 actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
     private let responses: [Data]
     private let receiveError: URLError?
