@@ -126,10 +126,10 @@ package struct MenuBarContent: View {
         case .recoverVoiceInput:
             if let recoveryAction = voiceInput.state.menu.recoveryAction {
                 Button("检查语音设置…") {
-                    guard voiceInput.perform(recoveryAction) != nil else {
+                    guard let effect = voiceInput.perform(recoveryAction) else {
                         return
                     }
-                    commandRouter.perform(.permissionSettings)
+                    commandRouter.perform(effect)
                 }
             }
         case .dismissVoiceInput:

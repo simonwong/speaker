@@ -3,6 +3,7 @@ package enum MenuBarCommand: Equatable, Sendable {
     case overview
     case permissionSettings
     case settings
+    case settingsSection(SettingsGroup)
     case dataErasureRecovery
     case quit
 }
@@ -32,6 +33,13 @@ package struct MenuBarCommandRouter {
         self.terminate = terminate
     }
 
+    package func perform(_ effect: VoiceInputExperienceEffect) {
+        switch effect {
+        case .openSettings(let group):
+            perform(.settingsSection(group))
+        }
+    }
+
     package func perform(_ command: MenuBarCommand) {
         switch command {
         case .overview:
@@ -39,6 +47,10 @@ package struct MenuBarCommandRouter {
             activate()
         case .permissionSettings:
             navigation.open(.permissions)
+            openSettings()
+            activate()
+        case .settingsSection(let group):
+            navigation.open(group)
             openSettings()
             activate()
         case .settings:

@@ -649,7 +649,7 @@ package struct PCMChunkBuffer: Sendable {
 
 package struct ClipboardPasteboardAccess: Sendable {
     let changeCount: @MainActor @Sendable () -> Int
-    let itemCount: @MainActor @Sendable () -> Int
+    let itemCount: @MainActor @Sendable () -> Int?
     let itemTypes: @MainActor @Sendable (Int) -> [String]?
     let data: @MainActor @Sendable (Int, String) -> Data?
     let clearContents: @MainActor @Sendable () -> Int
@@ -660,7 +660,7 @@ package struct ClipboardPasteboardAccess: Sendable {
 
     package init(
         changeCount: @escaping @MainActor @Sendable () -> Int,
-        itemCount: @escaping @MainActor @Sendable () -> Int,
+        itemCount: @escaping @MainActor @Sendable () -> Int?,
         itemTypes: @escaping @MainActor @Sendable (Int) -> [String]?,
         data: @escaping @MainActor @Sendable (Int, String) -> Data?,
         clearContents: @escaping @MainActor @Sendable () -> Int,
@@ -683,7 +683,7 @@ package struct ClipboardPasteboardAccess: Sendable {
     package static let live = ClipboardPasteboardAccess(
         changeCount: { NSPasteboard.general.changeCount },
         itemCount: {
-            NSPasteboard.general.pasteboardItems?.count ?? 0
+            NSPasteboard.general.pasteboardItems?.count
         },
         itemTypes: { itemIndex in
             let items = NSPasteboard.general.pasteboardItems ?? []

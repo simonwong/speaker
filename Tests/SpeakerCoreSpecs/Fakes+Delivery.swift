@@ -25,6 +25,7 @@ final class ClipboardPasteboardFake {
     private let failedReplacementItems: [[String: Data]]?
     private let externalItemsAfterReplacement: [[String: Data]]?
     private let unreadableTypes: Set<String>
+    private let itemEnumerationSucceeds: Bool
     private let mutatesWhileReadingRepresentations: Bool
     private var didMutateWhileReading = false
 
@@ -35,6 +36,7 @@ final class ClipboardPasteboardFake {
         failedReplacementItems: [[String: Data]]? = nil,
         externalItemsAfterReplacement: [[String: Data]]? = nil,
         unreadableTypes: Set<String> = [],
+        itemEnumerationSucceeds: Bool = true,
         mutatesWhileReadingRepresentations: Bool = false
     ) {
         self.items = items
@@ -43,6 +45,7 @@ final class ClipboardPasteboardFake {
         self.failedReplacementItems = failedReplacementItems
         self.externalItemsAfterReplacement = externalItemsAfterReplacement
         self.unreadableTypes = unreadableTypes
+        self.itemEnumerationSucceeds = itemEnumerationSucceeds
         self.mutatesWhileReadingRepresentations =
             mutatesWhileReadingRepresentations
     }
@@ -50,7 +53,7 @@ final class ClipboardPasteboardFake {
     var access: ClipboardPasteboardAccess {
         ClipboardPasteboardAccess(
             changeCount: { self.changeCount },
-            itemCount: { self.items.count },
+            itemCount: { self.itemEnumerationSucceeds ? self.items.count : nil },
             itemTypes: { itemIndex in
                 self.itemTypesReadCount += 1
                 guard self.items.indices.contains(itemIndex) else { return nil }

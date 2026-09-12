@@ -20,6 +20,68 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
         ]
 
         await runAsync(
+            "clipboard enumeration failure preserves the original contents when copying",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(
+                items: originalItems,
+                itemEnumerationSucceeds: false
+            )
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+
+            let copied = await writer.copy("Speaker 文本")
+
+            try expect(!copied, "an unreadable clipboard was treated as empty")
+            try expect(pasteboard.items == originalItems)
+            try expect(pasteboard.clearCount == 0)
+        }
+
+        await runAsync(
+            "clipboard enumeration failure refuses automatic delivery before mutation",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(
+                items: originalItems,
+                itemEnumerationSucceeds: false
+            )
+
+            let transaction = await PasteboardDeliveryTransaction.prepare(
+                text: "Speaker 文本",
+                pasteboard: pasteboard.access
+            )
+
+            try expect(transaction == nil)
+            try expect(pasteboard.items == originalItems)
+            try expect(pasteboard.clearCount == 0)
+        }
+
+        await runAsync(
+            "clipboard with no items still supports copying and conditional restoration",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: [])
+            guard
+                let transaction = PasteboardReplacementTransaction.prepare(
+                    text: "Speaker 文本",
+                    pasteboard: pasteboard.access
+                )
+            else {
+                throw SpecFailure(message: "a readable empty clipboard was rejected")
+            }
+
+            try expect(transaction.verifies("Speaker 文本"))
+            try expect(transaction.restoreIfOwned())
+            try expect(pasteboard.items.isEmpty)
+
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+            let copied = await writer.copy("明确复制的文字")
+            try expect(copied)
+            try expect(
+                pasteboard.items == [["public.utf8-plain-text": Data("明确复制的文字".utf8)]]
+            )
+        }
+
+        await runAsync(
             "clipboard snapshot keeps every representation of every item",
             failures: &failures
         ) {

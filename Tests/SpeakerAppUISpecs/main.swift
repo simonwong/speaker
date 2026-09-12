@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SpeakerAppFeatures
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 import SwiftUI
 
@@ -11,6 +12,120 @@ struct SpeakerAppUISpecs {
     static func main() {
         _ = NSApplication.shared.setActivationPolicy(.accessory)
         var failures: [String] = []
+
+        // AppKit layout fixtures need the top-level run loop, outside an async main-queue continuation.
+        var onboardingFinished = false
+        let onboardingTask = Task { @MainActor in
+            await runAsync(
+                "onboarding keeps the credential editor visible after save and failed validation",
+                failures: &failures
+            ) {
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("speaker-onboarding-\(UUID().uuidString)")
+                defer { try? FileManager.default.removeItem(at: directory) }
+                let credentials = LocalFileProviderCredentialStore(
+                    fileURL: directory.appendingPathComponent("credentials.json")
+                )
+                let service = CredentialedDoubaoTranscriber(
+                    credentials: credentials,
+                    connector: DoubaoFailingWebSocketConnectorFake(
+                        error: URLError(.userAuthenticationRequired)
+                    )
+                )
+                let model = DoubaoSettingsModel(
+                    service: service,
+                    settingsStore: VersionedLocalAppSettingsStore(
+                        fileURL: directory.appendingPathComponent("settings.json")
+                    )
+                )
+                model.apiKeyDraft = "initial-test-key"
+                await model.save()
+                let permissions = PermissionModel(
+                    access: PermissionAccessFake(
+                        snapshot: .init(accessibility: .granted, microphone: .granted)
+                    )
+                )
+                let hostingView = NSHostingView(
+                    rootView: SpeakerOnboardingView(
+                        permissions: permissions,
+                        doubao: model,
+                        requestPermission: { _ in },
+                        refreshPermissions: {},
+                        announce: { _ in },
+                        completion: {}
+                    )
+                )
+                let window = OnboardingWindowFactory.make(
+                    visibleFrame: NSRect(x: 0, y: 0, width: 900, height: 900),
+                    contentView: hostingView
+                )
+                window.orderFrontRegardless()
+                defer {
+                    window.orderOut(nil)
+                    window.close()
+                }
+
+                let editorVisible = await eventually(before: .seconds(1)) {
+                    pumpUIRunLoop()
+                    return onboardingSecureFields(in: hostingView).contains {
+                        $0.isEditable && !$0.isHiddenOrHasHiddenAncestor
+                            && !$0.visibleRect.isEmpty
+                    }
+                }
+                try expect(editorVisible, "saving a Key hid its replacement field")
+                try expect(model.apiKeyDraft.isEmpty)
+
+                model.checkConnection()
+                let failed = await eventually(before: .seconds(1)) {
+                    if case .failure = model.status { true } else { false }
+                }
+                try expect(failed)
+                try expect(model.hasStoredKey)
+                pumpUIRunLoop()
+                try expect(
+                    onboardingSecureFields(in: hostingView).contains {
+                        $0.isEditable && !$0.isHiddenOrHasHiddenAncestor
+                            && !$0.visibleRect.isEmpty
+                    },
+                    "failed validation hid the replacement field"
+                )
+
+                model.apiKeyDraft = "replacement-test-key"
+                let replacementVisible = await eventually(before: .seconds(1)) {
+                    pumpUIRunLoop()
+                    return onboardingSecureFields(in: hostingView).contains {
+                        $0.stringValue == "replacement-test-key"
+                    }
+                }
+                try expect(replacementVisible, "the replacement field did not update")
+                await model.save()
+                let replacementStored = await eventually(before: .seconds(1)) {
+                    pumpUIRunLoop()
+                    return model.status == .configured && model.apiKeyDraft.isEmpty
+                        && onboardingSecureFields(in: hostingView).contains {
+                            $0.stringValue.isEmpty && $0.isEditable
+                                && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
+                        }
+                }
+                try expect(replacementStored)
+                let storedKey = try await credentials.apiKey(for: .doubao)
+                try expect(storedKey == "replacement-test-key")
+                await model.shutdown()
+            }
+            onboardingFinished = true
+        }
+        let onboardingDeadline = Date().addingTimeInterval(10)
+        while !onboardingFinished, Date() < onboardingDeadline {
+            RunLoop.current.run(until: min(onboardingDeadline, Date().addingTimeInterval(0.01)))
+        }
+        guard onboardingFinished else {
+            onboardingTask.cancel()
+            SpecSummary.finish(
+                failures: ["the asynchronous onboarding UI spec did not finish within 10 seconds"],
+                label: "AppKit UI specs"
+            )
+            return
+        }
 
         run(
             "voice input panel has a non-activating production configuration",
@@ -1486,7 +1601,7 @@ private final class HUDActionRecorder {
         _ action: VoiceInputExperienceAction
     ) -> VoiceInputExperienceEffect? {
         performedActions += 1
-        return .openSpeechSettings
+        return .openSettings(.permissions)
     }
 
     func route(_ effect: VoiceInputExperienceEffect) {
@@ -1560,6 +1675,18 @@ private func verifyHUDControls(
         recorder.routedEffects == expectedRoutedEffects,
         "fixture routed \(recorder.routedEffects) effects instead of \(expectedRoutedEffects)"
     )
+}
+
+@MainActor
+private func onboardingSecureFields(in root: NSView) -> [NSSecureTextField] {
+    root.layoutSubtreeIfNeeded()
+    let own = (root as? NSSecureTextField).map { [$0] } ?? []
+    return own + root.subviews.flatMap(onboardingSecureFields)
+}
+
+@MainActor
+private func pumpUIRunLoop() {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.01))
 }
 
 private struct AccessibilityButton {
