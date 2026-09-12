@@ -19,6 +19,7 @@ final class SpeakerRuntime: ObservableObject {
     let loginItemSettings: LoginItemSettingsModel
     let settingsNavigation: SettingsNavigationModel
     let shortcut: VoiceShortcutFeature
+    let microphones: MicrophoneSelectionFeature
     let diagnostics: DiagnosticNoticeModel
     let softwareUpdate: SoftwareUpdateFeature
     let dataErasure: SpeakerDataErasureCoordinator
@@ -44,6 +45,7 @@ final class SpeakerRuntime: ObservableObject {
         navigation: settingsNavigation,
         permissions: permissions,
         shortcut: shortcut,
+        microphones: microphones,
         loginItemSettings: loginItemSettings,
         historyRetention: historyRetention,
         doubao: doubaoSettings,
@@ -117,6 +119,15 @@ final class SpeakerRuntime: ObservableObject {
             refinement: OptionalTextRefinementPipeline(refiner: deepSeek)
         )
         let settingsStore = dependencies.settingsStore
+        let microphones = MicrophoneSelectionFeature(
+            microphones: dependencies.microphones,
+            levelTester: dependencies.microphoneLevelTester,
+            persistPreference: { preference in
+                _ = try await settingsStore.updateMicrophone(preference)
+            }
+        )
+        self.microphones = microphones
+        microphones.start()
         let settingsNavigation = SettingsNavigationModel()
         self.settingsNavigation = settingsNavigation
         let diagnostics = DiagnosticNoticeModel()
@@ -242,6 +253,7 @@ final class SpeakerRuntime: ObservableObject {
                 historyModel: historyModel,
                 loginItem: loginItemSettings,
                 shortcut: shortcut,
+                microphones: microphones,
                 onboarding: onboarding,
                 launchArguments: dependencies.launchArguments
             ),
@@ -251,6 +263,7 @@ final class SpeakerRuntime: ObservableObject {
         let shutdown = RuntimeShutdownCoordinator(
             stages: SpeakerRuntimeShutdownStages(
                 shortcut: shortcut,
+                microphones: microphones,
                 permissionRefresh: permissionRefreshCoordinator,
                 startup: startup,
                 onboarding: onboarding,

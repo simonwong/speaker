@@ -11,5 +11,6 @@ ADRs preserve decisions whose rationale future architecture work must understand
 | [0005](0005-deliver-updates-through-sparkle.md) | Accepted | Deliver updates through Sparkle with three independent verifications |
 | [0006](0006-store-session-records-in-sqlite.md) | Accepted | Store Session Records in SQLite with WAL and explicit convergence |
 | [0007](0007-specify-behavior-through-sequential-executables.md) | Accepted | Specify behavior through sequential `@main` executables instead of XCTest |
+| [0008](0008-freeze-the-capture-microphone.md) | Accepted | Freeze the capture microphone per Voice Input Session and fail closed on loss |
 
 Create a new ADR when a load-bearing decision changes. Keep superseded ADRs as history and link the replacement rather than rewriting the old decision.

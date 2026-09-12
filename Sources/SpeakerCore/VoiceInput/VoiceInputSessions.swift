@@ -45,6 +45,7 @@ public actor VoiceInputSessions {
     private var historyWrites = SessionHistoryWriteQueue()
     private var isShutDown = false
     private var preparingStartedAt: Date?
+    private var preparingAudioStart: AudioCaptureStart?
     private var activeSnapshot: VoiceTextProcessingSnapshot?
     private var confirmedDoubaoResult: TranscriptionResult?
     private var historyTextPolicy = HistoryTextPolicy.unclassified
@@ -150,15 +151,22 @@ public actor VoiceInputSessions {
         activeTriggerSequence == triggerSequence
     }
 
+    package nonisolated func prepareAudioStart() -> AudioCaptureStart {
+        audioCapture.prepareStart()
+    }
+
     package func send(_ command: VoiceInputCommand) async {
-        await send(command, triggerSequence: nil)
+        let audioStart = command == .pressed ? prepareAudioStart() : nil
+        await send(command, triggerSequence: nil, audioStart: audioStart)
     }
 
     package func send(
         _ command: VoiceInputCommand,
-        triggerSequence: UInt64
+        triggerSequence: UInt64,
+        audioStart: AudioCaptureStart? = nil
     ) async {
-        await send(command, triggerSequence: Optional(triggerSequence))
+        let start = audioStart ?? (command == .pressed ? prepareAudioStart() : nil)
+        await send(command, triggerSequence: Optional(triggerSequence), audioStart: start)
     }
 
     package func releaseFromDispatcher(
@@ -236,11 +244,15 @@ public actor VoiceInputSessions {
 
     private func send(
         _ command: VoiceInputCommand,
-        triggerSequence: UInt64?
+        triggerSequence: UInt64?,
+        audioStart: AudioCaptureStart?
     ) async {
         switch command {
         case .pressed:
-            await beginSession(triggerSequence: triggerSequence)
+            await beginSession(
+                triggerSequence: triggerSequence,
+                audioStart: audioStart ?? prepareAudioStart()
+            )
         case .released:
             if case .preparing = phase {
                 releasePending = true
@@ -287,7 +299,10 @@ public actor VoiceInputSessions {
         }
     }
 
-    private func beginSession(triggerSequence: UInt64?) async {
+    private func beginSession(
+        triggerSequence: UInt64?,
+        audioStart: AudioCaptureStart
+    ) async {
         guard !isShutDown, phase == .idle else {
             if let triggerSequence {
                 finishRejectedTriggerSequence(triggerSequence)
@@ -304,6 +319,7 @@ public actor VoiceInputSessions {
         releasePending = false
         pendingReleaseCaptureHint = nil
         phase = .preparing(id)
+        preparingAudioStart = audioStart
         activeTriggerSequence = triggerSequence
         preparingStartedAt = requestedAt
         confirmedDoubaoResult = nil
@@ -327,13 +343,18 @@ public actor VoiceInputSessions {
             liveStream = nil
             streamingProcessor = nil
         }
+        guard phase == .preparing(id) else {
+            await audioStart.cancel()
+            return
+        }
 
         do {
-            try await audioCapture.start()
+            try await audioStart.start()
             guard phase == .preparing(id) else {
-                await audioCapture.cancel()
+                await audioStart.cancel()
                 return
             }
+            preparingAudioStart = nil
             let startedAt = requestedAt
             phase = .recording(id, startedAt: startedAt, snapshot: snapshot)
             stageAudit.advance(id: id, stage: "recording", now: clock.monotonicNow)
@@ -384,10 +405,11 @@ public actor VoiceInputSessions {
             }
         } catch {
             guard phase == .preparing(id) else {
-                await audioCapture.cancel()
+                await audioStart.cancel()
                 return
             }
             phase = .finalizing(id)
+            preparingAudioStart = nil
             finishActiveTriggerSequence()
             preparingStartedAt = nil
             activeSnapshot = nil
@@ -406,6 +428,9 @@ public actor VoiceInputSessions {
                 applicationName: nil,
                 transcription: nil,
                 finalText: nil,
+                transcriptionProvider: problem.diagnostic?.provider,
+                providerErrorCode: problem.diagnostic?.code,
+                providerOperation: problem.diagnostic?.operation.rawValue,
                 refinementModeName: snapshot.refinementMode.displayName,
                 refinementPrompt: snapshot.refinementMode.deepSeekInstruction,
                 dictionarySnapshotID: snapshot.dictionary.id,
@@ -779,6 +804,8 @@ public actor VoiceInputSessions {
 
         let cancelledAtStage = stageAudit.currentStage
         let audit = stageAudit.finish(id: id, now: clock.monotonicNow)
+        let audioStart = preparingAudioStart
+        preparingAudioStart = nil
         phase = .finalizing(id)
         finishActiveTriggerSequence()
         preparingStartedAt = nil
@@ -808,6 +835,7 @@ public actor VoiceInputSessions {
         // Cancellation is committed before cleanup or history I/O. The overlay
         // disappears immediately and late results are fenced by `.finalizing`.
         publish(activity)
+        await audioStart?.cancel()
         await audioCapture.cancel()
         let elapsed = max(0, Int(clock.date.timeIntervalSince(startedAt) * 1_000))
         _ = queueHistory(

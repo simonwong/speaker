@@ -415,6 +415,10 @@ enum DeliverySmokeRunner {
 }
 
 private struct DeliverySmokeAudioCapture: AudioCapturing {
+    func prepareStart() -> AudioCaptureStart {
+        AudioCaptureStart(start: {}, cancel: {})
+    }
+
     func start() async throws {}
 
     func stop() async throws -> CapturedAudio {

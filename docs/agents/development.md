@@ -131,6 +131,20 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 
 Use a real Mac for capture-environment acceptance. Start and end one Voice Input Session so the live recorder refreshes its snapshot, then use About to copy diagnostics. Confirm `audioCaptureVoiceProcessingRequested` is `false` and `audioCaptureVoiceProcessingActive` is `false`; Speaker records on the raw input path and does not request Apple voice processing. Compare `audioCapturePreferredMicrophoneMode` with the mode selected in Control Center and `audioCaptureActiveMicrophoneMode` with the mode actually active for the current route. Record `audioCaptureAGCEnabled` as observed evidence only; Speaker does not change AGC. Values are `unknown` until live capture has supplied them.
 
+## Microphone selection acceptance
+
+Use a stably signed local build on a real Mac. The deterministic specifications verify routing, ownership, preferences, and error handling; they do not certify real USB/Bluetooth audio or every supported macOS release. Do not run a normal Voice Input Session against configured paid providers without explicit approval. The Settings level test is local and sends no provider request; obtain permission before capturing real audio for acceptance.
+
+Verify both menu and Settings with built-in, USB, and Bluetooth inputs on the supported system versions:
+
+- With no stored preference, both surfaces select Follow System and show the current system input. A fixed selection survives relaunch without changing the system default.
+- Plug/unplug devices and change the system default while idle. Both surfaces update; a missing fixed choice stays selected and refuses recording. Reconnection restores availability for the next attempt.
+- Run a local level test on a non-default input and confirm the displayed actual device and input level. Stop it, let its eight-second limit end it, and start normal voice input during a test only in an approved provider run; old preview cleanup must not stop the new capture.
+- Change the preference during capture. The actual input remains fixed while the UI identifies the next choice. Check startup-time removal, active removal, sleep/wake, and the next attempt; no missing input silently falls back and no interrupted capture resumes itself.
+- Verify raw input conversion for each hardware format, especially Bluetooth low-rate input. Check device binding/readback and the existing capture environment snapshot. Do not record device names, UIDs, audio, transcript text, or raw provider messages in committed evidence.
+
+Keep untested hardware/system combinations explicitly pending. A build, fake directory, or local meter reading alone does not establish recognition accuracy or cross-device compatibility.
+
 ## Launch, bundle, and local install
 
 Every command that bundles or launches Speaker must keep one stable local code identity:

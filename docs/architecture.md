@@ -55,7 +55,9 @@ The implementation owns the trigger dispatcher, hold/short-press gesture, synchr
 
 ### Application feature modules
 
-`SettingsNavigationModel` is the single page-selection source for the six settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
+`SettingsNavigationModel` is the single page-selection source for the settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
+
+`MicrophoneSelectionFeature` exposes one selection state and semantic actions to the menu and Settings. It hides ordered persistence, late-restore fencing, local test presentation, and shutdown. `MicrophoneRouting` shares the device directory, preference, and actual capture lease with `AVAudioCapture`; the UI never invents the device currently recording. Settings restore the preference before shortcut activation, and shutdown stops observation and testing before completing the last preference write.
 
 `OnboardingPresentation` owns permission actions, provider-check availability, resource selection, and completion rules. The onboarding view, its copy, and its SF Symbols live in the application feature module; the App scene keeps only the window controller. The secure credential editor remains available after saving and failed validation, so users can replace a Key in place without exposing its saved value. Production window configuration comes from a dedicated factory that the AppKit specifications exercise through the same interface.
 
@@ -74,6 +76,12 @@ User Cancellation is distinct from a Session Problem. Cancellation suppresses la
 New shortcut presses are rejected while processing or while a Pending Copy Result owns the interaction. Gesture ownership is reset synchronously and in the actor so a rejected press cannot start a delayed recording after the old session finishes.
 
 ## Provider processing and audio
+
+`CoreAudioMicrophoneDevices` observes input-device and default-input changes behind the same snapshot/observation interface used by deterministic device sources. Stable UIDs select devices across directory refreshes; transient device IDs are checked against those identities before binding. A directory error refuses capture instead of becoming an empty or default selection.
+
+`AudioCaptureStart` carries an immutable recording plan through the trigger dispatcher and the Voice Input Session. The physical recording press captures the latest observed device snapshot synchronously, without CoreAudio I/O in the event callback; session preparation can suspend without changing which microphone will start. Cancellation invalidates that plan before accepting another session, and its late cleanup cannot cancel another plan's capture. `AVAudioCapture` binds and verifies the selected input before creating its PCM converter and checks the route again after the engine starts. Capture generations fence configuration, conversion, buffer, meter, and local-preview callbacks so old work cannot stop a newer engine. The microphone decision is recorded in [ADR-0008](adr/0008-freeze-the-capture-microphone.md).
+
+The optional local level test uses the same capture ownership and raw path, discards its samples, and finishes within eight seconds. It has no transcriber, refinement, delivery, or history collaborator. Normal voice input preempts the test, and a later test stop cannot cancel the new session.
 
 Microphone capture uses the raw input path and does not request Apple voice processing. The result is converted to 16 kHz, 16-bit, mono PCM and enters a bounded in-memory stream. Doubao transmission and reception run concurrently over the bidirectional `bigmodel_async` WebSocket. Release marks the final audio frame; cancellation never sends a final frame after the task has been cancelled.
 

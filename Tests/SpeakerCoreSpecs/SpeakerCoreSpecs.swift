@@ -10,6 +10,8 @@ struct SpeakerCoreSpecs {
         await InputTargetSpecs.run(failures: &failures)
         await ShortcutSpecs.run(failures: &failures)
         await AudioCaptureSpecs.run(failures: &failures)
+        await MicrophoneRoutingSpecs.run(failures: &failures)
+        await MicrophoneSessionSpecs.run(failures: &failures)
         await VoiceInputSessionSpecs.run(failures: &failures)
         await RecordingLimitSpecs.run(failures: &failures)
         await SessionCancellationSpecs.run(failures: &failures)

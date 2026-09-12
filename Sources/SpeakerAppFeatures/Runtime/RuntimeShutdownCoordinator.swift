@@ -9,6 +9,7 @@ package protocol RuntimeShutdownStages: AnyObject {
     func stopTrigger()
     /// Stop reacting to permission changes.
     func stopPermissionRefresh()
+    func stopMicrophoneSelection()
     /// Ask the startup sequence to stop at its next checkpoint.
     func cancelStartup()
     /// Close the onboarding window if it is open.
@@ -61,6 +62,7 @@ package final class RuntimeShutdownCoordinator {
     private static func run(_ stages: any RuntimeShutdownStages) async {
         stages.stopTrigger()
         stages.stopPermissionRefresh()
+        stages.stopMicrophoneSelection()
         stages.cancelStartup()
         stages.closeOnboarding()
         stages.closePanel()

@@ -45,6 +45,7 @@ package protocol RuntimeStartupStages: AnyObject {
     func applyHistoryRetention(_ policy: HistoryRetentionPolicy) async
     func refreshHistory() async
     func restoreLoginItem(desiredEnabled: Bool) async
+    func restoreMicrophone(_ preference: MicrophonePreference)
     func restoreShortcut(_ preference: VoiceShortcutPreference)
     func presentOnboarding()
 }
@@ -152,6 +153,7 @@ package final class RuntimeStartupSequence {
         guard !Task.isCancelled else { return }
         await stages.restoreLoginItem(desiredEnabled: settings.launchAtLogin)
         guard !Task.isCancelled else { return }
+        stages.restoreMicrophone(settings.microphone)
         stages.restoreShortcut(settings.shortcut)
         stages.presentOnboarding()
     }

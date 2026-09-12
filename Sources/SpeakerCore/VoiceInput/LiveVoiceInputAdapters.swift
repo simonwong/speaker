@@ -7,6 +7,8 @@ public enum AudioCaptureError: Error, Equatable, Sendable {
     case couldNotPrepare
     case couldNotStart
     case microphonePermissionDenied
+    case microphoneUnavailable
+    case microphoneSelectionFailed
     case noActiveRecording
     case tooShort
     case silent
@@ -92,177 +94,239 @@ package enum AudioCaptureQualityPolicy {
 }
 
 public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
-    AudioCaptureFailureProviding, AudioCaptureEnvironmentProviding
+    AudioCaptureFailureProviding, AudioCaptureEnvironmentProviding, MicrophoneLevelTesting
 {
-    /// Caps audio waiting to be consumed by the provider transport. This is a
-    /// memory/resource boundary, not a deadline: healthy consumers keep the
-    /// buffer close to empty regardless of recording duration.
     package static let maximumBufferedAudioBytes = 1_024_000
+    package static let maximumLevelTestDuration: Duration = .seconds(8)
 
-    private var engine: AVAudioEngine?
-    private var bridge: PCMStreamingBridge?
+    private nonisolated let microphones: MicrophoneRouting
+    private let hardwareFactory: AudioCaptureHardwareFactory
+    private let clock: any VoiceInputClock
+    private var hardware: (any AudioCaptureHardware)?
+    private var lease: MicrophoneCaptureLease?
+    private var previewContinuation:
+        AsyncThrowingStream<RecordingTelemetry, any Error>.Continuation?
     private var pendingAudioStream: BoundedAudioChunkStream?
-    private var recordingStartedAt: ContinuousClock.Instant?
+    private var pendingStreamID: UUID?
+    private var activeStreamID: UUID?
+    private var recordingStartedAt: Duration?
     private var meterTask: Task<Void, Never>?
-    private var configurationObserver: NSObjectProtocol?
+    private var deviceObservation: Task<Void, Never>?
+    private var previewDeadline: Task<Void, Never>?
+    private var sleepObserver: NSObjectProtocol?
     private var activeRuntimeFailure: AudioCaptureError?
     private var latestEnvironmentSnapshot: AudioCaptureEnvironmentSnapshot?
     private var telemetryObservers: [UUID: AsyncStream<RecordingTelemetry>.Continuation] = [:]
     private var failureObservers: [UUID: AsyncStream<AudioCaptureError>.Continuation] = [:]
 
-    public init() {}
+    public init(microphones: MicrophoneRouting) {
+        self.microphones = microphones
+        hardwareFactory = .live
+        clock = ContinuousVoiceInputClock()
+    }
+
+    public init() {
+        microphones = MicrophoneRouting(devices: CoreAudioMicrophoneDevices())
+        hardwareFactory = .live
+        clock = ContinuousVoiceInputClock()
+    }
+
+    package init(
+        microphones: MicrophoneRouting,
+        hardwareFactory: AudioCaptureHardwareFactory,
+        clock: any VoiceInputClock = ContinuousVoiceInputClock()
+    ) {
+        self.microphones = microphones
+        self.hardwareFactory = hardwareFactory
+        self.clock = clock
+    }
+
+    public nonisolated func prepareStart() -> AudioCaptureStart {
+        let plan = microphones.prepareCapture()
+        return AudioCaptureStart(
+            start: { [self] in try await start(plan: plan) },
+            cancel: { [self] in
+                plan.cancel()
+                await cancel(planID: plan.id)
+            }
+        )
+    }
 
     public func audioChunks() -> AsyncStream<Data> {
         pendingAudioStream?.finish()
+        let id = UUID()
         let audioStream = BoundedAudioChunkStream(
             maximumBufferedBytes: Self.maximumBufferedAudioBytes,
             nominalChunkSize: 6_400,
             onBufferExhausted: { [weak self] in
-                Task { await self?.reportRuntimeFailure(.streamBufferExhausted) }
+                Task { await self?.reportStreamFailure(.streamBufferExhausted, id: id) }
             }
         )
         pendingAudioStream = audioStream
+        pendingStreamID = id
         return audioStream.stream
     }
 
     public func start() async throws {
-        guard engine == nil else {
-            throw AudioCaptureError.alreadyRecording
+        try start(plan: microphones.prepareCapture())
+    }
+
+    private func start(plan: MicrophoneCapturePlan) throws {
+        guard !plan.isCancelled else { throw CancellationError() }
+        if let lease, lease.purpose == .levelTest {
+            cleanUpCapture(lease)
         }
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .denied, .restricted:
-            throw AudioCaptureError.microphonePermissionDenied
-        case .authorized, .notDetermined:
-            break
-        @unknown default:
-            throw AudioCaptureError.couldNotPrepare
-        }
-        guard let audioStream = pendingAudioStream else {
+        guard lease == nil else { throw AudioCaptureError.alreadyRecording }
+        guard let audioStream = pendingAudioStream, let streamID = pendingStreamID else {
             throw AudioCaptureError.couldNotPrepare
         }
         pendingAudioStream = nil
-
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        // Apple voice processing is deliberately not requested: enabling it
-        // on the engine's input node was observed to end capture immediately
-        // on device. The snapshot still records the raw-path facts.
-        refreshCaptureEnvironment(input: input)
-        let inputFormat = input.outputFormat(forBus: 0)
-        guard inputFormat.channelCount > 0,
-            let outputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatInt16,
-                sampleRate: 16_000,
-                channels: 1,
-                interleaved: true
-            ),
-            let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
-        else {
-            audioStream.finish()
-            throw AudioCaptureError.couldNotPrepare
-        }
-
-        let bridge = PCMStreamingBridge(
-            converter: converter,
-            outputFormat: outputFormat,
-            audioStream: audioStream,
-            onConversionFailure: { [weak self] in
-                Task { await self?.reportRuntimeFailure(.conversionFailed) }
-            }
-        )
-        input.installTap(
-            onBus: 0,
-            bufferSize: 4_096,
-            format: inputFormat
-        ) { buffer, _ in
-            bridge.consume(buffer)
-        }
-
+        pendingStreamID = nil
         do {
-            engine.prepare()
-            try engine.start()
-            refreshCaptureEnvironment(input: input)
+            try hardwareFactory.checkPermission()
+            let lease = try microphones.acquire(plan, purpose: .voice)
+            self.lease = lease
+            activeStreamID = streamID
+            try configureCapture(lease, audioStream: audioStream)
+            guard !plan.isCancelled else { throw CancellationError() }
         } catch {
-            input.removeTap(onBus: 0)
+            if let lease { cleanUpCapture(lease) }
             audioStream.finish()
-            throw AudioCaptureError.couldNotStart
+            throw error
         }
+    }
 
-        self.engine = engine
-        self.bridge = bridge
+    public func startLevelTest() async throws -> AsyncThrowingStream<RecordingTelemetry, any Error>
+    {
+        guard lease == nil else { throw AudioCaptureError.alreadyRecording }
+        try hardwareFactory.checkPermission()
+        let lease = try microphones.acquire(microphones.prepareCapture(), purpose: .levelTest)
+        self.lease = lease
+        let (stream, continuation) = AsyncThrowingStream<RecordingTelemetry, any Error>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        previewContinuation = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.stopLevelTest(lease) }
+        }
+        do {
+            try configureCapture(lease, audioStream: nil)
+            let deadline = clock.monotonicNow + Self.maximumLevelTestDuration
+            previewDeadline = Task { [weak self, clock] in
+                let remaining = deadline - clock.monotonicNow
+                if remaining > .zero {
+                    do { try await clock.sleep(for: remaining) } catch { return }
+                }
+                await self?.stopLevelTest(lease)
+            }
+            return stream
+        } catch {
+            cleanUpCapture(lease)
+            throw error
+        }
+    }
+
+    public func stopLevelTest() async {
+        guard let lease, lease.purpose == .levelTest else { return }
+        cleanUpCapture(lease)
+    }
+
+    private func stopLevelTest(_ lease: MicrophoneCaptureLease) {
+        guard lease.purpose == .levelTest else { return }
+        cleanUpCapture(lease)
+    }
+
+    private func configureCapture(
+        _ lease: MicrophoneCaptureLease,
+        audioStream: BoundedAudioChunkStream?
+    ) throws {
+        let hardware = hardwareFactory.make()
+        self.hardware = hardware
         activeRuntimeFailure = nil
-        recordingStartedAt = .now
-        configurationObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: nil
+        try hardware.start(deviceID: lease.device.deviceID, audioStream: audioStream) {
+            [weak self] failure in
+            await self?.reportRuntimeFailure(failure, lease: lease)
+        }
+        guard hardware.currentDeviceID == lease.device.deviceID,
+            microphones.refreshAndValidate(lease), hardware.isRunning
+        else { throw AudioCaptureError.microphoneSelectionFailed }
+        latestEnvironmentSnapshot = hardware.environmentSnapshot
+        recordingStartedAt = clock.monotonicNow
+        microphones.markStarted(lease)
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: nil
         ) { [weak self] _ in
-            Task {
-                await self?.reportRuntimeFailure(.deviceConfigurationChanged)
+            Task { await self?.reportRuntimeFailure(.deviceConfigurationChanged, lease: lease) }
+        }
+        let changes = microphones.observe()
+        deviceObservation = Task { [weak self, microphones] in
+            for await _ in changes {
+                guard !Task.isCancelled else { return }
+                guard microphones.isCurrent(lease), microphones.deviceIsAvailable(lease) else {
+                    await self?.reportRuntimeFailure(.deviceConfigurationChanged, lease: lease)
+                    return
+                }
             }
         }
-        meterTask = Task { [weak self] in
+        meterTask = Task { [weak self, clock] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(50))
-                await self?.sampleMeters()
+                do { try await clock.sleep(for: .milliseconds(50)) } catch { return }
+                await self?.sampleMeters(lease)
             }
         }
     }
 
     public func stop() async throws -> CapturedAudio {
-        guard let engine, let bridge, let recordingStartedAt else {
+        guard let lease, lease.purpose == .voice, let hardware, let recordingStartedAt else {
             throw AudioCaptureError.noActiveRecording
         }
-
-        meterTask?.cancel()
-        meterTask = nil
-        sampleMeters()
-        let duration = recordingStartedAt.duration(to: .now)
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        bridge.finish()
-        let metrics = bridge.metrics()
-        removeConfigurationObserver()
+        sampleMeters(lease)
+        let duration = clock.monotonicNow - recordingStartedAt
         let runtimeFailure = activeRuntimeFailure
-        self.engine = nil
-        self.bridge = nil
-        self.recordingStartedAt = nil
-        activeRuntimeFailure = nil
-
+        cleanUpCapture(lease)
+        let metrics = hardware.metrics
         if let runtimeFailure { throw runtimeFailure }
-        guard !metrics.didExhaustStreamBuffer else {
-            throw AudioCaptureError.streamBufferExhausted
-        }
-        guard !metrics.didFailConversion else {
-            throw AudioCaptureError.conversionFailed
-        }
-        try AudioCaptureQualityPolicy.validate(
-            duration: duration,
-            peakPower: metrics.peakPower
-        )
+        guard !metrics.didExhaustStreamBuffer else { throw AudioCaptureError.streamBufferExhausted }
+        guard !metrics.didFailConversion else { throw AudioCaptureError.conversionFailed }
+        try AudioCaptureQualityPolicy.validate(duration: duration, peakPower: metrics.peakPower)
+        return CapturedAudio(data: Data(), duration: duration, peakPower: metrics.peakPower)
+    }
 
-        return CapturedAudio(
-            data: Data(),
-            duration: duration,
-            peakPower: metrics.peakPower
-        )
+    private func cancel(planID: UUID) {
+        guard let lease, lease.planID == planID else { return }
+        cleanUpCapture(lease)
     }
 
     public func cancel() async {
+        if let lease { cleanUpCapture(lease) }
+        pendingAudioStream?.finish()
+        pendingAudioStream = nil
+        pendingStreamID = nil
+    }
+
+    private func cleanUpCapture(
+        _ lease: MicrophoneCaptureLease, previewFailure: AudioCaptureError? = nil
+    ) {
+        guard self.lease?.id == lease.id else { return }
+        self.lease = nil
         meterTask?.cancel()
         meterTask = nil
-        if let engine {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
+        deviceObservation?.cancel()
+        deviceObservation = nil
+        previewDeadline?.cancel()
+        previewDeadline = nil
+        if let sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
         }
-        removeConfigurationObserver()
-        bridge?.finish()
-        pendingAudioStream?.finish()
-        engine = nil
-        bridge = nil
-        pendingAudioStream = nil
+        sleepObserver = nil
+        hardware?.stop()
+        hardware = nil
+        activeStreamID = nil
         recordingStartedAt = nil
         activeRuntimeFailure = nil
+        previewContinuation?.finish(throwing: previewFailure)
+        previewContinuation = nil
+        microphones.release(lease)
     }
 
     public func observeTelemetry() -> AsyncStream<RecordingTelemetry> {
@@ -283,9 +347,7 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
             bufferingPolicy: .bufferingNewest(1)
         )
         failureObservers[id] = continuation
-        if let activeRuntimeFailure {
-            continuation.yield(activeRuntimeFailure)
-        }
+        if let activeRuntimeFailure { continuation.yield(activeRuntimeFailure) }
         continuation.onTermination = { [weak self] _ in
             Task { await self?.removeFailureObserver(id) }
         }
@@ -296,81 +358,233 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         latestEnvironmentSnapshot
     }
 
-    private func sampleMeters() {
-        guard let bridge, let recordingStartedAt else { return }
-        let metrics = bridge.metrics()
+    private func sampleMeters(_ lease: MicrophoneCaptureLease) {
+        guard self.lease?.id == lease.id, microphones.isCurrent(lease), let recordingStartedAt
+        else {
+            return
+        }
+        let power = hardware?.metrics.currentPower ?? -160
         let telemetry = RecordingTelemetry(
-            elapsedMilliseconds: Self.milliseconds(recordingStartedAt.duration(to: .now)),
-            peakPower: metrics.currentPower
+            elapsedMilliseconds: Self.milliseconds(clock.monotonicNow - recordingStartedAt),
+            peakPower: power
         )
-        for continuation in telemetryObservers.values {
-            continuation.yield(telemetry)
+        if lease.purpose == .levelTest {
+            previewContinuation?.yield(telemetry)
+        } else {
+            for continuation in telemetryObservers.values { continuation.yield(telemetry) }
         }
     }
 
-    private func removeTelemetryObserver(_ id: UUID) {
-        telemetryObservers[id] = nil
+    private func removeTelemetryObserver(_ id: UUID) { telemetryObservers[id] = nil }
+    private func removeFailureObserver(_ id: UUID) { failureObservers[id] = nil }
+
+    private func reportStreamFailure(_ failure: AudioCaptureError, id: UUID) {
+        guard activeStreamID == id, let lease else { return }
+        reportRuntimeFailure(failure, lease: lease)
     }
 
-    private func removeFailureObserver(_ id: UUID) {
-        failureObservers[id] = nil
-    }
-
-    private func reportRuntimeFailure(_ failure: AudioCaptureError) {
-        guard engine != nil, activeRuntimeFailure == nil else { return }
+    private func reportRuntimeFailure(
+        _ failure: AudioCaptureError,
+        lease: MicrophoneCaptureLease
+    ) {
+        guard self.lease?.id == lease.id, microphones.isCurrent(lease),
+            hardware != nil, activeRuntimeFailure == nil
+        else { return }
+        if lease.purpose == .levelTest {
+            cleanUpCapture(lease, previewFailure: failure)
+            return
+        }
         activeRuntimeFailure = failure
-        engine?.stop()
-        bridge?.finish()
-        for continuation in failureObservers.values {
-            continuation.yield(failure)
-        }
-    }
-
-    private func removeConfigurationObserver() {
-        if let configurationObserver {
-            NotificationCenter.default.removeObserver(configurationObserver)
-        }
-        configurationObserver = nil
-    }
-
-    private func refreshCaptureEnvironment(input: AVAudioInputNode) {
-        latestEnvironmentSnapshot = AudioCaptureEnvironmentSnapshot(
-            voiceProcessingRequested: false,
-            voiceProcessingActive: input.isVoiceProcessingEnabled,
-            voiceProcessingEnableFailure: nil,
-            automaticGainControlEnabled: input.isVoiceProcessingAGCEnabled,
-            preferredMicrophoneMode: Self.microphoneMode(
-                AVCaptureDevice.preferredMicrophoneMode
-            ),
-            activeMicrophoneMode: Self.microphoneMode(
-                AVCaptureDevice.activeMicrophoneMode
-            )
-        )
-    }
-
-    private static func microphoneMode(
-        _ mode: AVCaptureDevice.MicrophoneMode
-    ) -> AudioCaptureMicrophoneMode {
-        switch mode {
-        case .standard:
-            .standard
-        case .wideSpectrum:
-            .wideSpectrum
-        case .voiceIsolation:
-            .voiceIsolation
-        @unknown default:
-            .unknown
-        }
+        hardware?.stop()
+        for continuation in failureObservers.values { continuation.yield(failure) }
     }
 
     private static func milliseconds(_ duration: Duration) -> Int {
         let components = duration.components
         return Int(
-            clamping:
-                components.seconds * 1_000
-                + components.attoseconds / 1_000_000_000_000_000
+            clamping: components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)
+    }
+}
+
+package struct AudioCaptureHardwareMetrics: Sendable {
+    package let currentPower: Float
+    package let peakPower: Float
+    package let didExhaustStreamBuffer: Bool
+    package let didFailConversion: Bool
+
+    package init(
+        currentPower: Float, peakPower: Float, didExhaustStreamBuffer: Bool, didFailConversion: Bool
+    ) {
+        self.currentPower = currentPower
+        self.peakPower = peakPower
+        self.didExhaustStreamBuffer = didExhaustStreamBuffer
+        self.didFailConversion = didFailConversion
+    }
+}
+
+package protocol AudioCaptureHardware: AnyObject, Sendable {
+    var currentDeviceID: UInt32 { get }
+    var isRunning: Bool { get }
+    var metrics: AudioCaptureHardwareMetrics { get }
+    var environmentSnapshot: AudioCaptureEnvironmentSnapshot? { get }
+    func start(
+        deviceID: UInt32,
+        audioStream: BoundedAudioChunkStream?,
+        onFailure: @escaping @Sendable (AudioCaptureError) async -> Void
+    ) throws
+    func stop()
+}
+
+package struct AudioCaptureHardwareFactory: Sendable {
+    package let checkPermission: @Sendable () throws -> Void
+    package let make: @Sendable () -> any AudioCaptureHardware
+
+    package init(
+        checkPermission: @escaping @Sendable () throws -> Void,
+        make: @escaping @Sendable () -> any AudioCaptureHardware
+    ) {
+        self.checkPermission = checkPermission
+        self.make = make
+    }
+
+    package static let live = AudioCaptureHardwareFactory(
+        checkPermission: {
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .denied, .restricted: throw AudioCaptureError.microphonePermissionDenied
+            case .authorized, .notDetermined: break
+            @unknown default: throw AudioCaptureError.couldNotPrepare
+            }
+        },
+        make: { LiveAudioCaptureHardware() }
+    )
+}
+
+// The owning capture actor serializes lifecycle calls; tap metrics synchronize separately.
+private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked Sendable {
+    private let engine = AVAudioEngine()
+    private var bridge: PCMStreamingBridge?
+    private var previewMeter: AudioCaptureLevelMeter?
+    private var configurationObserver: NSObjectProtocol?
+    private var hasTap = false
+    private(set) var environmentSnapshot: AudioCaptureEnvironmentSnapshot?
+
+    var currentDeviceID: UInt32 { engine.inputNode.auAudioUnit.deviceID }
+    var isRunning: Bool { engine.isRunning }
+    var metrics: AudioCaptureHardwareMetrics {
+        if let bridge {
+            let metrics = bridge.metrics()
+            return AudioCaptureHardwareMetrics(
+                currentPower: metrics.currentPower, peakPower: metrics.peakPower,
+                didExhaustStreamBuffer: metrics.didExhaustStreamBuffer,
+                didFailConversion: metrics.didFailConversion
+            )
+        }
+        let power = previewMeter?.power ?? -160
+        return AudioCaptureHardwareMetrics(
+            currentPower: power, peakPower: power,
+            didExhaustStreamBuffer: false, didFailConversion: false
         )
     }
+
+    func start(
+        deviceID: UInt32,
+        audioStream: BoundedAudioChunkStream?,
+        onFailure: @escaping @Sendable (AudioCaptureError) async -> Void
+    ) throws {
+        let input = engine.inputNode
+        do { try input.auAudioUnit.setDeviceID(deviceID) } catch {
+            throw AudioCaptureError.microphoneSelectionFailed
+        }
+        guard currentDeviceID == deviceID else { throw AudioCaptureError.microphoneSelectionFailed }
+        // Binding precedes format, converter, and tap creation so no old route defines the graph.
+        let inputFormat = input.outputFormat(forBus: 0)
+        guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
+            throw AudioCaptureError.couldNotPrepare
+        }
+        if let audioStream {
+            guard
+                let outputFormat = AVAudioFormat(
+                    commonFormat: .pcmFormatInt16, sampleRate: 16_000,
+                    channels: 1, interleaved: true
+                ), let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+            else {
+                throw AudioCaptureError.couldNotPrepare
+            }
+            let bridge = PCMStreamingBridge(
+                converter: converter, outputFormat: outputFormat, audioStream: audioStream,
+                onConversionFailure: { Task { await onFailure(.conversionFailed) } }
+            )
+            self.bridge = bridge
+            input.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { buffer, _ in
+                bridge.consume(buffer)
+            }
+        } else {
+            let meter = AudioCaptureLevelMeter()
+            previewMeter = meter
+            input.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { buffer, _ in
+                meter.consume(buffer)
+            }
+        }
+        hasTap = true
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { _ in Task { await onFailure(.deviceConfigurationChanged) } }
+        do {
+            engine.prepare()
+            try engine.start()
+        } catch { throw AudioCaptureError.couldNotStart }
+        environmentSnapshot = AudioCaptureEnvironmentSnapshot(
+            voiceProcessingRequested: false,
+            voiceProcessingActive: input.isVoiceProcessingEnabled,
+            voiceProcessingEnableFailure: nil,
+            automaticGainControlEnabled: input.isVoiceProcessingAGCEnabled,
+            preferredMicrophoneMode: Self.microphoneMode(AVCaptureDevice.preferredMicrophoneMode),
+            activeMicrophoneMode: Self.microphoneMode(AVCaptureDevice.activeMicrophoneMode)
+        )
+    }
+
+    func stop() {
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+        }
+        configurationObserver = nil
+        engine.stop()
+        if hasTap {
+            engine.inputNode.removeTap(onBus: 0)
+            hasTap = false
+        }
+        bridge?.finish()
+        previewMeter?.finish()
+    }
+
+    private static func microphoneMode(_ mode: AVCaptureDevice.MicrophoneMode)
+        -> AudioCaptureMicrophoneMode
+    {
+        switch mode {
+        case .standard: .standard
+        case .wideSpectrum: .wideSpectrum
+        case .voiceIsolation: .voiceIsolation
+        @unknown default: .unknown
+        }
+    }
+}
+
+private final class AudioCaptureLevelMeter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentPower: Float = -160
+    private var isFinished = false
+
+    var power: Float { lock.withLock { currentPower } }
+
+    func consume(_ buffer: AVAudioPCMBuffer) {
+        let power = PCMStreamingBridge.power(of: buffer)
+        lock.withLock {
+            guard !isFinished else { return }
+            currentPower = power
+        }
+    }
+
+    func finish() { lock.withLock { isFinished = true } }
 }
 
 extension AVAudioCapture: AudioChunkStreaming {}
@@ -597,7 +811,7 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         )
     }
 
-    private static func power(of buffer: AVAudioPCMBuffer) -> Float {
+    fileprivate static func power(of buffer: AVAudioPCMBuffer) -> Float {
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return -160 }
         var maximum: Float = 0
