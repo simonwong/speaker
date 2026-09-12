@@ -27,6 +27,7 @@ package final class SettingsWorkspace {
     let navigation: SettingsNavigationModel
     let permissions: PermissionModel
     let shortcut: VoiceShortcutFeature
+    let microphones: MicrophoneSelectionFeature
     let loginItemSettings: LoginItemSettingsModel
     let historyRetention: HistoryRetentionSettingsModel
     let doubao: DoubaoSettingsModel
@@ -45,6 +46,7 @@ package final class SettingsWorkspace {
         navigation: SettingsNavigationModel,
         permissions: PermissionModel,
         shortcut: VoiceShortcutFeature,
+        microphones: MicrophoneSelectionFeature,
         loginItemSettings: LoginItemSettingsModel,
         historyRetention: HistoryRetentionSettingsModel,
         doubao: DoubaoSettingsModel,
@@ -61,6 +63,7 @@ package final class SettingsWorkspace {
         self.navigation = navigation
         self.permissions = permissions
         self.shortcut = shortcut
+        self.microphones = microphones
         self.loginItemSettings = loginItemSettings
         self.historyRetention = historyRetention
         self.doubao = doubao
@@ -78,6 +81,7 @@ package final class SettingsWorkspace {
     func refresh() async {
         guard dataErasure.state == .idle else { return }
         refreshPermissions()
+        microphones.refresh()
         await doubao.refresh()
         await loginItemSettings.refresh()
         await historyRetention.refresh()

@@ -10,6 +10,7 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
         let uptimeNanoseconds: UInt64
         let ownerSequence: UInt64?
         var captureHint: InputTargetCaptureHint?
+        var audioStart: AudioCaptureStart?
     }
 
     private let sessions: VoiceInputSessions
@@ -43,7 +44,11 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                         guard !Task.isCancelled else { return }
                         switch event.trigger {
                         case .pressed:
-                            await sessions.send(.pressed, triggerSequence: event.sequence)
+                            await sessions.send(
+                                .pressed,
+                                triggerSequence: event.sequence,
+                                audioStart: event.audioStart
+                            )
                         case .released:
                             if event.source == .pressed,
                                 let ownerSequence = event.ownerSequence,
@@ -55,7 +60,8 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                             {
                                 await sessions.send(
                                     .pressed,
-                                    triggerSequence: event.sequence
+                                    triggerSequence: event.sequence,
+                                    audioStart: event.audioStart
                                 )
                             } else {
                                 await sessions.releaseFromDispatcher(
@@ -80,6 +86,12 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
 
     package func send(_ trigger: GlobalVoiceTrigger, at uptimeNanoseconds: UInt64) {
         var events = gestureController.handle(trigger, at: uptimeNanoseconds)
+        if trigger == .pressed, !events.isEmpty {
+            let audioStart = sessions.prepareAudioStart()
+            for index in events.indices {
+                events[index].audioStart = audioStart
+            }
+        }
         for index in events.indices where events[index].trigger == .released {
             events[index].captureHint = releaseCaptureHint()
         }
@@ -144,7 +156,8 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                         source: trigger,
                         uptimeNanoseconds: uptimeNanoseconds,
                         ownerSequence: existingOwnerSequence,
-                        captureHint: nil
+                        captureHint: nil,
+                        audioStart: nil
                     )
                 }
             }

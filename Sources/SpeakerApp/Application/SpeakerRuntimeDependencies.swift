@@ -115,6 +115,8 @@ struct SpeakerRuntimeDependencies {
     var launchArguments: [String]
     var operatingSystemVersion: String
     var audioCapture: any AudioCapturing & AudioCaptureEnvironmentProviding
+    var microphones: MicrophoneRouting
+    var microphoneLevelTester: any MicrophoneLevelTesting
     var history: SQLiteSessionHistory
     var legacyHistoryFileURL: URL
     var settingsStore: VersionedLocalAppSettingsStore
@@ -134,12 +136,16 @@ struct SpeakerRuntimeDependencies {
         termination: SpeakerTerminationCoordinator
     ) -> SpeakerRuntimeDependencies {
         let bundle = SpeakerBundleInfo.main()
+        let microphones = MicrophoneRouting(devices: CoreAudioMicrophoneDevices())
+        let audioCapture = AVAudioCapture(microphones: microphones)
         return SpeakerRuntimeDependencies(
             bundle: bundle,
             preferences: .standard,
             launchArguments: ProcessInfo.processInfo.arguments,
             operatingSystemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
-            audioCapture: AVAudioCapture(),
+            audioCapture: audioCapture,
+            microphones: microphones,
+            microphoneLevelTester: audioCapture,
             history: SQLiteSessionHistory(
                 fileURL: SQLiteSessionHistory.defaultFileURL()
             ),

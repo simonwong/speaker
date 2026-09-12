@@ -47,16 +47,21 @@ public actor SpeechTranscriberFake: SpeechTranscribing {
 public struct VoiceTextProcessorFake: VoiceTextProcessing {
     public let result: VoiceTextProcessingResult
     public let reportedStages: [VoiceInputProcessingStage]
+    private let snapshotOperation: @Sendable () async -> VoiceTextProcessingSnapshot
 
     public init(
         result: VoiceTextProcessingResult,
-        reportedStages: [VoiceInputProcessingStage] = []
+        reportedStages: [VoiceInputProcessingStage] = [],
+        captureSnapshot: @escaping @Sendable () async -> VoiceTextProcessingSnapshot = { .empty }
     ) {
         self.result = result
         self.reportedStages = reportedStages
+        snapshotOperation = captureSnapshot
     }
 
-    public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+    public func captureSnapshot() async -> VoiceTextProcessingSnapshot {
+        await snapshotOperation()
+    }
 
     public func process(
         _ audio: CapturedAudio,

@@ -1,6 +1,28 @@
 import Foundation
 
+public struct AudioCaptureStart: Sendable {
+    private let operation: @Sendable () async throws -> Void
+    private let cancellation: @Sendable () async -> Void
+
+    public init(
+        start: @escaping @Sendable () async throws -> Void,
+        cancel: @escaping @Sendable () async -> Void
+    ) {
+        operation = start
+        cancellation = cancel
+    }
+
+    public func start() async throws {
+        try await operation()
+    }
+
+    public func cancel() async {
+        await cancellation()
+    }
+}
+
 public protocol AudioCapturing: Sendable {
+    func prepareStart() -> AudioCaptureStart
     func start() async throws
     func stop() async throws -> CapturedAudio
     func cancel() async

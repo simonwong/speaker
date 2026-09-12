@@ -35,6 +35,7 @@ private final class StartupStagesFake: RuntimeStartupStages {
     var legacyHistory: LegacyHistoryMigrationOutcome = .notNeeded
     var reconciles = true
     var restoredShortcut: VoiceShortcutPreference?
+    var restoredMicrophone: MicrophonePreference?
     var restoredLoginItem: Bool?
     var appliedRetention: HistoryRetentionPolicy?
     var scrubGate: StageGate?
@@ -97,6 +98,11 @@ private final class StartupStagesFake: RuntimeStartupStages {
         restoredLoginItem = desiredEnabled
     }
 
+    func restoreMicrophone(_ preference: MicrophonePreference) {
+        calls.append("restoreMicrophone")
+        restoredMicrophone = preference
+    }
+
     func restoreShortcut(_ preference: VoiceShortcutPreference) {
         calls.append("restoreShortcut")
         restoredShortcut = preference
@@ -114,6 +120,7 @@ private final class ShutdownStagesFake: RuntimeShutdownStages {
 
     func stopTrigger() { calls.append("stopTrigger") }
     func stopPermissionRefresh() { calls.append("stopPermissionRefresh") }
+    func stopMicrophoneSelection() { calls.append("stopMicrophoneSelection") }
     func cancelStartup() { calls.append("cancelStartup") }
     func closeOnboarding() { calls.append("closeOnboarding") }
     func closePanel() { calls.append("closePanel") }
@@ -143,6 +150,7 @@ enum RuntimeLifecycleSpecs {
         "applyHistoryRetention",
         "refreshHistory",
         "restoreLoginItem",
+        "restoreMicrophone",
         "restoreShortcut",
         "presentOnboarding",
     ]
@@ -150,6 +158,7 @@ enum RuntimeLifecycleSpecs {
     private static let shutdownOrder = [
         "stopTrigger",
         "stopPermissionRefresh",
+        "stopMicrophoneSelection",
         "cancelStartup",
         "closeOnboarding",
         "closePanel",
@@ -175,6 +184,7 @@ enum RuntimeLifecycleSpecs {
             stages.settings = .loaded(
                 SpeakerAppSettings(
                     shortcut: customShortcut,
+                    microphone: .device(uid: "startup-microphone"),
                     launchAtLogin: true,
                     historyRetention: .thirtyDays
                 ))
@@ -187,6 +197,7 @@ enum RuntimeLifecycleSpecs {
 
             try expect(stages.calls == fullStartupOrder, "unexpected order \(stages.calls)")
             try expect(stages.restoredShortcut == customShortcut)
+            try expect(stages.restoredMicrophone == .device(uid: "startup-microphone"))
             try expect(stages.restoredLoginItem == true)
             try expect(stages.appliedRetention == .thirtyDays)
             try expect(notices.isEmpty, "a clean startup published \(notices)")
@@ -320,6 +331,7 @@ enum RuntimeLifecycleSpecs {
                     "scrubHistory",
                     "refreshHistory",
                     "restoreLoginItem",
+                    "restoreMicrophone",
                     "restoreShortcut",
                     "presentOnboarding",
                 ], "unexpected order \(stages.calls)")
@@ -365,7 +377,7 @@ enum RuntimeLifecycleSpecs {
             await Task.yield()
             try expect(!erasureFinished, "the second caller returned before convergence finished")
             try expect(
-                stages.calls.count == 8, "the second caller restarted stages: \(stages.calls)")
+                stages.calls.count == 9, "the second caller restarted stages: \(stages.calls)")
 
             gate.open()
             await termination.value

@@ -9,6 +9,7 @@ package enum MenuBarIconState: Equatable, Sendable {
 package enum MenuBarRow: Equatable, Sendable {
     case openSpeaker
     case refinementMode
+    case microphone
     case voiceStatus
     case cancelVoiceInput
     case voiceNotice
@@ -91,7 +92,7 @@ package enum MenuBarPresentation {
         if voice.canDismiss { voiceRows.append(.dismissVoiceInput) }
 
         return rows(in: [
-            [.openSpeaker, .refinementMode],
+            [.openSpeaker, .refinementMode, .microphone],
             voiceRows,
             [.settings],
             [.quit],

@@ -72,6 +72,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     private let historyModel: HistoryModel
     private let loginItem: LoginItemSettingsModel
     private let shortcut: VoiceShortcutFeature
+    private let microphones: MicrophoneSelectionFeature
     private let onboarding: OnboardingPresenter
     private let launchArguments: [String]
 
@@ -88,6 +89,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         historyModel: HistoryModel,
         loginItem: LoginItemSettingsModel,
         shortcut: VoiceShortcutFeature,
+        microphones: MicrophoneSelectionFeature,
         onboarding: OnboardingPresenter,
         launchArguments: [String]
     ) {
@@ -103,6 +105,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         self.historyModel = historyModel
         self.loginItem = loginItem
         self.shortcut = shortcut
+        self.microphones = microphones
         self.onboarding = onboarding
         self.launchArguments = launchArguments
     }
@@ -189,6 +192,10 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         await loginItem.restore(desiredEnabled: desiredEnabled)
     }
 
+    func restoreMicrophone(_ preference: MicrophonePreference) {
+        microphones.restore(preference)
+    }
+
     func restoreShortcut(_ preference: VoiceShortcutPreference) {
         shortcut.restore(preference)
     }
@@ -225,6 +232,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
 @MainActor
 final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     private let shortcut: VoiceShortcutFeature
+    private let microphones: MicrophoneSelectionFeature
     private let permissionRefresh: PermissionRefreshCoordinator
     private let startup: RuntimeStartupSequence
     private let onboarding: OnboardingPresenter
@@ -235,6 +243,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
 
     init(
         shortcut: VoiceShortcutFeature,
+        microphones: MicrophoneSelectionFeature,
         permissionRefresh: PermissionRefreshCoordinator,
         startup: RuntimeStartupSequence,
         onboarding: OnboardingPresenter,
@@ -244,6 +253,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         voiceInput: VoiceInputExperience
     ) {
         self.shortcut = shortcut
+        self.microphones = microphones
         self.permissionRefresh = permissionRefresh
         self.startup = startup
         self.onboarding = onboarding
@@ -255,6 +265,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
 
     func stopTrigger() { shortcut.beginShutdown() }
     func stopPermissionRefresh() { permissionRefresh.stop() }
+    func stopMicrophoneSelection() { microphones.beginShutdown() }
     func cancelStartup() { startup.cancel() }
     func closeOnboarding() { onboarding.close() }
     func closePanel() { panel.stop() }
@@ -262,7 +273,10 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     func shutdownDoubao() async { await doubao.shutdown() }
     func shutdownVoiceInput() async { await voiceInput.shutdown() }
     func awaitStartup() async { await startup.waitUntilFinished() }
-    func flushPersistence() async { await shortcut.flushPersistence() }
+    func flushPersistence() async {
+        await shortcut.flushPersistence()
+        await microphones.flushPersistence()
+    }
 }
 
 #if DEBUG
