@@ -35,7 +35,12 @@ package struct VoiceInputHUD: View {
                     model: activity,
                     palette: palette,
                     dismissal: activityDismissal,
-                    cancel: { _ = performAction(activity.cancelAction) }
+                    cancel: { _ = performAction(activity.cancelAction) },
+                    finish: {
+                        if let action = activity.finishAction {
+                            _ = performAction(action)
+                        }
+                    }
                 )
             } else {
                 noticeBody
@@ -95,21 +100,24 @@ private struct ActivityPillModel: Equatable {
     let accessibilityTitle: String
     let cancelHint: String
     let cancelAction: VoiceInputExperienceAction
+    let finishAction: VoiceInputExperienceAction?
 
     init?(_ presentation: VoiceInputOverlayPresentation) {
         switch presentation {
-        case .recording(let peakPower, let cancelAction):
+        case .recording(let peakPower, let cancelAction, let finishAction):
             phase = .recording(peakPower: peakPower)
             layout = .recording
             accessibilityTitle = "正在录音"
             cancelHint = "停止录音并忽略本次内容"
             self.cancelAction = cancelAction
+            self.finishAction = finishAction
         case .processing(let title, let cancelAction):
             phase = .processing
             layout = .processing
             accessibilityTitle = title
             cancelHint = "停止当前处理并忽略迟到结果"
             self.cancelAction = cancelAction
+            finishAction = nil
         case .hidden, .pendingCopy, .problem:
             return nil
         }
@@ -125,14 +133,18 @@ private struct ActivityPill: View {
     let palette: VoiceInputHUDContrastPalette
     let dismissal: VoiceInputPanelDismissal?
     let cancel: () -> Void
+    let finish: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.voiceInputHUDHoverOverride) private var hoverOverride
     @State private var levels: [Double] = Array(
         repeating: 0,
         count: ActivityWaveform.barCount
     )
     @State private var isHovered = false
     @State private var isRevealed = false
+
+    private var controlsVisible: Bool { hoverOverride ?? isHovered }
 
     var body: some View {
         ActivityHUDSurface(
@@ -144,7 +156,8 @@ private struct ActivityPill: View {
                 ActivityWaveform(
                     phase: model.phase,
                     levels: levels,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    compact: controlsVisible
                 )
                 .frame(width: waveformWidth, height: contentSize.height)
                 .mask {
@@ -154,7 +167,6 @@ private struct ActivityPill: View {
                             height: contentSize.height
                         )
                 }
-                .opacity(isHovered ? 0.3 : 1)
                 .animation(
                     .easeInOut(duration: 0.35),
                     value: model.isProcessing
@@ -162,16 +174,30 @@ private struct ActivityPill: View {
                 .accessibilityLabel(model.accessibilityTitle)
 
                 HStack {
-                    Spacer()
-                    ActivityHUDCloseButton(
+                    HUDIconButton(
+                        symbol: "xmark",
                         palette: palette,
+                        isVisible: controlsVisible,
+                        accessibilityLabel: "取消语音输入",
                         help: "取消这次输入",
                         accessibilityHint: model.cancelHint,
                         action: cancel
                     )
+                    Spacer()
+                    if model.finishAction != nil {
+                        HUDIconButton(
+                            symbol: "checkmark",
+                            palette: palette,
+                            isVisible: controlsVisible,
+                            prominent: true,
+                            accessibilityLabel: "结束录音",
+                            help: "结束录音并处理",
+                            accessibilityHint: "保留本次录音并开始转成文字",
+                            action: finish
+                        )
+                    }
                 }
-                .padding(.trailing, 4)
-                .opacity(isHovered ? 1 : 0)
+                .padding(.horizontal, 4)
             }
         }
         .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
@@ -203,7 +229,7 @@ private struct ActivityPill: View {
             }
         }
         .onHover { hovered in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
                 isHovered = hovered
             }
         }
@@ -242,7 +268,7 @@ private struct ActivityPill: View {
     }
 }
 
-/// The pill's only content: a row of centre-anchored bars. While recording
+/// A row of centre-anchored bars. While recording
 /// the bars replay the recent microphone history (new samples enter on the
 /// right); while processing they run a self-driven travelling wave in a
 /// cooler tone, signalling "no longer listening, still working".
@@ -252,6 +278,7 @@ private struct ActivityWaveform: View {
     let phase: ActivityPillModel.Phase
     let levels: [Double]
     let reduceMotion: Bool
+    let compact: Bool
 
     var body: some View {
         if phase == .processing, !reduceMotion {
@@ -264,7 +291,7 @@ private struct ActivityWaveform: View {
     }
 
     private func bars(at time: TimeInterval) -> some View {
-        HStack(spacing: 3.5) {
+        HStack(spacing: compact ? 1 : 3.5) {
             ForEach(0..<Self.barCount, id: \.self) { index in
                 Capsule()
                     .fill(barGradient)
@@ -463,16 +490,17 @@ private struct HUDVisualEffect: NSViewRepresentable {
     }
 }
 
-/// One-line retained-text strip. There is no headline on purpose: the
-/// transcribed text sitting next to a copy button is self-explanatory, and
-/// the strip never blocks the shortcut — a new press abandons the text and
-/// starts over.
 private struct PendingCopyStrip: View {
     let text: String
     let copyButtonTitle: String
     let palette: VoiceInputHUDContrastPalette
     let copy: () -> Void
     let dismiss: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.voiceInputHUDHoverOverride) private var hoverOverride
+    @State private var isHovered = false
+
+    private var controlsVisible: Bool { hoverOverride ?? isHovered }
 
     private var contentSize: CGSize {
         VoiceInputPanelLayout.pendingCopy.contentSize
@@ -484,43 +512,51 @@ private struct PendingCopyStrip: View {
             height: contentSize.height,
             palette: palette
         ) {
-            HStack(spacing: 9) {
-                Image(systemName: "doc.on.clipboard")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(SpeakerVisualIdentity.warmAccent)
-                    .accessibilityHidden(true)
-
+            ZStack {
                 Text(text)
                     .font(.callout)
-                    .foregroundStyle(.primary.opacity(0.85))
+                    .foregroundStyle(.primary.opacity(0.92))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(text)
-                    .layoutPriority(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, controlsVisible ? 38 : 16)
+                    .padding(.trailing, 38)
 
-                HUDSecondaryButton(
-                    title: "复制",
-                    accessibilityLabel: copyButtonTitle,
-                    accessibilityHint: "将保留的文字复制到剪贴板",
-                    palette: palette,
-                    action: copy
-                )
-                .keyboardShortcut(.defaultAction)
+                HStack {
+                    HUDIconButton(
+                        symbol: "xmark",
+                        palette: palette,
+                        isVisible: controlsVisible,
+                        accessibilityLabel: "关闭待复制文字",
+                        help: "关闭",
+                        accessibilityHint: "不复制并关闭这个提示",
+                        action: dismiss
+                    )
+                    .keyboardShortcut(.cancelAction)
 
-                ActivityHUDCloseButton(
-                    palette: palette,
-                    accessibilityLabel: "关闭待复制文字",
-                    help: "关闭",
-                    accessibilityHint: "不复制并关闭这个提示",
-                    respondsToEscape: true,
-                    action: dismiss
-                )
+                    Spacer()
+
+                    HUDIconButton(
+                        symbol: "doc.on.doc",
+                        palette: palette,
+                        accessibilityLabel: copyButtonTitle,
+                        help: copyButtonTitle,
+                        accessibilityHint: "将保留的文字复制到剪贴板",
+                        action: copy
+                    )
+                    .keyboardShortcut(.defaultAction)
+                }
+                .padding(.horizontal, 4)
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 9)
         }
+        .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
         .padding(VoiceInputPanelLayout.contentInset)
+        .onHover { hovered in
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+                isHovered = hovered
+            }
+        }
     }
 }
 
@@ -578,69 +614,62 @@ private struct ProblemStrip: View {
     }
 }
 
-private struct HUDSecondaryButton: View {
-    let title: String
-    let accessibilityLabel: String?
-    let accessibilityHint: String
+private struct HUDIconButton: View {
+    let symbol: String
     let palette: VoiceInputHUDContrastPalette
+    var isVisible = true
+    var prominent = false
+    let accessibilityLabel: String
+    let help: String
+    let accessibilityHint: String
     let action: () -> Void
-
     @State private var isHovered = false
-
-    init(
-        title: String,
-        accessibilityLabel: String? = nil,
-        accessibilityHint: String,
-        palette: VoiceInputHUDContrastPalette,
-        action: @escaping () -> Void
-    ) {
-        self.title = title
-        self.accessibilityLabel = accessibilityLabel
-        self.accessibilityHint = accessibilityHint
-        self.palette = palette
-        self.action = action
-    }
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary.opacity(foregroundOpacity))
-                .lineLimit(1)
-                .padding(.horizontal, 11)
-                .frame(height: 26)
-                .background(.primary.opacity(backgroundOpacity), in: Capsule())
-                .overlay {
-                    Capsule().stroke(.primary.opacity(borderOpacity))
-                }
-                .contentShape(Capsule())
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(
+                    prominent
+                        ? (colorScheme == .dark ? Color.black : Color.white)
+                        : Color.primary.opacity(max(0.88, palette.darkControlForegroundOpacity))
+                )
+                .frame(width: 26, height: 26)
+                .background(
+                    Color.primary.opacity(
+                        prominent
+                            ? (isHovered ? 0.85 : 1)
+                            : max(isHovered ? 0.24 : 0.14, palette.darkControlBackgroundOpacity)
+                    ),
+                    in: Circle()
+                )
+                .contentShape(Circle())
+                .opacity(isVisible ? 1 : 0)
         }
         .buttonStyle(.plain)
+        .allowsHitTesting(isVisible)
+        .onHover { isHovered = $0 }
+        .help(help)
         .accessibilityHidden(true)
         .overlay {
             AccessibilityButtonBridge(
-                label: accessibilityLabel ?? title,
+                label: accessibilityLabel,
                 hint: accessibilityHint,
                 action: action
             )
         }
-        .onHover { hovered in
-            withAnimation(.easeOut(duration: 0.1)) {
-                isHovered = hovered
-            }
-        }
     }
+}
 
-    private var foregroundOpacity: Double {
-        max(isHovered ? 0.98 : 0.92, palette.darkControlForegroundOpacity)
-    }
+private struct VoiceInputHUDHoverOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
 
-    private var backgroundOpacity: Double {
-        max(isHovered ? 0.18 : 0.12, palette.darkControlBackgroundOpacity)
-    }
-
-    private var borderOpacity: Double {
-        max(isHovered ? 0.16 : 0.1, palette.darkBorderOpacity)
+extension EnvironmentValues {
+    package var voiceInputHUDHoverOverride: Bool? {
+        get { self[VoiceInputHUDHoverOverrideKey.self] }
+        set { self[VoiceInputHUDHoverOverrideKey.self] = newValue }
     }
 }
 

@@ -76,6 +76,7 @@ package enum HistoryRecordStatus: Equatable, Sendable {
 package struct HistoryRecordRowPresentation: Equatable, Sendable {
     package let time: String
     package let text: String
+    package let previewText: String
     package let canCopy: Bool
     package let status: HistoryRecordStatus
 
@@ -87,6 +88,14 @@ package struct HistoryRecordRowPresentation: Equatable, Sendable {
     ) {
         self.time = time
         self.text = text
+        // A two-line limit still lays out the full string, so bound the collapsed preview first.
+        if let end = text.index(text.startIndex, offsetBy: 512, limitedBy: text.endIndex),
+            end < text.endIndex
+        {
+            self.previewText = String(text[..<end]) + "…"
+        } else {
+            self.previewText = text
+        }
         self.canCopy = canCopy
         self.status = status
     }
@@ -166,14 +175,16 @@ package enum HistoryPresentation {
         calendar: Calendar = .current
     ) -> HistoryRecordRowPresentation {
         let retainedText = retainedText(for: record)
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "HH:mm"
+        let timeStyle = Date.VerbatimFormatStyle(
+            format:
+                "\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
+            locale: Locale(identifier: "en_US_POSIX"),
+            timeZone: calendar.timeZone,
+            calendar: calendar
+        )
 
         return HistoryRecordRowPresentation(
-            time: formatter.string(from: record.startedAt),
+            time: record.startedAt.formatted(timeStyle),
             text: retainedText ?? rowText(for: record),
             canCopy: retainedText != nil,
             status: status(for: record)

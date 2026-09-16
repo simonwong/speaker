@@ -501,7 +501,7 @@ struct SpeakerAppUISpecs {
                 ),
                 (
                     VoiceInputHUDContractFixture.pendingCopy.presentation,
-                    CGSize(width: 394, height: 54)
+                    CGSize(width: 370, height: 44)
                 ),
                 (
                     VoiceInputHUDContractFixture.problem.presentation,
@@ -619,7 +619,7 @@ struct SpeakerAppUISpecs {
             )
             try verifyHUDControls(
                 fixture: .recording,
-                expectedLabels: ["取消语音输入"]
+                expectedLabels: ["取消语音输入", "结束录音"]
             )
             try verifyHUDControls(
                 fixture: .pendingCopy,
@@ -629,6 +629,53 @@ struct SpeakerAppUISpecs {
                 fixture: .problem,
                 expectedLabels: ["关闭错误提示"]
             )
+        }
+
+        run(
+            "voice HUD hover controls keep separate hit targets without taking focus",
+            failures: &failures
+        ) {
+            for fixture in VoiceInputHUDContractFixture.allCases {
+                for hovered in [false, true] {
+                    let presenter = VoiceInputPanelPresenter { presentation in
+                        VoiceInputHUD(
+                            presentation: presentation,
+                            performAction: { _ in nil },
+                            routeEffect: { _ in }
+                        )
+                        .environment(\.voiceInputHUDHoverOverride, hovered)
+                    }
+                    defer { presenter.stop() }
+                    presenter.present(fixture.presentation)
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.55))
+                    let buttons = presenter.accessibilityButtonEvidence
+                    if buttons.count == 2 {
+                        try expect(
+                            !buttons[0].frame.intersects(buttons[1].frame),
+                            "HUD controls overlap"
+                        )
+                        let leftLabel = fixture == .recording ? "取消语音输入" : "关闭待复制文字"
+                        let rightLabel = fixture == .recording ? "结束录音" : "复制"
+                        let left = buttons.first { $0.label == leftLabel }
+                        let right = buttons.first { $0.label == rightLabel }
+                        try expect(
+                            left != nil && right != nil
+                                && left!.frame.maxX <= right!.frame.minX,
+                            "HUD dismissal must be left of completion or copy"
+                        )
+                    }
+                    try expect(!presenter.evidence.isKeyWindow)
+                    if let path = ProcessInfo.processInfo.environment["SPEAKER_HUD_CAPTURE_DIR"] {
+                        let directory = URL(fileURLWithPath: path, isDirectory: true)
+                        try FileManager.default.createDirectory(
+                            at: directory, withIntermediateDirectories: true
+                        )
+                        try presenter.captureDebugSnapshot(
+                            to: directory.appendingPathComponent("\(fixture)-\(hovered).png")
+                        )
+                    }
+                }
+            }
         }
 
         run(
@@ -1241,6 +1288,162 @@ struct SpeakerAppUISpecs {
 
             try expect(counts == expected)
         }
+
+        run(
+            "history collapsed previews bound layout work without losing the full result",
+            failures: &failures
+        ) {
+            let text = String(repeating: "中文 English 👨‍👩‍👧‍👦 é ", count: 300) + "结束"
+            let record = makeHistoryRecord(
+                id: VoiceInputSessionID(), startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                finalText: text
+            )
+            let row = HistoryPresentation.row(for: record)
+            try expect(row.previewText == String(text.prefix(512)) + "…")
+            try expect(row.text == text, "expanded text lost part of the result")
+            try expect(
+                HistoryPresentation.retainedText(for: record) == text,
+                "copy lost part of the result")
+            try expect(
+                HistoryPresentation.filteredRecords([record], query: "结束").count == 1,
+                "search ignored text beyond the collapsed preview"
+            )
+            let shortRow = HistoryRecordRowPresentation(
+                time: "12:00", text: "短文本", canCopy: true, status: .delivered)
+            try expect(shortRow.previewText == "短文本")
+        }
+
+        run(
+            "history times preserve the calendar time zone and 24 hour display",
+            failures: &failures
+        ) {
+            for (seconds, zone, expected) in [
+                (0, 0, "00:00"), (54_420, 0, "15:07"), (0, 28_800, "08:00"),
+            ] {
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: zone)!
+                let record = makeHistoryRecord(
+                    id: VoiceInputSessionID(),
+                    startedAt: Date(timeIntervalSince1970: Double(seconds)))
+                try expect(
+                    HistoryPresentation.row(for: record, calendar: calendar).time == expected)
+            }
+        }
+
+        run(
+            "history continuous scrolling preserves the requested offset",
+            failures: &failures
+        ) {
+            let date = Date(timeIntervalSince1970: 1_700_000_000)
+            let records = (0..<1000).map { index in
+                makeHistoryRecord(
+                    id: VoiceInputSessionID(),
+                    startedAt: date.addingTimeInterval(-Double(index * 3600)),
+                    finalText: String(
+                        repeating: "这是用于滚动性能测量的合成会话记录。SwiftUI history scrolling. ",
+                        count: 1 + index % 80)
+                )
+            }
+            let host = NSHostingView(
+                rootView: HistoryDashboard(
+                    state: .init(
+                        records: records, totalRecordCount: records.count, notice: nil,
+                        feedback: nil, isBusy: false, referenceDate: date),
+                    query: .constant(""),
+                    actions: .init(refresh: {}, clear: {}, copy: { _ in }, delete: { _ in })
+                ))
+            host.frame = NSRect(x: 0, y: 0, width: 760, height: 600)
+            let window = NSWindow(
+                contentRect: NSRect(x: -10_000, y: -10_000, width: 760, height: 600),
+                styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            window.orderFrontRegardless()
+            defer { window.close() }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            guard let scroll = firstScrollView(in: host) else {
+                throw SpecFailure(message: "history has no native scroll view")
+            }
+            var milliseconds: [Double] = []
+            var largestDrift = 0.0
+            for step in 1...180 {
+                let requested = CGFloat(step * 180)
+                let start = CFAbsoluteTimeGetCurrent()
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: requested))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                host.layoutSubtreeIfNeeded()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.001))
+                host.layoutSubtreeIfNeeded()
+                milliseconds.append((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                largestDrift = max(largestDrift, abs(scroll.contentView.bounds.minY - requested))
+            }
+            let sorted = milliseconds.sorted()
+            let p95 = sorted[Int(Double(sorted.count - 1) * 0.95)]
+            print("History scroll: p95=\(p95) ms, max=\(sorted.last!) ms, drift=\(largestDrift) pt")
+            try expect(
+                largestDrift < 1, "history corrected the scroll position while revealing rows")
+            if ProcessInfo.processInfo.environment["SPEAKER_HISTORY_PROFILE"] == "1" {
+                try expect(p95 < 16.7, "history scroll layout exceeded a 60 Hz frame budget")
+            }
+        }
+
+        #if DEBUG
+            run(
+                "history hover keeps following records stationary",
+                failures: &failures
+            ) {
+                let date = Date(timeIntervalSince1970: 1_700_000_000)
+                let records = (0..<1000).map { index in
+                    makeHistoryRecord(
+                        id: VoiceInputSessionID(),
+                        startedAt: date.addingTimeInterval(-Double(index)),
+                        finalText: index == 1
+                            ? String(repeating: "长文本保持两行摘要，悬停不改变换行。", count: 10)
+                            : "短文本记录 \(index)"
+                    )
+                }
+                let state = HistoryDashboardState(
+                    records: records, totalRecordCount: records.count, notice: nil,
+                    feedback: nil, isBusy: false, referenceDate: date
+                )
+                for width in [420.0, 760.0] {
+                    let frames = HistoryFrameRecorder()
+                    let dashboard = HistoryDashboard(
+                        state: state, query: .constant(""),
+                        actions: .init(refresh: {}, clear: {}, copy: { _ in }, delete: { _ in })
+                    )
+                    let host = NSHostingView(
+                        rootView: HistoryHoverFixture(dashboard: dashboard, probe: frames)
+                    )
+                    host.frame = NSRect(x: 0, y: 0, width: width, height: 500)
+                    let window = NSWindow(
+                        contentRect: NSRect(x: -10_000, y: -10_000, width: width, height: 500),
+                        styleMask: [.borderless], backing: .buffered, defer: false
+                    )
+                    window.isReleasedWhenClosed = false
+                    window.contentView = host
+                    window.orderFrontRegardless()
+                    defer { window.close() }
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                    let before = frames.values
+                    try expect(
+                        before[records[0].sessionID] != nil, "history rows were not laid out")
+                    try expect(
+                        before[records[1].sessionID] != nil, "long history row was not laid out")
+                    for id in [
+                        records[0].sessionID, records[1].sessionID, records[2].sessionID, nil,
+                    ] {
+                        frames.hoveredID = id
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+                        try expect(
+                            before.allSatisfy { frames.values[$0.key] == $0.value },
+                            "hover changed history row frames at width \(width)"
+                        )
+                    }
+                }
+            }
+
+        #endif
 
         run(
             "history records are grouped by local day in reverse chronological order",
@@ -1865,3 +2068,23 @@ private func verticalDistanceFromTop(_ scrollView: NSScrollView) -> CGFloat {
     }
     return documentView.bounds.maxY - visibleRect.maxY
 }
+
+#if DEBUG
+    @MainActor
+    private final class HistoryFrameRecorder: ObservableObject {
+        @Published var hoveredID: VoiceInputSessionID?
+        var values: [VoiceInputSessionID: CGRect] = [:]
+    }
+
+    private struct HistoryHoverFixture: View {
+        let dashboard: HistoryDashboard
+        @ObservedObject var probe: HistoryFrameRecorder
+
+        var body: some View {
+            dashboard
+                .environment(\.historyHoveredRecordOverride, probe.hoveredID)
+                .environment(\.historyRowFrameObserver, { id, frame in probe.values[id] = frame })
+        }
+    }
+
+#endif
