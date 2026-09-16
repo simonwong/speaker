@@ -2,6 +2,31 @@ import Foundation
 import SpeakerCore
 import SwiftUI
 
+#if DEBUG
+    private struct HistoryHoveredRecordOverrideKey: EnvironmentKey {
+        static let defaultValue: VoiceInputSessionID? = nil
+    }
+
+    private struct HistoryRowFrameObserverKey: EnvironmentKey {
+        static let defaultValue: (@MainActor @Sendable (VoiceInputSessionID, CGRect) -> Void)? = nil
+    }
+
+    extension EnvironmentValues {
+        package var historyRowFrameObserver:
+            (@MainActor @Sendable (VoiceInputSessionID, CGRect) -> Void)?
+        {
+            get { self[HistoryRowFrameObserverKey.self] }
+            set { self[HistoryRowFrameObserverKey.self] = newValue }
+        }
+
+        package var historyHoveredRecordOverride: VoiceInputSessionID? {
+            get { self[HistoryHoveredRecordOverrideKey.self] }
+            set { self[HistoryHoveredRecordOverrideKey.self] = newValue }
+        }
+    }
+
+#endif
+
 package struct HistoryDashboardFeedback: Equatable, Sendable {
     package enum Kind: Equatable, Sendable {
         case information
@@ -86,12 +111,10 @@ package struct HistoryDashboardActions {
 /// stay behind this interface.
 package struct HistoryDashboard: View {
     let state: HistoryDashboardState
+    private let sections: [HistoryDaySection]
     @Binding private var query: String
     let actions: HistoryDashboardActions
     @State private var expandedRecordID: VoiceInputSessionID?
-    /// Hover lives here, not in the row, so only one row can ever read as
-    /// hovered however fast the pointer crosses the list.
-    @State private var hoveredRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
     @FocusState private var searchIsFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -104,6 +127,7 @@ package struct HistoryDashboard: View {
         actions: HistoryDashboardActions
     ) {
         self.state = state
+        self.sections = state.sections()
         _query = query
         self.actions = actions
     }
@@ -120,9 +144,6 @@ package struct HistoryDashboard: View {
             .onChange(of: state.records.map(\.sessionID)) { _, ids in
                 if let expandedRecordID, !ids.contains(expandedRecordID) {
                     self.expandedRecordID = nil
-                }
-                if let hoveredRecordID, !ids.contains(hoveredRecordID) {
-                    self.hoveredRecordID = nil
                 }
             }
             .confirmationDialog(
@@ -287,17 +308,10 @@ package struct HistoryDashboard: View {
     private func row(for record: VoiceInputHistoryRecord) -> some View {
         HistoryRecordRow(
             record: record,
+            presentation: HistoryPresentation.row(for: record),
             isExpanded: expandedRecordID == record.sessionID,
-            isHovered: hoveredRecordID == record.sessionID,
             isBusy: state.isBusy,
             reduceMotion: reduceMotion,
-            setHovered: { hovering in
-                if hovering {
-                    hoveredRecordID = record.sessionID
-                } else if hoveredRecordID == record.sessionID {
-                    hoveredRecordID = nil
-                }
-            },
             copy: { actions.copy(record) },
             addDictionaryEntry: actions.addDictionaryEntry,
             toggleDetails: {
@@ -357,10 +371,6 @@ package struct HistoryDashboard: View {
         }
         return nil
     }
-
-    private var sections: [HistoryDaySection] {
-        state.sections()
-    }
 }
 
 /// The one line the tab can print under the list: whichever of the transient
@@ -386,16 +396,20 @@ extension Color {
 
 private struct HistoryRecordRow: View {
     let record: VoiceInputHistoryRecord
+    let presentation: HistoryRecordRowPresentation
     let isExpanded: Bool
-    let isHovered: Bool
     let isBusy: Bool
     let reduceMotion: Bool
-    let setHovered: (Bool) -> Void
     let copy: () -> Void
     let addDictionaryEntry: (String) -> Void
     let toggleDetails: () -> Void
     let delete: () -> Void
+    @State private var pointerIsInside = false
     @State private var confirmsDelete = false
+    #if DEBUG
+        @Environment(\.historyHoveredRecordOverride) private var hoverOverride
+        @Environment(\.historyRowFrameObserver) private var frameObserver
+    #endif
     @Environment(\.colorSchemeContrast) private var contrast
 
     /// The gap between two rows. Rows carry no rule between them: the hover
@@ -408,8 +422,11 @@ private struct HistoryRecordRow: View {
     /// the pointer.
     private static let collapsedLineLimit = 2
 
-    private var presentation: HistoryRecordRowPresentation {
-        HistoryPresentation.row(for: record)
+    private var isHovered: Bool {
+        #if DEBUG
+            if let hoverOverride { return hoverOverride == record.sessionID }
+        #endif
+        return pointerIsInside
     }
 
     private var showsActions: Bool { isHovered || isExpanded }
@@ -463,7 +480,14 @@ private struct HistoryRecordRow: View {
                 shape.strokeBorder(Color.primary.opacity(0.25), lineWidth: 1)
             }
         }
-        .onHover(perform: setHovered)
+        #if DEBUG
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { frame in
+                frameObserver?(record.sessionID, frame)
+            }
+        #endif
+        .onHover { pointerIsInside = $0 }
         .animation(reduceMotion ? nil : .historyHover, value: isHovered)
         .confirmationDialog(
             "删除这条会话记录？",
@@ -493,7 +517,7 @@ private struct HistoryRecordRow: View {
 
     @ViewBuilder
     private var recordText: some View {
-        let text = Text(presentation.text)
+        let text = Text(isExpanded ? presentation.text : presentation.previewText)
             .font(SpeakerTypography.body)
             .lineSpacing(2)
 
@@ -503,7 +527,7 @@ private struct HistoryRecordRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The cluster keeps its width whether or not a button is in it, so the
+    /// The cluster reserves both dimensions when its buttons are hidden, so the
     /// text column never resizes; the buttons themselves only exist while
     /// visible, staying out of the focus ring and the accessibility tree.
     private var rowActions: some View {
@@ -526,7 +550,11 @@ private struct HistoryRecordRow: View {
                 }
             }
         }
-        .frame(width: HistoryRowActionButton.clusterWidth, alignment: .trailing)
+        .frame(
+            width: HistoryRowActionButton.clusterWidth,
+            height: HistoryRowActionButton.side,
+            alignment: .trailing
+        )
     }
 }
 
@@ -534,7 +562,7 @@ private struct HistoryRecordRow: View {
 /// lands on something that answers back.
 private struct HistoryRowActionButton: View {
     static let spacing: CGFloat = 2
-    private static let side: CGFloat = 24
+    static let side: CGFloat = 24
     /// Two buttons plus the gap: the width a row reserves for the cluster.
     static let clusterWidth = side * 2 + spacing
 
