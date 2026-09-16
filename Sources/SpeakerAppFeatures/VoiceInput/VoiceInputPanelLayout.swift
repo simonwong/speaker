@@ -37,7 +37,7 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
         case .processing, .recording:
             CGSize(width: 118, height: 34)
         case .pendingCopy:
-            CGSize(width: 384, height: 44)
+            CGSize(width: 360, height: 34)
         case .problem:
             CGSize(width: 320, height: 44)
         }

@@ -501,7 +501,7 @@ struct SpeakerAppUISpecs {
                 ),
                 (
                     VoiceInputHUDContractFixture.pendingCopy.presentation,
-                    CGSize(width: 394, height: 54)
+                    CGSize(width: 370, height: 44)
                 ),
                 (
                     VoiceInputHUDContractFixture.problem.presentation,
@@ -619,7 +619,7 @@ struct SpeakerAppUISpecs {
             )
             try verifyHUDControls(
                 fixture: .recording,
-                expectedLabels: ["取消语音输入"]
+                expectedLabels: ["取消语音输入", "结束录音"]
             )
             try verifyHUDControls(
                 fixture: .pendingCopy,
@@ -629,6 +629,53 @@ struct SpeakerAppUISpecs {
                 fixture: .problem,
                 expectedLabels: ["关闭错误提示"]
             )
+        }
+
+        run(
+            "voice HUD hover controls keep separate hit targets without taking focus",
+            failures: &failures
+        ) {
+            for fixture in VoiceInputHUDContractFixture.allCases {
+                for hovered in [false, true] {
+                    let presenter = VoiceInputPanelPresenter { presentation in
+                        VoiceInputHUD(
+                            presentation: presentation,
+                            performAction: { _ in nil },
+                            routeEffect: { _ in }
+                        )
+                        .environment(\.voiceInputHUDHoverOverride, hovered)
+                    }
+                    defer { presenter.stop() }
+                    presenter.present(fixture.presentation)
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.55))
+                    let buttons = presenter.accessibilityButtonEvidence
+                    if buttons.count == 2 {
+                        try expect(
+                            !buttons[0].frame.intersects(buttons[1].frame),
+                            "HUD controls overlap"
+                        )
+                        let leftLabel = fixture == .recording ? "取消语音输入" : "关闭待复制文字"
+                        let rightLabel = fixture == .recording ? "结束录音" : "复制"
+                        let left = buttons.first { $0.label == leftLabel }
+                        let right = buttons.first { $0.label == rightLabel }
+                        try expect(
+                            left != nil && right != nil
+                                && left!.frame.maxX <= right!.frame.minX,
+                            "HUD dismissal must be left of completion or copy"
+                        )
+                    }
+                    try expect(!presenter.evidence.isKeyWindow)
+                    if let path = ProcessInfo.processInfo.environment["SPEAKER_HUD_CAPTURE_DIR"] {
+                        let directory = URL(fileURLWithPath: path, isDirectory: true)
+                        try FileManager.default.createDirectory(
+                            at: directory, withIntermediateDirectories: true
+                        )
+                        try presenter.captureDebugSnapshot(
+                            to: directory.appendingPathComponent("\(fixture)-\(hovered).png")
+                        )
+                    }
+                }
+            }
         }
 
         run(

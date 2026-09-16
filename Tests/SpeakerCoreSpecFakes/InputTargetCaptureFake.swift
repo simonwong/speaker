@@ -8,6 +8,7 @@ import SpeakerCore
 public actor TargetCaptureFake: InputTargetCapturing {
     public let result: InputTargetCaptureResult
     public private(set) var captureCount = 0
+    public private(set) var captureHints: [InputTargetCaptureHint] = []
 
     public init(result: InputTargetCaptureResult) {
         self.result = result
@@ -16,5 +17,10 @@ public actor TargetCaptureFake: InputTargetCapturing {
     public func capture() async -> InputTargetCaptureResult {
         captureCount += 1
         return result
+    }
+
+    public func capture(matching hint: InputTargetCaptureHint) async -> InputTargetCaptureResult {
+        captureHints.append(hint)
+        return await capture()
     }
 }

@@ -3231,6 +3231,144 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        for latched in [false, true] {
+            await runAsync(
+                "voice experience finishes \(latched ? "latched" : "held") recording from the HUD once",
+                failures: &failures
+            ) {
+                let audio = AudioCaptureFake()
+                let targetCapture = TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                )
+                let delivery = TextDeliveryFake(result: .delivered)
+                let hint = InputTargetCaptureHint(processID: 42)
+                let sessions = VoiceInputSessions(
+                    audioCapture: audio,
+                    targetCapture: targetCapture,
+                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    delivery: delivery,
+                    clipboard: ClipboardFake(),
+                    history: SessionHistoryFake()
+                )
+                let experience = VoiceInputExperience(
+                    sessions: sessions,
+                    releaseCaptureHint: { hint },
+                    announce: { _ in }
+                )
+                experience.start()
+                experience.shortcutTarget.receive(.pressed)
+                let started = await waitUntil { experience.state.isRecording }
+                try expect(started)
+                if latched { experience.shortcutTarget.receive(.released) }
+                guard case .recording(_, _, let finishAction) = experience.state.overlay else {
+                    throw SpecFailure(message: "recording has no finish action")
+                }
+                experience.perform(finishAction)
+                experience.perform(finishAction)
+                experience.shortcutTarget.receive(.released)
+                let delivered = await waitUntil { experience.state.diagnosticCode == "delivered" }
+                try expect(delivered)
+                let captureHints = await targetCapture.captureHints
+                let deliveredTexts = await delivery.deliveredTexts
+                try expect(captureHints == [hint], "HUD completion lost or repeated target capture")
+                try expect(deliveredTexts == ["保留的文字"], "HUD completion delivered more than once")
+
+                experience.shortcutTarget.receive(.pressed)
+                let restarted = await waitUntil { experience.state.isRecording }
+                try expect(restarted, "HUD completion left the shortcut latched")
+                experience.perform(finishAction)
+                guard let cancel = experience.state.menu.cancelAction else {
+                    throw SpecFailure(message: "new recording has no cancel action")
+                }
+                experience.perform(cancel)
+                let cancelled = await waitUntil { experience.state.diagnosticCode == "cancelled" }
+                try expect(cancelled)
+                let stopCount = await audio.stopCount
+                try expect(stopCount == 1, "a stale finish action stopped the next session")
+                await experience.shutdown()
+            }
+        }
+
+        for cancelFirst in [false, true] {
+            await runAsync(
+                "voice HUD cancellation wins over uncommitted completion (cancel first: \(cancelFirst))",
+                failures: &failures
+            ) {
+                let audio = AudioCaptureFake()
+                let delivery = TextDeliveryFake(result: .delivered)
+                let sessions = VoiceInputSessions(
+                    audioCapture: audio,
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                    ),
+                    textProcessor: HangingVoiceTextProcessor(),
+                    delivery: delivery,
+                    clipboard: ClipboardFake(),
+                    history: SessionHistoryFake()
+                )
+                let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+                experience.start()
+                experience.shortcutTarget.receive(.pressed)
+                let started = await waitUntil { experience.state.isRecording }
+                try expect(started)
+                guard case .recording(_, let cancel, let finish) = experience.state.overlay else {
+                    throw SpecFailure(message: "recording controls unavailable")
+                }
+                experience.perform(cancelFirst ? cancel : finish)
+                experience.perform(cancelFirst ? finish : cancel)
+                let cancelled = await waitUntil { experience.state.diagnosticCode == "cancelled" }
+                try expect(cancelled)
+                await experience.shutdown()
+                let delivered = await delivery.deliveredTexts
+                try expect(delivered.isEmpty, "cancelled HUD completion delivered text")
+            }
+        }
+
+        await runAsync(
+            "pending copy HUD keeps complete long text and dismisses without copying",
+            failures: &failures
+        ) {
+            let text = String(repeating: "这是需要完整保留的中英混合结果 Speaker SwiftUI。", count: 30)
+            let clipboard = ClipboardFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: text),
+                delivery: TextDeliveryFake(
+                    result: .pendingCopy(.deliveryFailed), commitsBeforeDelivering: false),
+                clipboard: clipboard,
+                history: SessionHistoryFake()
+            )
+            let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+            experience.start()
+            for shouldCopy in [false, true] {
+                experience.shortcutTarget.receive(.pressed)
+                let started = await waitUntil { experience.state.isRecording }
+                try expect(started)
+                guard case .recording(_, _, let finish) = experience.state.overlay else {
+                    throw SpecFailure(message: "recording controls unavailable")
+                }
+                experience.perform(finish)
+                let retained = await waitUntil {
+                    if case .pendingCopy = experience.state.overlay { true } else { false }
+                }
+                try expect(retained)
+                guard
+                    case .pendingCopy(_, let retainedText, _, let copy, let dismiss) = experience
+                        .state.overlay
+                else {
+                    throw SpecFailure(message: "pending copy controls unavailable")
+                }
+                try expect(retainedText == text)
+                experience.perform(shouldCopy ? copy : dismiss)
+                let closed = await waitUntil { experience.state.diagnosticCode == "idle" }
+                try expect(closed)
+                let copies = await clipboard.copiedTexts
+                try expect(copies == (shouldCopy ? [text] : []))
+            }
+            await experience.shutdown()
+        }
+
         await runAsync(
             "voice experience replaces retained text on a new press and rejects stale actions",
             failures: &failures
