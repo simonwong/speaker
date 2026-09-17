@@ -243,12 +243,18 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         let hardware = hardwareFactory.make()
         self.hardware = hardware
         activeRuntimeFailure = nil
-        try hardware.start(deviceID: lease.device.deviceID, audioStream: audioStream) {
-            [weak self] failure in
-            await self?.reportRuntimeFailure(failure, lease: lease)
-        }
+        try hardware.start(
+            deviceID: lease.device.deviceID, audioStream: audioStream,
+            onConfigurationChange: { [weak self] in
+                await self?.validateHardwareConfiguration(lease)
+            },
+            onFailure: { [weak self] failure in
+                await self?.reportRuntimeFailure(failure, lease: lease)
+            }
+        )
         guard hardware.currentDeviceID == lease.device.deviceID,
-            microphones.refreshAndValidate(lease), hardware.isRunning
+            microphones.refreshAndValidate(lease), hardware.isRunning,
+            hardware.isInputFormatUnchanged
         else { throw AudioCaptureError.microphoneSelectionFailed }
         latestEnvironmentSnapshot = hardware.environmentSnapshot
         recordingStartedAt = clock.monotonicNow
@@ -383,6 +389,18 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         reportRuntimeFailure(failure, lease: lease)
     }
 
+    private func validateHardwareConfiguration(_ lease: MicrophoneCaptureLease) {
+        guard self.lease?.id == lease.id, microphones.isCurrent(lease), let hardware else { return }
+        guard hardware.isRunning,
+            hardware.currentDeviceID == lease.device.deviceID,
+            hardware.isInputFormatUnchanged,
+            microphones.refreshAndValidate(lease)
+        else {
+            reportRuntimeFailure(.deviceConfigurationChanged, lease: lease)
+            return
+        }
+    }
+
     private func reportRuntimeFailure(
         _ failure: AudioCaptureError,
         lease: MicrophoneCaptureLease
@@ -425,11 +443,13 @@ package struct AudioCaptureHardwareMetrics: Sendable {
 package protocol AudioCaptureHardware: AnyObject, Sendable {
     var currentDeviceID: UInt32 { get }
     var isRunning: Bool { get }
+    var isInputFormatUnchanged: Bool { get }
     var metrics: AudioCaptureHardwareMetrics { get }
     var environmentSnapshot: AudioCaptureEnvironmentSnapshot? { get }
     func start(
         deviceID: UInt32,
         audioStream: BoundedAudioChunkStream?,
+        onConfigurationChange: @escaping @Sendable () async -> Void,
         onFailure: @escaping @Sendable (AudioCaptureError) async -> Void
     ) throws
     func stop()
@@ -462,6 +482,7 @@ package struct AudioCaptureHardwareFactory: Sendable {
 // The owning capture actor serializes lifecycle calls; tap metrics synchronize separately.
 private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked Sendable {
     private let engine = AVAudioEngine()
+    private var captureFormat: AVAudioFormat?
     private var bridge: PCMStreamingBridge?
     private var previewMeter: AudioCaptureLevelMeter?
     private var configurationObserver: NSObjectProtocol?
@@ -470,6 +491,10 @@ private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked S
 
     var currentDeviceID: UInt32 { engine.inputNode.auAudioUnit.deviceID }
     var isRunning: Bool { engine.isRunning }
+    var isInputFormatUnchanged: Bool {
+        guard let captureFormat else { return false }
+        return engine.inputNode.outputFormat(forBus: 0) == captureFormat
+    }
     var metrics: AudioCaptureHardwareMetrics {
         if let bridge {
             let metrics = bridge.metrics()
@@ -489,6 +514,7 @@ private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked S
     func start(
         deviceID: UInt32,
         audioStream: BoundedAudioChunkStream?,
+        onConfigurationChange: @escaping @Sendable () async -> Void,
         onFailure: @escaping @Sendable (AudioCaptureError) async -> Void
     ) throws {
         let input = engine.inputNode
@@ -501,6 +527,7 @@ private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked S
         guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
             throw AudioCaptureError.couldNotPrepare
         }
+        captureFormat = inputFormat
         if let audioStream {
             guard
                 let outputFormat = AVAudioFormat(
@@ -528,7 +555,7 @@ private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked S
         hasTap = true
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { _ in Task { await onFailure(.deviceConfigurationChanged) } }
+        ) { _ in Task { await onConfigurationChange() } }
         do {
             engine.prepare()
             try engine.start()
@@ -555,6 +582,7 @@ private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked S
         }
         bridge?.finish()
         previewMeter?.finish()
+        captureFormat = nil
     }
 
     private static func microphoneMode(_ mode: AVCaptureDevice.MicrophoneMode)

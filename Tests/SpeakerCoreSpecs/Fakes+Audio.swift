@@ -238,9 +238,11 @@ final class AudioCaptureHardwareFake: AudioCaptureHardware, @unchecked Sendable 
     private let startFailure: AudioCaptureError?
     private var selectedID: UInt32 = 0
     private var running = false
+    private var inputFormatUnchanged = true
     private var stops = 0
     private var stream: BoundedAudioChunkStream?
     private var failureCallback: (@Sendable (AudioCaptureError) async -> Void)?
+    private var configurationCallback: (@Sendable () async -> Void)?
 
     init(readbackOverride: UInt32? = nil, startFailure: AudioCaptureError? = nil) {
         self.readbackOverride = readbackOverride
@@ -249,6 +251,7 @@ final class AudioCaptureHardwareFake: AudioCaptureHardware, @unchecked Sendable 
 
     var currentDeviceID: UInt32 { lock.withLock { readbackOverride ?? selectedID } }
     var isRunning: Bool { lock.withLock { running } }
+    var isInputFormatUnchanged: Bool { lock.withLock { inputFormatUnchanged } }
     var stopCount: Int { lock.withLock { stops } }
     var streamsAudio: Bool { lock.withLock { stream != nil } }
     var environmentSnapshot: AudioCaptureEnvironmentSnapshot? { nil }
@@ -262,12 +265,14 @@ final class AudioCaptureHardwareFake: AudioCaptureHardware, @unchecked Sendable 
     func start(
         deviceID: UInt32,
         audioStream: BoundedAudioChunkStream?,
+        onConfigurationChange: @escaping @Sendable () async -> Void,
         onFailure: @escaping @Sendable (AudioCaptureError) async -> Void
     ) throws {
         try lock.withLock {
             selectedID = deviceID
             stream = audioStream
             failureCallback = onFailure
+            configurationCallback = onConfigurationChange
             if let startFailure { throw startFailure }
             running = true
         }
@@ -285,6 +290,18 @@ final class AudioCaptureHardwareFake: AudioCaptureHardware, @unchecked Sendable 
     func emitFailure(_ failure: AudioCaptureError) async {
         let callback = lock.withLock { failureCallback }
         await callback?(failure)
+    }
+
+    func emitConfigurationChange(
+        running: Bool? = nil, deviceID: UInt32? = nil, inputFormatUnchanged: Bool? = nil
+    ) async {
+        let callback = lock.withLock {
+            if let running { self.running = running }
+            if let deviceID { selectedID = deviceID }
+            if let inputFormatUnchanged { self.inputFormatUnchanged = inputFormatUnchanged }
+            return configurationCallback
+        }
+        await callback?()
     }
 
 }

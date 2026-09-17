@@ -362,6 +362,7 @@ enum AudioCaptureSpecs: CoreSpecDomain {
             try await newPlan.start()
             let current = probe.instances[1]
             await oldPlan.cancel()
+            await old.emitConfigurationChange(inputFormatUnchanged: false)
             await old.emitFailure(.deviceConfigurationChanged)
             await old.emitFailure(.conversionFailed)
             try expect(current.isRunning && current.stopCount == 0)
@@ -434,6 +435,86 @@ enum AudioCaptureSpecs: CoreSpecDomain {
             try await capture.start()
             try expect(probe.instances[1].currentDeviceID == 8)
             await capture.cancel()
+        }
+
+        await runAsync(
+            "microphone configuration notifications preserve healthy preview and voice capture",
+            failures: &failures
+        ) {
+            for isPreview in [true, false] {
+                let device = MicrophoneDevice(
+                    uid: "test-device", name: "Test microphone", deviceID: 4)
+                let source = MicrophoneDeviceSourceFake(
+                    snapshot: .init(devices: [device], systemDefaultDeviceID: 4, isAvailable: true))
+                let routing = MicrophoneRouting(devices: source)
+                let probe = AudioCaptureHardwareFactoryFake()
+                let capture = AVAudioCapture(microphones: routing, hardwareFactory: probe.factory)
+                defer { routing.shutdown() }
+                let previewStream: AsyncThrowingStream<RecordingTelemetry, any Error>?
+                if isPreview {
+                    previewStream = try await capture.startLevelTest()
+                } else {
+                    previewStream = nil
+                    _ = await capture.audioChunks()
+                    try await capture.start()
+                }
+                let hardware = probe.instances[0]
+                await hardware.emitConfigurationChange()
+                let remainedActive =
+                    hardware.isRunning && hardware.stopCount == 0
+                    && routing.snapshot().actualDevice == device
+                await capture.cancel()
+                withExtendedLifetime(previewStream) {}
+                try expect(remainedActive, "a healthy configuration notification stopped capture")
+            }
+        }
+
+        await runAsync(
+            "microphone configuration notifications interrupt stopped changed or reformatted capture",
+            failures: &failures
+        ) {
+            for isPreview in [true, false] {
+                for change in 0..<3 {
+                    let device = MicrophoneDevice(
+                        uid: "test-device", name: "Test microphone", deviceID: 4)
+                    let source = MicrophoneDeviceSourceFake(
+                        snapshot: .init(
+                            devices: [device], systemDefaultDeviceID: 4, isAvailable: true))
+                    let routing = MicrophoneRouting(devices: source)
+                    let probe = AudioCaptureHardwareFactoryFake()
+                    let capture = AVAudioCapture(
+                        microphones: routing, hardwareFactory: probe.factory)
+                    defer { routing.shutdown() }
+                    var preview: AsyncThrowingStream<RecordingTelemetry, any Error>.Iterator?
+                    if isPreview {
+                        preview = try await capture.startLevelTest().makeAsyncIterator()
+                    } else {
+                        _ = await capture.audioChunks()
+                        try await capture.start()
+                    }
+                    let hardware = probe.instances[0]
+                    await hardware.emitConfigurationChange(
+                        running: change == 0 ? false : nil,
+                        deviceID: change == 1 ? 9 : nil,
+                        inputFormatUnchanged: change == 2 ? false : nil
+                    )
+                    let interrupted = hardware.stopCount == 1
+                    if !interrupted { await capture.cancel() }
+                    try expect(interrupted, "an invalid configuration continued capture")
+                    do {
+                        if isPreview {
+                            _ = try await preview?.next()
+                        } else {
+                            _ = try await capture.stop()
+                        }
+                        throw SpecFailure(message: "an interrupted capture reported success")
+                    } catch let error as AudioCaptureError {
+                        try expect(error == .deviceConfigurationChanged)
+                    }
+                    await capture.cancel()
+                    try expect(routing.snapshot().actualDevice == nil)
+                }
+            }
         }
 
         await runAsync(
