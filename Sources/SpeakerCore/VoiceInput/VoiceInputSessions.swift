@@ -50,6 +50,7 @@ public actor VoiceInputSessions {
     private var confirmedDoubaoResult: TranscriptionResult?
     private var historyTextPolicy = HistoryTextPolicy.unclassified
     private var activeTriggerSequence: UInt64?
+    private var presentationTriggerSequence: UInt64?
     private var stageAudit = VoiceInputStageAudit()
     private var presenter = VoiceInputPresentationPublisher()
     private var triggerTerminations = TriggerTerminationPublisher()
@@ -190,6 +191,18 @@ public actor VoiceInputSessions {
         beginFinishingSession(captureHint: captureHint)
     }
 
+    package func handleEscape(triggeredAtSequence sequence: UInt64) async {
+        guard let presentationTriggerSequence,
+            presentationTriggerSequence <= sequence
+        else { return }
+        switch presentation.activity {
+        case .pendingCopy(let id, _, _), .failed(let id, _):
+            dismissResult(expectedSessionID: id)
+        default:
+            await cancel(triggeredAtSequence: sequence)
+        }
+    }
+
     public func cancel(triggeredAtSequence sequence: UInt64) async {
         guard let activeTriggerSequence,
             activeTriggerSequence <= sequence
@@ -225,10 +238,14 @@ public actor VoiceInputSessions {
     }
 
     package func dismissResult(expectedSessionID: VoiceInputSessionID) {
-        guard phase == .idle,
-            presentation.activity.sessionID == expectedSessionID
-        else { return }
-        publish(.idle)
+        guard presentation.activity.sessionID == expectedSessionID else { return }
+        switch presentation.activity {
+        case .pendingCopy where phase == .idle,
+            .failed where phase == .idle || phase == .finalizing(expectedSessionID):
+            publish(.idle)
+        default:
+            return
+        }
     }
 
     /// Stops active work and waits until every queued history mutation has
@@ -331,6 +348,7 @@ public actor VoiceInputSessions {
         phase = .preparing(id)
         preparingAudioStart = audioStart
         activeTriggerSequence = triggerSequence
+        presentationTriggerSequence = triggerSequence
         preparingStartedAt = requestedAt
         confirmedDoubaoResult = nil
         historyTextPolicy = .unclassified

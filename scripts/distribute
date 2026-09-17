@@ -159,7 +159,6 @@ export SPEAKER_BUNDLE_OUTPUT_APP="$RELEASE_APP"
 export SPEAKER_BUNDLE_PENDING_ROOT="$PENDING_DIR"
 export SPEAKER_SWIFT_RELEASE_ISOLATION=1
 PENDING_ARCHIVE="$PENDING_DIR/submission.zip"
-DMG_SOURCE="$PENDING_DIR/dmg-source"
 PENDING_DMG="$PENDING_DIR/final.dmg"
 PENDING_CHECKSUM="$PENDING_DIR/final.dmg.sha256"
 EVIDENCE_WORK="$PENDING_DIR/evidence"
@@ -273,18 +272,7 @@ validate_notary_log \
 xcrun stapler staple "$APP"
 verify_notarized_app "$APP"
 
-# Sparkle recommends APFS images with lzfse compression. `ditto` preserves
-# Sparkle.framework's symlinks while the image is staged.
-mkdir -p "$DMG_SOURCE"
-ditto "$APP" "$DMG_SOURCE/Speaker.app"
-ln -s /Applications "$DMG_SOURCE/Applications"
-hdiutil create \
-    -quiet \
-    -fs APFS \
-    -format ULFO \
-    -srcfolder "$DMG_SOURCE" \
-    -volname Speaker \
-    "$PENDING_DMG"
+/bin/zsh "$RELEASE_SOURCE/scripts/package-dmg" "$APP" "$PENDING_DMG"
 DMG_SUBMISSION_HASH="$(shasum -a 256 "$PENDING_DMG" | awk '{print $1}')"
 DMG_NOTARY_RESULT="$EVIDENCE_WORK/dmg-notary-submission.json"
 DMG_NOTARY_LOG="$EVIDENCE_WORK/dmg-notary-log.json"

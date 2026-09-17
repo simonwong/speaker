@@ -34,6 +34,8 @@ speaker_test_run "test-provider-smoke-contract" \
     /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
 speaker_test_run "test-brand-assets" \
     /bin/zsh "$SCRIPT_DIR/test-brand-assets"
+speaker_test_run "test-package-dmg" \
+    /bin/zsh "$SCRIPT_DIR/test-package-dmg"
 speaker_test_run "test-install-identity" \
     /bin/zsh "$SCRIPT_DIR/test-install-identity"
 speaker_test_run "test-release-evidence" \

@@ -169,6 +169,7 @@ package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var inspectedPromptMode: BuiltInRefinementMode?
     @Published private(set) var isEditingCustomMode = false
     @Published package private(set) var hasStoredKey = false
+    @Published package private(set) var isUpdatingKey = false
     @Published package private(set) var isConnectionVerified = false
     @Published private(set) var isCheckingConnection = false
     @Published private(set) var connectionFailure: String?
@@ -267,11 +268,15 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     package func saveAPIKey() async {
+        guard !isUpdatingKey else { return }
+        isUpdatingKey = true
+        defer { isUpdatingKey = false }
+        let draft = apiKeyDraft
         await cancelConnectionCheck()
         do {
-            try await service.saveAPIKey(apiKeyDraft)
+            try await service.saveAPIKey(draft)
             connectionGeneration &+= 1
-            apiKeyDraft = ""
+            if apiKeyDraft == draft { apiKeyDraft = "" }
             hasStoredKey = true
             isConnectionVerified = false
             connectionFailure = nil
@@ -293,7 +298,11 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func deleteAPIKey() async {
+    package func deleteAPIKey() async {
+        guard !isUpdatingKey else { return }
+        isUpdatingKey = true
+        defer { isUpdatingKey = false }
+        let draft = apiKeyDraft
         await cancelConnectionCheck()
         do {
             try await service.deleteAPIKey()
@@ -302,7 +311,7 @@ package final class RefinementSettingsModel: ObservableObject {
             isConnectionVerified = false
             connectionFailure = nil
             credentialNotice = nil
-            apiKeyDraft = ""
+            if apiKeyDraft == draft { apiKeyDraft = "" }
             deferredMode = nil
             await select(.defaultSmooth)
         } catch {
@@ -312,6 +321,7 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     func checkConnection() {
+        guard !isUpdatingKey, hasStoredKey else { return }
         connectionGeneration &+= 1
         let generation = connectionGeneration
         let previousTask = connectionTask

@@ -494,8 +494,8 @@ package final class VoiceInputExperience: ObservableObject {
                 true
             }
         triggerIntakeGate.setAllowsSessionTriggers(allowsSessionTriggers)
-        escapeGate.setActive(presentation.activity.isActive)
         state = Self.makeState(from: presentation)
+        escapeGate.setActive(presentation.activity.isActive || state.menu.dismissAction != nil)
         announceTransitionIfNeeded(presentation.activity)
         announceNoticeIfNeeded(presentation)
     }
@@ -617,9 +617,10 @@ package final class VoiceInputExperience: ObservableObject {
     }
 
     private static func endsSilently(_ activity: VoiceInputActivity) -> Bool {
-        if case .failed(_, .providerReturnedNoText) = activity {
+        switch activity {
+        case .failed(_, .providerReturnedNoText), .failed(_, .recordingTooShort):
             true
-        } else {
+        default:
             false
         }
     }

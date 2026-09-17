@@ -76,6 +76,72 @@ struct SpeakerAppScenarioSpecs {
             try expect(!deletedKeyWithStaleSuccess.isReady)
         }
 
+        run(
+            "onboarding steps require observed permissions and current key verification",
+            failures: &failures
+        ) {
+            let pending = OnboardingPresentation(
+                permissions: .init(accessibility: .denied, microphone: .notDetermined),
+                doubaoStatus: .unconfigured,
+                hasStoredDoubaoKey: false
+            )
+            try expect(!pending.canContinue(from: .permissions))
+            try expect(pending.permissionInstructions(for: .microphone).contains("macOS"))
+            try expect(pending.permissionInstructions(for: .accessibility).contains("+"))
+            let authorized = OnboardingPresentation(
+                permissions: .init(accessibility: .granted, microphone: .granted),
+                doubaoStatus: .configured,
+                hasStoredDoubaoKey: true
+            )
+            try expect(authorized.canContinue(from: .permissions))
+            try expect(!authorized.canContinue(from: .apiKey))
+            try expect(!authorized.canContinue(from: .shortcut))
+            let verified = OnboardingPresentation(
+                permissions: authorized.permissions,
+                doubaoStatus: .success(nil),
+                hasStoredDoubaoKey: true
+            )
+            try expect(verified.canContinue(from: .apiKey))
+            try expect(verified.canContinue(from: .shortcut))
+            let changingKey = OnboardingPresentation(
+                permissions: authorized.permissions,
+                doubaoStatus: .success(nil),
+                hasStoredDoubaoKey: true,
+                isUpdatingDoubaoKey: true
+            )
+            try expect(!changingKey.canContinue(from: .apiKey))
+            try expect(!changingKey.canContinue(from: .shortcut))
+            let removed = OnboardingPresentation(
+                permissions: authorized.permissions,
+                doubaoStatus: .success(nil),
+                hasStoredDoubaoKey: false
+            )
+            try expect(!removed.canContinue(from: .apiKey))
+            try expect(!removed.canContinue(from: .shortcut))
+            let revoked = OnboardingPresentation(
+                permissions: pending.permissions,
+                doubaoStatus: .success(nil),
+                hasStoredDoubaoKey: true
+            )
+            try expect(!revoked.canContinue(from: .apiKey))
+            try expect(!revoked.canContinue(from: .shortcut))
+        }
+
+        run(
+            "onboarding review allows tutorial navigation without claiming recording readiness",
+            failures: &failures
+        ) {
+            let review = OnboardingPresentation(
+                permissions: .init(accessibility: .denied, microphone: .denied),
+                doubaoStatus: .configured,
+                hasStoredDoubaoKey: true,
+                mode: .review
+            )
+            for step in OnboardingStep.allCases { try expect(review.canContinue(from: step)) }
+            try expect(!review.isReady)
+            try expect(review.permissionAction(for: .microphone) == .openSystemSettings)
+        }
+
         run("shortcut recorder captures one physical modifier on release", failures: &failures) {
             var policy = ShortcutRecorderPolicy()
             try expect(
@@ -175,7 +241,7 @@ struct SpeakerAppScenarioSpecs {
             }
         }
 
-        run("onboarding exposes only valid permission and provider actions", failures: &failures) {
+        run("onboarding exposes only valid permission actions", failures: &failures) {
             let presentation = OnboardingPresentation(
                 permissions: .init(
                     accessibility: .denied,
@@ -193,9 +259,7 @@ struct SpeakerAppScenarioSpecs {
                 presentation.permissionAction(for: .accessibility)
                     == .openSystemSettings
             )
-            try expect(!presentation.canCheckConnection)
-            try expect(!presentation.canSelectResource)
-            try expect(!presentation.canComplete)
+            try expect(!presentation.isReady)
 
             let restricted = OnboardingPresentation(
                 permissions: .init(
@@ -211,12 +275,11 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 restricted.permissionAction(for: .microphone) == nil
             )
-            try expect(restricted.canCheckConnection)
-            try expect(restricted.canSelectResource)
+            try expect(!restricted.isReady)
         }
 
         await runAsync(
-            "onboarding advances from an explicit microphone grant only",
+            "onboarding requests only the permission explicitly chosen by the user",
             failures: &failures
         ) {
             let grantedAccess = PermissionAccessFake(
@@ -242,8 +305,12 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(
                 grantedAccess.requestedPermissions
-                    == [.microphone, .accessibility]
+                    == [.microphone]
             )
+            try expect(grantedSynchronizations == 1)
+            try expect(grantedPermissions.snapshot.accessibility == .denied)
+            await grantedCoordinator.request(.accessibility)
+            try expect(grantedAccess.requestedPermissions == [.microphone, .accessibility])
             try expect(grantedSynchronizations == 2)
 
             for terminalState in [
@@ -2490,32 +2557,121 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("API key cards show a persistent input only before a key is saved", failures: &failures)
-        {
+        await runAsync(
+            "provider key replacement failures retain the old key and an editable draft",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "speaker-key-recovery-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let credentials = ScenarioProviderCredentialStore()
+            let settings = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            let doubao = DoubaoSettingsModel(
+                service: CredentialedDoubaoTranscriber(credentials: credentials),
+                settingsStore: settings)
+            let refinement = RefinementSettingsModel(
+                service: CredentialedDeepSeekTextRefiner(credentials: credentials),
+                configuration: VoiceInputConfigurationController(), settingsStore: settings)
+            doubao.apiKeyDraft = "synthetic-doubao-old"
+            refinement.apiKeyDraft = "synthetic-deepseek-old"
+            await doubao.save()
+            await refinement.saveAPIKey()
+            await credentials.setSaveError(.storageUnavailable)
+            doubao.apiKeyDraft = "synthetic-doubao-new"
+            refinement.apiKeyDraft = "synthetic-deepseek-new"
+            await doubao.save()
+            await refinement.saveAPIKey()
+            try expect(doubao.hasStoredKey && refinement.hasStoredKey)
+            try expect(doubao.apiKeyDraft == "synthetic-doubao-new")
+            try expect(refinement.apiKeyDraft == "synthetic-deepseek-new")
+            if case .failure = doubao.status {
+            } else {
+                throw SpecFailure(message: "replacement failure was hidden")
+            }
+            let oldDoubao = await credentials.apiKey(for: .doubao)
+            let oldDeepSeek = await credentials.apiKey(for: .deepSeek)
             try expect(
-                APIKeyCardPresentation.mode(
-                    hasStoredKey: false,
-                    isReplacingKey: false
-                ) == .enterKey
-            )
+                oldDoubao == "synthetic-doubao-old" && oldDeepSeek == "synthetic-deepseek-old")
+            await credentials.setSaveError(nil)
+            await doubao.save()
+            await refinement.saveAPIKey()
+            let newDoubao = await credentials.apiKey(for: .doubao)
+            let newDeepSeek = await credentials.apiKey(for: .deepSeek)
             try expect(
-                APIKeyCardPresentation.mode(
-                    hasStoredKey: false,
-                    isReplacingKey: true
-                ) == .enterKey
-            )
-            try expect(
-                APIKeyCardPresentation.mode(
-                    hasStoredKey: true,
-                    isReplacingKey: false
-                ) == .configured
-            )
-            try expect(
-                APIKeyCardPresentation.mode(
-                    hasStoredKey: true,
-                    isReplacingKey: true
-                ) == .replacingKey
-            )
+                newDoubao == "synthetic-doubao-new" && newDeepSeek == "synthetic-deepseek-new")
+            try expect(doubao.apiKeyDraft.isEmpty && refinement.apiKeyDraft.isEmpty)
+            await doubao.delete()
+            await refinement.deleteAPIKey()
+            try expect(!doubao.hasStoredKey && !refinement.hasStoredKey)
+            await doubao.shutdown()
+            await refinement.shutdown()
+        }
+
+        await runAsync(
+            "provider key mutation rejects duplicates and preserves newer drafts",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "speaker-key-ordering-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settings = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            for provider in ProviderID.allCases {
+                let credentials = ScenarioProviderCredentialStore()
+                let doubao = DoubaoSettingsModel(
+                    service: CredentialedDoubaoTranscriber(credentials: credentials),
+                    settingsStore: settings)
+                let refinement = RefinementSettingsModel(
+                    service: CredentialedDeepSeekTextRefiner(credentials: credentials),
+                    configuration: VoiceInputConfigurationController(), settingsStore: settings)
+                doubao.apiKeyDraft = "synthetic-first"
+                refinement.apiKeyDraft = "synthetic-first"
+                await credentials.pauseSaves()
+                let saveTask = Task {
+                    if provider == .doubao {
+                        await doubao.save()
+                    } else {
+                        await refinement.saveAPIKey()
+                    }
+                }
+                let pending = await eventually(before: .seconds(2)) {
+                    await credentials.pendingSaveCount == 1
+                }
+                try expect(pending)
+                let updating = provider == .doubao ? doubao.isUpdatingKey : refinement.isUpdatingKey
+                try expect(updating)
+                doubao.apiKeyDraft = "synthetic-newer-draft"
+                refinement.apiKeyDraft = "synthetic-newer-draft"
+                var duplicateFinished = false
+                let duplicateTask = Task {
+                    if provider == .doubao {
+                        await doubao.save()
+                        await doubao.delete()
+                    } else {
+                        await refinement.saveAPIKey()
+                        await refinement.deleteAPIKey()
+                    }
+                    duplicateFinished = true
+                }
+                let duplicateIgnored = await eventually(before: .seconds(2)) { duplicateFinished }
+                await credentials.resumeSaves()
+                await saveTask.value
+                await duplicateTask.value
+                try expect(
+                    duplicateIgnored,
+                    "a duplicate mutation entered storage while a save was pending")
+                let saved = await credentials.apiKey(for: provider)
+                try expect(
+                    saved == "synthetic-first",
+                    "a duplicate mutation replaced or deleted the first save")
+                let draft = provider == .doubao ? doubao.apiKeyDraft : refinement.apiKeyDraft
+                try expect(
+                    draft == "synthetic-newer-draft", "save completion discarded newer input")
+                try expect(!doubao.isUpdatingKey && !refinement.isUpdatingKey)
+                await doubao.shutdown()
+                await refinement.shutdown()
+            }
         }
 
         run(
@@ -2621,6 +2777,7 @@ struct SpeakerAppScenarioSpecs {
                     .microphone,
                     .divider,
                     .settings,
+                    .onboarding,
                     .divider,
                     .quit,
                 ]
@@ -2638,6 +2795,7 @@ struct SpeakerAppScenarioSpecs {
                     .cancelVoiceInput,
                     .divider,
                     .settings,
+                    .onboarding,
                     .divider,
                     .quit,
                 ]
@@ -2656,6 +2814,7 @@ struct SpeakerAppScenarioSpecs {
                     .dismissVoiceInput,
                     .divider,
                     .settings,
+                    .onboarding,
                     .divider,
                     .quit,
                 ]
@@ -2674,6 +2833,7 @@ struct SpeakerAppScenarioSpecs {
                     .dismissVoiceInput,
                     .divider,
                     .settings,
+                    .onboarding,
                     .divider,
                     .quit,
                 ]
@@ -2704,6 +2864,7 @@ struct SpeakerAppScenarioSpecs {
             let router = MenuBarCommandRouter(
                 navigation: navigation,
                 openOverview: { events.append("overview") },
+                openOnboarding: { events.append("onboarding") },
                 openSettings: { events.append("settings") },
                 openDataErasureRecovery: {
                     events.append("data-erasure-recovery")
@@ -2714,6 +2875,10 @@ struct SpeakerAppScenarioSpecs {
 
             router.perform(.overview)
             try expect(events == ["overview", "activate"])
+            let navigationBeforeGuide = navigation.presentationRequest
+            router.perform(.onboarding)
+            try expect(events.suffix(2) == ["onboarding", "activate"])
+            try expect(navigation.presentationRequest == navigationBeforeGuide)
 
             router.perform(.permissionSettings)
             try expect(
@@ -3622,6 +3787,7 @@ struct SpeakerAppScenarioSpecs {
                 let router = MenuBarCommandRouter(
                     navigation: navigation,
                     openOverview: {},
+                    openOnboarding: {},
                     openSettings: {
                         if let target = navigation.presentationRequest?.target {
                             presentedTargets.append(target)
@@ -3658,6 +3824,7 @@ struct SpeakerAppScenarioSpecs {
             }
         }
 
+        await VoiceInputFeedbackSpecs.run(failures: &failures)
         await ShortcutRecorderSpecs.run(failures: &failures)
         await MicrophoneSelectionSpecs.run(failures: &failures)
         await RuntimeLifecycleSpecs.run(failures: &failures)
@@ -4130,8 +4297,24 @@ private struct PersistenceFailure: LocalizedError {
 
 private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
     private var values: [ProviderID: String] = [:]
+    private var saveError: ProviderCredentialStoreError?
+    private var pausesSaves = false
+    private var saveWaiters: [CheckedContinuation<Void, Never>] = []
 
-    func save(apiKey: String, for provider: ProviderID) throws {
+    func setSaveError(_ error: ProviderCredentialStoreError?) { saveError = error }
+    func pauseSaves() { pausesSaves = true }
+    var pendingSaveCount: Int { saveWaiters.count }
+    func resumeSaves() {
+        pausesSaves = false
+        let waiters = saveWaiters
+        saveWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func save(apiKey: String, for provider: ProviderID) async throws {
+        if pausesSaves { await withCheckedContinuation { saveWaiters.append($0) } }
+        if let saveError { throw saveError }
+
         let normalized = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else {
             throw ProviderCredentialStoreError.emptyAPIKey

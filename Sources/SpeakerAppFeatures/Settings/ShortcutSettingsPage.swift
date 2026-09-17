@@ -26,10 +26,6 @@ struct ShortcutSettingsPage: View {
                         recoveryRow(recovery)
                     }
                 }
-
-                SettingsRowDivider()
-
-                gestureHints
             }
         }
     }
@@ -74,7 +70,7 @@ struct ShortcutSettingsPage: View {
             }
             .disabled(shortcut.activation.activePreference == .functionKey)
 
-            Button(shortcutRecorder.isRecording ? "取消" : "录制新快捷键") {
+            Button(shortcutRecorder.isRecording ? "取消" : "更改快捷键") {
                 if shortcutRecorder.isRecording {
                     shortcutRecorder.stop()
                 } else {
@@ -125,26 +121,6 @@ struct ShortcutSettingsPage: View {
         }
     }
 
-    private var gestureHints: some View {
-        HStack(spacing: 12) {
-            GestureHint(
-                icon: "hand.tap",
-                title: "短按",
-                detail: "按一下开始，再按一下结束"
-            )
-            GestureHint(
-                icon: "hand.point.up.left",
-                title: "长按",
-                detail: "按住录音，松开结束"
-            )
-            GestureHint(
-                icon: "escape",
-                title: "取消",
-                detail: "录音期间按 Esc"
-            )
-        }
-    }
-
     private var shortcutStatusText: String {
         switch shortcut.activation {
         case .active(let preference):
@@ -180,34 +156,5 @@ struct ShortcutSettingsPage: View {
         case .warning: .orange
         case .error: .red
         }
-    }
-}
-
-private struct GestureHint: View {
-    let icon: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon)
-                // A glyph centred in a fixed 24pt tile.
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .background(
-                    Color.primary.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                )
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(SpeakerTypography.caption.weight(.semibold))
-                Text(detail)
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

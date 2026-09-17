@@ -598,14 +598,15 @@ private struct ProblemStrip: View {
                     .layoutPriority(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                ActivityHUDCloseButton(
+                HUDIconButton(
+                    symbol: "xmark",
                     palette: palette,
                     accessibilityLabel: "关闭错误提示",
                     help: "关闭",
                     accessibilityHint: "关闭当前错误，不会自动重试",
-                    respondsToEscape: true,
                     action: dismiss
                 )
+                .keyboardShortcut(.cancelAction)
             }
             .padding(.leading, 16)
             .padding(.trailing, 9)
@@ -670,63 +671,5 @@ extension EnvironmentValues {
     package var voiceInputHUDHoverOverride: Bool? {
         get { self[VoiceInputHUDHoverOverrideKey.self] }
         set { self[VoiceInputHUDHoverOverrideKey.self] = newValue }
-    }
-}
-
-private struct ActivityHUDCloseButton: View {
-    let palette: VoiceInputHUDContrastPalette
-    var accessibilityLabel: String = "取消语音输入"
-    let help: String
-    let accessibilityHint: String
-    var respondsToEscape: Bool = false
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        if respondsToEscape {
-            button.keyboardShortcut(.cancelAction)
-        } else {
-            button
-        }
-    }
-
-    private var button: some View {
-        Button(action: action) {
-            Image(systemName: "xmark")
-                // A glyph centred in a fixed 24pt hit circle.
-                .font(.system(size: 8.5, weight: .semibold))
-                .foregroundStyle(
-                    .primary.opacity(
-                        isHovered
-                            ? max(
-                                0.92,
-                                palette.darkControlForegroundOpacity
-                            )
-                            : palette.darkControlForegroundOpacity
-                    )
-                )
-                .frame(width: 24, height: 24)
-                .background(
-                    .primary.opacity(
-                        isHovered
-                            ? palette.darkControlBackgroundOpacity
-                            : 0
-                    ),
-                    in: Circle()
-                )
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help(help)
-        .accessibilityHidden(true)
-        .overlay {
-            AccessibilityButtonBridge(
-                label: accessibilityLabel,
-                hint: accessibilityHint,
-                action: action
-            )
-        }
     }
 }

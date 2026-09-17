@@ -3,11 +3,16 @@ import SwiftUI
 
 /// The API Keys page: one card per provider seam, Doubao first because
 /// transcription cannot start without it.
-struct APIKeySettingsPage: View {
+package struct APIKeySettingsPage: View {
     let doubao: DoubaoSettingsModel
     let refinement: RefinementSettingsModel
 
-    var body: some View {
+    package init(doubao: DoubaoSettingsModel, refinement: RefinementSettingsModel) {
+        self.doubao = doubao
+        self.refinement = refinement
+    }
+
+    package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
             DoubaoSettingsCard(model: doubao)
             DeepSeekSettingsCard(model: refinement)
@@ -15,19 +20,11 @@ struct APIKeySettingsPage: View {
     }
 }
 
-private struct DoubaoSettingsCard: View {
+package struct DoubaoSettingsCard: View {
     @ObservedObject var model: DoubaoSettingsModel
-    @State private var confirmingDelete = false
-    @State private var isReplacingKey = false
 
-    private var mode: APIKeyCardMode {
-        APIKeyCardPresentation.mode(
-            hasStoredKey: model.hasConfiguredKey,
-            isReplacingKey: isReplacingKey
-        )
-    }
-
-    var body: some View {
+    package init(model: DoubaoSettingsModel) { self.model = model }
+    package var body: some View {
         SettingsCard(
             "豆包语音",
             subtitle: "边说边转录，默认启用语义顺滑",
@@ -37,37 +34,23 @@ private struct DoubaoSettingsCard: View {
 
             SettingsRowDivider()
 
-            if mode == .enterKey {
-                keyInput(
-                    placeholder: "输入豆包语音 API Key",
-                    saveTitle: "保存 Key"
-                )
-            } else {
+            ProviderKeyEditor(
+                draft: $model.apiKeyDraft,
+                providerName: "豆包语音",
+                hasStoredKey: model.hasConfiguredKey,
+                isUpdating: model.isUpdatingKey,
+                deletionMessage: "删除后将无法进行新的语音转录，历史记录不会受影响。",
+                save: { await model.save() },
+                delete: { await model.delete() }
+            )
+
+            if model.hasConfiguredKey {
                 resourceRow
                 actionRow
-
-                if mode == .replacingKey {
-                    keyInput(
-                        placeholder: "输入新 Key 替换当前凭据",
-                        saveTitle: "保存"
-                    )
-                }
             }
-        }
-        .confirmationDialog(
-            "删除豆包 API Key？",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("删除 Key", role: .destructive) {
-                Task { await model.delete() }
+            if case .failure(let message) = model.status {
+                SettingsNotice(text: message, color: .red)
             }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("删除后将无法进行新的语音转录，历史记录不会受影响。")
-        }
-        .onChange(of: model.hasConfiguredKey) { _, hasKey in
-            if !hasKey { isReplacingKey = false }
         }
     }
 
@@ -104,6 +87,7 @@ private struct DoubaoSettingsCard: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(maxWidth: 260, alignment: .trailing)
+            .disabled(model.isUpdatingKey)
         }
     }
 
@@ -117,41 +101,8 @@ private struct DoubaoSettingsCard: View {
             Button("检查连接") {
                 model.checkConnection()
             }
-            .disabled(isChecking)
-
-            Button(isReplacingKey ? "收起" : "更换 Key") {
-                isReplacingKey.toggle()
-            }
-            .disabled(isChecking)
-
+            .disabled(isChecking || model.isUpdatingKey)
             Spacer()
-
-            Button("删除 Key", role: .destructive) {
-                confirmingDelete = true
-            }
-        }
-    }
-
-    private func keyInput(
-        placeholder: String,
-        saveTitle: String
-    ) -> some View {
-        HStack(spacing: 8) {
-            SecureField(placeholder, text: $model.apiKeyDraft)
-                .textContentType(.password)
-
-            Button(saveTitle) {
-                Task {
-                    await model.save()
-                    isReplacingKey = false
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                model.apiKeyDraft
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            )
         }
     }
 
@@ -166,16 +117,6 @@ private struct DoubaoSettingsCard: View {
 
 private struct DeepSeekSettingsCard: View {
     @ObservedObject var model: RefinementSettingsModel
-    @State private var confirmingDelete = false
-    @State private var isReplacingKey = false
-
-    private var mode: APIKeyCardMode {
-        APIKeyCardPresentation.mode(
-            hasStoredKey: model.hasStoredKey,
-            isReplacingKey: isReplacingKey
-        )
-    }
-
     var body: some View {
         SettingsCard(
             "DeepSeek · 可选",
@@ -186,20 +127,18 @@ private struct DeepSeekSettingsCard: View {
 
             SettingsRowDivider()
 
-            if mode == .enterKey {
-                keyInput(
-                    placeholder: "输入 DeepSeek API Key",
-                    saveTitle: "保存 Key"
-                )
-            } else {
-                actionRow
+            ProviderKeyEditor(
+                draft: $model.apiKeyDraft,
+                providerName: "DeepSeek",
+                hasStoredKey: model.hasStoredKey,
+                isUpdating: model.isUpdatingKey,
+                deletionMessage: "删除后会自动切回默认顺滑，豆包转录仍可正常使用。",
+                save: { await model.saveAPIKey() },
+                delete: { await model.deleteAPIKey() }
+            )
 
-                if mode == .replacingKey {
-                    keyInput(
-                        placeholder: "输入新 Key 替换当前凭据",
-                        saveTitle: "保存"
-                    )
-                }
+            if model.hasStoredKey {
+                actionRow
             }
 
             if let credentialNotice = model.credentialNotice {
@@ -208,21 +147,6 @@ private struct DeepSeekSettingsCard: View {
             if let connectionFailure = model.connectionFailure {
                 SettingsNotice(text: connectionFailure, color: .red)
             }
-        }
-        .confirmationDialog(
-            "删除 DeepSeek API Key？",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("删除 Key", role: .destructive) {
-                Task { await model.deleteAPIKey() }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("删除后会自动切回默认顺滑，豆包转录仍可正常使用。")
-        }
-        .onChange(of: model.hasStoredKey) { _, hasKey in
-            if !hasKey { isReplacingKey = false }
         }
     }
 
@@ -257,43 +181,8 @@ private struct DeepSeekSettingsCard: View {
                     Text("检查连接")
                 }
             }
-            .disabled(model.isCheckingConnection)
-
-            Button(isReplacingKey ? "收起" : "更换 Key") {
-                isReplacingKey.toggle()
-            }
-            .disabled(model.isCheckingConnection)
-
+            .disabled(model.isCheckingConnection || model.isUpdatingKey)
             Spacer()
-
-            Button("删除 Key", role: .destructive) {
-                confirmingDelete = true
-            }
-            .disabled(model.isCheckingConnection)
-        }
-    }
-
-    private func keyInput(
-        placeholder: String,
-        saveTitle: String
-    ) -> some View {
-        HStack(spacing: 8) {
-            SecureField(placeholder, text: $model.apiKeyDraft)
-                .textContentType(.password)
-
-            Button(saveTitle) {
-                Task {
-                    await model.saveAPIKey()
-                    isReplacingKey = false
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                model.apiKeyDraft
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-                    || model.isCheckingConnection
-            )
         }
     }
 
@@ -317,4 +206,98 @@ private struct DeepSeekSettingsCard: View {
         if model.hasStoredKey { return .green }
         return .secondary
     }
+}
+
+private struct ProviderKeyEditor: View {
+    @Binding var draft: String
+    let providerName: String
+    let hasStoredKey: Bool
+    let isUpdating: Bool
+    let deletionMessage: String
+    let save: @MainActor () async -> Void
+    let delete: @MainActor () async -> Void
+    @State private var confirmingDelete = false
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                keyField.frame(minWidth: 180)
+                actions.fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                keyField
+                actions
+            }
+        }
+        .disabled(isUpdating)
+        .confirmationDialog(
+            "删除 \(providerName) API Key？",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("删除 Key", role: .destructive) {
+                Task { await delete() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(deletionMessage)
+        }
+    }
+
+    private var keyField: some View {
+        SecureField(
+            hasStoredKey ? "输入新 Key 替换当前凭据" : "输入 \(providerName) API Key",
+            text: $draft
+        )
+        .textContentType(.password)
+        .accessibilityLabel("\(providerName) API Key")
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if isUpdating {
+                ProgressView().controlSize(.small)
+            }
+            Button(saveTitle, action: saveDraft)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
+                .accessibilityHidden(true)
+                .overlay {
+                    AccessibilityButtonBridge(
+                        label: saveTitle,
+                        hint: "保存 \(providerName) API Key，不会自动发起连接检查",
+                        isEnabled: canSave,
+                        action: saveDraft
+                    )
+                }
+
+            if hasStoredKey {
+                Button("删除 Key", role: .destructive) {
+                    confirmingDelete = true
+                }
+                .accessibilityHidden(true)
+                .overlay {
+                    AccessibilityButtonBridge(
+                        label: "删除 Key",
+                        hint: "删除 \(providerName) API Key 前需要确认",
+                        isEnabled: !isUpdating,
+                        action: { confirmingDelete = true }
+                    )
+                }
+            }
+        }
+    }
+
+    private var saveTitle: String {
+        isUpdating ? "处理中…" : hasStoredKey ? "保存更换" : "保存 Key"
+    }
+
+    private var canSave: Bool {
+        !isUpdating && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func saveDraft() {
+        Task { await save() }
+    }
+
 }

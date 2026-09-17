@@ -106,6 +106,7 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `generate-brand-assets` | Regenerates `Resources/AppIcon.png` and `AppIcon.icns` through `SpeakerBrandAssetGenerator`. | developer, `./scripts/test` |
 | `install` | Replaces `/Applications/Speaker.app` with a verified swap, identity checks, and rollback. | developer, `release`, `./scripts/test`, CI |
 | `launch` | Bundles the development App and opens it. | developer |
+| `package-dmg` | Packages a signed App into an APFS/lzfse drag-to-Applications DMG without rebuilding or resigning. | `distribute`, development prerelease CI, developer |
 | `provider-smoke` | Doubao/DeepSeek connection probes and the paid evidence matrix. | developer (explicit approval), release |
 | `release` | Development “try my change” loop: release build, bundle, install, launch under a stable local identity. | developer |
 | `release-common` | Sourced library of fail-closed release validation helpers; it is never run directly. | `bundle`, `install`, `distribute`, `verify-published-update`, `test-release-*`, CI |
@@ -118,9 +119,12 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `test-development-build-identity` | Exercises development build metadata derivation and its failure modes. | `./scripts/test` |
 | `test-install-identity` | Proves the installer refuses a same-Bundle-ID app with a broken signature. | `./scripts/test` |
 | `test-install-rollback` | Injects a post-swap failure and confirms the old bundle is restored. | CI only |
+| `test-package-dmg` | Mounts a fixture DMG and checks its installation layout, signature, and refusal to overwrite output. | `./scripts/test` |
 | `test-provider-smoke-contract` | Asserts `provider-smoke` argument validation under the offline guard so the gate can never bill. | `./scripts/test` |
 | `test-release-evidence` | Checks dSYM binding and evidence ZIP integrity with a real executable. | `./scripts/test`, CI |
 | `test-release-identity` | Release identity, lock, promotion journal, and rollback counterexamples. | `./scripts/test` |
+| `test-runner-common` | Sourced helpers for parallel gate steps and the combined exit-status summary. | `./scripts/test`, `test-scripts-test-summary` |
+| `test-scripts-test-summary` | Proves the full gate keeps running after failures and reports every result. | `./scripts/test` |
 | `test-skills-lock` | Checks `skills-lock.json` is valid JSON and that every locked skill directory exists. | `./scripts/test` |
 | `test-workflow-security` | GitHub workflow permission, pinning, and trigger counterexamples. | `./scripts/test` |
 | `verify-provider-evidence` | Runs `SpeakerProviderEvidenceVerifier` over a provider matrix report. | developer, release |

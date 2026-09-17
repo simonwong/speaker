@@ -65,6 +65,18 @@ struct SpeakerAppUISpecs {
                     window.close()
                 }
 
+                let nextAvailable = await eventually(before: .seconds(1)) {
+                    pumpUIRunLoop()
+                    return accessibilityButtons(in: hostingView).contains { $0.label == "下一步" }
+                }
+                try expect(nextAvailable)
+                try expect(
+                    onboardingSecureFields(in: hostingView).isEmpty,
+                    "API credentials leaked into the permissions step")
+                let next = accessibilityButtons(in: hostingView).first { $0.label == "下一步" }
+                try expect(
+                    next?.press() == true, "the user could not advance to API Key configuration")
+
                 let editorVisible = await eventually(before: .seconds(1)) {
                     pumpUIRunLoop()
                     return onboardingSecureFields(in: hostingView).contains {
@@ -110,9 +122,27 @@ struct SpeakerAppUISpecs {
                 try expect(replacementStored)
                 let storedKey = try await credentials.apiKey(for: .doubao)
                 try expect(storedKey == "replacement-test-key")
+                let back = accessibilityButtons(in: hostingView).first { $0.label == "上一步" }
+                try expect(back?.press() == true)
+                let returnedToPermissions = await eventually(before: .seconds(1)) {
+                    pumpUIRunLoop()
+                    return onboardingSecureFields(in: hostingView).isEmpty
+                }
+                try expect(returnedToPermissions, "Back did not return to the permissions step")
+                let forwardAgain = accessibilityButtons(in: hostingView).first { $0.label == "下一步" }
+                try expect(forwardAgain?.press() == true)
+                let editorReturned = await eventually(before: .seconds(1)) {
+                    pumpUIRunLoop()
+                    return !onboardingSecureFields(in: hostingView).isEmpty
+                }
+                try expect(editorReturned, "Back navigation lost the editable credential card")
+                try expect(model.hasStoredKey)
                 await model.shutdown()
             }
             await MicrophoneSelectionUISpecs.run(failures: &failures)
+            await APIKeySettingsUISpecs.run(failures: &failures)
+            await RefinementSelectionUISpecs.run(failures: &failures)
+            await OnboardingFlowUISpecs.run(failures: &failures)
             onboardingFinished = true
         }
         let onboardingDeadline = Date().addingTimeInterval(20)

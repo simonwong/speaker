@@ -10,13 +10,15 @@ final class OnboardingPresenter {
 
     private let preferences: UserDefaults
     private let makeController:
-        @MainActor (_ completion: @escaping () -> Void) -> SpeakerOnboardingWindowController
+        @MainActor (_ mode: OnboardingMode, _ completion: @escaping () -> Void) ->
+            SpeakerOnboardingWindowController
     private var controller: SpeakerOnboardingWindowController?
 
     init(
         preferences: UserDefaults,
         makeController:
             @escaping @MainActor (
+                _ mode: OnboardingMode,
                 _ completion: @escaping () -> Void
             ) -> SpeakerOnboardingWindowController
     ) {
@@ -30,7 +32,14 @@ final class OnboardingPresenter {
         guard force || !preferences.bool(forKey: Self.completionKey) else {
             return
         }
-        let controller = makeController { [weak self] in self?.complete() }
+        if let controller {
+            controller.show()
+            return
+        }
+        let mode: OnboardingMode = preferences.bool(forKey: Self.completionKey) ? .review : .setup
+        let controller = makeController(mode) { [weak self] in
+            if mode == .review { self?.close() } else { self?.complete() }
+        }
         self.controller = controller
         controller.show()
     }

@@ -40,13 +40,13 @@ Speaker 常驻菜单栏，默认使用 `Fn` 快捷键。你可以按住说话、
 
 ## 下载并运行
 
-1. 打开 [GitHub Releases](https://github.com/simonwong/speaker/releases)，下载最新的 `Speaker-<版本>-development.zip` 及对应的 `.sha256` 文件。
-2. 校验下载文件，通过后解压，并把 `Speaker.app` 移动到 `/Applications`。
+1. 打开 [GitHub Releases](https://github.com/simonwong/speaker/releases)，下载最新的 `Speaker-<版本>-development.dmg` 及对应的 `.sha256` 文件。
+2. 校验下载文件，通过后打开 DMG，在窗口中把 **Speaker** 拖到右侧的 **Applications（应用程序）**。
 3. 只移除这个 App 的隔离属性，然后启动：
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c Speaker-*-development.zip.sha256
+shasum -a 256 -c Speaker-*-development.dmg.sha256
 ```
 
 ```bash
@@ -54,7 +54,7 @@ xattr -dr com.apple.quarantine /Applications/Speaker.app
 open /Applications/Speaker.app
 ```
 
-请把下载的 ZIP 和 checksum 文件放在同一目录。校验命令必须显示 `OK`，再继续安装。
+请把下载的 DMG 和 checksum 文件放在同一目录。校验命令必须显示 `OK`，再继续安装。
 
 `xattr` 命令只移除 `/Applications/Speaker.app` 的 Gatekeeper 隔离标记，不会关闭系统全局的 Gatekeeper。由于每个开发版本使用 ad-hoc 身份，更新 Speaker 后，macOS 可能要求重新授予麦克风和辅助功能权限。
 

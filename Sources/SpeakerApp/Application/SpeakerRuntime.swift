@@ -223,7 +223,7 @@ final class SpeakerRuntime: ObservableObject {
         self.panel = panel
         let onboarding = OnboardingPresenter(
             preferences: dependencies.preferences,
-            makeController: { completion in
+            makeController: { mode, completion in
                 SpeakerOnboardingWindowController(
                     permissions: permissions,
                     doubao: doubaoSettings,
@@ -234,6 +234,8 @@ final class SpeakerRuntime: ObservableObject {
                         permissionRefreshCoordinator.refreshNow()
                     },
                     announce: announce,
+                    shortcutName: { shortcut.preference.displayName },
+                    mode: mode,
                     completion: completion
                 )
             }
@@ -392,6 +394,11 @@ final class SpeakerRuntime: ObservableObject {
             await shutdown.converge()
         }
         startup.start()
+    }
+
+    func showOnboarding() {
+        guard dataErasure.state == .idle else { return }
+        onboarding.present(force: true)
     }
 
     func refreshPermissions() {

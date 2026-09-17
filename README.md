@@ -40,13 +40,13 @@ If Speaker cannot prove that the original input target is still safe and current
 
 ## Download and run
 
-1. Open [GitHub Releases](https://github.com/simonwong/speaker/releases) and download the newest `Speaker-<version>-development.zip` and its `.sha256` file.
-2. Verify the downloaded archive against the published checksum, then unzip it and move `Speaker.app` into `/Applications`.
+1. Open [GitHub Releases](https://github.com/simonwong/speaker/releases) and download the newest `Speaker-<version>-development.dmg` and its `.sha256` file.
+2. Verify the downloaded disk image against the published checksum, then open the DMG and drag **Speaker** onto **Applications** in its window.
 3. Remove the quarantine attribute from this app only, then launch it:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c Speaker-*-development.zip.sha256
+shasum -a 256 -c Speaker-*-development.dmg.sha256
 ```
 
 ```bash
@@ -54,7 +54,7 @@ xattr -dr com.apple.quarantine /Applications/Speaker.app
 open /Applications/Speaker.app
 ```
 
-Keep the downloaded ZIP and checksum file in the same directory. The checksum command must report `OK` before you continue.
+Keep the downloaded DMG and checksum file in the same directory. The checksum command must report `OK` before you continue.
 
 The `xattr` command removes Gatekeeper's quarantine marker only from `/Applications/Speaker.app`; it does not disable Gatekeeper system-wide. Because each development build has an ad-hoc identity, updating Speaker can require macOS to approve Microphone and Accessibility access again.
 

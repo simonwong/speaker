@@ -12,6 +12,8 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
     private let refreshPermissions: () -> Void
     private let announce: AccessibilityAnnounce
     private let completion: () -> Void
+    private let shortcutName: () -> String
+    private let mode: OnboardingMode
 
     init(
         permissions: PermissionModel,
@@ -19,6 +21,8 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
         announce: @escaping AccessibilityAnnounce,
+        shortcutName: @escaping () -> String = { "Fn" },
+        mode: OnboardingMode = .setup,
         completion: @escaping () -> Void
     ) {
         self.permissions = permissions
@@ -27,6 +31,8 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
         self.refreshPermissions = refreshPermissions
         self.announce = announce
         self.completion = completion
+        self.shortcutName = shortcutName
+        self.mode = mode
     }
 
     func show() {
@@ -41,6 +47,8 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
             requestPermission: requestPermission,
             refreshPermissions: refreshPermissions,
             announce: announce,
+            shortcutName: shortcutName,
+            mode: mode,
             completion: completion
         )
         let visibleFrame =

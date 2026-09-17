@@ -17,6 +17,7 @@ package enum MenuBarRow: Equatable, Sendable {
     case recoverVoiceInput
     case dismissVoiceInput
     case settings
+    case onboarding
     case dataErasureStatus
     case dataErasureRecovery
     case quit
@@ -94,7 +95,7 @@ package enum MenuBarPresentation {
         return rows(in: [
             [.openSpeaker, .refinementMode, .microphone],
             voiceRows,
-            [.settings],
+            [.settings, .onboarding],
             [.quit],
         ])
     }

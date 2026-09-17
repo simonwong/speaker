@@ -1,6 +1,7 @@
 @MainActor
 package enum MenuBarCommand: Equatable, Sendable {
     case overview
+    case onboarding
     case permissionSettings
     case settings
     case settingsSection(SettingsGroup)
@@ -12,6 +13,7 @@ package enum MenuBarCommand: Equatable, Sendable {
 package struct MenuBarCommandRouter {
     private let navigation: SettingsNavigationModel
     private let openOverview: () -> Void
+    private let openOnboarding: () -> Void
     private let openSettings: () -> Void
     private let openDataErasureRecovery: () -> Void
     private let activate: () -> Void
@@ -20,6 +22,7 @@ package struct MenuBarCommandRouter {
     package init(
         navigation: SettingsNavigationModel,
         openOverview: @escaping () -> Void,
+        openOnboarding: @escaping () -> Void,
         openSettings: @escaping () -> Void,
         openDataErasureRecovery: @escaping () -> Void,
         activate: @escaping () -> Void,
@@ -27,6 +30,7 @@ package struct MenuBarCommandRouter {
     ) {
         self.navigation = navigation
         self.openOverview = openOverview
+        self.openOnboarding = openOnboarding
         self.openSettings = openSettings
         self.openDataErasureRecovery = openDataErasureRecovery
         self.activate = activate
@@ -42,6 +46,9 @@ package struct MenuBarCommandRouter {
 
     package func perform(_ command: MenuBarCommand) {
         switch command {
+        case .onboarding:
+            openOnboarding()
+            activate()
         case .overview:
             openOverview()
             activate()

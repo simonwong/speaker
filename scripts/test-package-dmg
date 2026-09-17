@@ -1,0 +1,54 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-package-dmg.XXXXXX")"
+APP="$TEST_ROOT/Speaker.app"
+MOUNT="$TEST_ROOT/mounted"
+MOUNTED=0
+cleanup() {
+    if (( MOUNTED )); then
+        /usr/bin/hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup EXIT
+
+mkdir -p "$APP/Contents/MacOS" "$MOUNT"
+FIXTURE_SDK="$(/bin/zsh "$SCRIPT_DIR/swiftw" --print-sdk-path)"
+print -r -- 'int main(void) { return 0; }' > "$TEST_ROOT/Fixture.c"
+xcrun clang -isysroot "$FIXTURE_SDK" "$TEST_ROOT/Fixture.c" \
+    -o "$APP/Contents/MacOS/SpeakerApp"
+plutil -create xml1 "$APP/Contents/Info.plist"
+plutil -insert CFBundleIdentifier -string com.local.speaker.dmgfixture \
+    "$APP/Contents/Info.plist"
+plutil -insert CFBundleExecutable -string SpeakerApp "$APP/Contents/Info.plist"
+plutil -insert CFBundlePackageType -string APPL "$APP/Contents/Info.plist"
+
+if /bin/zsh "$SCRIPT_DIR/package-dmg" "$APP" "$TEST_ROOT/unsigned.dmg" >/dev/null 2>&1; then
+    print -u2 "The packager accepted an unsigned app."
+    exit 1
+fi
+[[ ! -e "$TEST_ROOT/unsigned.dmg" ]]
+/usr/bin/codesign --force --sign - "$APP"
+/bin/zsh "$SCRIPT_DIR/package-dmg" "$APP" "$TEST_ROOT/installer.dmg"
+BEFORE="$(shasum -a 256 "$TEST_ROOT/installer.dmg")"
+if /bin/zsh "$SCRIPT_DIR/package-dmg" "$APP" "$TEST_ROOT/installer.dmg" >/dev/null 2>&1; then
+    print -u2 "The packager overwrote an existing disk image."
+    exit 1
+fi
+[[ "$(shasum -a 256 "$TEST_ROOT/installer.dmg")" == "$BEFORE" ]]
+/usr/bin/hdiutil attach "$TEST_ROOT/installer.dmg" -readonly -nobrowse \
+    -mountpoint "$MOUNT" >/dev/null
+MOUNTED=1
+[[ "$(readlink "$MOUNT/Applications")" == /Applications ]]
+cmp "$ROOT/Resources/Installer/FinderLayout" "$MOUNT/.DS_Store"
+cmp "$ROOT/Resources/Installer/Install.txt" \
+    "$MOUNT/拖动 Speaker 到 Applications 安装.txt"
+cmp "$APP/Contents/MacOS/SpeakerApp" "$MOUNT/Speaker.app/Contents/MacOS/SpeakerApp"
+/usr/bin/codesign --verify --deep --strict "$MOUNT/Speaker.app"
+/usr/bin/hdiutil detach "$MOUNT" >/dev/null
+MOUNTED=0
+print "PASS: DMG preserves the signed app and presents the drag-to-Applications layout"

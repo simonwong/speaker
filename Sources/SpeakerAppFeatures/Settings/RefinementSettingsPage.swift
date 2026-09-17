@@ -3,10 +3,12 @@ import SwiftUI
 
 /// The 整理 page: mode selection first, then at most one editor card — the
 /// inspected built-in mode's prompt, or Custom Mode's own name and prompt.
-struct RefinementSettingsPage: View {
+package struct RefinementSettingsPage: View {
     @ObservedObject var model: RefinementSettingsModel
 
-    var body: some View {
+    package init(model: RefinementSettingsModel) { self.model = model }
+
+    package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
             modeCard
 
@@ -28,7 +30,7 @@ struct RefinementSettingsPage: View {
     private var modeCard: some View {
         SettingsCard(
             "整理模式",
-            subtitle: "默认顺滑只用豆包；其他模式需要先验证 DeepSeek Key",
+            subtitle: "默认顺滑只用豆包；其他模式需配置 DeepSeek Key",
             icon: "text.alignleft"
         ) {
             LazyVGrid(
@@ -39,8 +41,6 @@ struct RefinementSettingsPage: View {
                     RefinementModeButton(
                         choice: choice,
                         selected: model.choice == choice,
-                        inspected: model.inspectedPromptMode
-                            == choice.builtInMode,
                         locked: choice != .defaultSmooth && !model.hasStoredKey
                     ) {
                         Task { await model.select(choice) }
@@ -203,7 +203,6 @@ private struct RefinementPromptTextEditor: View {
 private struct RefinementModeButton: View {
     let choice: RefinementChoice
     let selected: Bool
-    let inspected: Bool
     let locked: Bool
     let action: () -> Void
 
@@ -214,7 +213,7 @@ private struct RefinementModeButton: View {
                     Image(systemName: choice.icon)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(
-                            selected || inspected ? Color.accentColor : .secondary
+                            selected ? Color.accentColor : .secondary
                         )
                     Spacer()
                     Image(
@@ -237,7 +236,7 @@ private struct RefinementModeButton: View {
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
             .background(
-                selected || inspected
+                selected
                     ? Color.accentColor.opacity(0.10)
                     : Color.primary.opacity(0.03),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -245,13 +244,14 @@ private struct RefinementModeButton: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(
-                        selected || inspected
+                        selected
                             ? Color.accentColor.opacity(0.8)
                             : Color.primary.opacity(0.08),
-                        lineWidth: selected || inspected ? 1.5 : 1
+                        lineWidth: selected ? 1.5 : 1
                     )
             }
         }
         .buttonStyle(.plain)
+        .accessibilityValue(selected ? "当前使用" : "未启用")
     }
 }

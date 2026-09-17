@@ -277,7 +277,7 @@ jobs:
             > "$ARTIFACT_ZIP"
           /usr/bin/ditto -x -k "$ARTIFACT_ZIP" "$CANDIDATE"
 
-      - name: Verify and name release assets
+      - name: Verify and package development installer
         if: steps.release.outputs.publish == 'true'
         shell: zsh {0}
         env:
@@ -289,16 +289,13 @@ jobs:
           SOURCE_CHECKSUM="$SOURCE_ZIP.sha256"
           RELEASE_ROOT="$RUNNER_TEMP/speaker-development-release"
           EXTRACT_ROOT="$RUNNER_TEMP/speaker-development-extract"
-          ASSET_BASENAME="Speaker-${VERSION}-development.zip"
+          ASSET_BASENAME="Speaker-${VERSION}-development.dmg"
           ASSET="$RELEASE_ROOT/$ASSET_BASENAME"
 
           mkdir -p "$RELEASE_ROOT" "$EXTRACT_ROOT"
           (cd "$CANDIDATE" && /usr/bin/shasum -a 256 -c \
             "${SOURCE_CHECKSUM:t}")
-          cp "$SOURCE_ZIP" "$ASSET"
-          (cd "$RELEASE_ROOT" && /usr/bin/shasum -a 256 \
-            "$ASSET_BASENAME" > "$ASSET_BASENAME.sha256")
-          /usr/bin/ditto -x -k "$ASSET" "$EXTRACT_ROOT"
+          /usr/bin/ditto -x -k "$SOURCE_ZIP" "$EXTRACT_ROOT"
 
           APP="$EXTRACT_ROOT/Speaker.app"
           [[ -d "$APP" ]]
@@ -309,6 +306,9 @@ jobs:
             -c 'Print :SpeakerSigningMode' \
             "$APP/Contents/Info.plist")" == "development-ad-hoc" ]]
           codesign --verify --deep --strict --verbose=2 "$APP"
+          ./scripts/package-dmg "$APP" "$ASSET"
+          (cd "$RELEASE_ROOT" && /usr/bin/shasum -a 256 \
+            "$ASSET_BASENAME" > "$ASSET_BASENAME.sha256")
 
       - name: Create GitHub development prerelease
         if: steps.release.outputs.publish == 'true'
@@ -325,12 +325,14 @@ jobs:
             '' \
             '> This app is ad-hoc signed and not notarized. It is intended for development testing only. macOS may require renewed Microphone and Accessibility permissions after installation.' \
             '' \
+            'Open the DMG, drag Speaker onto Applications, then open Speaker from Applications.' \
+            '' \
             "Source commit: \`$GITHUB_SHA\`" \
             > "$NOTES"
 
           gh release create "$TAG" \
-            "$RELEASE_ROOT/Speaker-${VERSION}-development.zip#Speaker ${VERSION} development app" \
-            "$RELEASE_ROOT/Speaker-${VERSION}-development.zip.sha256#SHA-256 checksum" \
+            "$RELEASE_ROOT/Speaker-${VERSION}-development.dmg#Speaker ${VERSION} drag-to-Applications installer" \
+            "$RELEASE_ROOT/Speaker-${VERSION}-development.dmg.sha256#SHA-256 checksum" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Speaker $VERSION Development Prerelease" \

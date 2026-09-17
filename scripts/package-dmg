@@ -1,0 +1,38 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+[[ $# == 2 ]] || {
+    print -u2 "Usage: scripts/package-dmg <signed Speaker.app> <new output.dmg>"
+    exit 64
+}
+APP="$1"
+OUTPUT="${2:a}"
+[[ -d "$APP" && ! -L "$APP" && "${APP:t}" == "Speaker.app" ]] || {
+    print -u2 "A signed Speaker.app bundle is required."
+    exit 1
+}
+[[ "$OUTPUT" == *.dmg && -d "${OUTPUT:h}" && ! -e "$OUTPUT" && ! -L "$OUTPUT" ]] || {
+    print -u2 "The output must be a new .dmg in an existing directory."
+    exit 1
+}
+/usr/bin/codesign --verify --deep --strict "$APP"
+PENDING="$(mktemp -d "${OUTPUT:h}/.speaker-dmg.XXXXXX")"
+trap 'rm -rf "$PENDING"' EXIT
+mkdir "$PENDING/source"
+/usr/bin/ditto "$APP" "$PENDING/source/Speaker.app"
+ln -s /Applications "$PENDING/source/Applications"
+cp "$ROOT/Resources/Installer/FinderLayout" "$PENDING/source/.DS_Store"
+cp "$ROOT/Resources/Installer/Install.txt" \
+    "$PENDING/source/拖动 Speaker 到 Applications 安装.txt"
+/usr/bin/codesign --verify --deep --strict "$PENDING/source/Speaker.app"
+/usr/bin/hdiutil create -quiet -fs APFS -format ULFO \
+    -srcfolder "$PENDING/source" -volname Speaker "$PENDING/installer.dmg"
+/bin/mv -n "$PENDING/installer.dmg" "$OUTPUT"
+[[ ! -e "$PENDING/installer.dmg" ]] || {
+    print -u2 "Refusing to overwrite an existing disk image."
+    exit 1
+}
+print "Created drag-to-Applications installer: $OUTPUT"
