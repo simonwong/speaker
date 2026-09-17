@@ -73,7 +73,7 @@ After CI succeeds for a push to `main`, it reads the explicit SemVer from
 Prerelease containing a drag-to-Applications DMG and its SHA-256 file. The DMG
 is packaged from the already validated ad-hoc App; the internal CI ZIP remains
 a transport artifact. The installer presents Speaker and Applications side by
-side with installation instructions, without launching the App.
+side with installation instructions and embeds the Speaker logo as the mounted volume icon, without launching the App.
 Later commits using the same SemVer do not replace or republish that release;
 creating another development release requires a reviewed version change.
 

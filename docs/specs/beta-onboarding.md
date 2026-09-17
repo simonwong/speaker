@@ -53,7 +53,7 @@ The changes improve the existing small beta. They do not establish production di
 
 ## Implementation Decisions
 
-- The installation package accepts an already signed App and preserves its signature and nested bundle structure. It creates an APFS/lzfse DMG containing the App, an Applications link, installation instructions, and a volume-local Finder layout. Packaging does not launch the App or change global Finder preferences.
+- The installation package accepts an already signed App and preserves its signature and nested bundle structure. It creates an APFS/lzfse DMG containing the App, an Applications link, installation instructions, the Speaker logo as its custom volume icon, and a volume-local Finder layout. Packaging does not launch the App or change global Finder preferences.
 - Development prereleases publish the DMG and its checksum as human-facing downloads. Their internal CI ZIP remains a transport artifact. Existing release tags are not overwritten. Development signing remains explicitly separate from production Developer ID signing and notarization.
 - Production distribution uses the same installation layout while retaining its existing App and DMG notarization, HTTPS feed, Ed25519 verification, immutable artifact promotion, and public readback gates. Packaging does not weaken or replace these gates.
 - `SpeakerAppFeatures` owns the three-step presentation, permission instructions, product copy, accessibility announcements, and close-control style. `SpeakerRuntime` and the existing permission coordinator continue to own live lifecycle integration.

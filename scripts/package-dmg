@@ -20,16 +20,36 @@ OUTPUT="${2:a}"
 }
 /usr/bin/codesign --verify --deep --strict "$APP"
 PENDING="$(mktemp -d "${OUTPUT:h}/.speaker-dmg.XXXXXX")"
-trap 'rm -rf "$PENDING"' EXIT
+MOUNTED=0
+cleanup() {
+    if (( MOUNTED )); then
+        if ! /usr/bin/hdiutil detach "$PENDING/mounted" >/dev/null 2>&1; then
+            print -u2 "Could not detach the staging volume; retained at $PENDING"
+            return
+        fi
+    fi
+    rm -rf "$PENDING"
+}
+trap cleanup EXIT
 mkdir "$PENDING/source"
 /usr/bin/ditto "$APP" "$PENDING/source/Speaker.app"
 ln -s /Applications "$PENDING/source/Applications"
+cp "$ROOT/Resources/AppIcon.icns" "$PENDING/source/.VolumeIcon.icns"
 cp "$ROOT/Resources/Installer/FinderLayout" "$PENDING/source/.DS_Store"
 cp "$ROOT/Resources/Installer/Install.txt" \
     "$PENDING/source/拖动 Speaker 到 Applications 安装.txt"
 /usr/bin/codesign --verify --deep --strict "$PENDING/source/Speaker.app"
-/usr/bin/hdiutil create -quiet -fs APFS -format ULFO \
-    -srcfolder "$PENDING/source" -volname Speaker "$PENDING/installer.dmg"
+/usr/bin/hdiutil create -quiet -fs APFS -format UDRW \
+    -srcfolder "$PENDING/source" -volname Speaker "$PENDING/writable.dmg"
+mkdir "$PENDING/mounted"
+/usr/bin/hdiutil attach "$PENDING/writable.dmg" -nobrowse \
+    -mountpoint "$PENDING/mounted" >/dev/null
+MOUNTED=1
+xcrun SetFile -a C "$PENDING/mounted"
+/usr/bin/hdiutil detach "$PENDING/mounted" >/dev/null
+MOUNTED=0
+/usr/bin/hdiutil convert "$PENDING/writable.dmg" -quiet -format ULFO \
+    -o "$PENDING/installer.dmg"
 /bin/mv -n "$PENDING/installer.dmg" "$OUTPUT"
 [[ ! -e "$PENDING/installer.dmg" ]] || {
     print -u2 "Refusing to overwrite an existing disk image."

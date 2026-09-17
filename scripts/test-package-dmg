@@ -44,6 +44,8 @@ fi
     -mountpoint "$MOUNT" >/dev/null
 MOUNTED=1
 [[ "$(readlink "$MOUNT/Applications")" == /Applications ]]
+cmp "$ROOT/Resources/AppIcon.icns" "$MOUNT/.VolumeIcon.icns"
+[[ "$(xcrun GetFileInfo -aC "$MOUNT")" == "1" ]]
 cmp "$ROOT/Resources/Installer/FinderLayout" "$MOUNT/.DS_Store"
 cmp "$ROOT/Resources/Installer/Install.txt" \
     "$MOUNT/拖动 Speaker 到 Applications 安装.txt"
