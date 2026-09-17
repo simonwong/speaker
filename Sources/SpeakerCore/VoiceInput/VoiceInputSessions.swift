@@ -180,6 +180,16 @@ public actor VoiceInputSessions {
         }
     }
 
+    package func finishRecording(
+        expectedSessionID: VoiceInputSessionID,
+        captureHint: InputTargetCaptureHint?
+    ) {
+        guard case .recording(let id, _, _) = phase,
+            id == expectedSessionID
+        else { return }
+        beginFinishingSession(captureHint: captureHint)
+    }
+
     public func cancel(triggeredAtSequence sequence: UInt64) async {
         guard let activeTriggerSequence,
             activeTriggerSequence <= sequence

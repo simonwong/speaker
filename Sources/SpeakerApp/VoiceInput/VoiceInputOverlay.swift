@@ -69,5 +69,12 @@ private struct VoiceInputOverlay: View {
                 NSApp.activate(ignoringOtherApps: true)
             }
         )
+        #if DEBUG
+            .environment(
+                \.voiceInputHUDHoverOverride,
+                ProcessInfo.processInfo.arguments.contains("--speaker-visual-hover")
+                    ? true : nil
+            )
+        #endif
     }
 }

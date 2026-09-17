@@ -38,6 +38,7 @@ private final class VoiceTriggerIntakeGate: @unchecked Sendable {
 package struct VoiceInputExperienceAction: Equatable, Sendable {
     fileprivate enum Operation: Equatable, Sendable {
         case cancel
+        case finishRecording
         case copyRetainedText
         case dismissResult
         case requestRecovery
@@ -70,7 +71,8 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
     case hidden
     case recording(
         peakPower: Float?,
-        cancelAction: VoiceInputExperienceAction
+        cancelAction: VoiceInputExperienceAction,
+        finishAction: VoiceInputExperienceAction
     )
     case processing(
         title: String,
@@ -125,7 +127,11 @@ package enum VoiceInputHUDContractFixture: CaseIterable, Sendable {
         case .processing:
             .processing(title: "正在转成文字", cancelAction: cancel)
         case .recording:
-            .recording(peakPower: -18, cancelAction: cancel)
+            .recording(
+                peakPower: -18,
+                cancelAction: cancel,
+                finishAction: .init(sessionID: sessionID, operation: .finishRecording)
+            )
         case .pendingCopy:
             .pendingCopy(
                 title: "这个输入框需要手动粘贴",
@@ -203,6 +209,7 @@ package final class VoiceInputExperience: ObservableObject {
     private let escapeGate: EscapeCancellationGate
     private let triggerIntakeGate: VoiceTriggerIntakeGate
     private let announce: Announce
+    private let releaseCaptureHint: @Sendable () -> InputTargetCaptureHint?
     private var observationTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
     private var currentPresentation = VoiceInputPresentation(
@@ -222,6 +229,7 @@ package final class VoiceInputExperience: ObservableObject {
     ) {
         self.sessions = sessions
         self.announce = announce
+        self.releaseCaptureHint = releaseCaptureHint
         let dispatcher = VoiceInputTriggerDispatcher(
             sessions: sessions,
             releaseCaptureHint: releaseCaptureHint
@@ -283,7 +291,11 @@ package final class VoiceInputExperience: ObservableObject {
 
             switch scenario {
             case .recording:
-                overlay = .recording(peakPower: -18, cancelAction: cancel)
+                overlay = .recording(
+                    peakPower: -18,
+                    cancelAction: cancel,
+                    finishAction: .init(sessionID: sessionID, operation: .finishRecording)
+                )
                 menuStatus = .init(title: "正在录音", icon: "mic.fill")
                 isRecording = true
                 diagnosticCode = "visual.recording"
@@ -356,6 +368,15 @@ package final class VoiceInputExperience: ObservableObject {
     ) -> VoiceInputExperienceEffect? {
         guard !isShuttingDown, accepts(action) else { return nil }
         switch action.operation {
+        case .finishRecording:
+            let captureHint = releaseCaptureHint()
+            enqueue { [sessions] in
+                await sessions.finishRecording(
+                    expectedSessionID: action.sessionID,
+                    captureHint: captureHint
+                )
+            }
+            return nil
         case .cancel:
             enqueue { [sessions] in
                 await sessions.cancel(expectedSessionID: action.sessionID)
@@ -434,6 +455,7 @@ package final class VoiceInputExperience: ObservableObject {
         }
         return switch (action.operation, currentPresentation.activity) {
         case (.cancel, .preparing),
+            (.finishRecording, .recording),
             (.cancel, .recording),
             (.cancel, .processing),
             (.copyRetainedText, .pendingCopy),
@@ -448,6 +470,7 @@ package final class VoiceInputExperience: ObservableObject {
             (.cancel, .cancelled),
             (.cancel, .failed),
             (.copyRetainedText, _),
+            (.finishRecording, _),
             (.dismissResult, _),
             (.requestRecovery, _):
             false
@@ -616,7 +639,8 @@ package final class VoiceInputExperience: ObservableObject {
         case .recording(let id):
             .recording(
                 peakPower: peakPower,
-                cancelAction: .init(sessionID: id, operation: .cancel)
+                cancelAction: .init(sessionID: id, operation: .cancel),
+                finishAction: .init(sessionID: id, operation: .finishRecording)
             )
         case .processing(let id, _, _):
             .processing(

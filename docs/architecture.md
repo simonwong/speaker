@@ -73,7 +73,7 @@ Recording, target capture, transcription, optional refinement, delivery, cancell
 
 User Cancellation is distinct from a Session Problem. Cancellation suppresses late provider results. Once `DeliveryCommitGate` commits a mutation, cancellation may close the HUD and release the shortcut, while receipt and Session Record settlement continue with the real mutation outcome.
 
-New shortcut presses are rejected while processing or while a Pending Copy Result owns the interaction. Gesture ownership is reset synchronously and in the actor so a rejected press cannot start a delayed recording after the old session finishes.
+New shortcut presses are rejected while processing. A press during a Pending Copy Result dismisses that result and starts a new session. Gesture ownership is reset synchronously and in the actor so a rejected press cannot start a delayed recording after the old session finishes.
 
 ## Provider processing and audio
 
@@ -135,7 +135,7 @@ Both the main window and the system Settings scene replace writable controls whi
 
 The History and Overview dashboards group by calendar day from a reference date carried in their state, never from the wall clock read while rendering, so a specification can pin the today/yesterday boundary. Debug builds provide a visual-scenario entry point for the recording, processing, Pending Copy Result, and problem HUD states. It does not load the voice runtime and is absent from Release binaries. `VoiceInputPanelLayout` is the single source for panel classification and size: the HUD strips read its content size and the presenter derives the window size from the same case; AppKit specifications cover every state transition and require the window and hosting content to converge together. Those specifications, like every other suite, are sequential `@main` executables sharing the `SpeakerSpecSupport` harness rather than XCTest bundles; see [ADR-0007](adr/0007-specify-behavior-through-sequential-executables.md).
 
-The HUD exposes real state rather than fabricated progress. Recording shows a red indicator, audio level, and explicit cancel action. Preparing shows a compact wave and the same cancel action. Waiting For Result widens the same pill to show the stage title; Esc and the cancel control keep their User Cancellation meaning. Reduce Motion, Increase Contrast, VoiceOver labels, and announcements are product behavior owned by the application feature module.
+The HUD uses the same pill for recording and processing: a warm live waveform represents recording and a neutral travelling waveform represents processing. Hover reveals a left cancellation control and, while recording, a right completion control without dimming the waveform. Completion freezes the Input Target through the same capture seam as shortcut release, and the session validates the action's identity before ending recording. Preparing and Waiting For Result expose cancellation only; their stage titles remain available in the menu and accessibility presentation. A Pending Copy Result uses a single-line text capsule with a copy icon and a hover-revealed dismiss control. Reduce Motion, Increase Contrast, VoiceOver labels, and announcements are product behavior owned by the application feature module.
 
 Onboarding has a separate debug capture entry point that renders the production view and window. Content scrolls within constrained screens while the completion region remains reachable.
 
