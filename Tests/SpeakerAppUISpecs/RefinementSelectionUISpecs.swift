@@ -8,7 +8,10 @@ import SwiftUI
 enum RefinementSelectionUISpecs {
     @MainActor
     static func run(failures: inout [String]) async {
-        await runAsync("refinement cards highlight only the active mode", failures: &failures) {
+        await runAsync(
+            "refinement cards highlight the clicked choice without duplicate highlights",
+            failures: &failures
+        ) {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
                 "speaker-refinement-ui-\(UUID())")
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -22,20 +25,33 @@ enum RefinementSelectionUISpecs {
                     fileURL: directory.appendingPathComponent("settings.json")))
             await model.load()
             let hosting = NSHostingView(
-                rootView: RefinementSettingsPage(model: model).frame(width: 900, alignment: .top)
+                rootView: RefinementSettingsPage(model: model).frame(width: 720, alignment: .top)
+                    .frame(maxHeight: .infinity, alignment: .top)
                     .environment(\.colorScheme, .light).tint(.blue))
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled],
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 600), styleMask: [.titled],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = hosting
-            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
             defer {
                 window.orderOut(nil)
                 window.close()
             }
-            for choice in RefinementChoice.allCases {
-                await model.select(choice)
+            let clicks: [RefinementChoice] = [
+                .defaultSmooth, .conciseCleanup, .fullRewrite, .custom, .defaultSmooth, .custom,
+            ]
+            for choice in clicks {
+                let index = RefinementChoice.allCases.firstIndex(of: choice)!
+                let previouslyActiveMode = model.mode
+                pumpUI()
+                hosting.layoutSubtreeIfNeeded()
+                let titles = ["默认顺滑", "精简清理", "完整重写", "自定义"]
+                guard let button = cardButton(named: titles[index], in: hosting) else {
+                    throw SpecFailure(message: "missing refinement card \(choice.id)")
+                }
+                try expect(button.accessibilityPerformPress(), "card click was rejected")
+                try await Task.sleep(for: .milliseconds(80))
                 let rendered = await eventually(before: .seconds(2)) {
                     pumpUI()
                     hosting.layoutSubtreeIfNeeded()
@@ -55,6 +71,7 @@ enum RefinementSelectionUISpecs {
                 }
                 // Long blue spans are the card borders or background, excluding icons and text.
                 var maximumHighlightedCards = 0
+                var firstHighlightedColumn: Int?
                 for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
                     var spans = 0
                     var length = 0
@@ -68,7 +85,13 @@ enum RefinementSelectionUISpecs {
                         if blue {
                             length += 1
                         } else {
-                            if length > 90 { spans += 1 }
+                            if length > 90 {
+                                spans += 1
+                                if firstHighlightedColumn == nil {
+                                    firstHighlightedColumn =
+                                        (x - length / 2) * 4 / bitmap.pixelsWide
+                                }
+                            }
                             length = 0
                         }
                     }
@@ -78,9 +101,30 @@ enum RefinementSelectionUISpecs {
                 try expect(
                     maximumHighlightedCards == 1,
                     "refinement cards showed \(maximumHighlightedCards) simultaneous highlights")
+                if choice == .custom {
+                    try expect(
+                        model.mode == previouslyActiveMode,
+                        "opening an unfinished custom editor changed the active mode")
+                }
+                try expect(
+                    firstHighlightedColumn == RefinementChoice.allCases.firstIndex(of: choice),
+                    "clicking \(choice.id) highlighted column \(String(describing: firstHighlightedColumn)) instead of its own card"
+                )
             }
             await model.shutdown()
         }
+    }
+    @MainActor
+    private static func cardButton(named title: String, in view: NSView) -> (
+        any NSAccessibilityButton
+    )? {
+        if let button = view as? any NSAccessibilityButton, button.accessibilityLabel() == title {
+            return button
+        }
+        for child in view.subviews {
+            if let button = cardButton(named: title, in: child) { return button }
+        }
+        return nil
     }
     @MainActor
     private static func pumpUI() {

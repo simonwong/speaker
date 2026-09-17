@@ -41,6 +41,8 @@ package struct RefinementSettingsPage: View {
                     RefinementModeButton(
                         choice: choice,
                         selected: model.choice == choice,
+                        highlighted: model.isEditingCustomMode
+                            ? choice == .custom : model.choice == choice,
                         locked: choice != .defaultSmooth && !model.hasStoredKey
                     ) {
                         Task { await model.select(choice) }
@@ -118,6 +120,12 @@ private struct CustomRefinementModeCard: View {
             subtitle: "说清楚希望保留、删除和重组的内容",
             icon: "slider.horizontal.3"
         ) {
+            if model.choice != .custom {
+                Text("保存并启用后生效；当前使用「\(model.mode.displayName)」。")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             TextField("模式名称", text: $model.customName)
 
             HStack {
@@ -203,6 +211,7 @@ private struct RefinementPromptTextEditor: View {
 private struct RefinementModeButton: View {
     let choice: RefinementChoice
     let selected: Bool
+    let highlighted: Bool
     let locked: Bool
     let action: () -> Void
 
@@ -213,15 +222,16 @@ private struct RefinementModeButton: View {
                     Image(systemName: choice.icon)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(
-                            selected ? Color.accentColor : .secondary
+                            highlighted ? Color.accentColor : .secondary
                         )
                     Spacer()
                     Image(
                         systemName: selected
-                            ? "checkmark.circle.fill" : locked ? "lock.fill" : "circle"
+                            ? "checkmark.circle.fill"
+                            : highlighted ? "pencil.circle" : locked ? "lock.fill" : "circle"
                     )
                     .foregroundStyle(
-                        selected ? Color.accentColor : Color.secondary.opacity(0.55)
+                        highlighted ? Color.accentColor : Color.secondary.opacity(0.55)
                     )
                 }
                 Text(choice.title)
@@ -236,7 +246,7 @@ private struct RefinementModeButton: View {
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
             .background(
-                selected
+                highlighted
                     ? Color.accentColor.opacity(0.10)
                     : Color.primary.opacity(0.03),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -244,14 +254,21 @@ private struct RefinementModeButton: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(
-                        selected
+                        highlighted
                             ? Color.accentColor.opacity(0.8)
                             : Color.primary.opacity(0.08),
-                        lineWidth: selected ? 1.5 : 1
+                        lineWidth: highlighted ? 1.5 : 1
                     )
             }
         }
         .buttonStyle(.plain)
-        .accessibilityValue(selected ? "当前使用" : "未启用")
+        .accessibilityHidden(true)
+        .overlay {
+            AccessibilityButtonBridge(
+                label: choice.title,
+                hint: selected ? "当前使用" : highlighted ? "正在编辑，尚未启用" : "未启用",
+                action: action
+            )
+        }
     }
 }
