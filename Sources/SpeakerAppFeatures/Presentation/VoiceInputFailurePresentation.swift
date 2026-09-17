@@ -30,6 +30,12 @@ package struct VoiceInputFailurePresentation {
         icon: "mic.slash.fill",
         settingsDestination: .permissions
     )
+    package static let microphoneUnavailable = Self(
+        title: "无法使用所选麦克风",
+        guidance: "请重新连接所选麦克风，或在麦克风设置中选择其他设备。",
+        icon: "mic.slash.fill",
+        settingsDestination: .microphones
+    )
     package static let transcriptionFailed = Self(
         title: "没有完成语音识别",
         guidance: "语音已经停止，请稍后再试。",
@@ -141,6 +147,7 @@ extension VoiceInputFailure {
         case .recordingFailed: .recordingFailed
         case .recordingLimitReached: .recordingLimitReached
         case .microphonePermissionDenied: .microphonePermissionDenied
+        case .microphoneUnavailable: .microphoneUnavailable
         case .transcriptionFailed: .transcriptionFailed
         case .providerNotConfigured: .providerNotConfigured
         case .providerAuthenticationFailed: .providerAuthenticationFailed

@@ -6,6 +6,79 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
+            "microphone settings default to the system and persist only a fixed UID in owner-only storage",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-microphone-settings-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            let defaults = await store.load()
+            try expect(defaults.settings.microphone == .systemDefault)
+
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            let legacy = Data(
+                #"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"defaultSmooth"},"launchAtLogin":true}}"#
+                    .utf8
+            )
+            try legacy.write(to: fileURL)
+            let legacyLoaded = await store.load()
+            try expect(legacyLoaded.settings.microphone == .systemDefault)
+            try expect(legacyLoaded.settings.launchAtLogin)
+            try await store.updateMicrophone(.device(uid: "synthetic-stable-device"))
+            async let shortcut = store.updateShortcut(
+                .custom(keyCode: 49, modifiers: 2_048, displayName: "⌥ Space")
+            )
+            async let refinement = store.updateRefinement(.fullRewrite)
+            _ = try await (shortcut, refinement)
+            let restored = await VersionedLocalAppSettingsStore(fileURL: fileURL).load().settings
+            try expect(restored.microphone == .device(uid: "synthetic-stable-device"))
+            try expect(restored.refinement == .fullRewrite)
+            try expect(restored.launchAtLogin)
+            let permissions = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            try expect((permissions[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+            let data = try Data(contentsOf: fileURL)
+            let document = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            try expect(document?["schemaVersion"] as? Int == 1)
+            let text = String(decoding: data, as: UTF8.self)
+            try expect(!text.contains("deviceID") && !text.contains("systemDefaultDeviceID"))
+
+            try await store.updateMicrophone(.systemDefault)
+            let reset = await VersionedLocalAppSettingsStore(fileURL: fileURL).load().settings
+            try expect(reset.microphone == .systemDefault)
+            try expect(
+                reset.shortcut == restored.shortcut && reset.refinement == restored.refinement)
+        }
+
+        await runAsync(
+            "microphone settings refuse an unsafe existing file without overwriting its contents",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-microphone-settings-protection-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            try await VersionedLocalAppSettingsStore(fileURL: fileURL).save(
+                SpeakerAppSettings(microphone: .device(uid: "synthetic-original-device"))
+            )
+            let original = try Data(contentsOf: fileURL)
+            let store = VersionedLocalAppSettingsStore(
+                fileURL: fileURL,
+                fileProtection: LocalFileProtection { _ in throw FileProtectionFailure() }
+            )
+            do {
+                try await store.updateMicrophone(.systemDefault)
+                throw SpecFailure(message: "unsafe settings accepted a microphone update")
+            } catch AppSettingsStoreError.sourceUnreadable(.protectionFailed) {
+                let preserved = try Data(contentsOf: fileURL)
+                try expect(preserved == original)
+            }
+        }
+
+        await runAsync(
             "versioned app settings round trip shortcut refinement and login launch",
             failures: &failures
         ) {

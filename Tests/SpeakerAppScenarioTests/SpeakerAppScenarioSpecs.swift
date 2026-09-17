@@ -2430,6 +2430,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 SettingsGroup.allCases == [
                     .shortcut,
+                    .microphones,
                     .permissions,
                     .apiKeys,
                     .refinement,
@@ -2440,6 +2441,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 SettingsGroup.allCases.map(\.title) == [
                     SettingsGroup.shortcutTitle,
+                    SettingsGroup.microphonesTitle,
                     SettingsGroup.permissionsTitle,
                     SettingsGroup.apiKeysTitle,
                     SettingsGroup.refinementTitle,
@@ -2616,6 +2618,7 @@ struct SpeakerAppScenarioSpecs {
                 ) == [
                     .openSpeaker,
                     .refinementMode,
+                    .microphone,
                     .divider,
                     .settings,
                     .divider,
@@ -2629,6 +2632,7 @@ struct SpeakerAppScenarioSpecs {
                 ) == [
                     .openSpeaker,
                     .refinementMode,
+                    .microphone,
                     .divider,
                     .voiceStatus,
                     .cancelVoiceInput,
@@ -2645,6 +2649,7 @@ struct SpeakerAppScenarioSpecs {
                 ) == [
                     .openSpeaker,
                     .refinementMode,
+                    .microphone,
                     .divider,
                     .voiceStatus,
                     .copyRetainedText,
@@ -2662,6 +2667,7 @@ struct SpeakerAppScenarioSpecs {
                 ) == [
                     .openSpeaker,
                     .refinementMode,
+                    .microphone,
                     .divider,
                     .voiceStatus,
                     .recoverVoiceInput,
@@ -3572,6 +3578,7 @@ struct SpeakerAppScenarioSpecs {
         ) {
             let cases: [(VoiceInputFailure, SettingsGroup)] = [
                 (.microphonePermissionDenied, .permissions),
+                (.microphoneUnavailable, .microphones),
                 (.providerNotConfigured, .apiKeys),
                 (.providerAuthenticationFailed, .apiKeys),
                 (.providerCredentialUnavailable, .apiKeys),
@@ -3652,6 +3659,7 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await ShortcutRecorderSpecs.run(failures: &failures)
+        await MicrophoneSelectionSpecs.run(failures: &failures)
         await RuntimeLifecycleSpecs.run(failures: &failures)
         await DashboardGroupingSpecs.run(failures: &failures)
 

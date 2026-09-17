@@ -112,16 +112,17 @@ struct SpeakerAppUISpecs {
                 try expect(storedKey == "replacement-test-key")
                 await model.shutdown()
             }
+            await MicrophoneSelectionUISpecs.run(failures: &failures)
             onboardingFinished = true
         }
-        let onboardingDeadline = Date().addingTimeInterval(10)
+        let onboardingDeadline = Date().addingTimeInterval(20)
         while !onboardingFinished, Date() < onboardingDeadline {
             RunLoop.current.run(until: min(onboardingDeadline, Date().addingTimeInterval(0.01)))
         }
         guard onboardingFinished else {
             onboardingTask.cancel()
             SpecSummary.finish(
-                failures: ["the asynchronous onboarding UI spec did not finish within 10 seconds"],
+                failures: ["the asynchronous UI specs did not finish within 20 seconds"],
                 label: "AppKit UI specs"
             )
             return
@@ -2067,6 +2068,150 @@ private func verticalDistanceFromTop(_ scrollView: NSScrollView) -> CGFloat {
         return visibleRect.minY - documentView.bounds.minY
     }
     return documentView.bounds.maxY - visibleRect.maxY
+}
+
+enum MicrophoneSelectionUISpecs {
+    @MainActor
+    static func run(failures: inout [String]) async {
+        await runAsync(
+            "microphone controls share selection and keep a disconnected choice visible",
+            failures: &failures
+        ) {
+            let builtIn = MicrophoneDevice(uid: "ui-built-in", name: "内置麦克风", deviceID: 1)
+            let usb = MicrophoneDevice(
+                uid: "ui-private-usb", name: "USB 麦克风 — 桌面外置输入设备", deviceID: 2
+            )
+            let source = MicrophoneDeviceSourceFake(
+                snapshot: .init(
+                    devices: [builtIn, usb], systemDefaultDeviceID: 1, isAvailable: true)
+            )
+            let routing = MicrophoneRouting(devices: source)
+            let model = MicrophoneSelectionFeature(
+                microphones: routing,
+                levelTester: MicrophoneLevelTesterFake(routing: routing),
+                persistPreference: { _ in }
+            )
+            model.start()
+            model.restore(.systemDefault)
+            let hosting = NSHostingView(
+                rootView: VStack(spacing: 20) {
+                    MicrophoneSelectionMenu(model: model)
+                    MicrophoneSettingsPage(model: model)
+                }
+                .padding(20)
+                .frame(width: 680)
+                .background(Color(nsColor: .windowBackgroundColor))
+            )
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 680, height: 440),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = hosting
+            window.orderFrontRegardless()
+            defer {
+                model.beginShutdown()
+                window.orderOut(nil)
+                window.close()
+            }
+            let ready = await eventually(before: .seconds(2)) {
+                hosting.layoutSubtreeIfNeeded()
+                return popupButtons(in: hosting).count == 2
+            }
+            try expect(ready, "the shared microphone picker and settings picker were not rendered")
+            let pickers = popupButtons(in: hosting)
+            try expect(pickers.allSatisfy { $0.isEnabled && !$0.visibleRect.isEmpty })
+            guard let menuControl = pickers.first(where: { $0.pullsDown }),
+                let settingsControl = pickers.first(where: { !$0.pullsDown })
+            else {
+                throw SpecFailure(
+                    message: "menu and settings did not expose separate native controls")
+            }
+            let closeMenu = Timer(timeInterval: 0.1, repeats: false) { _ in
+                MainActor.assumeIsolated { menuControl.menu?.cancelTracking() }
+            }
+            RunLoop.main.add(closeMenu, forMode: .eventTracking)
+            RunLoop.main.add(closeMenu, forMode: .default)
+            menuControl.performClick(nil)
+            closeMenu.invalidate()
+            guard let menu = menuControl.menu else {
+                throw SpecFailure(message: "the microphone menu did not populate")
+            }
+            try expect(menuControl.title == "麦克风：跟随系统（内置麦克风）")
+            try expect(menuControl.accessibilityLabel() == menuControl.title)
+            try expect(settingsControl.titleOfSelectedItem == "跟随系统（内置麦克风）")
+            guard let itemIndex = menu.items.firstIndex(where: { $0.title == usb.name }) else {
+                throw SpecFailure(message: "the microphone menu omitted the USB device")
+            }
+            try captureMicrophoneFixture(hosting, name: "microphone-connected")
+            menu.performActionForItem(at: itemIndex)
+            let synchronized = await eventually(before: .seconds(2)) {
+                hosting.layoutSubtreeIfNeeded()
+                return model.state.preference == .device(uid: usb.uid)
+                    && settingsControl.titleOfSelectedItem == usb.name
+                    && menuControl.title == "麦克风：\(usb.name)"
+            }
+            try expect(synchronized, "one microphone control did not update the other")
+            guard let settingsMenu = settingsControl.menu,
+                let builtInIndex = settingsMenu.items.firstIndex(where: { $0.title == builtIn.name }
+                )
+            else {
+                throw SpecFailure(
+                    message: "the settings microphone picker omitted the built-in device")
+            }
+            settingsMenu.performActionForItem(at: builtInIndex)
+            let reverseSynchronized = await eventually(before: .seconds(2)) {
+                hosting.layoutSubtreeIfNeeded()
+                return model.state.preference == .device(uid: builtIn.uid)
+                    && menuControl.title == "麦克风：\(builtIn.name)"
+            }
+            try expect(reverseSynchronized, "a settings microphone change did not update the menu")
+            menu.performActionForItem(at: itemIndex)
+            let usbSelected = await eventually(before: .seconds(2)) {
+                hosting.layoutSubtreeIfNeeded()
+                return settingsControl.titleOfSelectedItem == usb.name
+            }
+            try expect(usbSelected)
+            source.update(.init(devices: [builtIn], systemDefaultDeviceID: 1, isAvailable: true))
+            let disconnected = await eventually(before: .seconds(2)) {
+                hosting.layoutSubtreeIfNeeded()
+                return settingsControl.titleOfSelectedItem == "所选麦克风（已断开）"
+                    && menuControl.title == "麦克风：所选麦克风（已断开）"
+            }
+            try expect(disconnected, "a disconnected selected microphone disappeared from a picker")
+            try captureMicrophoneFixture(hosting, name: "microphone-disconnected")
+            try expect(
+                !popupButtons(in: hosting).flatMap(\.itemTitles).contains { $0.contains(usb.uid) })
+            guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
+                throw SpecFailure(message: "the microphone settings could not render")
+            }
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            try expect(bitmap.pixelsWide >= 680 && bitmap.pixelsHigh > 0)
+            await model.flushPersistence()
+        }
+    }
+
+    @MainActor
+    private static func captureMicrophoneFixture(_ view: NSView, name: String) throws {
+        guard let directory = ProcessInfo.processInfo.environment["SPEAKER_MICROPHONE_UI_ARTIFACTS"]
+        else { return }
+        view.layoutSubtreeIfNeeded()
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SpecFailure(message: "the microphone fixture could not create an image")
+        }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw SpecFailure(message: "the microphone fixture could not encode an image")
+        }
+        let url = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try png.write(to: url.appendingPathComponent(name + ".png"), options: .atomic)
+    }
+
+    @MainActor
+    private static func popupButtons(in root: NSView) -> [NSPopUpButton] {
+        (root as? NSPopUpButton).map { [$0] } ?? root.subviews.flatMap(popupButtons)
+    }
 }
 
 #if DEBUG

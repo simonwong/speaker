@@ -5,6 +5,7 @@ public enum VoiceInputFailure: String, Equatable, Sendable {
     case recordingFailed
     case recordingLimitReached
     case microphonePermissionDenied
+    case microphoneUnavailable
     case transcriptionFailed
     case providerNotConfigured
     case providerAuthenticationFailed
@@ -164,6 +165,20 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
                 provider: "local",
                 operation: .transcription,
                 code: "audio.microphone_permission_denied"
+            )
+        case .microphoneUnavailable:
+            failure = .microphoneUnavailable
+            diagnostic = VoiceProviderDiagnostic(
+                provider: "local",
+                operation: .transcription,
+                code: "audio.microphone_unavailable"
+            )
+        case .microphoneSelectionFailed:
+            failure = .microphoneUnavailable
+            diagnostic = VoiceProviderDiagnostic(
+                provider: "local",
+                operation: .transcription,
+                code: "audio.microphone_selection_failed"
             )
         case .alreadyRecording, .couldNotPrepare, .couldNotStart,
             .noActiveRecording:

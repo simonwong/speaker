@@ -156,6 +156,8 @@ private struct SettingsOverviewView: View {
                     navigation.open(.permissions)
                 }
             )
+        case .microphones:
+            MicrophoneSettingsPage(model: workspace.microphones)
         case .permissions:
             PermissionSettingsPage(
                 permissions: workspace.permissions,

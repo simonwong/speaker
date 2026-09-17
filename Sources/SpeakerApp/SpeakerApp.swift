@@ -23,6 +23,7 @@ struct SpeakerApp: App {
             MenuBarContent(
                 voiceInput: runtime.voiceInput,
                 refinement: runtime.refinementSettings,
+                microphones: runtime.microphones,
                 dataErasure: runtime.dataErasure,
                 settingsNavigation: runtime.settingsNavigation,
                 mainWindow: runtime.mainWindow,

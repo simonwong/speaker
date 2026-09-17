@@ -4,6 +4,7 @@ import Combine
 /// sections in display order and double as scroll anchors for deep links.
 package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendable {
     case shortcut
+    case microphones
     case permissions
     case apiKeys
     case refinement
@@ -13,6 +14,7 @@ package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendab
     package var id: String { rawValue }
 
     package static let shortcutTitle = "快捷键"
+    package static let microphonesTitle = "麦克风"
     package static let permissionsTitle = "权限"
     package static let apiKeysTitle = "API Key"
     package static let refinementTitle = "整理"
@@ -22,6 +24,7 @@ package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendab
     package var title: String {
         switch self {
         case .shortcut: Self.shortcutTitle
+        case .microphones: Self.microphonesTitle
         case .permissions: Self.permissionsTitle
         case .apiKeys: Self.apiKeysTitle
         case .refinement: Self.refinementTitle

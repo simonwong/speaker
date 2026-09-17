@@ -7,6 +7,7 @@ import SwiftUI
 package struct MenuBarContent: View {
     @ObservedObject var voiceInput: VoiceInputExperience
     @ObservedObject var refinement: RefinementSettingsModel
+    @ObservedObject var microphones: MicrophoneSelectionFeature
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var settingsNavigation: SettingsNavigationModel
     @ObservedObject var mainWindow: MainWindowModel
@@ -17,6 +18,7 @@ package struct MenuBarContent: View {
     package init(
         voiceInput: VoiceInputExperience,
         refinement: RefinementSettingsModel,
+        microphones: MicrophoneSelectionFeature,
         dataErasure: SpeakerDataErasureCoordinator,
         settingsNavigation: SettingsNavigationModel,
         mainWindow: MainWindowModel,
@@ -25,6 +27,7 @@ package struct MenuBarContent: View {
     ) {
         self.voiceInput = voiceInput
         self.refinement = refinement
+        self.microphones = microphones
         self.dataErasure = dataErasure
         self.settingsNavigation = settingsNavigation
         self.mainWindow = mainWindow
@@ -97,6 +100,8 @@ package struct MenuBarContent: View {
             } label: {
                 Label(refinement.mode.displayName, systemImage: "text.alignleft")
             }
+        case .microphone:
+            MicrophoneSelectionMenu(model: microphones)
         case .voiceStatus:
             if let status = voiceInput.state.menu.status {
                 Label(

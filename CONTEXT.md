@@ -10,6 +10,12 @@ One attempt from shortcut activation through recording, transcription, optional 
 
 _Avoid_: request, job, recording session
 
+**Microphone Preference**
+
+The user's choice to follow the system input or use one particular microphone. It selects the microphone for the next Voice Input Session; changing it does not retarget a session already recording.
+
+_Avoid_: system default override, active microphone
+
 **Refinement Mode**
 
 The text-processing strategy selected for a Voice Input Session. Each mode has a stable name and states how it may transform a transcript while preserving meaning.

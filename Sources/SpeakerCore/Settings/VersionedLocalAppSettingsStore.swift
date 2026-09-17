@@ -218,6 +218,7 @@ public struct RefinementPromptOverrides: Equatable, Sendable, Codable {
 
 public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var shortcut: VoiceShortcutPreference
+    public var microphone: MicrophonePreference
     public var refinement: RefinementPreference
     public var savedCustomRefinement: RefinementPreference?
     public var refinementPromptOverrides: RefinementPromptOverrides
@@ -228,6 +229,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
 
     public init(
         shortcut: VoiceShortcutPreference = .functionKey,
+        microphone: MicrophonePreference = .systemDefault,
         refinement: RefinementPreference = .defaultSmooth,
         savedCustomRefinement: RefinementPreference? = nil,
         refinementPromptOverrides: RefinementPromptOverrides = RefinementPromptOverrides(),
@@ -237,6 +239,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         historyRetentionWhenEnabled: HistoryRetentionPolicy? = nil
     ) {
         self.shortcut = shortcut
+        self.microphone = microphone
         self.refinement = refinement
         self.savedCustomRefinement = savedCustomRefinement
         self.refinementPromptOverrides = refinementPromptOverrides
@@ -252,6 +255,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case shortcut
+        case microphone
         case refinement
         case savedCustomRefinement
         case refinementPromptOverrides
@@ -267,6 +271,11 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
             VoiceShortcutPreference.self,
             forKey: .shortcut
         )
+        microphone =
+            try container.decodeIfPresent(
+                MicrophonePreference.self,
+                forKey: .microphone
+            ) ?? .systemDefault
         refinement = try container.decode(
             RefinementPreference.self,
             forKey: .refinement
@@ -475,6 +484,16 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     ) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
         settings.shortcut = shortcut
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateMicrophone(
+        _ microphone: MicrophonePreference
+    ) throws -> SpeakerAppSettings {
+        var settings = try settingsForUpdate()
+        settings.microphone = microphone
         try save(settings)
         return settings
     }
