@@ -15,13 +15,13 @@ struct DictionarySettingsPage: View {
                     "输入词条，回车添加",
                     text: $model.draftWord
                 )
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(SettingsTextFieldStyle())
                 .onSubmit { Task { await model.add() } }
 
                 Button("添加") {
                     Task { await model.add() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(
                     model.draftWord
                         .trimmingCharacters(in: .whitespacesAndNewlines)

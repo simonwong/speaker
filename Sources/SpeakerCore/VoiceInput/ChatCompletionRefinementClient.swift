@@ -25,13 +25,15 @@ public struct ChatCompletionRefinementConfiguration: Equatable, Sendable {
     }
 
     public init(
-        apiKey: String, profile: RefinementProviderProfile, maximumOutputTokens: Int = 2_048
+        apiKey: String, profile: RefinementProviderProfile, maximumOutputTokens: Int? = nil
     ) throws {
         let profile = try profile.validated()
         self.apiKey = apiKey
         self.endpoint = try profile.completionEndpoint()
         self.model = profile.modelID
-        self.maximumOutputTokens = maximumOutputTokens
+        self.maximumOutputTokens =
+            maximumOutputTokens
+            ?? (profile.provider == .glm && profile.modelID == "glm-5.3-flash" ? 8_192 : 2_048)
         self.provider = profile.provider
     }
 }
@@ -192,6 +194,7 @@ package struct ChatCompletionRequest: Encodable, Equatable, Sendable {
     package let temperature: Double?
     package let maximumTokens: Int?
     package let maximumCompletionTokens: Int?
+    package let reasoningEffort: String?
     package let stream: Bool
 
     package init(
@@ -202,6 +205,7 @@ package struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         temperature: Double?,
         maximumTokens: Int?,
         maximumCompletionTokens: Int? = nil,
+        reasoningEffort: String? = nil,
         stream: Bool
     ) {
         self.model = model
@@ -211,6 +215,7 @@ package struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         self.temperature = temperature
         self.maximumTokens = maximumTokens
         self.maximumCompletionTokens = maximumCompletionTokens
+        self.reasoningEffort = reasoningEffort
         self.stream = stream
     }
 
@@ -219,6 +224,7 @@ package struct ChatCompletionRequest: Encodable, Equatable, Sendable {
         case responseFormat = "response_format"
         case maximumTokens = "max_tokens"
         case maximumCompletionTokens = "max_completion_tokens"
+        case reasoningEffort = "reasoning_effort"
     }
 }
 
@@ -418,6 +424,19 @@ public actor ChatCompletionRefinementClient: TextRefining {
         dictionaryWords: [String],
         apiKey: String
     ) throws -> URLRequest {
+        let usesGLMThinking =
+            configuration.provider == .glm && configuration.model == "glm-5.3-flash"
+        let reasoningEffort: String?
+        if usesGLMThinking {
+            reasoningEffort = "low"
+        } else if configuration.provider == .openAI
+            && ["gpt-5.6", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"].contains(
+                configuration.model)
+        {
+            reasoningEffort = "none"
+        } else {
+            reasoningEffort = nil
+        }
         let body = ChatCompletionRequest(
             model: configuration.model,
             messages: [
@@ -431,13 +450,14 @@ public actor ChatCompletionRefinementClient: TextRefining {
                     )),
             ],
             thinking: [.deepSeek, .kimi, .glm].contains(configuration.provider)
-                ? .init(type: "disabled") : nil,
+                ? .init(type: usesGLMThinking ? "enabled" : "disabled") : nil,
             responseFormat: .init(type: "json_object"),
             temperature: configuration.provider == .deepSeek ? 0 : nil,
             maximumTokens: configuration.provider == .openAI
                 ? nil : configuration.maximumOutputTokens,
             maximumCompletionTokens: configuration.provider == .openAI
                 ? configuration.maximumOutputTokens : nil,
+            reasoningEffort: reasoningEffort,
             stream: false
         )
         var request = URLRequest(url: configuration.endpoint)

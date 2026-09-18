@@ -133,7 +133,7 @@ private struct AboutSettingsPage: View {
                         .frame(width: 14, height: 14)
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(SettingsButtonStyle())
             .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityLabel("在 GitHub 查看 Speaker")
             .help("在 GitHub 查看 Speaker")

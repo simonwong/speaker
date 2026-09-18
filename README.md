@@ -103,7 +103,9 @@ Use the repository wrappers so local builds match CI:
 
 | Command | Purpose |
 | --- | --- |
-| `./scripts/test` | Run the deterministic specification executables and script checks |
+| `./scripts/test` | Run non-UI specifications and script checks without test windows |
+| `./scripts/test --ui-only` | Run native UI checks; test windows may appear |
+| `./scripts/test --with-ui` | Run the full deterministic gate used by CI |
 | `./scripts/build` | Build the debug `SpeakerApp` product |
 | `./scripts/provider-smoke doubao\|deepseek` | Check a configured provider connection using locally saved credentials |
 

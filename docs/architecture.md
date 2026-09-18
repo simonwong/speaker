@@ -55,6 +55,8 @@ The implementation owns the trigger dispatcher, hold/short-press gesture, synchr
 
 ### Application feature modules
 
+Settings and onboarding share adaptive control presentation in `SettingsControlStyles`. macOS 26 uses native glass button styles and glass surfaces for settings cards, text fields, secure fields, prompt editors, and mode choices. Native menus and switches retain system behavior. Older systems use bordered buttons and system material; Reduce Transparency selects opaque surfaces. Input focus and Increase Contrast remain visible, and styling preserves native editing and accessibility actions.
+
 `SettingsNavigationModel` is the single page-selection source for the settings sections. It separates ordinary top-of-page presentation from one-shot requests to reveal a specific section. About is a separate top-level main-window tab. `MenuBarCommandRouter` selects the intended destination before activating Speaker; the ordinary Settings command returns to the page top.
 
 `MicrophoneSelectionFeature` exposes one selection state and semantic actions to the menu and Settings. It hides ordered persistence, late-restore fencing, local test presentation, and shutdown. `MicrophoneRouting` shares the device directory, preference, and actual capture lease with `AVAudioCapture`; the UI never invents the device currently recording. Settings restore the preference before shortcut activation, and shutdown stops observation and testing before completing the last preference write.
@@ -95,6 +97,8 @@ Default Smoothing enables Doubao semantic smoothing and uses its confirmed Stage
 
 `RefinementProviderSettings` remembers each provider's profile. `VoiceInputConfigurationController` publishes the selected profile and active mode atomically, and its press-time snapshot reaches `TextRefinementContext`. `CredentialedTextRefiner` resolves only that profile's credential namespace; Custom credentials are bound to the normalized HTTPS base URL. `ChatCompletionRefinementClient` owns provider-specific request fields, bounded transport, redirect refusal, and strict response acceptance. Catalog entries are recommendations, while manually entered model IDs use the selected provider's compatibility profile. There is no automatic cross-provider fallback. The decision is recorded in [ADR-0009](adr/0009-select-text-refinement-providers.md).
 
+`RefinementProviderCatalog` is the app-maintained source for built-in model choices and defaults. Defaults favor low-cost text refinement and reviewed request profiles. GLM `glm-5.3-flash` requires thinking, so its profile enables thinking with `reasoning_effort: low` and an 8,192-token completion budget shared by reasoning and the final answer; only final JSON content is accepted. Settings adds the saved model to the picker even when it is no longer recommended, retains manual IDs and provider-scoped credentials, and does not fetch a remote model directory. OpenAI GPT-5.6 choices explicitly send `reasoning_effort: none`; legacy and manually configured models keep their existing request profile.
+
 `VoiceProviderRuntimeDiagnostics` holds a content-free, in-memory snapshot for the active Doubao request. Its phase advances only when Speaker crosses a transport event: connected, request header sent, audio streaming, final audio sent, and waiting for the final result. Intermediate receive frames may add safe request metadata but cannot advance a sender that is still streaming. Success, explicit failure, and cancellation remove the snapshot.
 
 Provider state records stable HTTP, close-code, DNS, connectivity, connection-loss, and TLS classifications. Raw network messages, audio, text, provider messages, and credentials never enter the snapshot. An open connection with no final result remains Waiting For Result; local elapsed time does not invent a provider failure.
@@ -109,7 +113,7 @@ There is one application-independent mutation path. While the frozen element or 
 
 AX `.cannotComplete` retains the precise operation stage: security read, role read, value read, selection read, focus read, or receipt. This maps to a target-application-unresponsive fact rather than a guessed timeout, focus change, or unsupported-control diagnosis.
 
-Delivery degradation carries a content-free `DeliveryDiagnostic` through the Session Record, search, history details, and copied diagnostics. Accessibility permission absence is a separate platform state, not an unsupported-target result.
+Delivery degradation carries a content-free `DeliveryDiagnostic` through internal session evidence and copied support diagnostics. History does not display or search delivery assessments. It shows retained text and explicit recording, transcription, or refinement errors, including textless errors; accidental short recordings and empty provider results stay quiet. Accessibility permission absence is a separate platform state, not an unsupported-target result.
 
 The full decision is recorded in [ADR-0002](adr/0002-freeze-the-input-target.md). Real target-family evidence is governed by the [compatibility matrix](compatibility.md).
 

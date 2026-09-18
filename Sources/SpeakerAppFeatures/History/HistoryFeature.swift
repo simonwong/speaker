@@ -7,7 +7,6 @@ package enum HistoryOperation: Equatable {
     case copying(VoiceInputSessionID)
     case deleting(VoiceInputSessionID)
     case clearing
-    case addingDictionaryEntry
 }
 
 /// The History tab's state: the visible Session Records, the moment they were
@@ -26,7 +25,6 @@ package final class HistoryModel: ObservableObject {
 
     private let store: any LocalSessionHistoryStoring
     private let clipboard: any ClipboardWriting
-    private let dictionary: DictionarySettingsModel
     private let announce: (String) -> Void
     private let now: () -> Date
     private var feedbackTask: Task<Void, Never>?
@@ -34,13 +32,11 @@ package final class HistoryModel: ObservableObject {
     package init(
         store: any LocalSessionHistoryStoring,
         clipboard: any ClipboardWriting,
-        dictionary: DictionarySettingsModel,
         announce: @escaping (String) -> Void,
         now: @escaping () -> Date = { Date() }
     ) {
         self.store = store
         self.clipboard = clipboard
-        self.dictionary = dictionary
         self.announce = announce
         self.now = now
         referenceDate = now()
@@ -126,19 +122,6 @@ package final class HistoryModel: ObservableObject {
         return true
     }
 
-    @discardableResult
-    package func addDictionaryEntry(_ word: String) async -> Bool {
-        guard activeOperation == nil else { return false }
-        activeOperation = .addingDictionaryEntry
-        defer { activeOperation = nil }
-        let feedback = await HistoryDictionaryEntryAddition.perform(
-            word: word,
-            using: dictionary
-        )
-        publishFeedback(feedback)
-        return feedback.kind == .success
-    }
-
     private func publishFeedback(
         _ kind: HistoryDashboardFeedback.Kind,
         _ message: String
@@ -186,9 +169,6 @@ package struct HistoryView: View {
                 },
                 delete: { id in
                     Task { _ = await model.delete(id) }
-                },
-                addDictionaryEntry: { word in
-                    Task { _ = await model.addDictionaryEntry(word) }
                 }
             )
         )

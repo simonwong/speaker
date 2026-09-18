@@ -103,7 +103,7 @@ private struct RefinementPromptEditorCard: View {
                 Button("保存") {
                     Task { await model.savePromptOverride() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!promptEditor.canSave(draft: model.promptDraft))
             }
         }
@@ -164,7 +164,7 @@ private struct CustomRefinementModeCard: View {
                 Button("保存并启用") {
                     Task { await model.saveCustomMode() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!model.canSaveCustomMode)
             }
         }
@@ -178,16 +178,12 @@ private struct RefinementPromptTextEditor: View {
     let placeholder: String
     let minHeight: CGFloat
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-            style: .continuous
-        )
-    }
+    @FocusState private var focused: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $text)
+                .focused($focused)
                 .font(SpeakerTypography.body)
                 .scrollContentBackground(.hidden)
                 .padding(8)
@@ -202,10 +198,7 @@ private struct RefinementPromptTextEditor: View {
             }
         }
         .frame(minHeight: minHeight)
-        .background(Color.primary.opacity(0.04), in: shape)
-        .overlay {
-            shape.stroke(Color.primary.opacity(0.10), lineWidth: 1)
-        }
+        .settingsGlassSurface(focused: focused)
     }
 }
 
@@ -246,11 +239,10 @@ private struct RefinementModeButton: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
-            .background(
-                highlighted
-                    ? Color.accentColor.opacity(0.10)
-                    : Color.primary.opacity(0.03),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .settingsGlassSurface(
+                cornerRadius: 10,
+                tint: highlighted ? Color.accentColor.opacity(0.16) : nil,
+                interactive: true
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)

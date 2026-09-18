@@ -70,7 +70,7 @@ jobs:
       - name: Run deterministic specifications
         env:
           SPEAKER_SPEC_TRACE: "1"
-        run: ./scripts/test
+        run: ./scripts/test --with-ui
 
       - name: Verify resolved dependencies are pristine
         shell: zsh {0}

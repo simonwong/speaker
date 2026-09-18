@@ -2058,84 +2058,6 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
-            "history adds an edited candidate through the shared Personal Dictionary model",
-            failures: &failures
-        ) {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent(
-                    "speaker-history-dictionary-\(UUID().uuidString)",
-                    isDirectory: true
-                )
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let store = VersionedJSONPersonalDictionaryStore(
-                fileURL: directory.appendingPathComponent("dictionary.json")
-            )
-            let configuration = VoiceInputConfigurationController()
-            let dictionary = DictionarySettingsModel(
-                store: store,
-                configuration: configuration
-            )
-            await dictionary.load()
-            let sessionID = VoiceInputSessionID()
-            let record = VoiceInputHistoryRecord(
-                sessionID: sessionID,
-                startedAt: Date(timeIntervalSince1970: 1),
-                applicationName: nil,
-                transcription: "Use SpeakerBeta today",
-                finalText: "Use SpeakerBeta today",
-                outcome: .pendingCopy(
-                    sessionID,
-                    text: "Use SpeakerBeta today",
-                    reason: .missingTarget
-                )
-            )
-            let retainedRecord = record
-            let composer = HistoryDictionaryEntryComposerState(
-                transcription: record.transcription
-            )
-            try expect(composer?.candidates.contains("SpeakerBeta") == true)
-
-            let added = await HistoryDictionaryEntryAddition.perform(
-                word: "  SpeakerBetaFixed  ",
-                using: dictionary
-            )
-
-            try expect(added.kind == .success)
-            try expect(record == retainedRecord)
-            let persisted = try await store.load().dictionary
-            try expect(persisted.entries.map(\.word) == ["SpeakerBetaFixed"])
-            let configured = await configuration.currentDictionary()
-            try expect(configured.entries.map(\.word) == ["SpeakerBetaFixed"])
-
-            let duplicate = await HistoryDictionaryEntryAddition.perform(
-                word: "speakerbetafixed",
-                using: dictionary
-            )
-            try expect(duplicate.kind == .warning)
-            try expect(duplicate.message.contains("已存在"))
-            let afterDuplicate = try await store.load().dictionary
-            try expect(afterDuplicate.entries.count == 1)
-
-            let noTextSessionID = VoiceInputSessionID()
-            let noTextRecord = VoiceInputHistoryRecord(
-                sessionID: noTextSessionID,
-                startedAt: Date(timeIntervalSince1970: 2),
-                applicationName: nil,
-                transcription: nil,
-                finalText: nil,
-                outcome: .cancelled(noTextSessionID)
-            )
-            try expect(
-                HistoryDictionaryEntryComposerState(
-                    transcription: noTextRecord.transcription
-                ) == nil
-            )
-            try expect(
-                HistoryDictionaryEntryComposerState(transcription: "  \n") == nil
-            )
-        }
-
-        await runAsync(
             "built-in prompts stay inspectable and editable without a DeepSeek key",
             failures: &failures
         ) {
@@ -2348,6 +2270,104 @@ struct SpeakerAppScenarioSpecs {
                 reloaded.selectedProvider == .openAI
                     && reloaded.selectedProfile.modelID == "gpt-4.1")
             try expect(reloaded.mode == .defaultSmooth)
+        }
+
+        await runAsync(
+            "bundled model updates retain saved provider models and credentials",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "speaker-bundled-models-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            let credentials = LocalFileProviderCredentialStore(
+                fileURL: directory.appendingPathComponent("keys.json"))
+            let saved = RefinementProviderProfile(
+                provider: .openAI, modelID: "gpt-4.1-mini",
+                baseURL: RefinementProviderCatalog.baseURL(for: .openAI))
+            try await store.updateRefinementProviders(
+                .init(selectedProvider: .openAI, profiles: ["openai": saved]))
+            try await credentials.save(apiKey: "synthetic-openai", for: .openAI)
+            let model = RefinementSettingsModel(
+                service: CredentialedTextRefiner(credentials: credentials),
+                configuration: VoiceInputConfigurationController(), settingsStore: store)
+            await model.load()
+            try expect(model.selectedProfile == saved)
+            try expect(model.modelIDs.first == "gpt-5.6-luna")
+            try expect(model.modelIDs.contains("gpt-4.1-mini"))
+            try expect(model.hasStoredKey)
+            await model.selectModel("gpt-5.6-luna")
+            try expect(model.selectedProfile.modelID == "gpt-5.6-luna")
+            try expect(model.hasStoredKey)
+            let key = try await credentials.apiKey(for: .openAI)
+            try expect(key == "synthetic-openai")
+            await model.shutdown()
+        }
+
+        await runAsync(
+            "refinement provider keys survive model changes replacement and disk reload",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "speaker-provider-roundtrip-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settingsURL = directory.appendingPathComponent("settings.json")
+            let credentialsURL = directory.appendingPathComponent("credentials.json")
+            let credentials = LocalFileProviderCredentialStore(fileURL: credentialsURL)
+            let model = RefinementSettingsModel(
+                service: CredentialedTextRefiner(credentials: credentials),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(fileURL: settingsURL))
+            let providers: [(RefinementProviderID, ProviderID)] = [
+                (.deepSeek, .deepSeek), (.openAI, .openAI), (.kimi, .kimi), (.glm, .glm),
+            ]
+            await model.load()
+            for (provider, account) in providers {
+                await model.selectProvider(provider)
+                model.apiKeyDraft = "synthetic-\(account.rawValue)"
+                await model.saveAPIKey()
+                model.isEditingModelID = true
+                model.modelIDDraft = "manual-\(provider.rawValue)"
+                await model.saveProviderConfiguration()
+                try expect(model.hasStoredKey && model.isEditingModelID)
+                let savedKey = try await credentials.apiKey(for: account)
+                try expect(savedKey == "synthetic-\(account.rawValue)")
+            }
+
+            for (provider, account) in providers {
+                await model.selectProvider(provider)
+                try expect(model.hasStoredKey && model.apiKeyDraft.isEmpty)
+                try expect(model.selectedProfile.modelID == "manual-\(provider.rawValue)")
+                model.apiKeyDraft = "replacement-\(account.rawValue)"
+                await model.saveAPIKey()
+                for (_, otherAccount) in providers {
+                    let savedKey = try await credentials.apiKey(for: otherAccount)
+                    let replaced = providers.prefix { $0.0 != provider }.map(\.1) + [account]
+                    let prefix = replaced.contains(otherAccount) ? "replacement" : "synthetic"
+                    try expect(savedKey == "\(prefix)-\(otherAccount.rawValue)")
+                }
+            }
+
+            let reloadedCredentials = LocalFileProviderCredentialStore(fileURL: credentialsURL)
+            let reloaded = RefinementSettingsModel(
+                service: CredentialedTextRefiner(credentials: reloadedCredentials),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(fileURL: settingsURL))
+            await reloaded.load()
+            for (provider, account) in providers {
+                await reloaded.selectProvider(provider)
+                try expect(reloaded.hasStoredKey && reloaded.apiKeyDraft.isEmpty)
+                try expect(reloaded.isEditingModelID)
+                try expect(reloaded.selectedProfile.modelID == "manual-\(provider.rawValue)")
+                let savedKey = try await reloadedCredentials.apiKey(for: account)
+                try expect(savedKey == "replacement-\(account.rawValue)")
+            }
+            await reloaded.deleteAPIKey()
+            for (_, account) in providers {
+                let savedKey = try await reloadedCredentials.apiKey(for: account)
+                try expect(savedKey == (account == .glm ? nil : "replacement-\(account.rawValue)"))
+            }
         }
 
         await runAsync(
@@ -2689,19 +2709,7 @@ struct SpeakerAppScenarioSpecs {
                     HistoryRetentionPolicy.foreverDisplayName,
                 ]
             )
-            try expect(
-                [
-                    HistoryRecordStatus.delivered,
-                    .deliveryUnconfirmed,
-                    .refinementFellBack,
-                    .pendingCopy,
-                ].map(\.label) == [
-                    HistoryRecordStatus.deliveredLabel,
-                    HistoryRecordStatus.deliveryUnconfirmedLabel,
-                    HistoryRecordStatus.refinementFellBackLabel,
-                    HistoryRecordStatus.pendingCopyLabel,
-                ]
-            )
+
         }
 
         await runAsync(

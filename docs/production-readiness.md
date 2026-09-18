@@ -4,14 +4,14 @@
 
 ## 当前结论
 
-Speaker 已可作为本机开发版持续试用，但还不能对外发布。主要阻断项是稳定代码签名与公证、凭据迁移到 Keychain、真实跨 App 兼容性验证和完整更新机制。
+Speaker 已可作为本机开发版持续试用，但尚未通过正式生产发布门槛。仓库另有明确标记的开发预发布通道；下一轮公测仍需满足本清单的公测前门槛并验证对应候选，不代表正式发布就绪。主要正式阻断项是稳定代码签名与公证、凭据迁移到 Keychain、真实跨 App 兼容性验证和完整更新机制。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
 
 ## P0 发布阻断
 
 - [x] 全局快捷键回调禁止目标 App AX IPC；松键时只冻结前台 PID，回调返回后立即在该 PID 内抓取当前 focused element，元素不可用时退到 focused window。正确性不依赖可能延迟或丢失的 `AXObserver` 通知，跨进程变化仍 fail closed。
 - [x] 剪贴板写入必须在 `setString` 后精确读回确认；系统拒绝、被并发覆盖或内容不一致时保留结果供重试。
 - [x] 跨 App 送达使用一个可注入的平台 seam；AX 仅冻结和复核目标身份及安全性，所有兼容目标统一走一次事务式 Command-V。事件发送使用 combined-session state 并在改动剪贴板前预检权限；剪贴板全量快照只在 change count 与私有 marker 仍匹配时恢复，用户的新复制内容优先。
-- [x] 自动送达保存内容无关的结构化边界，明确区分目标确认写入、已发送但无法回读，以及发送前 Pending Copy；已发送的粘贴永不暴露为可重试操作。诊断可在历史、搜索及复制脱敏报告中使用，旧记录缺少字段时保持兼容。
+- [x] 自动送达内部保存内容无关的结构化边界，明确区分目标确认写入、已发送但无法回读，以及发送前 Pending Copy；已发送的粘贴永不暴露为可重试操作。历史与搜索不展示或推断粘贴成功状态；脱敏诊断保留内部事实边界，旧记录缺少字段时保持兼容。
 - [x] Esc 只在 Speaker 会话活跃时消费完整 keyDown/repeat/keyUp 序列；空闲时透传给前台 App。
 - [x] 首次启动先解释用途，再由用户主动请求权限、选择豆包资源并通过真实连接检查。
 - [x] 音频流有明确的内存资源上限，耗尽时停止且报告事实，不静默丢帧。
@@ -56,7 +56,7 @@ Speaker 已可作为本机开发版持续试用，但还不能对外发布。主
 
 ## 当前自动证据
 
-- `./scripts/test`：核心、App scenario、AppKit UI、provider evidence 与发布脚本规格通过；精确数量以该命令当前输出为准。
+- `./scripts/test --with-ui`：核心、App scenario、AppKit UI、provider evidence 与发布脚本规格通过；精确数量以该命令当前输出为准。
 - `./scripts/test-compatibility-smoke`：使用本地构建候选验证人工兼容报告契约；partial PASS 返回 3、报告权限为 `0600`、记录可执行文件 SHA-256 且不包含绝对 Bundle 路径。
 - `./scripts/provider-smoke doubao`：2026-07-17 使用当前 BYOK 再次完成 `volc.seedasr.sauc.duration` 静音连接探针，服务端请求 ID `20260717125537286AF74BAC3BF6B4ED6B`。该结果只证明连接，不证明模型矩阵；DeepSeek 仍未配置。当前 matrix 要求显式付费确认、全新 evidence 目录及候选 version/build；报告以固定 13-case schema 绑定 source commit/clean 状态、`Package.resolved` SHA-256、macOS/架构、凭据来源、资源与模型，逐级 no-follow 校验父目录后原子写入 `0700/0600`，且 verifier 对未知字段、缺失/重复、FAIL/SKIP、dirty source 与非正式 Keychain 凭据 fail closed。受保护 production workflow 已把 matrix 接成正式硬门禁：在同一 run 的临时 Keychain 中生成报告，并再次精确绑定 commit、依赖锁 hash、version、build 与不超过四小时的生成时间窗，报告及其 hash 进入 exact-allowlist release evidence ZIP，旧报告不能复用。完整 BYOK 与正式身份的真实成功运行证据仍待取得。工具与 verifier 由 `./scripts/test` 以 warnings-as-errors 编译，并有离线隐私/权限/原子写反例规格。
 - 2026-07-17 旧版开发 matrix（严格报告 schema 落地前）：使用 226 秒非敏感系统 TTS 的前 60 秒完成开发预检。豆包 1/5/15/60 秒实时 paced 转录、流式取消和错误 Key全部 PASS；request ID 分别为 `20260717130020408124A2C1B9F0D44A84`、`20260717130022E8FA7E55CDA7BBB97D7F`、`2026071713002723F393A0B537B2B4AF8B`、`20260717130043BFCC2F1416BF87BBE9C0`、取消 `7669280B-705D-4856-B275-12280D970DFC`、错误 Key `20260717130146B7236D4D34EEBDC471A4`。临时 AIFF/WAV 已删除。DeepSeek 未配置，连接、三模式和取消均 SKIP；错误 Key边界 PASS。因此这只是历史 PARTIAL 日志，不是当前 schema 报告、完整 provider 或正式 Keychain 候选证据。

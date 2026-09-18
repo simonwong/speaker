@@ -60,6 +60,7 @@ package struct SpeakerOnboardingView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
         }
+        .buttonStyle(SettingsButtonStyle())
         .frame(minWidth: 360, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
@@ -219,7 +220,7 @@ package struct SpeakerOnboardingView: View {
                 Button(action == .request ? "允许麦克风" : "打开\(title)设置") {
                     Task { await requestPermission(permission) }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(SettingsButtonStyle())
             }
         }
         .padding(16)
@@ -274,7 +275,7 @@ package struct SpeakerOnboardingView: View {
                     step == .shortcut ? (mode == .review ? "完成" : "开始使用 Speaker") : "下一步",
                     action: nextStep
                 )
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!presentation.canContinue(from: step))
                 .keyboardShortcut(.defaultAction)
                 .accessibilityHidden(true)

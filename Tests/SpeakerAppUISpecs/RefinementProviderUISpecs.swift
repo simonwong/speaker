@@ -54,19 +54,24 @@ enum RefinementProviderUISpecs {
                 pump(hosting)
                 return model.selectedProvider == .openAI
                     && controls(NSPopUpButton.self, in: hosting).contains {
-                        $0.itemTitles.contains("gpt-4.1")
+                        $0.itemTitles.contains("gpt-5.6-terra")
                     }
             }
             try expect(switched, "provider action did not update model options")
+            try expect(model.selectedProfile.modelID == "gpt-5.6-luna")
+            try expect(
+                controls(NSPopUpButton.self, in: hosting).contains {
+                    $0.itemTitles.contains("gpt-5.6-luna（推荐）")
+                })
             guard
                 let models = controls(NSPopUpButton.self, in: hosting).first(where: {
-                    $0.itemTitles.contains("gpt-4.1")
+                    $0.itemTitles.contains("gpt-5.6-terra")
                 }),
-                let modelIndex = models.itemTitles.firstIndex(of: "gpt-4.1")
+                let modelIndex = models.itemTitles.firstIndex(of: "gpt-5.6-terra")
             else { throw SpecFailure(message: "OpenAI models missing") }
             models.menu?.performActionForItem(at: modelIndex)
             let saved = await eventually(before: .seconds(2)) {
-                model.selectedProfile.modelID == "gpt-4.1"
+                model.selectedProfile.modelID == "gpt-5.6-terra"
             }
             try expect(saved, "model picker action was not persisted")
             try capture(window, name: "openai-narrow")
@@ -121,8 +126,82 @@ enum RefinementProviderUISpecs {
             try expect(!model.isCheckingConnection && !model.isConnectionVerified)
             pump(hosting)
             try capture(window, name: "custom-narrow")
+            try await verifyControlAppearances(model)
             await model.shutdown()
         }
+    }
+
+    @MainActor
+    private static func verifyControlAppearances(_ model: RefinementSettingsModel) async throws {
+        for (name, scheme, style, appearance) in [
+            (
+                "glass-light", ColorScheme.light, AdaptiveGlassSurfaceStyle.liquidGlass,
+                NSAppearance.Name.aqua
+            ),
+            ("glass-dark", .dark, .liquidGlass, .darkAqua),
+            ("glass-contrast", .light, .liquidGlass, .accessibilityHighContrastAqua),
+            ("material-fallback", .light, .systemMaterial, .aqua),
+            ("opaque-fallback", .dark, .opaque, .accessibilityHighContrastDarkAqua),
+        ] {
+            model.apiKeyDraft = ""
+            let hosting = NSHostingView(
+                rootView: RefinementProviderSettingsCard(model: model)
+                    .padding(12).frame(width: 400)
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.adaptiveGlassSurfaceStyleOverride, style))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 750),
+                styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = hosting
+            window.appearance = NSAppearance(named: appearance)
+            window.makeKeyAndOrderFront(nil)
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            let rendered = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return editableFields(in: hosting).count == 3
+            }
+            try expect(rendered, "\(name) lost editable fields")
+            guard let key = controls(NSSecureTextField.self, in: hosting).first else {
+                throw SpecFailure(message: "\(name) lost secure input")
+            }
+            try expect(window.makeFirstResponder(key), "\(name) refused input focus")
+            guard let editor = key.currentEditor() as? NSTextView else {
+                throw SpecFailure(message: "\(name) has no native text editor")
+            }
+            editor.insertText(
+                "synthetic-glass-key", replacementRange: NSRange(location: 0, length: 0))
+            let edited = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return model.apiKeyDraft == "synthetic-glass-key"
+            }
+            try expect(edited, "\(name) did not update the Key draft through native editing")
+            try expect(!key.visibleRect.isEmpty, "\(name) clipped its secure input")
+            let saveEnabled = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return controls(NSView.self, in: hosting).contains {
+                    $0.accessibilityLabel() == "保存 Key" && $0.isAccessibilityEnabled()
+                }
+            }
+            try expect(saveEnabled, "\(name) left the save action disabled after editing")
+            if ProcessInfo.processInfo.environment["SPEAKER_REFINEMENT_PROVIDER_UI_ARTIFACTS"]
+                != nil
+            {
+                activateForCapture()
+            }
+            try capture(window, name: name)
+            window.endEditing(for: nil)
+        }
+        model.apiKeyDraft = ""
+    }
+
+    @MainActor
+    private static func activateForCapture() {
+        NSApp.activate(ignoringOtherApps: true)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
     }
 
     @MainActor

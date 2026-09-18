@@ -79,7 +79,7 @@ struct ShortcutSettingsPage: View {
                     }
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(SettingsButtonStyle(prominent: true))
         }
     }
 

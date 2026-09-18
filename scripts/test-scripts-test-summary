@@ -81,3 +81,58 @@ grep -Eq '^  FAIL  concurrent step +exit 4$' <<< "$FAILING_OUTPUT" || {
 }
 
 print "PASS: the gate runs every step and summarizes each failure"
+
+MODE_ROOT="$TEST_ROOT/modes"
+mkdir -p "$MODE_ROOT"
+cp "$SCRIPT_DIR/test" "$SCRIPT_DIR/test-runner-common" "$MODE_ROOT/"
+for original in "$SCRIPT_DIR"/*; do
+    stub_name="${original:t}"
+    [[ "$stub_name" == "test" || "$stub_name" == "test-runner-common" ]] && continue
+    print -r -- '#!/bin/zsh
+print -r -- "${0:t} $*" >> "$SPEAKER_TEST_MODE_TRACE"
+if [[ "${SPEAKER_TEST_UI_FAILURE:-0}" == "1" && "$*" == *SpeakerAppUISpecs* ]]; then
+    exit 9
+fi' > "$MODE_ROOT/$stub_name"
+done
+export SPEAKER_TEST_MODE_TRACE="$TEST_ROOT/mode-trace"
+for mode in quiet --with-ui --ui-only; do
+    : > "$SPEAKER_TEST_MODE_TRACE"
+    mode_args=()
+    [[ "$mode" != "quiet" ]] && mode_args=("$mode")
+    mode_output="$(/bin/zsh "$MODE_ROOT/test" "${mode_args[@]}")"
+    trace="$(cat "$SPEAKER_TEST_MODE_TRACE")"
+    case "$mode" in
+        quiet)
+            [[ "$trace" != *SpeakerAppUISpecs* && "$trace" == *SpeakerCoreSpecs* ]]
+            [[ "$mode_output" == *"Native UI coverage requires"* ]]
+            [[ "$mode_output" == *"all 23 gate steps passed"* ]]
+            ;;
+        --with-ui)
+            [[ "$trace" == *SpeakerAppUISpecs* && "$trace" == *SpeakerCoreSpecs* ]]
+            [[ "$mode_output" == *"all 24 gate steps passed"* ]]
+            ;;
+        --ui-only)
+            [[ "$trace" == "swiftw run --disable-sandbox SpeakerAppUISpecs" ]]
+            [[ "$mode_output" == *"all 1 gate steps passed"* ]]
+            ;;
+    esac
+done
+for mode in --with-ui --ui-only; do
+    if SPEAKER_TEST_UI_FAILURE=1 /bin/zsh "$MODE_ROOT/test" "$mode" > "$TEST_ROOT/ui-failure.log" 2>&1; then
+        print -u2 "UI failure was swallowed in $mode mode."
+        exit 1
+    fi
+    grep -Eq '^  FAIL  SpeakerAppUISpecs +exit 9$' "$TEST_ROOT/ui-failure.log"
+done
+: > "$SPEAKER_TEST_MODE_TRACE"
+help_output="$(/bin/zsh "$MODE_ROOT/test" --help)"
+[[ "$help_output" == *"--with-ui: full gate"* && ! -s "$SPEAKER_TEST_MODE_TRACE" ]]
+if /bin/zsh "$MODE_ROOT/test" --unknown > /dev/null 2>&1; then
+    print -u2 "Unknown test option was accepted."
+    exit 1
+fi
+[[ ! -s "$SPEAKER_TEST_MODE_TRACE" ]]
+for workflow in ci release; do
+    grep -Fq 'run: ./scripts/test --with-ui' "$SCRIPT_DIR/../.github/workflows/$workflow.yml"
+done
+print "PASS: default checks avoid UI, explicit UI modes preserve coverage and failures, and CI runs the full gate"

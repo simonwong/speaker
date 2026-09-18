@@ -152,7 +152,8 @@ enum APIKeySettingsUISpecs {
     {
         let existing = Set(
             buttons(named: title, in: root).map { ObjectIdentifier($0 as AnyObject) })
-        return NSApp.windows.compactMap(\.contentView).flatMap { buttons(named: title, in: $0) }
+        return NSApp.windows.filter(\.isVisible).compactMap(\.contentView)
+            .flatMap { buttons(named: title, in: $0) }
             .filter { !existing.contains(ObjectIdentifier($0 as AnyObject)) }
     }
 

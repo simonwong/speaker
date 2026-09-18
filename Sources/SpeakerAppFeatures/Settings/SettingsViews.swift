@@ -29,6 +29,7 @@ package struct SettingsView: View {
                 )
             }
         }
+        .buttonStyle(SettingsButtonStyle())
         .task {
             await workspace.refresh()
         }

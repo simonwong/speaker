@@ -89,20 +89,17 @@ package struct HistoryDashboardActions {
     package let clear: () -> Void
     package let copy: (VoiceInputHistoryRecord) -> Void
     package let delete: (VoiceInputSessionID) -> Void
-    package let addDictionaryEntry: (String) -> Void
 
     package init(
         refresh: @escaping () -> Void,
         clear: @escaping () -> Void,
         copy: @escaping (VoiceInputHistoryRecord) -> Void,
-        delete: @escaping (VoiceInputSessionID) -> Void,
-        addDictionaryEntry: @escaping (String) -> Void = { _ in }
+        delete: @escaping (VoiceInputSessionID) -> Void
     ) {
         self.refresh = refresh
         self.clear = clear
         self.copy = copy
         self.delete = delete
-        self.addDictionaryEntry = addDictionaryEntry
     }
 }
 
@@ -313,7 +310,6 @@ package struct HistoryDashboard: View {
             isBusy: state.isBusy,
             reduceMotion: reduceMotion,
             copy: { actions.copy(record) },
-            addDictionaryEntry: actions.addDictionaryEntry,
             toggleDetails: {
                 withAnimation(reduceMotion ? nil : .historyExpand) {
                     expandedRecordID =
@@ -401,7 +397,6 @@ private struct HistoryRecordRow: View {
     let isBusy: Bool
     let reduceMotion: Bool
     let copy: () -> Void
-    let addDictionaryEntry: (String) -> Void
     let toggleDetails: () -> Void
     let delete: () -> Void
     @State private var pointerIsInside = false
@@ -442,13 +437,13 @@ private struct HistoryRecordRow: View {
 
                 recordText
 
-                if presentation.status.showsStatusIcon {
-                    Image(systemName: presentation.status.icon)
+                if let problem = presentation.problem {
+                    Image(systemName: problem.icon)
                         .font(SpeakerTypography.body)
-                        .foregroundStyle(presentation.status.color)
+                        .foregroundStyle(problem.color)
                         .padding(.top, 2)
-                        .help(presentation.status.label)
-                        .accessibilityLabel(presentation.status.label)
+                        .help(problem.label)
+                        .accessibilityLabel(problem.label)
                 }
 
                 // The action cluster always occupies its width, whether or not
@@ -463,9 +458,7 @@ private struct HistoryRecordRow: View {
             if isExpanded {
                 HistoryExpandedRecord(
                     record: record,
-                    presentation: presentation,
-                    isBusy: isBusy,
-                    addDictionaryEntry: addDictionaryEntry
+                    presentation: presentation
                 )
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
@@ -517,14 +510,23 @@ private struct HistoryRecordRow: View {
 
     @ViewBuilder
     private var recordText: some View {
-        let text = Text(isExpanded ? presentation.text : presentation.previewText)
-            .font(SpeakerTypography.body)
-            .lineSpacing(2)
-
-        text
-            .lineLimit(isExpanded ? nil : Self.collapsedLineLimit)
-            .truncationMode(.tail)
+        if isExpanded {
+            HStack(spacing: 8) {
+                Text(presentation.canCopy ? (record.refinementModeName ?? "默认顺滑") : "错误详情")
+                    .font(SpeakerTypography.bodyEmphasis)
+                Image(systemName: "chevron.up")
+                    .font(SpeakerTypography.caption)
+                    .foregroundStyle(.secondary)
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(presentation.previewText)
+                .font(SpeakerTypography.body)
+                .lineSpacing(2)
+                .lineLimit(Self.collapsedLineLimit)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     /// The cluster reserves both dimensions when its buttons are hidden, so the
@@ -604,65 +606,90 @@ private struct HistoryRowActionButton: View {
     }
 }
 
-private struct HistoryExpandedRecord: View {
-    let record: VoiceInputHistoryRecord
-    let presentation: HistoryRecordRowPresentation
-    let isBusy: Bool
-    let addDictionaryEntry: (String) -> Void
+package struct HistoryExpandedRecord: View {
+    private let record: VoiceInputHistoryRecord
+    private let presentation: HistoryRecordRowPresentation
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label(
-                    presentation.status.label,
-                    systemImage: presentation.status.icon
-                )
-                .font(SpeakerTypography.footnote.weight(.medium))
-                .foregroundStyle(presentation.status.color)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    presentation.status.color.opacity(0.12),
-                    in: Capsule()
-                )
+    package init(record: VoiceInputHistoryRecord, presentation: HistoryRecordRowPresentation) {
+        self.record = record
+        self.presentation = presentation
+    }
+
+    package var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                if let problem = presentation.problem {
+                    Label(problem.label, systemImage: problem.icon)
+                        .font(SpeakerTypography.footnote.weight(.medium))
+                        .foregroundStyle(problem.color)
+                }
                 Text(metadataLine)
                     .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            SpeakerTextBlock(
-                title: "豆包转录",
-                text: record.transcription ?? "无",
-                isPlaceholder: record.transcription == nil
-            )
+            if presentation.canCopy {
+                Text(presentation.text)
+                    .font(SpeakerTypography.body)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            } else if case .failed(let failure) = presentation.problem {
+                Text(failure.userGuidance)
+                    .font(SpeakerTypography.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-            HistoryDictionaryEntryComposer(
-                transcription: record.transcription,
-                isBusy: isBusy,
-                addEntry: addDictionaryEntry
-            )
+            if let transcription = record.transcription,
+                !transcription.isEmpty, transcription != presentation.text
+            {
+                stageResult(title: "豆包转录", text: transcription)
+            }
 
-            if showsRefinementBlock {
-                SpeakerTextBlock(
-                    title: record.refinementProviderLabel == "文字整理"
-                        ? "文字整理" : "\(record.refinementProviderLabel) 整理",
-                    text: record.deepSeekText ?? refinementPlaceholder,
-                    isPlaceholder: record.deepSeekText == nil
-                )
+            if let refinement = record.deepSeekText,
+                !refinement.isEmpty, refinement != presentation.text,
+                refinement != record.transcription
+            {
+                stageResult(title: "\(record.refinementProviderLabel) 整理", text: refinement)
             }
 
             if !diagnosticLines.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(diagnosticLines, id: \.self) { line in
-                        diagnosticText(line)
+                DisclosureGroup("诊断信息") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(diagnosticLines, id: \.self) { line in
+                            diagnosticText(line)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                    .textSelection(.enabled)
                 }
                 .font(SpeakerTypography.footnote)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             }
         }
-        .textSelection(.enabled)
+        .padding(.horizontal, 8)
+    }
+
+    private func stageResult(title: String, text: String) -> some View {
+        DisclosureGroup(title) {
+            Text(text)
+                .font(SpeakerTypography.body)
+                .foregroundStyle(.primary)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+                .textSelection(.enabled)
+        }
+        .font(SpeakerTypography.footnote)
+        .foregroundStyle(.secondary)
     }
 
     /// Diagnostics stay content-free; identifiers read in the mono face.
@@ -702,13 +729,11 @@ private struct HistoryExpandedRecord: View {
                 )
             )
         }
-        if let deliveryDiagnosticCode = record.deliveryDiagnosticCode {
-            lines.append(
-                DiagnosticLine(
-                    label: "送达诊断：",
-                    identifier: deliveryDiagnosticCode
-                )
-            )
+        if let code = record.providerErrorCode {
+            lines.append(DiagnosticLine(label: "语音识别错误：", identifier: code))
+        }
+        if let code = record.refinementFailureCode {
+            lines.append(DiagnosticLine(label: "文字整理错误：", identifier: code))
         }
         return lines
     }
@@ -716,8 +741,7 @@ private struct HistoryExpandedRecord: View {
     private var metadataLine: String {
         [
             record.startedAt.formatted(date: .abbreviated, time: .shortened),
-            record.refinementModeName ?? "默认顺滑",
-            record.refinementModelID,
+            record.refinementModelID.map { "\(record.refinementProviderLabel) · \($0)" },
             Self.durationText(milliseconds: record.durationMilliseconds),
         ].compactMap { $0 }.joined(separator: " · ")
     }
@@ -725,14 +749,6 @@ private struct HistoryExpandedRecord: View {
     /// The metadata line reads in seconds; stage diagnostics keep raw ms.
     private static func durationText(milliseconds: Int) -> String {
         String(format: "%.1f 秒", Double(max(0, milliseconds)) / 1_000)
-    }
-
-    private var refinementPlaceholder: String { "无" }
-
-    private var showsRefinementBlock: Bool {
-        record.deepSeekText != nil
-            || record.refinementStatus
-                == TextRefinementStatus.fellBack.rawValue
     }
 
     private var stageDurationsLine: String {

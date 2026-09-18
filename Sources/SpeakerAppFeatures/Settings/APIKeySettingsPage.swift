@@ -159,12 +159,15 @@ package struct RefinementProviderSettingsCard: View {
                         )
                     ) {
                         ForEach(model.modelIDs, id: \.self) { modelID in
-                            Text(modelID).tag(modelID)
+                            Text(model.modelTitle(for: modelID)).tag(modelID)
                         }
                         Text("其他模型…").tag("__manual__")
                     }
                     .pickerStyle(.menu)
                     .accessibilityLabel("文字整理模型")
+
+                    Text("推荐模型优先考虑成本，随 App 更新；也可选择「其他模型…」手动填写。")
+                        .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
                 }
 
                 if model.selectedProvider == .custom {
@@ -243,11 +246,7 @@ package struct RefinementProviderSettingsCard: View {
     private func labeledField(_ label: String, placeholder: String, text: Binding<String>)
         -> some View
     {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(SpeakerTypography.caption)
-            RefinementConfigurationTextField(label: label, placeholder: placeholder, text: text)
-                .frame(height: 24)
-        }
+        RefinementConfigurationField(label: label, placeholder: placeholder, text: text)
     }
 
     private var statusText: String {
@@ -324,7 +323,7 @@ private struct ProviderKeyEditor: View {
                 ProgressView().controlSize(.small)
             }
             Button(saveTitle, action: saveDraft)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!canSave)
                 .accessibilityHidden(true)
                 .overlay {
@@ -367,18 +366,40 @@ private struct ProviderKeyEditor: View {
 
 }
 
+private struct RefinementConfigurationField: View {
+    let label: String
+    let placeholder: String
+    @Binding var text: String
+    @State private var isFocused = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(SpeakerTypography.caption)
+            RefinementConfigurationTextField(
+                label: label, placeholder: placeholder, text: $text, isFocused: $isFocused
+            )
+            .frame(height: 20)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .settingsGlassSurface(focused: isFocused)
+        }
+    }
+}
+
 private struct RefinementConfigurationTextField: NSViewRepresentable {
     let label: String
     let placeholder: String
     @Binding var text: String
+    @Binding var isFocused: Bool
     @Environment(\.isEnabled) private var isEnabled
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField(string: text)
         field.isEditable = true
         field.isSelectable = true
-        field.isBezeled = true
-        field.bezelStyle = .roundedBezel
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.focusRingType = .none
         field.font = .systemFont(ofSize: NSFont.systemFontSize)
         field.delegate = context.coordinator
         field.target = context.coordinator
@@ -389,18 +410,29 @@ private struct RefinementConfigurationTextField: NSViewRepresentable {
 
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.isFocused = $isFocused
         if field.stringValue != text { field.stringValue = text }
         field.placeholderString = placeholder
         field.isEnabled = isEnabled
         field.setAccessibilityLabel(label)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, isFocused: $isFocused) }
 
     @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
+        var isFocused: Binding<Bool>
+        init(text: Binding<String>, isFocused: Binding<Bool>) {
+            self.text = text
+            self.isFocused = isFocused
+        }
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            isFocused.wrappedValue = true
+        }
+        func controlTextDidEndEditing(_ notification: Notification) {
+            isFocused.wrappedValue = false
+        }
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             commit(field)

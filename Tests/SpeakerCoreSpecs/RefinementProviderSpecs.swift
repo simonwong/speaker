@@ -24,6 +24,20 @@ enum RefinementProviderSpecs: CoreSpecDomain {
         }
 
         run(
+            "refinement provider bundled defaults prioritize reviewed low-cost models",
+            failures: &failures
+        ) {
+            for (provider, modelID) in [
+                (RefinementProviderID.deepSeek, "deepseek-v4-flash"),
+                (.openAI, "gpt-5.6-luna"), (.kimi, "kimi-k2.6"), (.glm, "glm-5.3-flash"),
+            ] {
+                let profile = RefinementProviderSettings().profile(for: provider)
+                try expect(profile.modelID == modelID)
+                try expect(RefinementProviderCatalog.modelIDs(for: provider).first == modelID)
+            }
+        }
+
+        run(
             "refinement provider rejects unsafe custom addresses and preserves custom model IDs",
             failures: &failures
         ) {
@@ -109,8 +123,110 @@ enum RefinementProviderSpecs: CoreSpecDomain {
                 try expect((body["temperature"] != nil) == (provider == .deepSeek))
                 try expect(
                     (body["max_completion_tokens"] as? Int) == (provider == .openAI ? 2_048 : nil))
-                try expect((body["max_tokens"] as? Int) == (provider == .openAI ? nil : 2_048))
+                try expect(
+                    (body["max_tokens"] as? Int)
+                        == (provider == .openAI ? nil : provider == .glm ? 8_192 : 2_048))
+                if [.deepSeek, .kimi, .glm].contains(provider) {
+                    try expect(
+                        (body["thinking"] as? [String: String])?["type"]
+                            == (provider == .glm ? "enabled" : "disabled"))
+                }
+                try expect(
+                    (body["reasoning_effort"] as? String)
+                        == (provider == .openAI ? "none" : provider == .glm ? "low" : nil))
             }
+        }
+
+        await runAsync(
+            "refinement provider disables OpenAI reasoning only for reviewed models",
+            failures: &failures
+        ) {
+            for (provider, modelID, effort) in [
+                (RefinementProviderID.openAI, "gpt-5.6-terra", "none" as String?),
+                (.openAI, "gpt-4.1-mini", nil),
+                (.openAI, "manually-selected-model", nil),
+                (.custom, "gpt-5.6-luna", nil),
+            ] {
+                let profile = RefinementProviderProfile(
+                    provider: provider, modelID: modelID,
+                    baseURL: provider == .custom
+                        ? "https://example.com/v1"
+                        : RefinementProviderCatalog.baseURL(for: provider))
+                let transport = ChatCompletionTransportFake(response: response)
+                let client = ChatCompletionRefinementClient(
+                    configuration: try .init(apiKey: "synthetic", profile: profile),
+                    transport: transport)
+                _ = try await client.refine(
+                    "原文", using: .init(mode: .conciseCleanup(), provider: profile))
+                let request = try await transport.onlyRequest()
+                let body =
+                    try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                try expect(body["reasoning_effort"] as? String == effort)
+                try expect(body["model"] as? String == modelID)
+            }
+        }
+
+        await runAsync(
+            "refinement provider GLM thinking accepts only complete final content",
+            failures: &failures
+        ) {
+            let profile = RefinementProviderProfile.defaultProfile(for: .glm)
+            for (content, finishReason, expectedFailure) in [
+                ("{\"text\":\"结果\"}", "stop", nil as TextRefinementFailureKind?),
+                ("", "stop", .emptyOutput),
+                ("{\"text\":\"结果\"}", "length", .truncated),
+            ] {
+                let body = try JSONSerialization.data(withJSONObject: [
+                    "choices": [
+                        [
+                            "message": [
+                                "content": content,
+                                "reasoning_content": "private reasoning must not become the result",
+                            ],
+                            "finish_reason": finishReason,
+                        ]
+                    ]
+                ])
+                let transport = ChatCompletionTransportFake(
+                    response: .init(statusCode: 200, body: body))
+                let client = ChatCompletionRefinementClient(
+                    configuration: try .init(apiKey: "synthetic", profile: profile),
+                    transport: transport)
+                do {
+                    let result = try await client.refine(
+                        "原文", using: .init(mode: .conciseCleanup(), provider: profile))
+                    try expect(expectedFailure == nil)
+                    try expect(result.text == "结果")
+                } catch let failure as TextRefinementFailure {
+                    try expect(failure.kind == expectedFailure)
+                }
+            }
+            for (provider, modelID, thinking) in [
+                (RefinementProviderID.glm, "glm-4.7-flash", "disabled" as String?),
+                (.glm, "glm-5.2", "disabled"),
+                (.custom, "glm-5.3-flash", nil),
+            ] {
+                let saved = RefinementProviderProfile(
+                    provider: provider, modelID: modelID,
+                    baseURL: provider == .custom
+                        ? "https://example.com/v1"
+                        : RefinementProviderCatalog.baseURL(for: provider))
+                let transport = ChatCompletionTransportFake(response: response)
+                let client = ChatCompletionRefinementClient(
+                    configuration: try .init(apiKey: "synthetic", profile: saved),
+                    transport: transport)
+                _ = try await client.refine(
+                    "原文", using: .init(mode: .fullRewrite(), provider: saved))
+                let request = try await transport.onlyRequest()
+                let body =
+                    try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                try expect((body["thinking"] as? [String: String])?["type"] == thinking)
+                try expect(body["reasoning_effort"] == nil)
+                try expect(body["max_tokens"] as? Int == 2_048)
+            }
+            let bounded = try ChatCompletionRefinementConfiguration(
+                apiKey: "synthetic", profile: profile, maximumOutputTokens: 512)
+            try expect(bounded.maximumOutputTokens == 512)
         }
 
         await runAsync(

@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A thin wrapper over the shared card surface. A card may be headless when
-/// its settings group title already names it.
 struct SettingsCard<Content: View>: View {
     let title: String?
     let subtitle: String?
@@ -52,7 +50,11 @@ struct SettingsCard<Content: View>: View {
                 content
             }
         }
-        .speakerCard(tint: tint)
+        .padding(SpeakerSurfaceMetrics.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .settingsGlassSurface(cornerRadius: SpeakerSurfaceMetrics.cardCornerRadius, tint: tint)
+        .buttonStyle(SettingsButtonStyle())
+        .textFieldStyle(SettingsTextFieldStyle())
     }
 }
 

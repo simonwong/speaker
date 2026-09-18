@@ -1342,7 +1342,7 @@ struct SpeakerAppUISpecs {
                 "search ignored text beyond the collapsed preview"
             )
             let shortRow = HistoryRecordRowPresentation(
-                time: "12:00", text: "短文本", canCopy: true, status: .delivered)
+                time: "12:00", text: "短文本", canCopy: true, problem: nil)
             try expect(shortRow.previewText == "短文本")
         }
 
@@ -1360,6 +1360,94 @@ struct SpeakerAppUISpecs {
                     startedAt: Date(timeIntervalSince1970: Double(seconds)))
                 try expect(
                     HistoryPresentation.row(for: record, calendar: calendar).time == expected)
+            }
+        }
+
+        run(
+            "history expanded detail keeps one result and no dictionary editor",
+            failures: &failures
+        ) {
+            let result = "本周先完善安装和初始化引导。\n\n权限、API Key 和快捷键分步配置，填错后可以直接修改。\n\n完成后交给测试用户，收集反馈。"
+            for width in [420.0, 760.0] {
+                for distinctSource in [false, true] {
+                    let record = makeHistoryRecord(
+                        id: VoiceInputSessionID(),
+                        startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                        transcription: distinctSource ? "原始转录，仅在展开后显示。" : result,
+                        finalText: result,
+                        deliveryDiagnosticCode: "paste.postedWithoutReceipt"
+                    )
+                    let host = NSHostingView(
+                        rootView: HistoryExpandedRecord(
+                            record: record, presentation: HistoryPresentation.row(for: record)
+                        )
+                        .padding(16)
+                        .frame(width: width, alignment: .topLeading)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                    )
+                    host.frame = NSRect(x: 0, y: 0, width: width, height: 500)
+                    let window = NSWindow(
+                        contentRect: NSRect(x: -10_000, y: -10_000, width: width, height: 500),
+                        styleMask: [.borderless], backing: .buffered, defer: false
+                    )
+                    window.isReleasedWhenClosed = false
+                    window.contentView = host
+                    window.orderFrontRegardless()
+                    defer { window.close() }
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                    var visited = Set<ObjectIdentifier>()
+                    var labels: [String] = []
+                    var editableFieldCount = 0
+                    @MainActor func visit(_ object: AnyObject) {
+                        guard visited.insert(ObjectIdentifier(object)).inserted else { return }
+                        if let element = object as? any NSAccessibilityProtocol {
+                            if let label = element.accessibilityLabel() { labels.append(label) }
+                            if let value = element.accessibilityValue() as? String {
+                                labels.append(value)
+                            }
+                            if let title = element.accessibilityTitle() { labels.append(title) }
+                            for child in element.accessibilityChildren() ?? [] {
+                                visit(child as AnyObject)
+                            }
+                        }
+                        if let field = object as? NSTextField, field.isEditable {
+                            editableFieldCount += 1
+                        }
+                        if let view = object as? NSView { view.subviews.forEach(visit) }
+                    }
+                    visit(host)
+                    try expect(
+                        labels.filter { $0 == result }.count == 1,
+                        "expanded history must expose the complete result once: \(labels)")
+                    try expect(!labels.contains { $0.contains("加入词库") || $0.contains("输入词条") })
+                    try expect(
+                        !labels.contains("原始转录，仅在展开后显示。"), "source is not collapsed: \(labels)")
+                    try expect(
+                        !labels.contains { $0.contains("送达诊断：") },
+                        "diagnostics are not collapsed: \(labels)")
+                    try expect(editableFieldCount == 0, "history detail exposes an editor")
+                    try expect(
+                        host.fittingSize.width <= width + 1,
+                        "detail exceeds width: \(host.fittingSize)")
+                    if let directory = ProcessInfo.processInfo.environment[
+                        "SPEAKER_HISTORY_UI_ARTIFACTS"]
+                    {
+                        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)
+                        else {
+                            throw SpecFailure(message: "history fixture has no bitmap")
+                        }
+                        host.cacheDisplay(in: host.bounds, to: bitmap)
+                        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                            throw SpecFailure(message: "history fixture has no PNG")
+                        }
+                        let url = URL(fileURLWithPath: directory, isDirectory: true)
+                        try FileManager.default.createDirectory(
+                            at: url, withIntermediateDirectories: true)
+                        try png.write(
+                            to: url.appendingPathComponent(
+                                "history-\(Int(width))-\(distinctSource).png"))
+                    }
+                }
             }
         }
 
@@ -1545,7 +1633,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "history list hides cancelled and textless records",
+            "history list keeps explicit errors and hides cancelled and empty results",
             failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
@@ -1605,11 +1693,27 @@ struct SpeakerAppUISpecs {
                 query: ""
             )
 
-            try expect(filtered.map(\.sessionID) == [textID])
+            try expect(filtered.map(\.sessionID) == [textID, recordingLimitID])
+
+            for failure in [VoiceInputFailure.recordingFailed, .providerAuthenticationFailed] {
+                let id = VoiceInputSessionID()
+                let record = VoiceInputHistoryRecord(
+                    sessionID: id, startedAt: startedAt, applicationName: nil,
+                    transcription: nil, finalText: nil, outcome: .failed(id, failure)
+                )
+                let row = HistoryPresentation.row(for: record)
+                try expect(row.problem == .failed(failure))
+                try expect(row.text == failure.userTitle)
+                try expect(!row.canCopy)
+                try expect(
+                    HistoryPresentation.filteredRecords([record], query: failure.userTitle) == [
+                        record
+                    ])
+            }
         }
 
         run(
-            "history rows present the four delivery states",
+            "history rows show explicit refinement errors without delivery assessments",
             failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
@@ -1681,36 +1785,12 @@ struct SpeakerAppUISpecs {
                 )
             )
 
-            try expect(HistoryPresentation.status(for: deliveredRecord) == .delivered)
+            try expect(HistoryPresentation.problem(for: deliveredRecord) == nil)
+            try expect(HistoryPresentation.problem(for: unconfirmedRecord) == nil)
+            try expect(HistoryPresentation.problem(for: pendingRecord) == nil)
+            try expect(HistoryPresentation.problem(for: fallbackRecord) == .refinementFailed)
             try expect(
-                HistoryPresentation.status(for: unconfirmedRecord)
-                    == .deliveryUnconfirmed
-            )
-            try expect(
-                HistoryPresentation.status(for: fallbackRecord)
-                    == .refinementFellBack
-            )
-            try expect(
-                HistoryPresentation.status(for: unconfirmedFallbackRecord)
-                    == .deliveryUnconfirmed
-            )
-            try expect(HistoryPresentation.status(for: pendingRecord) == .pendingCopy)
-            try expect(
-                HistoryRecordStatus.delivered.label
-                    == HistoryRecordStatus.deliveredLabel
-            )
-            try expect(
-                HistoryRecordStatus.deliveryUnconfirmed.label
-                    == HistoryRecordStatus.deliveryUnconfirmedLabel
-            )
-            try expect(
-                HistoryRecordStatus.refinementFellBack.label
-                    == HistoryRecordStatus.refinementFellBackLabel
-            )
-            try expect(
-                HistoryRecordStatus.pendingCopy.label
-                    == HistoryRecordStatus.pendingCopyLabel
-            )
+                HistoryPresentation.problem(for: unconfirmedFallbackRecord) == .refinementFailed)
 
             let deliveredRow = HistoryPresentation.row(
                 for: deliveredRecord,
@@ -1728,15 +1808,14 @@ struct SpeakerAppUISpecs {
             try expect(deliveredRow.text == "最终正文")
             try expect(deliveredRow.time == "09:05")
             try expect(deliveredRow.canCopy)
-            try expect(deliveredRow.status == .delivered)
-            try expect(!deliveredRow.status.showsStatusIcon)
-            try expect(!unconfirmedRow.status.showsStatusIcon)
-            try expect(pendingRow.status.showsStatusIcon)
+            try expect(deliveredRow.problem == nil)
+            try expect(unconfirmedRow.problem == nil)
+            try expect(pendingRow.problem == nil)
             try expect(pendingRow.canCopy)
         }
 
         run(
-            "history search matches retained text and delivery diagnostics without exposing target application",
+            "history search excludes delivery assessments and target application",
             failures: &failures
         ) {
             let hiddenTranscriptID = VoiceInputSessionID()
@@ -1797,7 +1876,7 @@ struct SpeakerAppUISpecs {
                 HistoryPresentation.filteredRecords(
                     records,
                     query: "pasteReceipt.unconfirmed"
-                ).map(\.sessionID) == [deliveryDiagnosticID]
+                ).isEmpty
             )
         }
 

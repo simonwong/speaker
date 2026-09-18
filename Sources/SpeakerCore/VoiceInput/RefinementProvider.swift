@@ -21,10 +21,10 @@ public enum RefinementProviderID: String, Codable, CaseIterable, Sendable {
 public enum RefinementProviderCatalog {
     public static func modelIDs(for provider: RefinementProviderID) -> [String] {
         switch provider {
-        case .deepSeek: ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"]
-        case .openAI: ["gpt-4.1-mini", "gpt-4.1"]
+        case .deepSeek: ["deepseek-v4-flash", "deepseek-flash"]
+        case .openAI: ["gpt-5.6-luna", "gpt-5.6-terra"]
         case .kimi: ["kimi-k2.6"]
-        case .glm: ["glm-5.2"]
+        case .glm: ["glm-5.3-flash", "glm-4.7-flash", "glm-4.7-flashx", "glm-5.2"]
         case .custom: []
         }
     }

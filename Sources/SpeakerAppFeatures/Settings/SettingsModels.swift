@@ -196,7 +196,20 @@ package final class RefinementSettingsModel: ObservableObject {
     package var selectedProfile: RefinementProviderProfile { providers.selectedProfile }
     package var providerName: String { selectedProvider.displayName }
     package var isMutating: Bool { isUpdatingKey || isUpdatingProvider }
-    package var modelIDs: [String] { RefinementProviderCatalog.modelIDs(for: selectedProvider) }
+    private var suggestedModelIDs: [String] {
+        RefinementProviderCatalog.modelIDs(for: selectedProvider)
+    }
+
+    package func modelTitle(for modelID: String) -> String {
+        modelID == suggestedModelIDs.first ? "\(modelID)（推荐）" : modelID
+    }
+
+    package var modelIDs: [String] {
+        let listed = suggestedModelIDs
+        let selected = selectedProfile.modelID
+        return selected.isEmpty || listed.contains(selected) ? listed : listed + [selected]
+    }
+
     package var hasValidProfile: Bool { (try? selectedProfile.validated()) != nil }
     package var hasProfileChanges: Bool {
         modelIDDraft != selectedProfile.modelID || baseURLDraft != selectedProfile.baseURL
@@ -277,7 +290,7 @@ package final class RefinementSettingsModel: ObservableObject {
     private func syncProviderDrafts() {
         modelIDDraft = selectedProfile.modelID
         baseURLDraft = selectedProfile.baseURL
-        isEditingModelID = selectedProvider == .custom || !modelIDs.contains(modelIDDraft)
+        isEditingModelID = selectedProvider == .custom || !suggestedModelIDs.contains(modelIDDraft)
     }
 
     private func invalidateConnectionCheck() {

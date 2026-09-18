@@ -46,13 +46,15 @@ These are sequential `@main` executables. They are `executableTarget`s only, not
 ./scripts/swiftw run --disable-sandbox SpeakerCoreSpecs input target is frozen
 ```
 
-Iterate with a filter, then run the whole executable, then the full deterministic gate:
+Iterate with a filter, then run the whole executable. Daily checks avoid test windows by default:
 
 ```bash
 ./scripts/test
+./scripts/test --ui-only   # Native UI checks; windows may appear.
+./scripts/test --with-ui   # Full deterministic gate, used by CI.
 ```
 
-`./scripts/test` is the repository's full deterministic gate: all specification executables, its shell contract tests, and warnings-as-errors builds for tool executables. It is not the whole CI workflow. An ordinary code change is test-complete when its tightest relevant specification executable and `./scripts/test` both exit 0.
+`./scripts/test` runs non-UI specification executables, shell contract tests, and warnings-as-errors builds without launching `SpeakerAppUISpecs`. Its output explicitly excludes native UI coverage. `--ui-only` runs the native UI executable; `--with-ui` combines both lanes into the full deterministic gate. UI checks use real windows for focus, dialogs, accessibility, and screenshots, so run that lane on the macOS CI runner or when local desktop interruption is acceptable. An ordinary code change is test-complete when its tightest relevant specification executable and the full gate pass; separately passing the default lane and `--ui-only` against unchanged source is equivalent. The full deterministic gate is not the whole CI workflow.
 
 `skills-lock.json` is validated rather than deleted because every name it locks still resolves to a real `.agents/skills/<name>/SKILL.md` exposed through `.claude/skills/`, so `./scripts/test-skills-lock` turns silent drift between the lock file and those directories into a failing gate.
 
@@ -66,7 +68,7 @@ For installer, release, or workflow changes, also inspect `.github/workflows/ci.
 
 | Job | Name | Contents |
 | --- | --- | --- |
-| `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
+| `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
 | `verify` | `Test, build, and bundle` | `needs: specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, the retained release candidate, install rollback, and the reviewed release identity guard. |
 
 `Test, build, and bundle` is the required status check on `main`; renaming the `verify` job breaks branch protection until the required check is renamed to match. `development-prerelease` still `needs: verify`, so it runs only after both gating jobs pass.
@@ -113,7 +115,7 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `run` | Runs `SpeakerApp` straight from SwiftPM without bundling. | developer |
 | `swiftw` | SwiftPM wrapper that pins the macOS 26 SDK, isolates module caches, and guards isolated scratch paths. | every other script, developer |
 | `target-capture-smoke` | Verifies Input Target freezing against a real machine. | developer |
-| `test` | The repository's full deterministic gate. | developer, CI |
+| `test` | Non-UI checks by default; `--ui-only` runs native UI checks and `--with-ui` runs the full deterministic gate. | developer, CI |
 | `test-brand-assets` | Regenerates brand assets into a temporary directory and compares them pixel by pixel. | `./scripts/test` |
 | `test-compatibility-smoke` | Contract test for the compatibility report: partial PASS returns non-zero and the report stays `0600`. | `./scripts/test` |
 | `test-development-build-identity` | Exercises development build metadata derivation and its failure modes. | `./scripts/test` |

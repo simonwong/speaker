@@ -7,7 +7,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
-            "versioned local history omits empty records and excludes sensitive fields",
+            "versioned local history retains explicit errors and excludes sensitive fields",
             failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
@@ -81,8 +81,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 (historyAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
                 "history file is not owner-only"
             )
-            try expect(allRecords.map(\.sessionID) == [firstID])
-            try expect(allRecords.first?.transcription == "豆包原文 alpha")
+            try expect(allRecords.map(\.sessionID) == [secondID, firstID])
+            try expect(allRecords.last?.transcription == "豆包原文 alpha")
             try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
             try expect(allRecords.last?.transcriptionProvider == "doubao")
             try expect(
@@ -348,6 +348,38 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 !sqliteFilesContain(Data(secret.utf8), at: fileURL),
                 "retry did not remove provider text from physical SQLite pages"
             )
+        }
+
+        await runAsync(
+            "SQLite history retains textless recording and provider errors but omits quiet outcomes",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-history-errors-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let url = directory.appendingPathComponent("history.sqlite3")
+            let store = SQLiteSessionHistory(fileURL: url)
+            var retainedIDs: [VoiceInputSessionID] = []
+            for (index, failure) in [
+                VoiceInputFailure.recordingFailed, .providerAuthenticationFailed,
+                .recordingTooShort, .providerReturnedNoText,
+            ].enumerated() {
+                let id = VoiceInputSessionID()
+                if index < 2 { retainedIDs.append(id) }
+                await store.save(
+                    .init(
+                        sessionID: id, startedAt: Date().addingTimeInterval(Double(index)),
+                        applicationName: nil, transcription: nil, finalText: nil,
+                        providerErrorCode: failure.rawValue,
+                        outcome: .failed(id, failure)
+                    ))
+            }
+            let reloaded = SQLiteSessionHistory(fileURL: url)
+            let records = await reloaded.allRecords()
+            try expect(Set(records.map(\.sessionID)) == Set(retainedIDs))
+            try expect(records.allSatisfy { $0.transcription == nil && $0.finalText == nil })
+            _ = await reloaded.closeForErasure()
+            _ = await store.closeForErasure()
         }
 
         await runAsync(

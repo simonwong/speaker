@@ -175,7 +175,6 @@ final class SpeakerRuntime: ObservableObject {
         let historyModel = HistoryModel(
             store: history,
             clipboard: SystemClipboardWriter(),
-            dictionary: dictionarySettings,
             announce: announce
         )
         self.historyModel = historyModel

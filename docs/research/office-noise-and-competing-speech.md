@@ -2,6 +2,8 @@
 
 最后核对：2026-09-02（仅查阅第一方公开资料与本仓库文档；未调用供应商接口，也未读取凭据、音频、转写文本、供应商消息或本地敏感文件）
 
+当前策略见[音频处理策略与对照实验](audio-processing-policy.md)（2026-09-18）。本文关于“默认启用 Apple Voice Processing”的实现描述和相应验证顺序已过时；Speaker 当前不主动请求该处理，以下技术资料仅作为候选研究，不能视为现有能力或已验证收益。
+
 ## 结论
 
 Speaker 在录音引擎启动前默认尝试启用 Apple Voice Processing；无法启用时回退原始采集。处理后的音频转成 16 kHz、16-bit、单声道 PCM，实时送入豆包 `bigmodel_async`。这条系统路径适合稳态噪声、键盘瞬态和本机扬声器回声，但 Apple 没有承诺按身份排除旁人，因此不能把 Voice Isolation 当作“只听机主”。[当前架构](../architecture.md) [Voice Input 规范](../specs/voice-input.md) [Apple WWDC23](https://developer.apple.com/videos/play/wwdc2023/10235/)

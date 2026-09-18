@@ -177,7 +177,7 @@ artifact，核对公开 prerelease、完整 executable SHA-256、两架构 CodeD
 然后运行：
 
 ```bash
-./scripts/test
+./scripts/test --with-ui
 ./scripts/provider-smoke all
 ./scripts/build
 ./scripts/distribute
