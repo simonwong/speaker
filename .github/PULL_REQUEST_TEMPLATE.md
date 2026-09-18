@@ -4,7 +4,7 @@
 
 ## 检查清单
 
-- [ ] `./scripts/test` 在本机通过（全部退出 0）
+- [ ] `./scripts/test --with-ui` 在本机通过（全部退出 0）
 - [ ] 已按 [AGENTS.md](../AGENTS.md) 的「Read by task」阅读并遵循对应文档：
       改动模块或接口读 [`docs/architecture.md`](../docs/architecture.md)；
       改动用户可见的语音输入行为读 [`docs/specs/voice-input.md`](../docs/specs/voice-input.md)；

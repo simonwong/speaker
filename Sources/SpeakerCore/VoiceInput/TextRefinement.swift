@@ -1,12 +1,12 @@
 import Foundation
 
-/// The two Speaker-owned Refinement Modes whose DeepSeek instructions users
+/// The two Speaker-owned Refinement Modes whose refinement instructions users
 /// can inspect and override independently.
 package enum BuiltInRefinementMode: String, CaseIterable, Equatable, Hashable, Sendable {
     case conciseCleanup
     case fullRewrite
 
-    /// Provider contract: these prompts are sent to DeepSeek verbatim and are
+    /// Provider contract: these prompts are sent to the selected refinement provider verbatim and are
     /// not user-facing copy, so they stay in SpeakerCore.
     package var defaultPrompt: String {
         return switch self {
@@ -38,7 +38,7 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
     case fullRewrite(promptOverride: String? = nil)
     case custom(name: String, prompt: String)
 
-    public var requiresDeepSeek: Bool {
+    public var requiresRefinement: Bool {
         self != .defaultSmooth
     }
 
@@ -133,10 +133,10 @@ public enum TextRefinementMode: Equatable, Hashable, Sendable {
         )
     }
 
-    /// The instruction sent to DeepSeek for this mode: the saved override when
+    /// The instruction sent to the selected refinement provider for this mode: the saved override when
     /// present, otherwise the built-in prompt. Default Smoothing has no
     /// prompt — it is Doubao built-in.
-    public var deepSeekInstruction: String? {
+    public var refinementInstruction: String? {
         switch self {
         case .defaultSmooth:
             nil
@@ -171,7 +171,7 @@ public enum TextRefinementModeValidationError: String, Error, Equatable, Sendabl
     case customPromptTooLong
 }
 
-public struct DeepSeekRefinementResult: Equatable, Sendable {
+public struct TextRefinementResult: Equatable, Sendable {
     public let text: String
     public let providerRequestID: String?
 
@@ -184,28 +184,33 @@ public struct DeepSeekRefinementResult: Equatable, Sendable {
 /// Everything the text-refinement seam knows about one refinement request: the
 /// Refinement Mode to execute and the Personal Dictionary Entry words captured
 /// when the shortcut was pressed. Default Smoothing never constructs one
-/// because it never reaches DeepSeek.
+/// because it never reaches a refinement provider.
 public struct TextRefinementContext: Equatable, Sendable {
     public let mode: TextRefinementMode
+    public let provider: RefinementProviderProfile
     /// The Entry words of the press-time Personal Dictionary snapshot, in
-    /// snapshot order. DeepSeek has no provider token budget, so this is the
+    /// snapshot order. This is the
     /// full snapshot rather than the Doubao-truncated request context.
     public let dictionaryWords: [String]
 
-    public init(mode: TextRefinementMode, dictionaryWords: [String] = []) {
+    public init(
+        mode: TextRefinementMode, dictionaryWords: [String] = [],
+        provider: RefinementProviderProfile = .legacyDeepSeek
+    ) {
+        self.provider = provider
         self.mode = mode
         self.dictionaryWords = dictionaryWords
     }
 }
 
-public protocol DeepSeekTextRefining: Sendable {
+public protocol TextRefining: Sendable {
     func refine(
         _ text: String,
         using context: TextRefinementContext
-    ) async throws -> DeepSeekRefinementResult
+    ) async throws -> TextRefinementResult
 }
 
-public enum DeepSeekRefinementStatus: String, Equatable, Sendable {
+public enum TextRefinementStatus: String, Equatable, Sendable {
     case notRequested
     case succeeded
     case fellBack
@@ -216,8 +221,8 @@ public struct TextRefinementOutcome: Equatable, Sendable {
     public let deepSeekText: String?
     public let finalText: String
     public let mode: TextRefinementMode
-    public let status: DeepSeekRefinementStatus
-    public let failure: DeepSeekRefinementFailure?
+    public let status: TextRefinementStatus
+    public let failure: TextRefinementFailure?
     public let providerRequestID: String?
 
     public init(
@@ -225,8 +230,8 @@ public struct TextRefinementOutcome: Equatable, Sendable {
         deepSeekText: String?,
         finalText: String,
         mode: TextRefinementMode,
-        status: DeepSeekRefinementStatus,
-        failure: DeepSeekRefinementFailure?,
+        status: TextRefinementStatus,
+        failure: TextRefinementFailure?,
         providerRequestID: String? = nil
     ) {
         self.doubaoText = doubaoText
@@ -242,18 +247,19 @@ public struct TextRefinementOutcome: Equatable, Sendable {
 /// Owns the product fallback guarantee: optional refinement can improve a
 /// successful transcript, but can never turn it into a failed voice input.
 public actor OptionalTextRefinementPipeline {
-    private let refiner: any DeepSeekTextRefining
+    private let refiner: any TextRefining
 
-    public init(refiner: any DeepSeekTextRefining) {
+    public init(refiner: any TextRefining) {
         self.refiner = refiner
     }
 
     public func refine(
         doubaoText: String,
         mode: TextRefinementMode,
-        dictionaryWords: [String] = []
+        dictionaryWords: [String] = [],
+        provider: RefinementProviderProfile = .legacyDeepSeek
     ) async throws -> TextRefinementOutcome {
-        guard mode.requiresDeepSeek else {
+        guard mode.requiresRefinement else {
             return TextRefinementOutcome(
                 doubaoText: doubaoText,
                 deepSeekText: nil,
@@ -272,7 +278,8 @@ public actor OptionalTextRefinementPipeline {
                 doubaoText,
                 using: TextRefinementContext(
                     mode: validatedMode,
-                    dictionaryWords: dictionaryWords
+                    dictionaryWords: dictionaryWords,
+                    provider: provider
                 )
             )
             try Task.checkCancellation()
@@ -285,7 +292,7 @@ public actor OptionalTextRefinementPipeline {
                 failure: nil,
                 providerRequestID: result.providerRequestID
             )
-        } catch let failure as DeepSeekRefinementFailure {
+        } catch let failure as TextRefinementFailure {
             if failure.kind == .cancelled {
                 throw CancellationError()
             }
@@ -294,7 +301,7 @@ public actor OptionalTextRefinementPipeline {
             return fallback(
                 doubaoText: doubaoText,
                 mode: mode,
-                failure: DeepSeekRefinementFailure(
+                failure: TextRefinementFailure(
                     kind: .invalidMode,
                     message: validation.rawValue
                 )
@@ -305,7 +312,7 @@ public actor OptionalTextRefinementPipeline {
             return fallback(
                 doubaoText: doubaoText,
                 mode: mode,
-                failure: DeepSeekRefinementFailure(kind: .unexpected)
+                failure: TextRefinementFailure(kind: .unexpected)
             )
         }
     }
@@ -313,7 +320,7 @@ public actor OptionalTextRefinementPipeline {
     private func fallback(
         doubaoText: String,
         mode: TextRefinementMode,
-        failure: DeepSeekRefinementFailure
+        failure: TextRefinementFailure
     ) -> TextRefinementOutcome {
         TextRefinementOutcome(
             doubaoText: doubaoText,

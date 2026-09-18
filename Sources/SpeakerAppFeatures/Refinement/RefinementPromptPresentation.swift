@@ -1,7 +1,7 @@
 import Foundation
 import SpeakerCore
 
-/// Editor state for one DeepSeek-backed built-in refinement mode's prompt row
+/// Editor state for one provider-backed built-in refinement mode's prompt row
 /// in the settings 整理 group.
 package struct RefinementPromptEditorState: Equatable, Sendable {
     package let mode: BuiltInRefinementMode

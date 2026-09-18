@@ -5,11 +5,14 @@ import SwiftUI
 package struct SpeakerOnboardingView: View {
     @ObservedObject var permissions: PermissionModel
     @ObservedObject var doubao: DoubaoSettingsModel
+    @State private var step: OnboardingStep = .permissions
     let completion: () -> Void
     let requestPermission: (PermissionKind) async -> Void
     let refreshPermissions: () -> Void
     let announce: AccessibilityAnnounce
     let buildInfo: SpeakerBuildInfoReader
+    let shortcutName: () -> String
+    let mode: OnboardingMode
 
     package init(
         permissions: PermissionModel,
@@ -18,6 +21,8 @@ package struct SpeakerOnboardingView: View {
         refreshPermissions: @escaping () -> Void,
         announce: @escaping AccessibilityAnnounce,
         buildInfo: SpeakerBuildInfoReader = .main,
+        shortcutName: @escaping () -> String = { "Fn" },
+        mode: OnboardingMode = .setup,
         completion: @escaping () -> Void
     ) {
         self.permissions = permissions
@@ -27,160 +32,35 @@ package struct SpeakerOnboardingView: View {
         self.refreshPermissions = refreshPermissions
         self.announce = announce
         self.buildInfo = buildInfo
-    }
-
-    private var ready: Bool {
-        presentation.isReady
-    }
-
-    private var isCheckingConnection: Bool {
-        presentation.isCheckingConnection
+        self.shortcutName = shortcutName
+        self.mode = mode
     }
 
     private var presentation: OnboardingPresentation {
         OnboardingPresentation(
             permissions: permissions.snapshot,
             doubaoStatus: doubao.status,
-            hasStoredDoubaoKey: doubao.hasStoredKey
+            hasStoredDoubaoKey: doubao.hasStoredKey,
+            mode: mode,
+            isUpdatingDoubaoKey: doubao.isUpdatingKey
         )
-    }
-
-    private var signingMode: SpeakerSigningMode {
-        buildInfo.signingMode
     }
 
     package var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .top, spacing: 14) {
-                    onboardingIcon
-                    onboardingTitle
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                VStack(spacing: 0) {
-                    OnboardingPermissionRow(
-                        icon: "mic.fill",
-                        title: "麦克风",
-                        detail: "用于录音；Speaker 不保存音频。",
-                        state: permissions.snapshot.microphone,
-                        permissionAction: presentation.permissionAction(
-                            for: .microphone
-                        )
-                    ) {
-                        Task { await requestPermission(.microphone) }
-                    }
-                    Divider().padding(.leading, 48)
-                    OnboardingPermissionRow(
-                        icon: "accessibility",
-                        title: "辅助功能",
-                        detail: "用于全局快捷键与向已验证的输入框写入文字。",
-                        state: permissions.snapshot.accessibility,
-                        permissionAction: presentation.permissionAction(
-                            for: .accessibility
-                        )
-                    ) {
-                        Task { await requestPermission(.accessibility) }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .background(
-                    .quaternary.opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 14)
-                )
-
-                if let notice = signingMode.permissionIdentityNotice {
-                    Label(notice, systemImage: "hammer.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4)
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    ViewThatFits(in: .horizontal) {
-                        HStack {
-                            providerTitle
-                            Spacer()
-                            providerStatus
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            providerTitle
-                            providerStatus
-                        }
-                    }
-                    Text("Key 只保存在这台 Mac；语音会直接发送到你自己的豆包账号。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) {
-                            apiKeyField
-                            saveAPIKeyButton
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            apiKeyField
-                            saveAPIKeyButton
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                    }
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 10) {
-                            resourcePicker
-                            Spacer()
-                            connectionCheckControls
-                        }
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            resourcePicker
-                            connectionCheckControls
-                        }
-                    }
-
-                    connectionStatusNotice
-
-                    Link(
-                        "在火山引擎控制台获取 Key",
-                        destination: ExternalLinks.doubaoConsoleAPIKeys
-                    )
-                    .font(.caption)
-                }
-                .padding(16)
-                .background(
-                    .quaternary.opacity(0.45),
-                    in: RoundedRectangle(cornerRadius: 14)
-                )
-
+            VStack(alignment: .leading, spacing: 24) {
+                header
+                stepIndicator
+                stepContent
             }
-            .padding(.horizontal, 30)
-            .padding(.top, 30)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+            .padding(.bottom, 20)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 18) {
-                    readinessMessage
-                    Spacer()
-                    skipButton
-                    completionButton
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    readinessMessage
-                    HStack(spacing: 10) {
-                        skipButton
-                        completionButton
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 16)
-            .background(Color(nsColor: .windowBackgroundColor))
+            footer
         }
+        .buttonStyle(SettingsButtonStyle())
         .frame(minWidth: 360, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
@@ -188,242 +68,260 @@ package struct SpeakerOnboardingView: View {
             await doubao.refresh()
         }
         .onChange(of: permissions.snapshot) { previous, current in
-            announcePermissionChanges(from: previous, to: current)
+            for permission in PermissionKind.allCases
+            where previous[permission] != current[permission] {
+                let name = permission == .microphone ? "麦克风" : "辅助功能"
+                announce("\(name)：\(permissionStatus(current[permission]))")
+            }
         }
         .onChange(of: doubao.status) { _, status in
             switch status {
-            case .checking:
-                announce("正在检查豆包连接")
-            case .success:
-                announce("豆包连接成功")
-            case .failure(let message):
-                announce("豆包连接失败：\(message)")
-            case .loading, .unconfigured, .configured:
-                break
+            case .checking: announce("正在检查豆包连接")
+            case .success: announce("豆包连接成功，可以进入下一步")
+            case .failure(let message): announce("豆包连接失败：\(message)")
+            case .loading, .unconfigured, .configured: break
             }
         }
-        .onChange(of: ready) { wasReady, isReady in
-            guard !wasReady, isReady else { return }
-            announce("所有设置已完成，可以开始使用 Speaker")
+        .onChange(of: step) { _, current in
+            announce("第 \(current.rawValue + 1) 步，共 3 步：\(current.title)")
         }
     }
 
-    private var onboardingIcon: some View {
-        SpeakerIdentityTile(size: 58, accessibility: .named)
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            SpeakerIdentityTile(size: 48, accessibility: .named)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(step.title)
+                    .font(.title2.bold())
+                Text(stepDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
-    private var onboardingTitle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("用说话代替打字")
-                .font(.title.bold())
-            Text("长按 Fn 讲话、松开结束；也可以短按开始，再按一次结束。")
+    private var stepDescription: String {
+        switch step {
+        case .permissions: "先让 Speaker 听见你，并将文字输入其他应用。"
+        case .apiKey: "使用你自己的豆包账号，将语音转成文字。"
+        case .shortcut: "记住键盘上的快捷键，就能在任何输入框中开始。"
+        }
+    }
+
+    private var stepIndicator: some View {
+        HStack(spacing: 8) {
+            ForEach(OnboardingStep.allCases, id: \.rawValue) { item in
+                HStack(spacing: 6) {
+                    Text("\(item.rawValue + 1)")
+                        .font(.caption.bold())
+                        .frame(width: 24, height: 24)
+                        .background(
+                            item == step ? Color.accentColor : Color.secondary.opacity(0.12),
+                            in: Circle()
+                        )
+                        .foregroundStyle(item == step ? Color.white : Color.secondary)
+                    Text(item.shortTitle)
+                        .font(.caption.weight(item == step ? .semibold : .regular))
+                        .foregroundStyle(item == step ? .primary : .secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                if item != .shortcut {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.2))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("第 \(step.rawValue + 1) 步，共 3 步：\(step.title)")
+    }
+
+    @ViewBuilder
+    private var stepContent: some View {
+        switch step {
+        case .permissions:
+            VStack(alignment: .leading, spacing: 16) {
+                permissionCard(
+                    .microphone, title: "麦克风", icon: "mic.fill", purpose: "用于听见你的声音。Speaker 不保存音频。")
+                permissionCard(
+                    .accessibility, title: "辅助功能", icon: "accessibility",
+                    purpose: "用于响应键盘快捷键，并把文字输入你正在使用的应用。")
+                Button("重新检查权限", action: refreshPermissions)
+                    .font(.callout)
+                if let notice = buildInfo.signingMode.permissionIdentityNotice {
+                    SettingsNotice(text: notice, color: .orange)
+                }
+            }
+        case .apiKey:
+            VStack(alignment: .leading, spacing: 14) {
+                DoubaoSettingsCard(model: doubao)
+                Text("Key 只保存在这台 Mac。语音直接发送到你的豆包账号，费用由服务商收取。连接检查需由你手动发起。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("文字整理服务为可选项，之后可在设置中添加；默认顺滑只需豆包。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .shortcut:
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Text("当前键盘快捷键")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(shortcutName())
+                        .font(.title2.monospaced().bold())
+                }
+                tutorialRow(
+                    icon: "hand.tap", title: "短按键盘快捷键", detail: "按一下 \(shortcutName()) 开始录音，再按一下结束。"
+                )
+                tutorialRow(
+                    icon: "hand.point.up.left", title: "长按键盘快捷键",
+                    detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
+                tutorialRow(icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
+                Text("打开任意应用的输入框，再使用键盘快捷键。录音结束时所在的输入框，就是文字的输入位置。快捷键可随时在设置中更改。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(18)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func permissionCard(
+        _ permission: PermissionKind,
+        title: String,
+        icon: String,
+        purpose: String
+    ) -> some View {
+        let state = permissions.snapshot[permission]
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(title, systemImage: icon)
+                    .font(.headline)
+                Spacer()
+                Text(permissionStatus(state))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(state == .granted ? Color.green : Color.secondary)
+            }
+            Text(purpose)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(presentation.permissionInstructions(for: permission))
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var providerTitle: some View {
-        Label("豆包语音 API Key", systemImage: "key.fill")
-            .font(.headline)
-    }
-
-    private var providerStatus: some View {
-        let status = DoubaoStatusPresentation(status: doubao.status)
-        return StatusBadge(
-            text: status.text,
-            icon: status.symbolName,
-            color: status.tint
-        )
-    }
-
-    private var apiKeyField: some View {
-        SecureField(
-            doubao.hasStoredKey ? "粘贴新的 API Key 以替换" : "粘贴豆包语音 API Key",
-            text: $doubao.apiKeyDraft
-        )
-        .accessibilityLabel("豆包语音 API Key")
-    }
-
-    private var saveAPIKeyButton: some View {
-        Button("保存") {
-            Task { await doubao.save() }
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(
-            doubao.apiKeyDraft
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty
-        )
-        .accessibilityLabel("保存豆包语音 API Key")
-    }
-
-    private var resourcePicker: some View {
-        LabeledContent("流式资源") {
-            Picker(
-                "流式资源",
-                selection: Binding(
-                    get: { doubao.resource },
-                    set: { resource in
-                        Task { await doubao.selectResource(resource) }
-                    }
-                )
-            ) {
-                ForEach(DoubaoStreamingResource.allCases, id: \.rawValue) { resource in
-                    Text(resource.displayName).tag(resource)
+            if let action = presentation.permissionAction(for: permission) {
+                Button(action == .request ? "允许麦克风" : "打开\(title)设置") {
+                    Task { await requestPermission(permission) }
                 }
+                .buttonStyle(SettingsButtonStyle())
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .disabled(!presentation.canSelectResource)
         }
-        .font(.caption.weight(.medium))
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private var connectionCheckControls: some View {
-        HStack(spacing: 8) {
-            if isCheckingConnection {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("正在检查豆包连接")
+    private func tutorialRow(icon: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Button("检查连接") {
-                doubao.checkConnection()
+        }
+    }
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            if !presentation.canContinue(from: step) {
+                Text(blockingMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .disabled(!presentation.canCheckConnection)
-        }
-    }
-
-    private var readinessMessage: some View {
-        Text(
-            ready
-                ? "权限与豆包连接均已确认，可以开始使用。"
-                : "完成权限、保存 Key 并通过连接检查后即可开始；也可以先跳过，之后在设置中随时完成。"
-        )
-        .font(.caption)
-        .foregroundStyle(ready ? .green : .secondary)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder
-    private var skipButton: some View {
-        if !presentation.canComplete {
-            Button("跳过，稍后配置", action: completion)
-                .controlSize(.large)
-                .keyboardShortcut(.cancelAction)
-                .accessibilityHint(
-                    "关闭首次设置，之后不再自动弹出。完成权限和豆包配置前语音输入不可用，可在菜单栏或设置中继续配置。"
-                )
-        }
-    }
-
-    private var completionButton: some View {
-        Button("开始使用 Speaker", action: completion)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!presentation.canComplete)
-            .keyboardShortcut(.defaultAction)
-            .accessibilityHint(
-                ready
-                    ? "关闭首次设置并开始使用 Speaker"
-                    : "需要先完成权限和豆包连接检查"
-            )
-    }
-
-    @ViewBuilder
-    private var connectionStatusNotice: some View {
-        switch doubao.status {
-        case .loading:
-            SettingsNotice(text: "正在读取本机配置…")
-        case .unconfigured:
-            SettingsNotice(text: "保存 Key 后，请选择已开通的资源并检查连接。")
-        case .configured:
-            SettingsNotice(text: "Key 已保存；连接尚未验证。")
-        case .checking:
-            SettingsNotice(text: "正在等待豆包返回明确的连接检查结果。")
-        case .success:
-            SettingsNotice(text: "连接成功，当前资源可以使用。", color: .green)
-        case .failure:
-            SettingsNotice(text: doubao.summary, color: .red)
-        }
-    }
-
-    private func announcePermissionChanges(
-        from previous: PermissionSnapshot,
-        to current: PermissionSnapshot
-    ) {
-        if previous.microphone != current.microphone {
-            announce(permissionAnnouncement("麦克风", state: current.microphone))
-        }
-        if previous.accessibility != current.accessibility {
-            announce(permissionAnnouncement("辅助功能", state: current.accessibility))
-        }
-    }
-
-    private func permissionAnnouncement(_ name: String, state: PermissionState) -> String {
-        switch state {
-        case .granted: "\(name)权限已允许"
-        case .denied: "\(name)权限未允许"
-        case .notDetermined: "\(name)权限尚未决定"
-        case .restricted: "\(name)权限受系统或组织策略限制"
-        }
-    }
-}
-
-private struct OnboardingPermissionRow: View {
-    let icon: String
-    let title: String
-    let detail: String
-    let state: PermissionState
-    let permissionAction: OnboardingPermissionAction?
-    let action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 13) {
-                Image(systemName: icon)
-                    .foregroundStyle(state == .granted ? .green : .secondary)
-                    .frame(width: 32, height: 32)
+            HStack(spacing: 12) {
+                Button(mode == .review ? "关闭引导" : "稍后配置", action: completion)
+                    .keyboardShortcut(.cancelAction)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.headline)
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .overlay {
+                        AccessibilityButtonBridge(
+                            label: mode == .review ? "关闭引导" : "稍后配置", hint: "关闭首次设置，之后可在设置中完成配置。",
+                            action: completion)
+                    }
+                Spacer(minLength: 4)
+                if step != .permissions {
+                    Button("上一步", action: previousStep)
+                        .accessibilityHidden(true)
+                        .overlay {
+                            AccessibilityButtonBridge(label: "上一步", action: previousStep)
+                        }
                 }
-            }
-            HStack {
-                Spacer()
-                if state == .granted {
-                    Label("已完成", systemImage: "checkmark.circle.fill")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.green)
-                } else if state == .restricted {
-                    Label(
-                        "受系统或组织策略限制",
-                        systemImage: "lock.fill"
+                Button(
+                    step == .shortcut ? (mode == .review ? "完成" : "开始使用 Speaker") : "下一步",
+                    action: nextStep
+                )
+                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .disabled(!presentation.canContinue(from: step))
+                .keyboardShortcut(.defaultAction)
+                .accessibilityHidden(true)
+                .overlay {
+                    AccessibilityButtonBridge(
+                        label: step == .shortcut
+                            ? (mode == .review ? "完成" : "开始使用 Speaker") : "下一步",
+                        isEnabled: presentation.canContinue(from: step),
+                        action: nextStep
                     )
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.red)
-                } else if permissionAction != nil {
-                    permissionButton
                 }
             }
         }
-        .padding(.vertical, 13)
+        .padding(.horizontal, 28)
+        .padding(.bottom, 18)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var permissionButton: some View {
-        Button(
-            permissionAction == .request
-                ? "继续"
-                : "打开系统设置",
-            action: action
-        )
-        .accessibilityLabel(
-            permissionAction == .request
-                ? "允许\(title)"
-                : "打开\(title)设置"
-        )
+    private func previousStep() {
+        step = step == .shortcut ? .apiKey : .permissions
+    }
+
+    private func nextStep() {
+        guard presentation.canContinue(from: step) else { return }
+        switch step {
+        case .permissions: step = .apiKey
+        case .apiKey: step = .shortcut
+        case .shortcut: completion()
+        }
+    }
+
+    private var blockingMessage: String {
+        if !permissions.snapshot.allGranted {
+            return step == .permissions
+                ? "两项权限都开启后，点击「下一步」。也可以稍后在设置中完成。"
+                : "权限尚未全部开启，请返回第一步检查。"
+        }
+        return "保存豆包 Key，选择已开通的资源，再点击「检查连接」。连接成功后继续。"
+    }
+
+    private func permissionStatus(_ state: PermissionState) -> String {
+        switch state {
+        case .granted: "已开启"
+        case .denied: "未开启"
+        case .notDetermined: "待允许"
+        case .restricted: "受限制"
+        }
     }
 }

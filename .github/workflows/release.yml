@@ -135,7 +135,7 @@ jobs:
             "$REVIEWED_RELEASE_BUNDLE_IDENTIFIER.provider-api-keys"
 
       - name: Run complete deterministic gate
-        run: ./scripts/test
+        run: ./scripts/test --with-ui
 
       - name: Resolve pinned Sparkle tools
         run: ./scripts/swiftw package resolve --disable-sandbox

@@ -69,7 +69,7 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                                 )
                             }
                         case .cancel:
-                            await sessions.cancel(triggeredAtSequence: event.sequence)
+                            await sessions.handleEscape(triggeredAtSequence: event.sequence)
                         case .monitorRecovered:
                             break
                         }
@@ -100,7 +100,7 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                 // A provider request can keep the ordered consumer inside `.released`.
                 // Preempt it immediately. The sequence fence prevents a delayed
                 // task from cancelling a session begun by a later press.
-                Task { await sessions.cancel(triggeredAtSequence: event.sequence) }
+                Task { await sessions.handleEscape(triggeredAtSequence: event.sequence) }
             }
             continuation.yield(event)
         }

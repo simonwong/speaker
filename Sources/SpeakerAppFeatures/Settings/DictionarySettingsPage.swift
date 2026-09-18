@@ -15,13 +15,13 @@ struct DictionarySettingsPage: View {
                     "输入词条，回车添加",
                     text: $model.draftWord
                 )
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(SettingsTextFieldStyle())
                 .onSubmit { Task { await model.add() } }
 
                 Button("添加") {
                     Task { await model.add() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(
                     model.draftWord
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -52,7 +52,7 @@ struct DictionarySettingsPage: View {
                 }
             }
 
-            Text("只有词条文本会随识别请求发送给豆包；启用需要 DeepSeek 的整理模式时，词条文本也会一并发送给 DeepSeek。")
+            Text("只有词条文本会随识别请求发送给豆包；启用文字整理模式时，词条文本也会一并发送给所选文字整理服务。")
                 .font(SpeakerTypography.footnote)
                 .foregroundStyle(.tertiary)
 

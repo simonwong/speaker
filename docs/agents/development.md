@@ -46,13 +46,15 @@ These are sequential `@main` executables. They are `executableTarget`s only, not
 ./scripts/swiftw run --disable-sandbox SpeakerCoreSpecs input target is frozen
 ```
 
-Iterate with a filter, then run the whole executable, then the full deterministic gate:
+Iterate with a filter, then run the whole executable. Daily checks avoid test windows by default:
 
 ```bash
 ./scripts/test
+./scripts/test --ui-only   # Native UI checks; windows may appear.
+./scripts/test --with-ui   # Full deterministic gate, used by CI.
 ```
 
-`./scripts/test` is the repository's full deterministic gate: all specification executables, its shell contract tests, and warnings-as-errors builds for tool executables. It is not the whole CI workflow. An ordinary code change is test-complete when its tightest relevant specification executable and `./scripts/test` both exit 0.
+`./scripts/test` runs non-UI specification executables, shell contract tests, and warnings-as-errors builds without launching `SpeakerAppUISpecs`. Its output explicitly excludes native UI coverage. `--ui-only` runs the native UI executable; `--with-ui` combines both lanes into the full deterministic gate. UI checks use real windows for focus, dialogs, accessibility, and screenshots, so run that lane on the macOS CI runner or when local desktop interruption is acceptable. An ordinary code change is test-complete when its tightest relevant specification executable and the full gate pass; separately passing the default lane and `--ui-only` against unchanged source is equivalent. The full deterministic gate is not the whole CI workflow.
 
 `skills-lock.json` is validated rather than deleted because every name it locks still resolves to a real `.agents/skills/<name>/SKILL.md` exposed through `.claude/skills/`, so `./scripts/test-skills-lock` turns silent drift between the lock file and those directories into a failing gate.
 
@@ -66,7 +68,7 @@ For installer, release, or workflow changes, also inspect `.github/workflows/ci.
 
 | Job | Name | Contents |
 | --- | --- | --- |
-| `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
+| `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
 | `verify` | `Test, build, and bundle` | `needs: specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, the retained release candidate, install rollback, and the reviewed release identity guard. |
 
 `Test, build, and bundle` is the required status check on `main`; renaming the `verify` job breaks branch protection until the required check is renamed to match. `development-prerelease` still `needs: verify`, so it runs only after both gating jobs pass.
@@ -106,21 +108,25 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `generate-brand-assets` | Regenerates `Resources/AppIcon.png` and `AppIcon.icns` through `SpeakerBrandAssetGenerator`. | developer, `./scripts/test` |
 | `install` | Replaces `/Applications/Speaker.app` with a verified swap, identity checks, and rollback. | developer, `release`, `./scripts/test`, CI |
 | `launch` | Bundles the development App and opens it. | developer |
+| `package-dmg` | Packages a signed App into an APFS/lzfse drag-to-Applications DMG without rebuilding or resigning. | `distribute`, development prerelease CI, developer |
 | `provider-smoke` | Doubao/DeepSeek connection probes and the paid evidence matrix. | developer (explicit approval), release |
 | `release` | Development “try my change” loop: release build, bundle, install, launch under a stable local identity. | developer |
 | `release-common` | Sourced library of fail-closed release validation helpers; it is never run directly. | `bundle`, `install`, `distribute`, `verify-published-update`, `test-release-*`, CI |
 | `run` | Runs `SpeakerApp` straight from SwiftPM without bundling. | developer |
 | `swiftw` | SwiftPM wrapper that pins the macOS 26 SDK, isolates module caches, and guards isolated scratch paths. | every other script, developer |
 | `target-capture-smoke` | Verifies Input Target freezing against a real machine. | developer |
-| `test` | The repository's full deterministic gate. | developer, CI |
+| `test` | Non-UI checks by default; `--ui-only` runs native UI checks and `--with-ui` runs the full deterministic gate. | developer, CI |
 | `test-brand-assets` | Regenerates brand assets into a temporary directory and compares them pixel by pixel. | `./scripts/test` |
 | `test-compatibility-smoke` | Contract test for the compatibility report: partial PASS returns non-zero and the report stays `0600`. | `./scripts/test` |
 | `test-development-build-identity` | Exercises development build metadata derivation and its failure modes. | `./scripts/test` |
 | `test-install-identity` | Proves the installer refuses a same-Bundle-ID app with a broken signature. | `./scripts/test` |
 | `test-install-rollback` | Injects a post-swap failure and confirms the old bundle is restored. | CI only |
+| `test-package-dmg` | Mounts a fixture DMG and checks its installation layout, signature, and refusal to overwrite output. | `./scripts/test` |
 | `test-provider-smoke-contract` | Asserts `provider-smoke` argument validation under the offline guard so the gate can never bill. | `./scripts/test` |
 | `test-release-evidence` | Checks dSYM binding and evidence ZIP integrity with a real executable. | `./scripts/test`, CI |
 | `test-release-identity` | Release identity, lock, promotion journal, and rollback counterexamples. | `./scripts/test` |
+| `test-runner-common` | Sourced helpers for parallel gate steps and the combined exit-status summary. | `./scripts/test`, `test-scripts-test-summary` |
+| `test-scripts-test-summary` | Proves the full gate keeps running after failures and reports every result. | `./scripts/test` |
 | `test-skills-lock` | Checks `skills-lock.json` is valid JSON and that every locked skill directory exists. | `./scripts/test` |
 | `test-workflow-security` | GitHub workflow permission, pinning, and trigger counterexamples. | `./scripts/test` |
 | `verify-provider-evidence` | Runs `SpeakerProviderEvidenceVerifier` over a provider matrix report. | developer, release |

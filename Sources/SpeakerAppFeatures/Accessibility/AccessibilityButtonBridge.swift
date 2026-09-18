@@ -13,11 +13,13 @@ import SwiftUI
 struct AccessibilityButtonBridge: NSViewRepresentable {
     let label: String
     let hint: String?
+    let isEnabled: Bool
     let action: () -> Void
 
-    init(label: String, hint: String? = nil, action: @escaping () -> Void) {
+    init(label: String, hint: String? = nil, isEnabled: Bool = true, action: @escaping () -> Void) {
         self.label = label
         self.hint = hint
+        self.isEnabled = isEnabled
         self.action = action
     }
 
@@ -25,6 +27,7 @@ struct AccessibilityButtonBridge: NSViewRepresentable {
         AccessibilityButtonBridgeView(
             label: label,
             hint: hint,
+            isEnabled: isEnabled,
             action: action
         )
     }
@@ -33,7 +36,7 @@ struct AccessibilityButtonBridge: NSViewRepresentable {
         _ view: AccessibilityButtonBridgeView,
         context: Context
     ) {
-        view.update(label: label, hint: hint, action: action)
+        view.update(label: label, hint: hint, isEnabled: isEnabled, action: action)
     }
 }
 
@@ -44,10 +47,10 @@ final class AccessibilityButtonBridgeView:
 {
     private var accessibilityAction: () -> Void
 
-    init(label: String, hint: String?, action: @escaping () -> Void) {
+    init(label: String, hint: String?, isEnabled: Bool, action: @escaping () -> Void) {
         accessibilityAction = action
         super.init(frame: .zero)
-        update(label: label, hint: hint, action: action)
+        update(label: label, hint: hint, isEnabled: isEnabled, action: action)
     }
 
     @available(*, unavailable)
@@ -58,6 +61,7 @@ final class AccessibilityButtonBridgeView:
     func update(
         label: String,
         hint: String?,
+        isEnabled: Bool,
         action: @escaping () -> Void
     ) {
         accessibilityAction = action
@@ -65,7 +69,7 @@ final class AccessibilityButtonBridgeView:
         setAccessibilityRole(.button)
         setAccessibilityLabel(label)
         setAccessibilityHelp(hint)
-        setAccessibilityEnabled(true)
+        setAccessibilityEnabled(isEnabled)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -73,6 +77,7 @@ final class AccessibilityButtonBridgeView:
     }
 
     override func accessibilityPerformPress() -> Bool {
+        guard isAccessibilityEnabled() else { return false }
         accessibilityAction()
         return true
     }

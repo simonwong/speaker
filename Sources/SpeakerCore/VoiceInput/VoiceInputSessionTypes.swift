@@ -127,7 +127,7 @@ public enum VoiceInputActivity: Equatable, Sendable {
 
 public enum VoiceInputNotice: Equatable, Sendable {
     case copied
-    case refinementFellBack(DeepSeekRefinementFailureKind?)
+    case refinementFellBack(TextRefinementFailureKind?)
     case persistenceFailure(LocalHistoryPersistenceNotice)
 }
 
@@ -281,6 +281,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let deliveryDiagnosticCode: String?
     public let deepSeekText: String?
     public let deepSeekRequestID: String?
+    public let refinementProviderID: RefinementProviderID?
+    public let refinementModelID: String?
     public let refinementModeName: String?
     public let refinementPrompt: String?
     public let refinementStatus: String?
@@ -311,6 +313,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         deliveryDiagnosticCode: String? = nil,
         deepSeekText: String? = nil,
         deepSeekRequestID: String? = nil,
+        refinementProviderID: RefinementProviderID? = nil,
+        refinementModelID: String? = nil,
         refinementModeName: String? = nil,
         refinementPrompt: String? = nil,
         refinementStatus: String? = nil,
@@ -340,6 +344,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.deliveryDiagnosticCode = deliveryDiagnosticCode
         self.deepSeekText = deepSeekText
         self.deepSeekRequestID = deepSeekRequestID
+        self.refinementProviderID = refinementProviderID
+        self.refinementModelID = refinementModelID
         self.refinementModeName = refinementModeName
         self.refinementPrompt = refinementPrompt
         self.refinementStatus = refinementStatus

@@ -13,6 +13,7 @@ package struct MenuBarContent: View {
     @ObservedObject var mainWindow: MainWindowModel
     let startRuntime: () -> Void
     let refreshPermissions: () -> Void
+    let openOnboarding: () -> Void
     @Environment(\.openWindow) private var openWindow
 
     package init(
@@ -23,7 +24,8 @@ package struct MenuBarContent: View {
         settingsNavigation: SettingsNavigationModel,
         mainWindow: MainWindowModel,
         startRuntime: @escaping () -> Void,
-        refreshPermissions: @escaping () -> Void
+        refreshPermissions: @escaping () -> Void,
+        openOnboarding: @escaping () -> Void
     ) {
         self.voiceInput = voiceInput
         self.refinement = refinement
@@ -33,12 +35,14 @@ package struct MenuBarContent: View {
         self.mainWindow = mainWindow
         self.startRuntime = startRuntime
         self.refreshPermissions = refreshPermissions
+        self.openOnboarding = openOnboarding
     }
 
     private var commandRouter: MenuBarCommandRouter {
         MenuBarCommandRouter(
             navigation: settingsNavigation,
             openOverview: { openMainWindow(.overview) },
+            openOnboarding: openOnboarding,
             openSettings: { openMainWindow(.settings) },
             openDataErasureRecovery: { openMainWindow(.about) },
             activate: {
@@ -143,6 +147,8 @@ package struct MenuBarContent: View {
                     voiceInput.perform(dismissAction)
                 }
             }
+        case .onboarding:
+            Button("使用引导…") { commandRouter.perform(.onboarding) }
         case .settings:
             Button("设置…") {
                 commandRouter.perform(.settings)

@@ -185,10 +185,6 @@ enum DashboardGroupingSpecs {
         HistoryModel(
             store: DashboardHistoryStoreFake(records: records, summary: .empty),
             clipboard: DashboardClipboardFake(),
-            dictionary: DictionarySettingsModel(
-                store: DashboardDictionaryStoreFake(),
-                configuration: VoiceInputConfigurationController()
-            ),
             announce: { _ in },
             now: { now }
         )
@@ -293,17 +289,5 @@ private struct DashboardClipboardFake: ClipboardWriting {
     @discardableResult
     func copy(_ text: String) async -> Bool {
         true
-    }
-}
-
-private actor DashboardDictionaryStoreFake: PersonalDictionaryStoring {
-    private var stored: PersonalDictionary = .empty
-
-    func load() -> PersonalDictionaryLoadResult {
-        PersonalDictionaryLoadResult(dictionary: stored)
-    }
-
-    func save(_ dictionary: PersonalDictionary) {
-        stored = dictionary
     }
 }

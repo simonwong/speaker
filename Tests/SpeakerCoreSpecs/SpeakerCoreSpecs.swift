@@ -20,6 +20,7 @@ struct SpeakerCoreSpecs {
         await DoubaoFrameCodecSpecs.run(failures: &failures)
         await DoubaoFailureClassifierSpecs.run(failures: &failures)
         await DeepSeekRefinementSpecs.run(failures: &failures)
+        await RefinementProviderSpecs.run(failures: &failures)
         await CredentialStoreSpecs.run(failures: &failures)
         await SessionHistorySpecs.run(failures: &failures)
         await PersonalDictionarySpecs.run(failures: &failures)

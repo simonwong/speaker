@@ -22,6 +22,12 @@ The text-processing strategy selected for a Voice Input Session. Each mode has a
 
 _Avoid_: rule, transcription prompt
 
+**Refinement Provider**
+
+The user-selected service and model that may refine a confirmed Doubao Stage Result. Its destination and credential ownership are fixed for each Voice Input Session; it never receives audio.
+
+_Avoid_: transcription provider, model router
+
 **Default Smoothing**
 
 The built-in Refinement Mode that removes pauses, fillers, and repeated speech without deliberately reorganizing the content. It uses Doubao only.
@@ -60,7 +66,7 @@ _Avoid_: failed text, lost result
 
 **Session Record**
 
-The local history record for a Voice Input Session. It may contain Stage Results, the Refinement Mode, status, provider request identifiers, structured failure codes, the Personal Dictionary snapshot, timing, and content-free diagnostics, but never raw audio, target-application identity, or free-text provider messages.
+The local history record for a Voice Input Session. It may contain Stage Results, the Refinement Mode and Refinement Provider, status, provider request identifiers, structured failure codes, the Personal Dictionary snapshot, timing, and content-free diagnostics, but never raw audio, target-application identity, or free-text provider messages.
 
 _Avoid_: recording history, chat record
 

@@ -83,7 +83,8 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
         text: String,
         copyButtonTitle: String,
         copyAction: VoiceInputExperienceAction,
-        dismissAction: VoiceInputExperienceAction
+        dismissAction: VoiceInputExperienceAction,
+        copyFailed: Bool = false
     )
     case problem(
         icon: String,
@@ -494,8 +495,8 @@ package final class VoiceInputExperience: ObservableObject {
                 true
             }
         triggerIntakeGate.setAllowsSessionTriggers(allowsSessionTriggers)
-        escapeGate.setActive(presentation.activity.isActive)
         state = Self.makeState(from: presentation)
+        escapeGate.setActive(presentation.activity.isActive || state.menu.dismissAction != nil)
         announceTransitionIfNeeded(presentation.activity)
         announceNoticeIfNeeded(presentation)
     }
@@ -617,9 +618,10 @@ package final class VoiceInputExperience: ObservableObject {
     }
 
     private static func endsSilently(_ activity: VoiceInputActivity) -> Bool {
-        if case .failed(_, .providerReturnedNoText) = activity {
+        switch activity {
+        case .failed(_, .providerReturnedNoText), .failed(_, .recordingTooShort):
             true
-        } else {
+        default:
             false
         }
     }
@@ -653,7 +655,7 @@ package final class VoiceInputExperience: ObservableObject {
                 text: text,
                 copyButtonTitle: reason == .deliveryUnconfirmed
                     ? "确认未输入后复制"
-                    : "复制",
+                    : (reason == .clipboardFailed ? "重试复制" : "复制"),
                 copyAction: .init(
                     sessionID: id,
                     operation: .copyRetainedText
@@ -661,7 +663,8 @@ package final class VoiceInputExperience: ObservableObject {
                 dismissAction: .init(
                     sessionID: id,
                     operation: .dismissResult
-                )
+                ),
+                copyFailed: reason == .clipboardFailed
             )
         case .failed(let id, let failure):
             .problem(

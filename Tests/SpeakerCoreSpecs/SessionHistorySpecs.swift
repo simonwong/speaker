@@ -7,7 +7,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
-            "versioned local history omits empty records and excludes sensitive fields",
+            "versioned local history retains explicit errors and excludes sensitive fields",
             failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
@@ -34,6 +34,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                         "pasteReceipt.unconfirmed",
                     deepSeekText: "DeepSeek 结果 beta",
                     deepSeekRequestID: "deepseek-log-1",
+                    refinementProviderID: .openAI,
+                    refinementModelID: "gpt-4.1-mini",
                     refinementModeName: "精简清理",
                     refinementPrompt: "只清理口语杂质",
                     refinementStatus: "succeeded",
@@ -79,14 +81,16 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 (historyAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
                 "history file is not owner-only"
             )
-            try expect(allRecords.map(\.sessionID) == [firstID])
-            try expect(allRecords.first?.transcription == "豆包原文 alpha")
+            try expect(allRecords.map(\.sessionID) == [secondID, firstID])
+            try expect(allRecords.last?.transcription == "豆包原文 alpha")
             try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
             try expect(allRecords.last?.transcriptionProvider == "doubao")
             try expect(
                 allRecords.last?.deliveryDiagnosticCode
                     == "pasteReceipt.unconfirmed"
             )
+            try expect(allRecords.last?.refinementProviderID == .openAI)
+            try expect(allRecords.last?.refinementModelID == "gpt-4.1-mini")
             try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")
             try expect(
                 allRecords.last?.dictionarySnapshotEntries
@@ -347,6 +351,38 @@ enum SessionHistorySpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "SQLite history retains textless recording and provider errors but omits quiet outcomes",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-history-errors-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let url = directory.appendingPathComponent("history.sqlite3")
+            let store = SQLiteSessionHistory(fileURL: url)
+            var retainedIDs: [VoiceInputSessionID] = []
+            for (index, failure) in [
+                VoiceInputFailure.recordingFailed, .providerAuthenticationFailed,
+                .recordingTooShort, .providerReturnedNoText,
+            ].enumerated() {
+                let id = VoiceInputSessionID()
+                if index < 2 { retainedIDs.append(id) }
+                await store.save(
+                    .init(
+                        sessionID: id, startedAt: Date().addingTimeInterval(Double(index)),
+                        applicationName: nil, transcription: nil, finalText: nil,
+                        providerErrorCode: failure.rawValue,
+                        outcome: .failed(id, failure)
+                    ))
+            }
+            let reloaded = SQLiteSessionHistory(fileURL: url)
+            let records = await reloaded.allRecords()
+            try expect(Set(records.map(\.sessionID)) == Set(retainedIDs))
+            try expect(records.allSatisfy { $0.transcription == nil && $0.finalText == nil })
+            _ = await reloaded.closeForErasure()
+            _ = await store.closeForErasure()
+        }
+
+        await runAsync(
             "SQLite history incrementally upserts reloads searches and securely clears",
             failures: &failures
         ) {
@@ -391,6 +427,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     finalText: "最终增量结果",
                     providerRequestID: "sqlite-request",
                     deepSeekText: "最终增量结果",
+                    refinementProviderID: .kimi,
+                    refinementModelID: "kimi-k2.6",
                     outcome: .delivered(id, applicationName: "TextEdit", text: "最终增量结果")
                 ))
 
@@ -400,6 +438,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             try expect(records.count == 1)
             try expect(records.first?.finalText == "最终增量结果")
+            try expect(records.first?.refinementProviderID == .kimi)
+            try expect(records.first?.refinementModelID == "kimi-k2.6")
             try expect(records.first?.applicationName == nil)
             try expect(status.recordCount == 1)
             try expect(

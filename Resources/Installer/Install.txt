@@ -1,0 +1,17 @@
+安装 Speaker
+
+1. 将左侧 Speaker 拖到右侧 Applications 文件夹。
+2. 复制完成后，在“应用程序”中打开 Speaker。
+3. 按首次使用引导，依次完成权限、API Key 和快捷键设置。
+4. 安装完成后，可以推出此磁盘映像。
+
+请勿直接从此磁盘映像运行 Speaker。
+
+Install Speaker
+
+1. Drag Speaker onto the Applications folder.
+2. Once copying finishes, open Speaker from Applications.
+3. Follow the setup guide for permissions, API keys, and the shortcut.
+4. Eject this disk image when installation is complete.
+
+Do not run Speaker directly from this disk image.

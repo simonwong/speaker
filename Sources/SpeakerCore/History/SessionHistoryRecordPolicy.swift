@@ -26,20 +26,27 @@ package enum SessionHistoryRecordPolicy {
         if hasRetainedContent(record) {
             return true
         }
-        if case .failed(_, .recordingLimitReached) = record.outcome {
-            return true
-        }
-        return false
+        return retainedFailure(record) != nil
     }
 
-    /// Search covers the retained body plus content-free delivery evidence.
+    package static func retainedFailure(_ record: VoiceInputHistoryRecord) -> VoiceInputFailure? {
+        guard case .failed(_, let failure) = record.outcome else { return nil }
+        switch failure {
+        case .recordingTooShort, .providerReturnedNoText: return nil
+        default: return failure
+        }
+    }
+
+    /// Search covers retained text and explicit recording or provider errors.
     /// Raw target identity and superseded transcription stay excluded.
     package static func searchableValues(
         _ record: VoiceInputHistoryRecord
     ) -> [String] {
         [
             retainedText(record),
-            record.deliveryDiagnosticCode,
+            retainedFailure(record)?.rawValue,
+            record.providerErrorCode,
+            record.refinementFailureCode,
         ].compactMap { $0 }
     }
 

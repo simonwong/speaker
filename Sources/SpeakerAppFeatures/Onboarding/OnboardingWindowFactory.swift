@@ -33,6 +33,7 @@ package enum OnboardingWindowFactory {
         window.minSize = layout.effectiveMinimumSize
         window.contentMinSize = layout.effectiveMinimumSize
         window.contentView = contentView
+        window.setContentSize(layout.initialSize)
         return window
     }
 }

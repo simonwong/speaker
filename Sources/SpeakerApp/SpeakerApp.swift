@@ -28,7 +28,8 @@ struct SpeakerApp: App {
                 settingsNavigation: runtime.settingsNavigation,
                 mainWindow: runtime.mainWindow,
                 startRuntime: runtime.start,
-                refreshPermissions: runtime.refreshPermissions
+                refreshPermissions: runtime.refreshPermissions,
+                openOnboarding: runtime.showOnboarding
             )
         } label: {
             MenuBarStatusLabel(

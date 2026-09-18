@@ -361,6 +361,8 @@ package struct HistoryRecordV1: Codable {
     let deliveryDiagnosticCode: String?
     let deepSeekText: String?
     let deepSeekRequestID: String?
+    let refinementProviderID: RefinementProviderID?
+    let refinementModelID: String?
     let refinementModeName: String?
     let refinementPrompt: String?
     let refinementStatus: String?
@@ -391,6 +393,8 @@ package struct HistoryRecordV1: Codable {
         deliveryDiagnosticCode = record.deliveryDiagnosticCode
         deepSeekText = record.deepSeekText
         deepSeekRequestID = record.deepSeekRequestID
+        refinementProviderID = record.refinementProviderID
+        refinementModelID = record.refinementModelID
         refinementModeName = record.refinementModeName
         refinementPrompt = record.refinementPrompt
         refinementStatus = record.refinementStatus
@@ -424,6 +428,8 @@ package struct HistoryRecordV1: Codable {
                 deliveryDiagnosticCode: deliveryDiagnosticCode,
                 deepSeekText: deepSeekText,
                 deepSeekRequestID: deepSeekRequestID,
+                refinementProviderID: refinementProviderID,
+                refinementModelID: refinementModelID,
                 refinementModeName: refinementModeName,
                 refinementPrompt: refinementPrompt,
                 refinementStatus: refinementStatus,

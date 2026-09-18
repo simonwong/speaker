@@ -17,6 +17,7 @@ package final class DoubaoSettingsModel: ObservableObject {
     @Published package var apiKeyDraft = ""
     @Published package private(set) var status: DoubaoConnectionStatus = .loading
     @Published package private(set) var hasStoredKey = false
+    @Published package private(set) var isUpdatingKey = false
     @Published package private(set) var resource: DoubaoStreamingResource = .default
 
     private let service: any DoubaoSettingsServicing
@@ -46,6 +47,7 @@ package final class DoubaoSettingsModel: ObservableObject {
     package func selectResource(
         _ selected: DoubaoStreamingResource
     ) async {
+        guard !isUpdatingKey else { return }
         let token = invalidateConnectionCheck()
         resource = selected
         await service.setResource(selected)
@@ -60,6 +62,7 @@ package final class DoubaoSettingsModel: ObservableObject {
     }
 
     package func refresh() async {
+        guard !isUpdatingKey else { return }
         let token = generation
         do {
             let storedKeyExists = try await service.hasAPIKey()
@@ -75,11 +78,15 @@ package final class DoubaoSettingsModel: ObservableObject {
     }
 
     package func save() async {
+        guard !isUpdatingKey else { return }
+        isUpdatingKey = true
+        defer { isUpdatingKey = false }
+        let draft = apiKeyDraft
         let token = invalidateConnectionCheck()
         do {
-            try await service.saveAPIKey(apiKeyDraft)
+            try await service.saveAPIKey(draft)
             guard token == generation else { return }
-            apiKeyDraft = ""
+            if apiKeyDraft == draft { apiKeyDraft = "" }
             hasStoredKey = true
             status = .configured
         } catch {
@@ -89,6 +96,7 @@ package final class DoubaoSettingsModel: ObservableObject {
     }
 
     package func checkConnection() {
+        guard !isUpdatingKey, hasStoredKey else { return }
         let token = invalidateConnectionCheck()
         let checkedResource = resource
         status = .checking
@@ -118,11 +126,15 @@ package final class DoubaoSettingsModel: ObservableObject {
     }
 
     package func delete() async {
+        guard !isUpdatingKey else { return }
+        isUpdatingKey = true
+        defer { isUpdatingKey = false }
+        let draft = apiKeyDraft
         let token = invalidateConnectionCheck()
         do {
             try await service.deleteAPIKey()
             guard token == generation else { return }
-            apiKeyDraft = ""
+            if apiKeyDraft == draft { apiKeyDraft = "" }
             hasStoredKey = false
             status = .unconfigured
         } catch {

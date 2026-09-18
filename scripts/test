@@ -5,6 +5,35 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 source "$SCRIPT_DIR/test-runner-common"
 
+if (( $# > 1 )); then
+    print -u2 "Usage: ./scripts/test [--with-ui | --ui-only]"
+    exit 64
+fi
+SPEAKER_TEST_MODE="${1:-quiet}"
+case "$SPEAKER_TEST_MODE" in
+    quiet|--with-ui|--ui-only) ;;
+    --help|-h)
+        print "Usage: ./scripts/test [--with-ui | --ui-only]"
+        print "Default: non-UI checks without test windows."
+        print -r -- "--with-ui: full gate, including visible native UI tests."
+        print -r -- "--ui-only: native UI tests only; windows may appear."
+        exit 0
+        ;;
+    *)
+        print -u2 "Unknown test option: $SPEAKER_TEST_MODE"
+        exit 64
+        ;;
+esac
+if [[ "$SPEAKER_TEST_MODE" == "--ui-only" ]]; then
+    speaker_test_run "SpeakerAppUISpecs" \
+        /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
+    speaker_test_summary
+    exit 0
+fi
+if [[ "$SPEAKER_TEST_MODE" == "quiet" ]]; then
+    print "Running non-UI checks. Native UI coverage requires ./scripts/test --with-ui or --ui-only."
+fi
+
 # These contract tests read the repository and write only inside their own
 # mktemp directory, so they run concurrently with the sequential lane below.
 # Every other step reenters SwiftPM against the shared .build directory,
@@ -22,8 +51,10 @@ speaker_test_run "SpeakerCoreSpecs" \
     /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerCoreSpecs
 speaker_test_run "SpeakerAppScenarioSpecs" \
     /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppScenarioSpecs
-speaker_test_run "SpeakerAppUISpecs" \
-    /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
+if [[ "$SPEAKER_TEST_MODE" == "--with-ui" ]]; then
+    speaker_test_run "SpeakerAppUISpecs" \
+        /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerAppUISpecs
+fi
 speaker_test_run "SpeakerProviderEvidenceSpecs" \
     /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerProviderEvidenceSpecs
 speaker_test_run "SpeakerAccuracyMetricsSpecs" \
@@ -34,6 +65,8 @@ speaker_test_run "test-provider-smoke-contract" \
     /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
 speaker_test_run "test-brand-assets" \
     /bin/zsh "$SCRIPT_DIR/test-brand-assets"
+speaker_test_run "test-package-dmg" \
+    /bin/zsh "$SCRIPT_DIR/test-package-dmg"
 speaker_test_run "test-install-identity" \
     /bin/zsh "$SCRIPT_DIR/test-install-identity"
 speaker_test_run "test-release-evidence" \

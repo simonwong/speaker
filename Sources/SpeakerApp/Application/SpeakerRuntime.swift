@@ -109,14 +109,14 @@ final class SpeakerRuntime: ObservableObject {
             credentials: dependencies.credentials.store,
             runtimeDiagnostics: providerRuntimeDiagnostics
         )
-        let deepSeek = CredentialedDeepSeekTextRefiner(
+        let textRefiner = CredentialedTextRefiner(
             credentials: dependencies.credentials.store
         )
         let configuration = VoiceInputConfigurationController()
         let processor = DefaultVoiceTextProcessor(
             configuration: configuration,
             doubao: doubao,
-            refinement: OptionalTextRefinementPipeline(refiner: deepSeek)
+            refinement: OptionalTextRefinementPipeline(refiner: textRefiner)
         )
         let settingsStore = dependencies.settingsStore
         let microphones = MicrophoneSelectionFeature(
@@ -158,7 +158,7 @@ final class SpeakerRuntime: ObservableObject {
         )
         self.doubaoSettings = doubaoSettings
         let refinementSettings = RefinementSettingsModel(
-            service: deepSeek,
+            service: textRefiner,
             configuration: configuration,
             settingsStore: settingsStore
         )
@@ -175,7 +175,6 @@ final class SpeakerRuntime: ObservableObject {
         let historyModel = HistoryModel(
             store: history,
             clipboard: SystemClipboardWriter(),
-            dictionary: dictionarySettings,
             announce: announce
         )
         self.historyModel = historyModel
@@ -223,7 +222,7 @@ final class SpeakerRuntime: ObservableObject {
         self.panel = panel
         let onboarding = OnboardingPresenter(
             preferences: dependencies.preferences,
-            makeController: { completion in
+            makeController: { mode, completion in
                 SpeakerOnboardingWindowController(
                     permissions: permissions,
                     doubao: doubaoSettings,
@@ -234,6 +233,8 @@ final class SpeakerRuntime: ObservableObject {
                         permissionRefreshCoordinator.refreshNow()
                     },
                     announce: announce,
+                    shortcutName: { shortcut.preference.displayName },
+                    mode: mode,
                     completion: completion
                 )
             }
@@ -394,6 +395,11 @@ final class SpeakerRuntime: ObservableObject {
         startup.start()
     }
 
+    func showOnboarding() {
+        guard dataErasure.state == .idle else { return }
+        onboarding.present(force: true)
+    }
+
     func refreshPermissions() {
         permissionRefreshCoordinator.refreshNow()
     }
@@ -438,8 +444,9 @@ final class SpeakerRuntime: ObservableObject {
                 refinement: refinementSettings.mode.diagnosticKind,
                 doubaoConfigured: doubaoSettings.hasConfiguredKey,
                 doubaoResource: doubaoSettings.resource.rawValue,
-                deepSeekConfigured: refinementSettings.hasStoredKey,
-                deepSeekVerified: refinementSettings.isConnectionVerified,
+                refinementConfigured: refinementSettings.hasStoredKey,
+                refinementVerified: refinementSettings.isConnectionVerified,
+                refinementProfile: refinementSettings.selectedProfile,
                 historyRecordCount: historyStatus.recordCount,
                 historyPersistence: historyNotice,
                 audioCaptureEnvironment: audioCaptureEnvironment,

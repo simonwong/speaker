@@ -1,6 +1,6 @@
 # ADR-0003: Stream Doubao ASR and Refine Text Optionally
 
-Status: Accepted
+Status: Superseded by [ADR-0009](0009-select-text-refinement-providers.md)
 
 Date: 2026-07-18
 

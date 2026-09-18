@@ -26,6 +26,7 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             try legacy.write(to: fileURL)
             let legacyLoaded = await store.load()
             try expect(legacyLoaded.settings.microphone == .systemDefault)
+            try expect(legacyLoaded.settings.refinementProviders.selectedProfile == .legacyDeepSeek)
             try expect(legacyLoaded.settings.launchAtLogin)
             try await store.updateMicrophone(.device(uid: "synthetic-stable-device"))
             async let shortcut = store.updateShortcut(

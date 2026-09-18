@@ -16,21 +16,7 @@ package final class OnboardingPermissionCoordinator {
     }
 
     package func request(_ permission: PermissionKind) async {
-        let previous = permissions.snapshot
         await permissions.request(permission)
         synchronize()
-
-        guard permission == .microphone,
-            previous.microphone == .notDetermined,
-            permissions.snapshot.microphone == .granted
-        else { return }
-
-        switch permissions.snapshot.accessibility {
-        case .denied, .notDetermined:
-            await permissions.request(.accessibility)
-            synchronize()
-        case .granted, .restricted:
-            break
-        }
     }
 }

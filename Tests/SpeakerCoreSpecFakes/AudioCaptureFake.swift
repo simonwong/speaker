@@ -6,8 +6,15 @@ import SpeakerCore
 /// `delaysStart` suspends `start()` until `resumeStart()`, so a case can observe the window
 /// between shortcut activation and an active recorder. Without it the recorder starts
 /// immediately, which is what a case that only needs a working recorder wants.
-public actor AudioCaptureFake: AudioCapturing {
+/// `delaysCancel` holds cleanup until `resumeCancel()` so failure dismissal can be observed.
+public actor AudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
     public let delaysStart: Bool
+    private let stopError: AudioCaptureError?
+    private var delaysCancel: Bool
+    private var cancelContinuation: CheckedContinuation<Void, Never>?
+    private var failureContinuation: AsyncStream<AudioCaptureError>.Continuation?
+    public var hasPendingCancel: Bool { cancelContinuation != nil }
+    public var isObservingFailures: Bool { failureContinuation != nil }
     public private(set) var startCount = 0
     public private(set) var stopCount = 0
     public private(set) var cancelCount = 0
@@ -20,9 +27,13 @@ public actor AudioCaptureFake: AudioCapturing {
 
     public init(
         delaysStart: Bool = false,
+        delaysCancel: Bool = false,
+        stopError: AudioCaptureError? = nil,
         prepareStart: (@Sendable () -> AudioCaptureStart)? = nil
     ) {
         self.delaysStart = delaysStart
+        self.delaysCancel = delaysCancel
+        self.stopError = stopError
         prepareOperation = prepareStart
     }
 
@@ -65,6 +76,7 @@ public actor AudioCaptureFake: AudioCapturing {
         activeStartID = nil
         activePreparedOperation = nil
         isActive = false
+        if let stopError { throw stopError }
         return CapturedAudio(
             data: Data([0x52, 0x49, 0x46, 0x46]),
             duration: .seconds(1),
@@ -79,6 +91,26 @@ public actor AudioCaptureFake: AudioCapturing {
         cancelCount += 1
         isActive = false
         await operation?.cancel()
+        if delaysCancel {
+            await withCheckedContinuation { cancelContinuation = $0 }
+        }
+    }
+
+    public func resumeCancel() {
+        delaysCancel = false
+        cancelContinuation?.resume()
+        cancelContinuation = nil
+    }
+
+    public func observeFailures() -> AsyncStream<AudioCaptureError> {
+        failureContinuation?.finish()
+        let (stream, continuation) = AsyncStream<AudioCaptureError>.makeStream()
+        failureContinuation = continuation
+        return stream
+    }
+
+    public func emitFailure(_ failure: AudioCaptureError) {
+        failureContinuation?.yield(failure)
     }
 
     private func cancel(id: UUID, preparedOperation: AudioCaptureStart?) async {

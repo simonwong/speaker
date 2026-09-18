@@ -161,6 +161,12 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
 @MainActor
 package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
+    @Published package private(set) var providers = RefinementProviderSettings()
+    @Published package private(set) var isUpdatingProvider = false
+    @Published package var modelIDDraft = RefinementProviderProfile.legacyDeepSeek.modelID
+    @Published package var baseURLDraft = RefinementProviderProfile.legacyDeepSeek.baseURL
+    @Published package var isEditingModelID = false
+    @Published package private(set) var providerNotice: String?
     @Published package var apiKeyDraft = ""
     @Published package var customName = "我的模式"
     @Published package var customPrompt = ""
@@ -169,21 +175,138 @@ package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var inspectedPromptMode: BuiltInRefinementMode?
     @Published private(set) var isEditingCustomMode = false
     @Published package private(set) var hasStoredKey = false
+    @Published package private(set) var isUpdatingKey = false
     @Published package private(set) var isConnectionVerified = false
-    @Published private(set) var isCheckingConnection = false
-    @Published private(set) var connectionFailure: String?
+    @Published package private(set) var isCheckingConnection = false
+    @Published package private(set) var connectionFailure: String?
     @Published private(set) var credentialNotice: String?
     @Published private(set) var notice: String?
 
-    private let service: any DeepSeekSettingsServicing
+    private let service: any RefinementProviderServicing
     private let configuration: VoiceInputConfigurationController
     private let settingsStore: any AppSettingsStoring
     private var connectionGeneration = 0
     private var connectionTask: Task<Void, Never>?
     private var deferredMode: TextRefinementMode?
+    private var cancelledConnectionTasks: [Task<Void, Never>] = []
+    private var providerDrafts:
+        [RefinementProviderID: (modelID: String, baseURL: String, manual: Bool)] = [:]
+
+    package var selectedProvider: RefinementProviderID { providers.selectedProvider }
+    package var selectedProfile: RefinementProviderProfile { providers.selectedProfile }
+    package var providerName: String { selectedProvider.displayName }
+    package var isMutating: Bool { isUpdatingKey || isUpdatingProvider }
+    private var suggestedModelIDs: [String] {
+        RefinementProviderCatalog.modelIDs(for: selectedProvider)
+    }
+
+    package func modelTitle(for modelID: String) -> String {
+        modelID == suggestedModelIDs.first ? "\(modelID)（推荐）" : modelID
+    }
+
+    package var modelIDs: [String] {
+        let listed = suggestedModelIDs
+        let selected = selectedProfile.modelID
+        return selected.isEmpty || listed.contains(selected) ? listed : listed + [selected]
+    }
+
+    package var hasValidProfile: Bool { (try? selectedProfile.validated()) != nil }
+    package var hasProfileChanges: Bool {
+        modelIDDraft != selectedProfile.modelID || baseURLDraft != selectedProfile.baseURL
+    }
+
+    package func selectProvider(_ provider: RefinementProviderID) async {
+        guard !isMutating, provider != selectedProvider else { return }
+        var updated = providers
+        updated.selectedProvider = provider
+        await updateProviderSettings(updated)
+    }
+
+    package func selectModel(_ modelID: String) async {
+        guard !isMutating else { return }
+        var profile = selectedProfile
+        profile.modelID = modelID
+        await saveProfile(profile)
+    }
+
+    package func saveProviderConfiguration() async {
+        guard !isMutating else { return }
+        await saveProfile(
+            RefinementProviderProfile(
+                provider: selectedProvider, modelID: modelIDDraft, baseURL: baseURLDraft))
+    }
+
+    private func saveProfile(_ profile: RefinementProviderProfile) async {
+        do {
+            let validated = try profile.validated()
+            var updated = providers
+            updated.profiles[validated.provider.rawValue] = validated
+            await updateProviderSettings(updated)
+        } catch {
+            providerNotice = "请填写有效的模型 ID；自定义接口须使用不含凭据、查询参数或片段的 HTTPS Base URL。"
+        }
+    }
+
+    private func updateProviderSettings(_ updated: RefinementProviderSettings) async {
+        isUpdatingProvider = true
+        defer { isUpdatingProvider = false }
+        invalidateConnectionCheck()
+        do {
+            let desiredMode = deferredMode ?? mode
+            let profile = updated.selectedProfile
+            let valid = (try? profile.validated()) != nil
+            let configured = valid ? try await service.hasAPIKey(for: profile) : false
+            try await settingsStore.updateRefinementProviders(updated)
+            providerDrafts[selectedProvider] = (modelIDDraft, baseURLDraft, isEditingModelID)
+            let activation = RefinementActivationPlan(
+                desiredMode: desiredMode, hasStoredKey: configured)
+            if valid {
+                try await configuration.selectRefinementProvider(
+                    profile, mode: activation.activeMode)
+            } else {
+                try await configuration.selectRefinementMode(.defaultSmooth)
+            }
+            let switched = updated.selectedProvider != selectedProvider
+            providers = updated
+            mode = activation.activeMode
+            deferredMode = activation.deferredMode
+            hasStoredKey = configured
+            apiKeyDraft = ""
+            credentialNotice = nil
+            providerNotice = nil
+            if switched, let draft = providerDrafts[selectedProvider] {
+                modelIDDraft = draft.modelID
+                baseURLDraft = draft.baseURL
+                isEditingModelID = draft.manual
+            } else {
+                syncProviderDrafts()
+            }
+            notice = activation.deferredMode == nil ? nil : "已保留整理模式；保存 \(providerName) Key 后会自动恢复。"
+        } catch {
+            providerNotice = SpeakerCopy.Failure.message(for: error)
+        }
+    }
+
+    private func syncProviderDrafts() {
+        modelIDDraft = selectedProfile.modelID
+        baseURLDraft = selectedProfile.baseURL
+        isEditingModelID = selectedProvider == .custom || !suggestedModelIDs.contains(modelIDDraft)
+    }
+
+    private func invalidateConnectionCheck() {
+        connectionGeneration &+= 1
+        if let task = connectionTask {
+            task.cancel()
+            cancelledConnectionTasks.append(task)
+        }
+        connectionTask = nil
+        isCheckingConnection = false
+        isConnectionVerified = false
+        connectionFailure = nil
+    }
 
     package init(
-        service: any DeepSeekSettingsServicing,
+        service: any RefinementProviderServicing,
         configuration: VoiceInputConfigurationController,
         settingsStore: any AppSettingsStoring
     ) {
@@ -228,13 +351,16 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     package func load() async {
+        let loadedSettings = await settingsStore.load().settings
+        providers = loadedSettings.refinementProviders
+        syncProviderDrafts()
         do {
-            hasStoredKey = try await service.hasAPIKey()
+            if hasValidProfile {
+                hasStoredKey = try await service.hasAPIKey(for: selectedProfile)
+            }
         } catch {
             credentialNotice = SpeakerCopy.Failure.message(for: error)
         }
-
-        let loadedSettings = await settingsStore.load().settings
         promptOverrides = loadedSettings.refinementPromptOverrides
         let loadedMode = loadedSettings.refinement.textRefinementMode
             .applyingPromptOverrides(loadedSettings.refinementPromptOverrides)
@@ -249,15 +375,18 @@ package final class RefinementSettingsModel: ObservableObject {
                 desiredMode: validated,
                 hasStoredKey: hasStoredKey
             )
-            try await configuration.selectRefinementMode(
-                activation.activeMode
-            )
+            if hasValidProfile {
+                try await configuration.selectRefinementProvider(
+                    selectedProfile, mode: activation.activeMode)
+            } else {
+                try await configuration.selectRefinementMode(.defaultSmooth)
+            }
             mode = activation.activeMode
             deferredMode = activation.deferredMode
             inspectedPromptMode = validated.builtInMode
             syncPromptDraft()
             if activation.deferredMode != nil {
-                notice = "已保留“\(validated.displayName)”模式；保存 DeepSeek Key 后会自动恢复使用。"
+                notice = "已保留“\(validated.displayName)”模式；保存 \(providerName) Key 后会自动恢复使用。"
             } else {
                 notice = nil
             }
@@ -267,11 +396,15 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     package func saveAPIKey() async {
-        await cancelConnectionCheck()
+        guard !isMutating, hasValidProfile, !hasProfileChanges else { return }
+        isUpdatingKey = true
+        defer { isUpdatingKey = false }
+        let draft = apiKeyDraft
+        invalidateConnectionCheck()
         do {
-            try await service.saveAPIKey(apiKeyDraft)
+            try await service.saveAPIKey(draft, for: selectedProfile)
             connectionGeneration &+= 1
-            apiKeyDraft = ""
+            if apiKeyDraft == draft { apiKeyDraft = "" }
             hasStoredKey = true
             isConnectionVerified = false
             connectionFailure = nil
@@ -293,16 +426,20 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func deleteAPIKey() async {
-        await cancelConnectionCheck()
+    package func deleteAPIKey() async {
+        guard !isMutating else { return }
+        isUpdatingKey = true
+        defer { isUpdatingKey = false }
+        let draft = apiKeyDraft
+        invalidateConnectionCheck()
         do {
-            try await service.deleteAPIKey()
+            try await service.deleteAPIKey(for: selectedProvider)
             connectionGeneration &+= 1
             hasStoredKey = false
             isConnectionVerified = false
             connectionFailure = nil
             credentialNotice = nil
-            apiKeyDraft = ""
+            if apiKeyDraft == draft { apiKeyDraft = "" }
             deferredMode = nil
             await select(.defaultSmooth)
         } catch {
@@ -311,11 +448,13 @@ package final class RefinementSettingsModel: ObservableObject {
         }
     }
 
-    func checkConnection() {
+    package func checkConnection() {
+        guard !isMutating, hasStoredKey, hasValidProfile, !hasProfileChanges else { return }
         connectionGeneration &+= 1
         let generation = connectionGeneration
         let previousTask = connectionTask
         let service = service
+        let profile = selectedProfile
         isCheckingConnection = true
         connectionFailure = nil
         connectionTask = Task { @MainActor [weak self] in
@@ -325,7 +464,7 @@ package final class RefinementSettingsModel: ObservableObject {
 
             let result: Result<String?, Error>
             do {
-                result = .success(try await service.checkConnection())
+                result = .success(try await service.checkConnection(profile: profile))
             } catch {
                 result = .failure(error)
             }
@@ -340,9 +479,9 @@ package final class RefinementSettingsModel: ObservableObject {
             case .success:
                 isConnectionVerified = true
                 connectionFailure = nil
-            case .failure(let failure as DeepSeekRefinementFailure):
+            case .failure(let failure as TextRefinementFailure):
                 isConnectionVerified = false
-                connectionFailure = Self.connectionMessage(
+                connectionFailure = connectionMessage(
                     for: failure.kind
                 )
             case .failure(let error):
@@ -353,22 +492,16 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     package func shutdown() async {
-        await cancelConnectionCheck()
-    }
-
-    private func cancelConnectionCheck() async {
-        connectionGeneration &+= 1
-        let task = connectionTask
-        connectionTask = nil
-        task?.cancel()
-        await task?.value
-        isCheckingConnection = false
+        invalidateConnectionCheck()
+        for task in cancelledConnectionTasks { await task.value }
+        cancelledConnectionTasks.removeAll()
     }
 
     package func select(
         _ choice: RefinementChoice,
         persist: Bool = true
     ) async {
+        guard !isUpdatingProvider else { return }
         if let builtInMode = choice.builtInMode {
             inspectPrompt(builtInMode)
         } else {
@@ -380,14 +513,14 @@ package final class RefinementSettingsModel: ObservableObject {
             notice =
                 hasStoredKey
                 ? nil
-                : "可先编辑规则；保存 DeepSeek API Key 后才能启用。"
+                : "可先编辑规则；保存 \(providerName) API Key 后才能启用。"
             return
         }
 
         isEditingCustomMode = false
 
         if choice != .defaultSmooth, !hasStoredKey {
-            notice = "提示词可查看和编辑；保存 DeepSeek API Key 后才能启用该模式。"
+            notice = "提示词可查看和编辑；保存 \(providerName) API Key 后才能启用该模式。"
             return
         }
 
@@ -404,6 +537,7 @@ package final class RefinementSettingsModel: ObservableObject {
             notice = nil
             if persist {
                 try await persistSelection(mode)
+                deferredMode = nil
             }
         } catch {
             notice = SpeakerCopy.Failure.message(for: error)
@@ -411,8 +545,9 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     /// Saves the inspected built-in mode's prompt override, taking
-    /// effect for new sessions through the same `deepSeekInstruction` request path.
+    /// effect for new sessions through the same `refinementInstruction` request path.
     package func savePromptOverride() async {
+        guard !isMutating else { return }
         guard let promptEditorState else { return }
         do {
             let updatedMode = try promptEditorState.mode
@@ -434,6 +569,7 @@ package final class RefinementSettingsModel: ObservableObject {
     /// Restores the inspected built-in mode's built-in prompt and clears the
     /// saved override.
     package func restoreDefaultPrompt() async {
+        guard !isMutating else { return }
         guard let promptEditorState else { return }
         do {
             let updatedMode = promptEditorState.mode.refinementMode()
@@ -473,8 +609,9 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     package func saveCustomMode() async {
+        guard !isMutating else { return }
         guard hasStoredKey else {
-            notice = "请先保存 DeepSeek API Key，再保存并启用自定义规则。"
+            notice = "请先保存 \(providerName) API Key，再保存并启用自定义规则。"
             return
         }
         do {
@@ -501,8 +638,9 @@ package final class RefinementSettingsModel: ObservableObject {
     }
 
     package func selectSavedCustomMode() async {
+        guard !isMutating else { return }
         guard hasStoredKey else {
-            notice = "请先保存 DeepSeek API Key。"
+            notice = "请先保存 \(providerName) API Key。"
             return
         }
         do {
@@ -527,32 +665,32 @@ package final class RefinementSettingsModel: ObservableObject {
         )
     }
 
-    private static func connectionMessage(for kind: DeepSeekRefinementFailureKind) -> String {
+    private func connectionMessage(for kind: TextRefinementFailureKind) -> String {
         switch kind {
         case .invalidCredential, .authentication:
-            "DeepSeek Key 无效，请重新保存后检查连接。"
+            "\(providerName) Key 无效，请重新保存后检查连接。"
         case .credentialAccessDenied:
-            "macOS 拒绝访问 DeepSeek 凭据，请检查当前构建身份后重试。"
+            "macOS 拒绝访问 \(providerName) 凭据，请检查当前构建身份后重试。"
         case .credentialInteractionUnavailable:
-            "DeepSeek 凭据当前不可用，请解锁 Mac 后重试。"
+            "\(providerName) 凭据当前不可用，请解锁 Mac 后重试。"
         case .credentialMalformed:
-            "已保存的 DeepSeek Key 无法读取，请删除后重新保存。"
+            "已保存的 \(providerName) Key 无法读取，请删除后重新保存。"
         case .credentialStorageUnavailable:
             "本机凭据存储暂时不可用，请稍后重试。"
         case .insufficientBalance:
-            "DeepSeek 余额不足，请充值后重试。"
+            "\(providerName) 余额不足，请充值后重试。"
         case .rateLimited:
-            "DeepSeek 请求过于频繁，请稍后重试。"
+            "\(providerName) 请求过于频繁，请稍后重试。"
         case .network:
-            "无法连接 DeepSeek，请检查网络。"
+            "无法连接 \(providerName)，请检查网络。"
         case .systemNetworkTimeout:
-            "系统报告 DeepSeek 网络请求超时。"
+            "系统报告 \(providerName) 网络请求超时。"
         case .cancelled:
-            "DeepSeek 连接检查已取消。"
+            "\(providerName) 连接检查已取消。"
         case .serverError, .serviceUnavailable, .insufficientSystemResource:
-            "DeepSeek 服务暂时不可用，请稍后重试。"
+            "\(providerName) 服务暂时不可用，请稍后重试。"
         default:
-            "DeepSeek 返回了无法验证的响应，请稍后重试。"
+            "\(providerName) 返回了无法验证的响应，请稍后重试。"
         }
     }
 }

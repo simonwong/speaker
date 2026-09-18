@@ -3,10 +3,12 @@ import SwiftUI
 
 /// The 整理 page: mode selection first, then at most one editor card — the
 /// inspected built-in mode's prompt, or Custom Mode's own name and prompt.
-struct RefinementSettingsPage: View {
+package struct RefinementSettingsPage: View {
     @ObservedObject var model: RefinementSettingsModel
 
-    var body: some View {
+    package init(model: RefinementSettingsModel) { self.model = model }
+
+    package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
             modeCard
 
@@ -23,12 +25,13 @@ struct RefinementSettingsPage: View {
                 CustomRefinementModeCard(model: model)
             }
         }
+        .disabled(model.isMutating)
     }
 
     private var modeCard: some View {
         SettingsCard(
             "整理模式",
-            subtitle: "默认顺滑只用豆包；其他模式需要先验证 DeepSeek Key",
+            subtitle: "默认顺滑只用豆包；其他模式使用 \(model.providerName)，需先配置 Key",
             icon: "text.alignleft"
         ) {
             LazyVGrid(
@@ -39,8 +42,8 @@ struct RefinementSettingsPage: View {
                     RefinementModeButton(
                         choice: choice,
                         selected: model.choice == choice,
-                        inspected: model.inspectedPromptMode
-                            == choice.builtInMode,
+                        highlighted: model.isEditingCustomMode
+                            ? choice == .custom : model.choice == choice,
                         locked: choice != .defaultSmooth && !model.hasStoredKey
                     ) {
                         Task { await model.select(choice) }
@@ -100,7 +103,7 @@ private struct RefinementPromptEditorCard: View {
                 Button("保存") {
                     Task { await model.savePromptOverride() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!promptEditor.canSave(draft: model.promptDraft))
             }
         }
@@ -118,6 +121,12 @@ private struct CustomRefinementModeCard: View {
             subtitle: "说清楚希望保留、删除和重组的内容",
             icon: "slider.horizontal.3"
         ) {
+            if model.choice != .custom {
+                Text("保存并启用后生效；当前使用「\(model.mode.displayName)」。")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
             TextField("模式名称", text: $model.customName)
 
             HStack {
@@ -155,7 +164,7 @@ private struct CustomRefinementModeCard: View {
                 Button("保存并启用") {
                     Task { await model.saveCustomMode() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!model.canSaveCustomMode)
             }
         }
@@ -169,16 +178,12 @@ private struct RefinementPromptTextEditor: View {
     let placeholder: String
     let minHeight: CGFloat
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-            style: .continuous
-        )
-    }
+    @FocusState private var focused: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $text)
+                .focused($focused)
                 .font(SpeakerTypography.body)
                 .scrollContentBackground(.hidden)
                 .padding(8)
@@ -193,17 +198,14 @@ private struct RefinementPromptTextEditor: View {
             }
         }
         .frame(minHeight: minHeight)
-        .background(Color.primary.opacity(0.04), in: shape)
-        .overlay {
-            shape.stroke(Color.primary.opacity(0.10), lineWidth: 1)
-        }
+        .settingsGlassSurface(focused: focused)
     }
 }
 
 private struct RefinementModeButton: View {
     let choice: RefinementChoice
     let selected: Bool
-    let inspected: Bool
+    let highlighted: Bool
     let locked: Bool
     let action: () -> Void
 
@@ -214,15 +216,16 @@ private struct RefinementModeButton: View {
                     Image(systemName: choice.icon)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(
-                            selected || inspected ? Color.accentColor : .secondary
+                            highlighted ? Color.accentColor : .secondary
                         )
                     Spacer()
                     Image(
                         systemName: selected
-                            ? "checkmark.circle.fill" : locked ? "lock.fill" : "circle"
+                            ? "checkmark.circle.fill"
+                            : highlighted ? "pencil.circle" : locked ? "lock.fill" : "circle"
                     )
                     .foregroundStyle(
-                        selected ? Color.accentColor : Color.secondary.opacity(0.55)
+                        highlighted ? Color.accentColor : Color.secondary.opacity(0.55)
                     )
                 }
                 Text(choice.title)
@@ -236,22 +239,29 @@ private struct RefinementModeButton: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
-            .background(
-                selected || inspected
-                    ? Color.accentColor.opacity(0.10)
-                    : Color.primary.opacity(0.03),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .settingsGlassSurface(
+                cornerRadius: 10,
+                tint: highlighted ? Color.accentColor.opacity(0.16) : nil,
+                interactive: true
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(
-                        selected || inspected
+                        highlighted
                             ? Color.accentColor.opacity(0.8)
                             : Color.primary.opacity(0.08),
-                        lineWidth: selected || inspected ? 1.5 : 1
+                        lineWidth: highlighted ? 1.5 : 1
                     )
             }
         }
         .buttonStyle(.plain)
+        .accessibilityHidden(true)
+        .overlay {
+            AccessibilityButtonBridge(
+                label: choice.title,
+                hint: selected ? "当前使用" : highlighted ? "正在编辑，尚未启用" : "未启用",
+                action: action
+            )
+        }
     }
 }

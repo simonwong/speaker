@@ -32,12 +32,16 @@ public actor TextDeliveryFake: TextDelivering {
     }
 }
 
-/// A clipboard double that records every copied text and reports one fixed outcome.
+/// A clipboard double that records every copied text and reports the configured outcome.
 public actor ClipboardFake: ClipboardWriting {
     public private(set) var copiedTexts: [String] = []
-    private let succeeds: Bool
+    private var succeeds: Bool
 
     public init(succeeds: Bool = true) {
+        self.succeeds = succeeds
+    }
+
+    public func setSucceeds(_ succeeds: Bool) {
         self.succeeds = succeeds
     }
 
