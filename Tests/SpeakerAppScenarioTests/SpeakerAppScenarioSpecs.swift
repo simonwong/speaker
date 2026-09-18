@@ -3274,6 +3274,7 @@ struct SpeakerAppScenarioSpecs {
                     _,
                     let
                         copyAction,
+                    _,
                     _
                 ) = experience.state.overlay
             else {
@@ -3323,6 +3324,7 @@ struct SpeakerAppScenarioSpecs {
                     _,
                     let
                         copyAction,
+                    _,
                     _
                 ) = experience.state.overlay
             else {
@@ -3525,7 +3527,7 @@ struct SpeakerAppScenarioSpecs {
                 }
                 try expect(retained)
                 guard
-                    case .pendingCopy(_, let retainedText, _, let copy, let dismiss) = experience
+                    case .pendingCopy(_, let retainedText, _, let copy, let dismiss, _) = experience
                         .state.overlay
                 else {
                     throw SpecFailure(message: "pending copy controls unavailable")
@@ -3569,6 +3571,7 @@ struct SpeakerAppScenarioSpecs {
                     _,
                     let
                         staleCopyAction,
+                    _,
                     _
                 ) = experience.state.overlay
             else {

@@ -53,7 +53,7 @@ package struct VoiceInputHUD: View {
     private var noticeBody: some View {
         switch presentation {
         case .pendingCopy(
-            _,
+            let title,
             let
                 text,
             let
@@ -61,11 +61,14 @@ package struct VoiceInputHUD: View {
             let
                 copyAction,
             let
-                dismissAction
+                dismissAction,
+            let copyFailed
         ):
             PendingCopyStrip(
+                title: title,
                 text: text,
                 copyButtonTitle: copyButtonTitle,
+                copyFailed: copyFailed,
                 palette: palette,
                 copy: { _ = performAction(copyAction) },
                 dismiss: { _ = performAction(dismissAction) }
@@ -491,8 +494,10 @@ private struct HUDVisualEffect: NSViewRepresentable {
 }
 
 private struct PendingCopyStrip: View {
+    let title: String
     let text: String
     let copyButtonTitle: String
+    let copyFailed: Bool
     let palette: VoiceInputHUDContrastPalette
     let copy: () -> Void
     let dismiss: () -> Void
@@ -513,15 +518,23 @@ private struct PendingCopyStrip: View {
             palette: palette
         ) {
             ZStack {
-                Text(text)
-                    .font(.callout)
-                    .foregroundStyle(.primary.opacity(0.92))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, controlsVisible ? 38 : 16)
-                    .padding(.trailing, 38)
+                HStack(spacing: 8) {
+                    if copyFailed {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize()
+                    }
+                    Text(text)
+                        .font(.callout)
+                        .foregroundStyle(.primary.opacity(0.92))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.leading, controlsVisible ? 38 : 16)
+                .padding(.trailing, 38)
 
                 HStack {
                     HUDIconButton(
@@ -538,10 +551,10 @@ private struct PendingCopyStrip: View {
                     Spacer()
 
                     HUDIconButton(
-                        symbol: "doc.on.doc",
+                        symbol: copyFailed ? "arrow.clockwise" : "doc.on.doc",
                         palette: palette,
                         accessibilityLabel: copyButtonTitle,
-                        help: copyButtonTitle,
+                        help: "\(title)；\(copyButtonTitle)",
                         accessibilityHint: "将保留的文字复制到剪贴板",
                         action: copy
                     )

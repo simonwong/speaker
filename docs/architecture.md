@@ -73,7 +73,7 @@ Recording, target capture, transcription, optional refinement, delivery, cancell
 
 User Cancellation is distinct from a Session Problem. Cancellation suppresses late provider results. Once `DeliveryCommitGate` commits a mutation, cancellation may close the HUD and release the shortcut, while receipt and Session Record settlement continue with the real mutation outcome.
 
-New shortcut presses are rejected while processing. A press during a Pending Copy Result dismisses that result and starts a new session. Gesture ownership is reset synchronously and in the actor so a rejected press cannot start a delayed recording after the old session finishes.
+New shortcut presses are rejected while processing. A press during a Pending Copy Result dismisses that result and starts a new session. There is no additional retained-result store; history recovery follows the existing privacy and persistence policy. A failed explicit copy preserves the full result and publishes failure feedback with a retry action through the same session-owned capability. Gesture ownership is reset synchronously and in the actor so a rejected press cannot start a delayed recording after the old session finishes.
 
 ## Provider processing and audio
 

@@ -83,7 +83,8 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
         text: String,
         copyButtonTitle: String,
         copyAction: VoiceInputExperienceAction,
-        dismissAction: VoiceInputExperienceAction
+        dismissAction: VoiceInputExperienceAction,
+        copyFailed: Bool = false
     )
     case problem(
         icon: String,
@@ -654,7 +655,7 @@ package final class VoiceInputExperience: ObservableObject {
                 text: text,
                 copyButtonTitle: reason == .deliveryUnconfirmed
                     ? "确认未输入后复制"
-                    : "复制",
+                    : (reason == .clipboardFailed ? "重试复制" : "复制"),
                 copyAction: .init(
                     sessionID: id,
                     operation: .copyRetainedText
@@ -662,7 +663,8 @@ package final class VoiceInputExperience: ObservableObject {
                 dismissAction: .init(
                     sessionID: id,
                     operation: .dismissResult
-                )
+                ),
+                copyFailed: reason == .clipboardFailed
             )
         case .failed(let id, let failure):
             .problem(
