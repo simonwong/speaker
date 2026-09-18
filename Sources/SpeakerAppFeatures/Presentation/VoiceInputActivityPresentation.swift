@@ -94,7 +94,7 @@ extension VoiceInputProcessingStage {
 
     package static let capturingTargetAnnouncement = "正在确认输入位置"
     package static let transcribingAnnouncement = "正在等待豆包返回文字"
-    package static let refiningAnnouncement = "正在等待 DeepSeek 整理文字"
+    package static let refiningAnnouncement = "正在等待文字整理"
     package static let deliveringAnnouncement = "正在输入文字"
 
     package var compactTitle: String {

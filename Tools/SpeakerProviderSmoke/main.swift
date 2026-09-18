@@ -573,7 +573,7 @@ private struct SpeakerProviderSmoke {
             return result(
                 .deepSeekCancelInFlight, .fail, .acceptedAfterCancellation
             )
-        } catch let failure as DeepSeekRefinementFailure
+        } catch let failure as TextRefinementFailure
             where failure.kind == .cancelled
         {
             return result(
@@ -598,7 +598,7 @@ private struct SpeakerProviderSmoke {
                 using: TextRefinementContext(mode: .conciseCleanup())
             )
             return result(.deepSeekInvalidCredential, .fail, .unexpected)
-        } catch let failure as DeepSeekRefinementFailure
+        } catch let failure as TextRefinementFailure
             where failure.kind == .authentication
         {
             return result(
@@ -747,7 +747,7 @@ private struct SpeakerProviderSmoke {
         _ error: Error,
         caseID: ProviderMatrixCaseID
     ) -> SmokeResult {
-        if let failure = error as? DeepSeekRefinementFailure {
+        if let failure = error as? TextRefinementFailure {
             return result(
                 caseID,
                 .fail,

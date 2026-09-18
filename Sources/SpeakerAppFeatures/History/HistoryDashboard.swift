@@ -645,7 +645,8 @@ private struct HistoryExpandedRecord: View {
 
             if showsRefinementBlock {
                 SpeakerTextBlock(
-                    title: "DeepSeek 整理",
+                    title: record.refinementProviderLabel == "文字整理"
+                        ? "文字整理" : "\(record.refinementProviderLabel) 整理",
                     text: record.deepSeekText ?? refinementPlaceholder,
                     isPlaceholder: record.deepSeekText == nil
                 )
@@ -696,7 +697,7 @@ private struct HistoryExpandedRecord: View {
         if let deepSeekRequestID = record.deepSeekRequestID {
             lines.append(
                 DiagnosticLine(
-                    label: "DeepSeek 请求 ID：",
+                    label: "\(record.refinementProviderLabel) 请求 ID：",
                     identifier: deepSeekRequestID
                 )
             )
@@ -716,8 +717,9 @@ private struct HistoryExpandedRecord: View {
         [
             record.startedAt.formatted(date: .abbreviated, time: .shortened),
             record.refinementModeName ?? "默认顺滑",
+            record.refinementModelID,
             Self.durationText(milliseconds: record.durationMilliseconds),
-        ].joined(separator: " · ")
+        ].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The metadata line reads in seconds; stage diagnostics keep raw ms.
@@ -730,7 +732,7 @@ private struct HistoryExpandedRecord: View {
     private var showsRefinementBlock: Bool {
         record.deepSeekText != nil
             || record.refinementStatus
-                == DeepSeekRefinementStatus.fellBack.rawValue
+                == TextRefinementStatus.fellBack.rawValue
     }
 
     private var stageDurationsLine: String {

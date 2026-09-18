@@ -72,7 +72,7 @@ private struct AboutSettingsPage: View {
             SettingsRowDivider()
             SpeakerRow(
                 "识别文字",
-                detail: "保留在本机；只有启用需要 DeepSeek 的整理模式时才会发送给 DeepSeek。",
+                detail: "保留在本机；只有启用文字整理模式时才会发送给所选文字整理服务。",
                 icon: "text.alignleft"
             )
             SettingsRowDivider()

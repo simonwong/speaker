@@ -15,7 +15,7 @@ package struct APIKeySettingsPage: View {
     package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
             DoubaoSettingsCard(model: doubao)
-            DeepSeekSettingsCard(model: refinement)
+            RefinementProviderSettingsCard(model: refinement)
         }
     }
 }
@@ -115,32 +115,118 @@ package struct DoubaoSettingsCard: View {
     }
 }
 
-private struct DeepSeekSettingsCard: View {
+package struct RefinementProviderSettingsCard: View {
     @ObservedObject var model: RefinementSettingsModel
-    var body: some View {
+
+    package init(model: RefinementSettingsModel) { self.model = model }
+
+    package var body: some View {
         SettingsCard(
-            "DeepSeek · 可选",
-            subtitle: "只接收豆包转录文本与整理提示词，不接收音频",
+            "文字整理 · 可选",
+            subtitle: "只发送转录文字、整理规则和个人词库，不发送音频",
             icon: "sparkles"
         ) {
-            statusRow
+            VStack(alignment: .leading, spacing: 12) {
+                Picker(
+                    "服务商",
+                    selection: Binding(
+                        get: { model.selectedProvider },
+                        set: { provider in Task { await model.selectProvider(provider) } }
+                    )
+                ) {
+                    ForEach(RefinementProviderID.allCases, id: \.self) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityLabel("文字整理服务商")
+
+                if model.selectedProvider != .custom {
+                    Picker(
+                        "模型",
+                        selection: Binding(
+                            get: {
+                                model.isEditingModelID
+                                    ? "__manual__" : model.selectedProfile.modelID
+                            },
+                            set: { modelID in
+                                if modelID == "__manual__" {
+                                    model.isEditingModelID = true
+                                } else {
+                                    Task { await model.selectModel(modelID) }
+                                }
+                            }
+                        )
+                    ) {
+                        ForEach(model.modelIDs, id: \.self) { modelID in
+                            Text(modelID).tag(modelID)
+                        }
+                        Text("其他模型…").tag("__manual__")
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityLabel("文字整理模型")
+                }
+
+                if model.selectedProvider == .custom {
+                    labeledField(
+                        "API Base URL", placeholder: "https://api.example.com/v1",
+                        text: $model.baseURLDraft)
+                    Text(
+                        "使用兼容 OpenAI 的 HTTPS Base URL；Speaker 会追加 /chat/completions。更换地址后须重新填写 Key。"
+                    )
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+                }
+                if model.isEditingModelID {
+                    labeledField("模型 ID", placeholder: "填写服务商提供的模型 ID", text: $model.modelIDDraft)
+                    Button("保存模型配置", action: saveConfiguration)
+                        .disabled(!model.hasProfileChanges)
+                        .accessibilityHidden(true)
+                        .overlay {
+                            AccessibilityButtonBridge(
+                                label: "保存模型配置", hint: "保存接口和模型，不会发送测试请求",
+                                isEnabled: model.hasProfileChanges && !model.isMutating,
+                                action: saveConfiguration)
+                        }
+                }
+            }
+            .disabled(model.isMutating)
+
+            if let providerNotice = model.providerNotice {
+                SettingsNotice(text: providerNotice, color: .red)
+            }
 
             SettingsRowDivider()
+            StatusBadge(text: statusText, icon: statusIcon, color: statusColor)
 
             ProviderKeyEditor(
                 draft: $model.apiKeyDraft,
-                providerName: "DeepSeek",
+                providerName: model.providerName,
                 hasStoredKey: model.hasStoredKey,
-                isUpdating: model.isUpdatingKey,
-                deletionMessage: "删除后会自动切回默认顺滑，豆包转录仍可正常使用。",
+                isUpdating: model.isMutating,
+                allowsSave: model.hasValidProfile && !model.hasProfileChanges,
+                deletionMessage: "只删除当前服务商的 Key，并切回默认顺滑；其他服务商与历史记录不受影响。",
                 save: { await model.saveAPIKey() },
                 delete: { await model.deleteAPIKey() }
             )
 
-            if model.hasStoredKey {
-                actionRow
+            if !model.hasValidProfile || model.hasProfileChanges {
+                Text("先保存模型配置，再填写或更换 Key。")
+                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
             }
-
+            if model.hasStoredKey {
+                HStack {
+                    Button(model.isCheckingConnection ? "检查中…" : "检查连接") {
+                        model.checkConnection()
+                    }
+                    .disabled(
+                        model.isCheckingConnection || model.isMutating || model.hasProfileChanges)
+                    if model.isCheckingConnection { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                Text("手动检查会发送一小段测试文字，可能产生服务商用量费用。")
+                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
+            }
             if let credentialNotice = model.credentialNotice {
                 SettingsNotice(text: credentialNotice, color: .red)
             }
@@ -150,39 +236,17 @@ private struct DeepSeekSettingsCard: View {
         }
     }
 
-    private var statusRow: some View {
-        HStack {
-            StatusBadge(
-                text: statusText,
-                icon: statusIcon,
-                color: statusColor
-            )
-            Spacer()
-            Link(
-                "打开 DeepSeek 平台",
-                destination: ExternalLinks.deepSeekAPIKeys
-            )
-            .font(SpeakerTypography.caption)
-        }
+    private func saveConfiguration() {
+        Task { await model.saveProviderConfiguration() }
     }
 
-    private var actionRow: some View {
-        HStack {
-            Button {
-                model.checkConnection()
-            } label: {
-                if model.isCheckingConnection {
-                    HStack(spacing: 5) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("检查中…")
-                    }
-                } else {
-                    Text("检查连接")
-                }
-            }
-            .disabled(model.isCheckingConnection || model.isUpdatingKey)
-            Spacer()
+    private func labeledField(_ label: String, placeholder: String, text: Binding<String>)
+        -> some View
+    {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(SpeakerTypography.caption)
+            RefinementConfigurationTextField(label: label, placeholder: placeholder, text: text)
+                .frame(height: 24)
         }
     }
 
@@ -213,6 +277,7 @@ private struct ProviderKeyEditor: View {
     let providerName: String
     let hasStoredKey: Bool
     let isUpdating: Bool
+    var allowsSave = true
     let deletionMessage: String
     let save: @MainActor () async -> Void
     let delete: @MainActor () async -> Void
@@ -293,11 +358,55 @@ private struct ProviderKeyEditor: View {
     }
 
     private var canSave: Bool {
-        !isUpdating && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isUpdating && allowsSave && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func saveDraft() {
         Task { await save() }
     }
 
+}
+
+private struct RefinementConfigurationTextField: NSViewRepresentable {
+    let label: String
+    let placeholder: String
+    @Binding var text: String
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField(string: text)
+        field.isEditable = true
+        field.isSelectable = true
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.font = .systemFont(ofSize: NSFont.systemFontSize)
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.commit(_:))
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+        field.placeholderString = placeholder
+        field.isEnabled = isEnabled
+        field.setAccessibilityLabel(label)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            commit(field)
+        }
+        @objc func commit(_ field: NSTextField) {
+            text.wrappedValue = field.stringValue
+        }
+    }
 }

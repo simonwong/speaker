@@ -243,22 +243,22 @@ func appendUInt32BE(_ value: UInt32, to data: inout Data) {
     data.append(UInt8(value & 0xFF))
 }
 
-actor DeepSeekRefinerFake: DeepSeekTextRefining {
-    let result: Result<DeepSeekRefinementResult, DeepSeekRefinementFailure>
+actor DeepSeekRefinerFake: TextRefining {
+    let result: Result<TextRefinementResult, TextRefinementFailure>
     private(set) var callCount = 0
     private(set) var inputs: [String] = []
     private(set) var contexts: [TextRefinementContext] = []
 
     var modes: [TextRefinementMode] { contexts.map(\.mode) }
 
-    init(result: Result<DeepSeekRefinementResult, DeepSeekRefinementFailure>) {
+    init(result: Result<TextRefinementResult, TextRefinementFailure>) {
         self.result = result
     }
 
     func refine(
         _ text: String,
         using context: TextRefinementContext
-    ) async throws -> DeepSeekRefinementResult {
+    ) async throws -> TextRefinementResult {
         callCount += 1
         inputs.append(text)
         contexts.append(context)
@@ -333,15 +333,15 @@ actor StreamingContextualTranscriberFake: ContextualSpeechTranscribing,
     }
 }
 
-actor DeepSeekTransportFake: DeepSeekTransport {
-    let response: DeepSeekTransportResponse
+actor ChatCompletionTransportFake: ChatCompletionTransport {
+    let response: ChatCompletionTransportResponse
     private var requests: [URLRequest] = []
 
-    init(response: DeepSeekTransportResponse) {
+    init(response: ChatCompletionTransportResponse) {
         self.response = response
     }
 
-    func send(_ request: URLRequest) async throws -> DeepSeekTransportResponse {
+    func send(_ request: URLRequest) async throws -> ChatCompletionTransportResponse {
         requests.append(request)
         return response
     }
@@ -354,34 +354,34 @@ actor DeepSeekTransportFake: DeepSeekTransport {
     }
 }
 
-actor CancellableDeepSeekRefinerFake: DeepSeekTextRefining {
+actor CancellableDeepSeekRefinerFake: TextRefining {
     private(set) var callCount = 0
     private(set) var cancellationCount = 0
 
     func refine(
         _ text: String,
         using context: TextRefinementContext
-    ) async throws -> DeepSeekRefinementResult {
+    ) async throws -> TextRefinementResult {
         callCount += 1
         do {
             try await suspendUntilCancelled()
         } catch is CancellationError {
             cancellationCount += 1
-            throw DeepSeekRefinementFailure(kind: .cancelled)
+            throw TextRefinementFailure(kind: .cancelled)
         }
-        throw DeepSeekRefinementFailure(kind: .cancelled)
+        throw TextRefinementFailure(kind: .cancelled)
     }
 }
 
-func makeDeepSeekClient(content: String) -> DeepSeekRefinementClient {
+func makeDeepSeekClient(content: String) -> ChatCompletionRefinementClient {
     let encodedContent = try! JSONEncoder().encode(content)
     let body = Data(
         "{\"choices\":[{\"message\":{\"content\":\(String(decoding: encodedContent, as: UTF8.self))},\"finish_reason\":\"stop\"}]}"
             .utf8
     )
-    return DeepSeekRefinementClient(
+    return ChatCompletionRefinementClient(
         configuration: .init(apiKey: "deepseek-test-key"),
-        transport: DeepSeekTransportFake(response: .init(statusCode: 200, body: body))
+        transport: ChatCompletionTransportFake(response: .init(statusCode: 200, body: body))
     )
 }
 

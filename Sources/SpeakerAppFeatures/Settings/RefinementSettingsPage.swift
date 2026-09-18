@@ -25,12 +25,13 @@ package struct RefinementSettingsPage: View {
                 CustomRefinementModeCard(model: model)
             }
         }
+        .disabled(model.isMutating)
     }
 
     private var modeCard: some View {
         SettingsCard(
             "整理模式",
-            subtitle: "默认顺滑只用豆包；其他模式需配置 DeepSeek Key",
+            subtitle: "默认顺滑只用豆包；其他模式使用 \(model.providerName)，需先配置 Key",
             icon: "text.alignleft"
         ) {
             LazyVGrid(

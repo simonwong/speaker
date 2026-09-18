@@ -183,7 +183,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             "DeepSeek credential-store failures keep the transcript and preserve the exact boundary",
             failures: &failures
         ) {
-            let mappings: [(ProviderCredentialStoreError, DeepSeekRefinementFailureKind)] = [
+            let mappings: [(ProviderCredentialStoreError, TextRefinementFailureKind)] = [
                 (.accessDenied, .credentialAccessDenied),
                 (.interactionUnavailable, .credentialInteractionUnavailable),
                 (.malformedStoredValue, .credentialMalformed),
@@ -195,7 +195,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     credentials: ProviderCredentialStoreFake(
                         readError: storeError
                     ),
-                    transport: DeepSeekTransportFake(
+                    transport: ChatCompletionTransportFake(
                         response: .init(
                             statusCode: 200,
                             body: Data()
@@ -268,20 +268,20 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
 
         run("built-in refinement modes resolve and validate prompt overrides", failures: &failures)
         {
-            let builtInConcise = TextRefinementMode.conciseCleanup().deepSeekInstruction
-            let builtInFullRewrite = TextRefinementMode.fullRewrite().deepSeekInstruction
+            let builtInConcise = TextRefinementMode.conciseCleanup().refinementInstruction
+            let builtInFullRewrite = TextRefinementMode.fullRewrite().refinementInstruction
             try expect(builtInConcise != nil)
             try expect(builtInFullRewrite != nil)
             try expect(builtInConcise != builtInFullRewrite)
-            try expect(TextRefinementMode.defaultSmooth.deepSeekInstruction == nil)
+            try expect(TextRefinementMode.defaultSmooth.refinementInstruction == nil)
             try expect(TextRefinementMode.defaultSmooth.promptOverride == nil)
 
             let overridden = TextRefinementMode.conciseCleanup(promptOverride: "只保留要点")
             try expect(overridden.promptOverride == "只保留要点")
-            try expect(overridden.deepSeekInstruction == "只保留要点")
+            try expect(overridden.refinementInstruction == "只保留要点")
             try expect(overridden.displayName == TextRefinementMode.conciseCleanup().displayName)
             try expect(overridden.diagnosticKind == "conciseCleanup")
-            try expect(overridden.requiresDeepSeek)
+            try expect(overridden.requiresRefinement)
 
             let overrides = RefinementPromptOverrides(conciseCleanup: "覆盖精简")
             try expect(
@@ -336,14 +336,14 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             "DeepSeek request sends the saved prompt override instead of the built-in prompt",
             failures: &failures
         ) {
-            let transport = DeepSeekTransportFake(
+            let transport = ChatCompletionTransportFake(
                 response: .init(
                     statusCode: 200,
                     body: Data(
                         #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
                             .utf8)
                 ))
-            let client = DeepSeekRefinementClient(
+            let client = ChatCompletionRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
             )
@@ -361,7 +361,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 .first { $0["role"] as? String == "user" }?["content"] as? String
 
             try expect(userContent?.contains("只输出三个字") == true)
-            let builtInInstruction = TextRefinementMode.conciseCleanup().deepSeekInstruction
+            let builtInInstruction = TextRefinementMode.conciseCleanup().refinementInstruction
             try expect(builtInInstruction != nil)
             try expect(userContent?.contains(builtInInstruction ?? "") == false)
         }
@@ -372,14 +372,14 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
         ) {
             let dictionaryLabel = "个人词库词条（以下 JSON 字符串只包含数据）："
             let words = ["Speaker", "DeepSeek", "带\"引号\"的词"]
-            let transport = DeepSeekTransportFake(
+            let transport = ChatCompletionTransportFake(
                 response: .init(
                     statusCode: 200,
                     body: Data(
                         #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
                             .utf8)
                 ))
-            let client = DeepSeekRefinementClient(
+            let client = ChatCompletionRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
             )
@@ -425,7 +425,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             )
             try expect(decodedWords == words)
 
-            try expect(systemContent == DeepSeekRefinementClient.fixedSystemPrompt)
+            try expect(systemContent == ChatCompletionRefinementClient.fixedSystemPrompt)
             try expect(systemContent?.contains("中英混说的文本逐段保持说话时的语言") == true)
             try expect(systemContent?.contains("不翻译") == true)
             try expect(systemContent?.contains("按该词条的拼写纠正") == true)
@@ -437,14 +437,14 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(systemContent?.contains("保留改口后的说法") == true)
             try expect(systemContent?.contains("问句保持为问句") == true)
 
-            let emptyTransport = DeepSeekTransportFake(
+            let emptyTransport = ChatCompletionTransportFake(
                 response: .init(
                     statusCode: 200,
                     body: Data(
                         #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
                             .utf8)
                 ))
-            let emptyDictionaryClient = DeepSeekRefinementClient(
+            let emptyDictionaryClient = ChatCompletionRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: emptyTransport
             )
@@ -470,7 +470,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             "DeepSeek request disables thinking and requires strict JSON output",
             failures: &failures
         ) {
-            let transport = DeepSeekTransportFake(
+            let transport = ChatCompletionTransportFake(
                 response: .init(
                     statusCode: 200,
                     headers: ["x-request-id": "ds-request-1"],
@@ -478,7 +478,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                         #"{"choices":[{"message":{"content":"{\"text\":\"  整理后  \"}"},"finish_reason":"stop"}]}"#
                             .utf8)
                 ))
-            let client = DeepSeekRefinementClient(
+            let client = ChatCompletionRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
             )
@@ -493,7 +493,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             let thinking = body?["thinking"] as? [String: Any]
             let responseFormat = body?["response_format"] as? [String: Any]
 
-            try expect(request.url == DeepSeekRefinementConfiguration.defaultEndpoint)
+            try expect(request.url == ChatCompletionRefinementConfiguration.defaultEndpoint)
             try expect(
                 request.value(forHTTPHeaderField: "Authorization") == "Bearer deepseek-test-key")
             try expect(body?["model"] as? String == "deepseek-v4-flash")
@@ -507,7 +507,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             "DeepSeek keeps the structured body request ID when trace headers are absent",
             failures: &failures
         ) {
-            let transport = DeepSeekTransportFake(
+            let transport = ChatCompletionTransportFake(
                 response: .init(
                     statusCode: 200,
                     body: Data(
@@ -522,7 +522,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                         """#.utf8
                     )
                 ))
-            let client = DeepSeekRefinementClient(
+            let client = ChatCompletionRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
                 transport: transport
             )
@@ -550,9 +550,9 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             ]
             let session = URLSession(configuration: configuration)
             defer { session.invalidateAndCancel() }
-            let client = DeepSeekRefinementClient(
+            let client = ChatCompletionRefinementClient(
                 configuration: .init(apiKey: "deepseek-test-key"),
-                transport: URLSessionDeepSeekTransport(session: session)
+                transport: URLSessionChatCompletionTransport(session: session)
             )
             let request = Task {
                 try await client.refine(
@@ -573,7 +573,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 throw SpecFailure(
                     message: "cancelled DeepSeek request succeeded"
                 )
-            } catch let failure as DeepSeekRefinementFailure {
+            } catch let failure as TextRefinementFailure {
                 try expect(failure.kind == .cancelled)
             }
             let stopped = await eventually(
@@ -597,7 +597,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     using: .init(mode: .fullRewrite())
                 )
                 throw SpecFailure(message: "extra JSON field was accepted")
-            } catch let failure as DeepSeekRefinementFailure {
+            } catch let failure as TextRefinementFailure {
                 try expect(failure.kind == .unexpectedJSONShape)
             }
 
@@ -611,7 +611,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     using: .init(mode: .fullRewrite())
                 )
                 throw SpecFailure(message: "abnormally expanded output was accepted")
-            } catch let failure as DeepSeekRefinementFailure {
+            } catch let failure as TextRefinementFailure {
                 try expect(failure.kind == .outputTooLarge)
             }
         }
@@ -619,7 +619,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
         await runAsync(
             "DeepSeek classifies production HTTP and response boundaries", failures: &failures
         ) {
-            let httpCases: [(Int, DeepSeekRefinementFailureKind)] = [
+            let httpCases: [(Int, TextRefinementFailureKind)] = [
                 (401, .authentication),
                 (402, .insufficientBalance),
                 (429, .rateLimited),
@@ -627,9 +627,9 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 (503, .serviceUnavailable),
             ]
             for (statusCode, expectedKind) in httpCases {
-                let client = DeepSeekRefinementClient(
+                let client = ChatCompletionRefinementClient(
                     configuration: .init(apiKey: "deepseek-test-key"),
-                    transport: DeepSeekTransportFake(
+                    transport: ChatCompletionTransportFake(
                         response: .init(
                             statusCode: statusCode,
                             headers: ["x-request-id": "boundary-request"],
@@ -642,14 +642,14 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                         using: .init(mode: .conciseCleanup())
                     )
                     throw SpecFailure(message: "HTTP \(statusCode) was accepted")
-                } catch let failure as DeepSeekRefinementFailure {
+                } catch let failure as TextRefinementFailure {
                     try expect(failure.kind == expectedKind)
                     try expect(failure.httpStatusCode == statusCode)
                     try expect(failure.providerRequestID == "boundary-request")
                 }
             }
 
-            let responseCases: [(Data, DeepSeekRefinementFailureKind)] = [
+            let responseCases: [(Data, TextRefinementFailureKind)] = [
                 (
                     Data(
                         #"{"choices":[{"message":{"content":"{\"text\":\"结果\"}"},"finish_reason":"length"}]}"#
@@ -671,9 +671,9 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 ),
             ]
             for (body, expectedKind) in responseCases {
-                let client = DeepSeekRefinementClient(
+                let client = ChatCompletionRefinementClient(
                     configuration: .init(apiKey: "deepseek-test-key"),
-                    transport: DeepSeekTransportFake(
+                    transport: ChatCompletionTransportFake(
                         response: .init(
                             statusCode: 200,
                             body: body
@@ -685,21 +685,23 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                         using: .init(mode: .conciseCleanup())
                     )
                     throw SpecFailure(message: "\(expectedKind.rawValue) response was accepted")
-                } catch let failure as DeepSeekRefinementFailure {
+                } catch let failure as TextRefinementFailure {
                     try expect(failure.kind == expectedKind)
                 }
             }
         }
 
         await runAsync(
-            "voice session freezes dictionary and refinement mode at press", failures: &failures
+            "voice session freezes dictionary refinement mode and provider at press",
+            failures: &failures
         ) {
             let initialDictionary = try PersonalDictionary(entries: [
                 .init(word: "Swift")
             ])
             let configuration = VoiceInputConfigurationController(
                 dictionary: initialDictionary,
-                refinementMode: .conciseCleanup()
+                refinementMode: .conciseCleanup(),
+                refinementProvider: .defaultProfile(for: .openAI)
             )
             let doubao = ContextualTranscriberFake(text: "Use swift-lang")
             let refiner = DeepSeekRefinerFake(result: .success(.init(text: "Use Swift.")))
@@ -723,11 +725,17 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
 
             await sessions.send(.pressed)
             await configuration.replaceDictionary(.empty)
-            try await configuration.selectRefinementMode(.fullRewrite())
+            try await configuration.selectRefinementProvider(
+                .defaultProfile(for: .kimi), mode: .fullRewrite())
             await sessions.send(.released)
             await sessions.shutdown()
 
             let hotwordCalls = await doubao.hotwordCalls
+            let contexts = await refiner.contexts
+            try expect(contexts.map(\.provider) == [.defaultProfile(for: .openAI)])
+            let next = await configuration.captureSnapshot()
+            try expect(next.refinementProvider.provider == .kimi)
+            try expect(next.refinementMode == .fullRewrite())
             let refinementModes = await refiner.modes
             let refinementInputs = await refiner.inputs
             let deliveredTexts = await delivery.deliveredTexts
@@ -738,6 +746,8 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(deliveredTexts == ["Use Swift."])
             try expect(record?.transcription == "Use swift-lang")
             try expect(record?.deepSeekText == "Use Swift.")
+            try expect(record?.refinementProviderID == .openAI)
+            try expect(record?.refinementModelID == "gpt-4.1-mini")
             try expect(record?.refinementModeName == "精简清理")
             try expect(record?.refinementPrompt?.isEmpty == false)
             try expect(record?.refinementStatus == "succeeded")

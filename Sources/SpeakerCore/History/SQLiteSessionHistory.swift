@@ -620,6 +620,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             providerMessage: nil,
             deepSeekText: record.deepSeekText,
             deepSeekRequestID: record.deepSeekRequestID,
+            refinementProviderID: record.refinementProviderID,
+            refinementModelID: record.refinementModelID,
             refinementModeName: record.refinementModeName,
             refinementPrompt: record.refinementPrompt,
             refinementStatus: record.refinementStatus,

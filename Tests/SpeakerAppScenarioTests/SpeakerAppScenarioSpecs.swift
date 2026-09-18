@@ -1368,8 +1368,8 @@ struct SpeakerAppScenarioSpecs {
                         refinement: "defaultSmooth",
                         doubaoConfigured: true,
                         doubaoResource: "volc.bigasr.sauc.duration",
-                        deepSeekConfigured: false,
-                        deepSeekVerified: false,
+                        refinementConfigured: false,
+                        refinementVerified: false,
                         historyRecordCount: 0,
                         historyPersistence: "none",
                         audioCaptureEnvironment: environment,
@@ -1462,8 +1462,11 @@ struct SpeakerAppScenarioSpecs {
                     refinement: "custom",
                     doubaoConfigured: true,
                     doubaoResource: "volc.bigasr.sauc.duration",
-                    deepSeekConfigured: true,
-                    deepSeekVerified: false,
+                    refinementConfigured: true,
+                    refinementVerified: false,
+                    refinementProfile: .init(
+                        provider: .custom, modelID: "SECRET MODEL ID",
+                        baseURL: "https://SECRET-ENDPOINT.invalid/v1"),
                     historyRecordCount: 7,
                     historyPersistence: "none",
                     activeProvider: .init(
@@ -1494,10 +1497,14 @@ struct SpeakerAppScenarioSpecs {
                     "latestDeliveryDiagnostic: pasteReceipt.unconfirmed"
                 )
             )
-            try expect(report.contains("latestDeepSeekRequestID: deepseek-safe-id"))
+            try expect(report.contains("latestRefinementRequestID: deepseek-safe-id"))
+            try expect(report.contains("refinementProvider: custom"))
+            try expect(report.contains("refinementModel: custom"))
             try expect(report.contains("latestSessionStages: doubao=900,targetCapture=20"))
             try expect(report.contains("latestCancelledAtStage: doubao"))
             for secret in [
+                "SECRET MODEL ID",
+                "SECRET-ENDPOINT",
                 "SECRET TRANSCRIPT",
                 "SECRET FINAL TEXT",
                 "SECRET PROVIDER MESSAGE",
@@ -1931,7 +1938,7 @@ struct SpeakerAppScenarioSpecs {
             )
 
             let concise = RefinementPromptPresentation.editorState(for: .conciseCleanup())
-            let builtInConcise = TextRefinementMode.conciseCleanup().deepSeekInstruction
+            let builtInConcise = TextRefinementMode.conciseCleanup().refinementInstruction
             try expect(concise?.defaultPrompt == builtInConcise)
             try expect(concise?.effectivePrompt == builtInConcise)
             try expect(concise?.isOverridden == false)
@@ -1941,7 +1948,7 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(
                 overridden?.defaultPrompt
-                    == TextRefinementMode.fullRewrite().deepSeekInstruction
+                    == TextRefinementMode.fullRewrite().refinementInstruction
             )
             try expect(overridden?.effectivePrompt == "自定义提示词")
             try expect(overridden?.isOverridden == true)
@@ -2143,7 +2150,7 @@ struct SpeakerAppScenarioSpecs {
             )
             let configuration = VoiceInputConfigurationController()
             let model = RefinementSettingsModel(
-                service: CredentialedDeepSeekTextRefiner(
+                service: CredentialedTextRefiner(
                     credentials: ScenarioProviderCredentialStore()
                 ),
                 configuration: configuration,
@@ -2160,7 +2167,7 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(
                 model.promptDraft
-                    == TextRefinementMode.conciseCleanup().deepSeekInstruction
+                    == TextRefinementMode.conciseCleanup().refinementInstruction
             )
 
             model.promptDraft = "无 Key 时保存的精简规则"
@@ -2196,7 +2203,7 @@ struct SpeakerAppScenarioSpecs {
             let credentials = ScenarioProviderCredentialStore()
             let configuration = VoiceInputConfigurationController()
             let model = RefinementSettingsModel(
-                service: CredentialedDeepSeekTextRefiner(
+                service: CredentialedTextRefiner(
                     credentials: credentials
                 ),
                 configuration: configuration,
@@ -2293,6 +2300,146 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(model.resource == .model1Concurrent)
             try expect(model.status == .configured)
+        }
+
+        await runAsync(
+            "refinement providers preserve independent models keys and desired mode",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "speaker-provider-settings-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            try await store.updateRefinement(.fullRewrite)
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "synthetic-deepseek", for: .deepSeek)
+            let service = CredentialedTextRefiner(credentials: credentials)
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: service, configuration: configuration, settingsStore: store)
+            await model.load()
+            try expect(model.selectedProfile == .legacyDeepSeek)
+            try expect(model.mode == .fullRewrite())
+            await model.selectProvider(.openAI)
+            try expect(model.selectedProvider == .openAI && !model.hasStoredKey)
+            try expect(model.mode == .defaultSmooth)
+            let unconfigured = await configuration.captureSnapshot()
+            try expect(
+                unconfigured.refinementMode == .defaultSmooth
+                    && unconfigured.refinementProvider.provider == .openAI)
+            await model.selectModel("gpt-4.1")
+            model.apiKeyDraft = "synthetic-openai"
+            await model.saveAPIKey()
+            try expect(model.mode == .fullRewrite())
+            await model.selectProvider(.deepSeek)
+            try expect(model.hasStoredKey && model.selectedProfile == .legacyDeepSeek)
+            await model.selectProvider(.openAI)
+            try expect(model.hasStoredKey && model.selectedProfile.modelID == "gpt-4.1")
+            await model.deleteAPIKey()
+            try expect(model.mode == .defaultSmooth && !model.hasStoredKey)
+            let retained = await credentials.apiKey(for: .deepSeek)
+            try expect(retained == "synthetic-deepseek")
+            let reloaded = RefinementSettingsModel(
+                service: service, configuration: VoiceInputConfigurationController(),
+                settingsStore: store)
+            await reloaded.load()
+            try expect(
+                reloaded.selectedProvider == .openAI
+                    && reloaded.selectedProfile.modelID == "gpt-4.1")
+            try expect(reloaded.mode == .defaultSmooth)
+        }
+
+        await runAsync(
+            "refinement provider profile failures leave live selection unchanged",
+            failures: &failures
+        ) {
+            let store = ScenarioAppSettingsStore()
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: configuration, settingsStore: store)
+            await model.load()
+            await model.select(.fullRewrite)
+            await store.setFailProviderWrites(true)
+            await model.selectProvider(.kimi)
+            try expect(model.selectedProvider == .deepSeek && model.hasStoredKey)
+            let snapshot = await configuration.captureSnapshot()
+            try expect(
+                snapshot.refinementProvider == .legacyDeepSeek
+                    && snapshot.refinementMode == .fullRewrite())
+            try expect(model.providerNotice != nil)
+        }
+
+        await runAsync(
+            "custom refinement endpoint changes require a new key and preserve manual model ids",
+            failures: &failures
+        ) {
+            let credentials = ScenarioProviderCredentialStore()
+            let service = CredentialedTextRefiner(credentials: credentials)
+            let store = ScenarioAppSettingsStore()
+            let model = RefinementSettingsModel(
+                service: service, configuration: VoiceInputConfigurationController(),
+                settingsStore: store)
+            await model.load()
+            await model.selectProvider(.custom)
+            try expect(!model.hasValidProfile && model.isEditingModelID)
+            model.baseURLDraft = "https://example.invalid/v1"
+            model.modelIDDraft = "my-private-model"
+            await model.saveProviderConfiguration()
+            try expect(model.hasValidProfile && model.selectedProfile.modelID == "my-private-model")
+            model.apiKeyDraft = "synthetic-custom"
+            await model.saveAPIKey()
+            await model.select(.conciseCleanup)
+            try expect(model.hasStoredKey && model.mode == .conciseCleanup())
+            model.baseURLDraft = "https://other.invalid/v1"
+            await model.saveProviderConfiguration()
+            try expect(!model.hasStoredKey && model.mode == .defaultSmooth)
+            model.apiKeyDraft = "synthetic-other"
+            await model.saveAPIKey()
+            try expect(model.mode == .conciseCleanup())
+            await model.selectProvider(.glm)
+            model.modelIDDraft = "future-glm-model"
+            model.isEditingModelID = true
+            await model.saveProviderConfiguration()
+            await model.selectProvider(.custom)
+            try expect(model.hasStoredKey && model.selectedProfile.modelID == "my-private-model")
+            let reloaded = RefinementSettingsModel(
+                service: service, configuration: VoiceInputConfigurationController(),
+                settingsStore: store)
+            await reloaded.load()
+            await reloaded.selectProvider(.glm)
+            try expect(reloaded.isEditingModelID && reloaded.modelIDDraft == "future-glm-model")
+            await model.selectProvider(.custom)
+            let saved = model.selectedProfile
+            model.baseURLDraft = "http://insecure.invalid/v1"
+            await model.saveProviderConfiguration()
+            try expect(model.selectedProfile == saved && model.providerNotice != nil)
+        }
+
+        await runAsync(
+            "refinement provider switch fences an old connection check without probing the new provider",
+            failures: &failures
+        ) {
+            let service = ScenarioSuspendedRefinementService()
+            let model = RefinementSettingsModel(
+                service: service, configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore())
+            await model.load()
+            model.checkConnection()
+            let started = await eventually(before: .seconds(1)) { await service.checkCount == 1 }
+            try expect(started)
+            model.apiKeyDraft = "discard-on-switch"
+            await model.selectProvider(.kimi)
+            try expect(
+                model.selectedProvider == .kimi && !model.isCheckingConnection
+                    && !model.isConnectionVerified)
+            try expect(model.apiKeyDraft.isEmpty)
+            await service.finishCheck()
+            await model.shutdown()
+            try expect(!model.isConnectionVerified && model.connectionFailure == nil)
+            let count = await service.checkCount
+            try expect(count == 1)
         }
 
         await runAsync(
@@ -2571,7 +2718,7 @@ struct SpeakerAppScenarioSpecs {
                 service: CredentialedDoubaoTranscriber(credentials: credentials),
                 settingsStore: settings)
             let refinement = RefinementSettingsModel(
-                service: CredentialedDeepSeekTextRefiner(credentials: credentials),
+                service: CredentialedTextRefiner(credentials: credentials),
                 configuration: VoiceInputConfigurationController(), settingsStore: settings)
             doubao.apiKeyDraft = "synthetic-doubao-old"
             refinement.apiKeyDraft = "synthetic-deepseek-old"
@@ -2617,13 +2764,13 @@ struct SpeakerAppScenarioSpecs {
             defer { try? FileManager.default.removeItem(at: directory) }
             let settings = VersionedLocalAppSettingsStore(
                 fileURL: directory.appendingPathComponent("settings.json"))
-            for provider in ProviderID.allCases {
+            for provider in [ProviderID.doubao, .deepSeek] {
                 let credentials = ScenarioProviderCredentialStore()
                 let doubao = DoubaoSettingsModel(
                     service: CredentialedDoubaoTranscriber(credentials: credentials),
                     settingsStore: settings)
                 let refinement = RefinementSettingsModel(
-                    service: CredentialedDeepSeekTextRefiner(credentials: credentials),
+                    service: CredentialedTextRefiner(credentials: credentials),
                     configuration: VoiceInputConfigurationController(), settingsStore: settings)
                 doubao.apiKeyDraft = "synthetic-first"
                 refinement.apiKeyDraft = "synthetic-first"
@@ -4033,6 +4180,9 @@ private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {
 /// settings models depend on `AppSettingsStoring` rather than a file on disk.
 private actor ScenarioAppSettingsStore: AppSettingsStoring {
     private(set) var settings: SpeakerAppSettings
+    private var failProviderWrites = false
+
+    func setFailProviderWrites(_ value: Bool) { failProviderWrites = value }
 
     init(settings: SpeakerAppSettings = .default) {
         self.settings = settings
@@ -4047,6 +4197,15 @@ private actor ScenarioAppSettingsStore: AppSettingsStoring {
         _ refinement: RefinementPreference
     ) -> SpeakerAppSettings {
         settings.refinement = refinement
+        return settings
+    }
+
+    @discardableResult
+    func updateRefinementProviders(_ providers: RefinementProviderSettings) throws
+        -> SpeakerAppSettings
+    {
+        if failProviderWrites { throw AppSettingsStoreError.writeFailed(reason: "fixture") }
+        settings.refinementProviders = providers
         return settings
     }
 
@@ -4076,28 +4235,28 @@ private actor ScenarioAppSettingsStore: AppSettingsStoring {
     }
 }
 
-private actor ScenarioDeepSeekSettingsService: DeepSeekSettingsServicing {
+private actor ScenarioDeepSeekSettingsService: RefinementProviderServicing {
     private var hasKey: Bool
 
     init(hasKey: Bool) {
         self.hasKey = hasKey
     }
 
-    func hasAPIKey() -> Bool {
+    func hasAPIKey(for profile: RefinementProviderProfile) -> Bool {
         hasKey
     }
 
-    func saveAPIKey(_ apiKey: String) {
+    func saveAPIKey(_ apiKey: String, for profile: RefinementProviderProfile) {
         hasKey = !apiKey.trimmingCharacters(
             in: .whitespacesAndNewlines
         ).isEmpty
     }
 
-    func deleteAPIKey() {
+    func deleteAPIKey(for provider: RefinementProviderID) {
         hasKey = false
     }
 
-    func checkConnection() -> String? {
+    func checkConnection(profile: RefinementProviderProfile) -> String? {
         "scenario-deepseek-request"
     }
 }
@@ -4424,5 +4583,21 @@ private final class DataErasureHarness {
         if failing.contains(name) {
             throw SpeakerDataErasureReason.io
         }
+    }
+}
+
+private actor ScenarioSuspendedRefinementService: RefinementProviderServicing {
+    private var waiter: CheckedContinuation<String?, Never>?
+    private(set) var checkCount = 0
+    func hasAPIKey(for profile: RefinementProviderProfile) -> Bool { true }
+    func saveAPIKey(_ apiKey: String, for profile: RefinementProviderProfile) {}
+    func deleteAPIKey(for provider: RefinementProviderID) {}
+    func checkConnection(profile: RefinementProviderProfile) async -> String? {
+        checkCount += 1
+        return await withCheckedContinuation { waiter = $0 }
+    }
+    func finishCheck() {
+        waiter?.resume(returning: "synthetic-id")
+        waiter = nil
     }
 }

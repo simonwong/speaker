@@ -2,15 +2,15 @@ import Foundation
 
 /// Resolves the user's current BYOK value for every request, keeping the key
 /// out of settings persistence, session history, and long-lived app state.
-public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
+public actor CredentialedDeepSeekTextRefiner: TextRefining {
     private let credentials: any ProviderCredentialStoring
-    private let transport: any DeepSeekTransport
+    private let transport: any ChatCompletionTransport
     private let endpoint: URL
 
     public init(
         credentials: any ProviderCredentialStoring,
-        transport: any DeepSeekTransport = URLSessionDeepSeekTransport(),
-        endpoint: URL = DeepSeekRefinementConfiguration.defaultEndpoint
+        transport: any ChatCompletionTransport = URLSessionChatCompletionTransport(),
+        endpoint: URL = ChatCompletionRefinementConfiguration.defaultEndpoint
     ) {
         self.credentials = credentials
         self.transport = transport
@@ -20,19 +20,19 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
     public func refine(
         _ text: String,
         using context: TextRefinementContext
-    ) async throws -> DeepSeekRefinementResult {
+    ) async throws -> TextRefinementResult {
         let apiKey: String
         do {
             guard let storedKey = try await credentials.apiKey(for: .deepSeek) else {
-                throw DeepSeekRefinementFailure(kind: .invalidCredential)
+                throw TextRefinementFailure(kind: .invalidCredential)
             }
             apiKey = storedKey
         } catch let failure as ProviderCredentialStoreError {
-            throw DeepSeekRefinementFailure(
+            throw TextRefinementFailure(
                 kind: Self.refinementFailureKind(for: failure)
             )
         }
-        let client = DeepSeekRefinementClient(
+        let client = ChatCompletionRefinementClient(
             configuration: .init(apiKey: apiKey, endpoint: endpoint),
             transport: transport
         )
@@ -61,7 +61,7 @@ public actor CredentialedDeepSeekTextRefiner: DeepSeekTextRefining {
 
     private static func refinementFailureKind(
         for failure: ProviderCredentialStoreError
-    ) -> DeepSeekRefinementFailureKind {
+    ) -> TextRefinementFailureKind {
         switch failure {
         case .emptyAPIKey, .apiKeyTooLarge:
             .invalidCredential

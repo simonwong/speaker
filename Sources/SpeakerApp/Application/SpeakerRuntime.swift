@@ -109,14 +109,14 @@ final class SpeakerRuntime: ObservableObject {
             credentials: dependencies.credentials.store,
             runtimeDiagnostics: providerRuntimeDiagnostics
         )
-        let deepSeek = CredentialedDeepSeekTextRefiner(
+        let textRefiner = CredentialedTextRefiner(
             credentials: dependencies.credentials.store
         )
         let configuration = VoiceInputConfigurationController()
         let processor = DefaultVoiceTextProcessor(
             configuration: configuration,
             doubao: doubao,
-            refinement: OptionalTextRefinementPipeline(refiner: deepSeek)
+            refinement: OptionalTextRefinementPipeline(refiner: textRefiner)
         )
         let settingsStore = dependencies.settingsStore
         let microphones = MicrophoneSelectionFeature(
@@ -158,7 +158,7 @@ final class SpeakerRuntime: ObservableObject {
         )
         self.doubaoSettings = doubaoSettings
         let refinementSettings = RefinementSettingsModel(
-            service: deepSeek,
+            service: textRefiner,
             configuration: configuration,
             settingsStore: settingsStore
         )
@@ -445,8 +445,9 @@ final class SpeakerRuntime: ObservableObject {
                 refinement: refinementSettings.mode.diagnosticKind,
                 doubaoConfigured: doubaoSettings.hasConfiguredKey,
                 doubaoResource: doubaoSettings.resource.rawValue,
-                deepSeekConfigured: refinementSettings.hasStoredKey,
-                deepSeekVerified: refinementSettings.isConnectionVerified,
+                refinementConfigured: refinementSettings.hasStoredKey,
+                refinementVerified: refinementSettings.isConnectionVerified,
+                refinementProfile: refinementSettings.selectedProfile,
                 historyRecordCount: historyStatus.recordCount,
                 historyPersistence: historyNotice,
                 audioCaptureEnvironment: audioCaptureEnvironment,

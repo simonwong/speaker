@@ -4,6 +4,10 @@ import Security
 public enum ProviderID: String, CaseIterable, Sendable {
     case doubao
     case deepSeek = "deepseek"
+    case openAI = "openai"
+    case kimi
+    case glm
+    case customRefinement = "custom-refinement"
 }
 
 public enum ProviderCredentialStoreError: Error, Equatable, Sendable {

@@ -8,7 +8,7 @@ package struct RefinementActivationPlan: Equatable, Sendable {
         desiredMode: TextRefinementMode,
         hasStoredKey: Bool
     ) {
-        if desiredMode.requiresDeepSeek, !hasStoredKey {
+        if desiredMode.requiresRefinement, !hasStoredKey {
             activeMode = .defaultSmooth
             deferredMode = desiredMode
         } else {

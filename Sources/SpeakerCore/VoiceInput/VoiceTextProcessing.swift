@@ -4,15 +4,18 @@ public struct VoiceTextProcessingSnapshot: Equatable, Sendable {
     public let dictionary: PersonalDictionarySnapshot
     public let dictionaryContext: DictionaryRequestContext
     public let refinementMode: TextRefinementMode
+    public let refinementProvider: RefinementProviderProfile
 
     public init(
         dictionary: PersonalDictionarySnapshot,
         dictionaryContext: DictionaryRequestContext,
-        refinementMode: TextRefinementMode
+        refinementMode: TextRefinementMode,
+        refinementProvider: RefinementProviderProfile = .legacyDeepSeek
     ) {
         self.dictionary = dictionary
         self.dictionaryContext = dictionaryContext
         self.refinementMode = refinementMode
+        self.refinementProvider = refinementProvider
     }
 
     public static let empty = {
@@ -32,8 +35,8 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
     public let finalText: String
     public let doubaoRequestID: String?
     public let deepSeekRequestID: String?
-    public let refinementStatus: DeepSeekRefinementStatus
-    public let refinementFailure: DeepSeekRefinementFailure?
+    public let refinementStatus: TextRefinementStatus
+    public let refinementFailure: TextRefinementFailure?
     public let stageDurationsMilliseconds: [String: Int]
 
     public init(
@@ -43,8 +46,8 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
         finalText: String,
         doubaoRequestID: String?,
         deepSeekRequestID: String?,
-        refinementStatus: DeepSeekRefinementStatus,
-        refinementFailure: DeepSeekRefinementFailure?,
+        refinementStatus: TextRefinementStatus,
+        refinementFailure: TextRefinementFailure?,
         stageDurationsMilliseconds: [String: Int] = [:]
     ) {
         self.doubaoText = doubaoText
@@ -149,13 +152,16 @@ public protocol StreamingVoiceTextProcessing: Sendable {
 public actor VoiceInputConfigurationController {
     private var dictionary: PersonalDictionary
     private var refinementMode: TextRefinementMode
+    private var refinementProvider: RefinementProviderProfile
 
     public init(
         dictionary: PersonalDictionary = .empty,
-        refinementMode: TextRefinementMode = .defaultSmooth
+        refinementMode: TextRefinementMode = .defaultSmooth,
+        refinementProvider: RefinementProviderProfile = .legacyDeepSeek
     ) {
         self.dictionary = dictionary
         self.refinementMode = refinementMode
+        self.refinementProvider = refinementProvider
     }
 
     public func captureSnapshot() -> VoiceTextProcessingSnapshot {
@@ -164,7 +170,8 @@ public actor VoiceInputConfigurationController {
             dictionary: dictionarySnapshot,
             dictionaryContext: DictionaryRequestContextBuilder.makeContext(
                 from: dictionarySnapshot),
-            refinementMode: refinementMode
+            refinementMode: refinementMode,
+            refinementProvider: refinementProvider
         )
     }
 
@@ -172,6 +179,15 @@ public actor VoiceInputConfigurationController {
 
     public func replaceDictionary(_ dictionary: PersonalDictionary) {
         self.dictionary = dictionary
+    }
+
+    public func selectRefinementProvider(
+        _ profile: RefinementProviderProfile, mode: TextRefinementMode
+    ) throws {
+        let validatedProfile = try profile.validated()
+        let validatedMode = try mode.validated()
+        refinementProvider = validatedProfile
+        refinementMode = validatedMode
     }
 
     public func currentRefinementMode() -> TextRefinementMode { refinementMode }
@@ -267,7 +283,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
     ) -> SpeechTranscriptionContext {
         SpeechTranscriptionContext(
             hotwords: snapshot.dictionaryContext.hotwords,
-            purpose: snapshot.refinementMode.requiresDeepSeek
+            purpose: snapshot.refinementMode.requiresRefinement
                 ? .refinementSource
                 : .defaultSmoothing
         )
@@ -280,7 +296,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         doubaoDuration: Duration,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
-        if snapshot.refinementMode.requiresDeepSeek {
+        if snapshot.refinementMode.requiresRefinement {
             await progress(
                 .init(
                     stage: .refining,
@@ -291,13 +307,14 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         let refinementOutcome = try await refinement.refine(
             doubaoText: doubaoResult.text,
             mode: snapshot.refinementMode,
-            dictionaryWords: snapshot.dictionary.entries.map(\.word)
+            dictionaryWords: snapshot.dictionary.entries.map(\.word),
+            provider: snapshot.refinementProvider
         )
         let refinementDuration = refinementStarted.duration(to: .now)
 
         var stageDurations = [
             "doubao": Self.milliseconds(doubaoDuration),
-            "deepseek": snapshot.refinementMode.requiresDeepSeek
+            "deepseek": snapshot.refinementMode.requiresRefinement
                 ? Self.milliseconds(refinementDuration)
                 : 0,
         ]

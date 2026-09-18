@@ -85,8 +85,12 @@ enum VoiceInputTerminalRecordBuilder {
             deepSeekRequestID: mayPersistProviderRequestID
                 ? processedText?.deepSeekRequestID
                 : nil,
+            refinementProviderID: snapshot?.refinementMode.requiresRefinement == true
+                ? snapshot?.refinementProvider.provider : nil,
+            refinementModelID: snapshot?.refinementMode.requiresRefinement == true
+                ? snapshot?.refinementProvider.modelID : nil,
             refinementModeName: snapshot?.refinementMode.displayName,
-            refinementPrompt: snapshot?.refinementMode.deepSeekInstruction,
+            refinementPrompt: snapshot?.refinementMode.refinementInstruction,
             refinementStatus: processedText?.refinementStatus.rawValue,
             refinementFailureCode: processedText?.refinementFailure?.kind.rawValue,
             refinementFailureStatusCode: refinementDiagnostic?.statusCode,

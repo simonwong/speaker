@@ -1,0 +1,190 @@
+import AppKit
+import Foundation
+import SpeakerAppFeatures
+import SpeakerCore
+import SpeakerSpecSupport
+import SwiftUI
+
+enum RefinementProviderUISpecs {
+    @MainActor
+    static func run(failures: inout [String]) async {
+        await runAsync(
+            "refinement provider model and custom endpoint controls work at narrow width",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "speaker-provider-ui-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let model = RefinementSettingsModel(
+                service: CredentialedTextRefiner(
+                    credentials: LocalFileProviderCredentialStore(
+                        fileURL: directory.appendingPathComponent("credentials.json"))),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(
+                    fileURL: directory.appendingPathComponent("settings.json")))
+            await model.load()
+            let hosting = NSHostingView(
+                rootView: RefinementProviderSettingsCard(model: model).padding(12).frame(width: 400)
+            )
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 650), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = hosting
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            let rendered = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return controls(NSPopUpButton.self, in: hosting).count == 2
+            }
+            try expect(rendered, "provider and model selectors were not rendered")
+            try capture(window, name: "deepseek-narrow")
+            guard
+                let provider = controls(NSPopUpButton.self, in: hosting).first(where: {
+                    $0.itemTitles.contains("OpenAI")
+                }),
+                let openAIIndex = provider.itemTitles.firstIndex(of: "OpenAI")
+            else { throw SpecFailure(message: "built-in provider selector missing") }
+            try expect(provider.itemTitles == ["DeepSeek", "OpenAI", "Kimi", "GLM", "自定义"])
+            provider.menu?.performActionForItem(at: openAIIndex)
+            let switched = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return model.selectedProvider == .openAI
+                    && controls(NSPopUpButton.self, in: hosting).contains {
+                        $0.itemTitles.contains("gpt-4.1")
+                    }
+            }
+            try expect(switched, "provider action did not update model options")
+            guard
+                let models = controls(NSPopUpButton.self, in: hosting).first(where: {
+                    $0.itemTitles.contains("gpt-4.1")
+                }),
+                let modelIndex = models.itemTitles.firstIndex(of: "gpt-4.1")
+            else { throw SpecFailure(message: "OpenAI models missing") }
+            models.menu?.performActionForItem(at: modelIndex)
+            let saved = await eventually(before: .seconds(2)) {
+                model.selectedProfile.modelID == "gpt-4.1"
+            }
+            try expect(saved, "model picker action was not persisted")
+            try capture(window, name: "openai-narrow")
+            guard let customIndex = provider.itemTitles.firstIndex(of: "自定义") else {
+                throw SpecFailure(message: "custom provider missing")
+            }
+            provider.menu?.performActionForItem(at: customIndex)
+            let custom = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return model.selectedProvider == .custom && editableFields(in: hosting).count == 3
+            }
+            try expect(custom, "custom provider did not expose URL, model ID and secure Key fields")
+            let fields = editableFields(in: hosting)
+            try expect(
+                fields.allSatisfy { !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty },
+                "custom fields were clipped")
+            try expect(hosting.frame.width <= 400, "provider card exceeded narrow width")
+            try expect(
+                accessibilityLabels(in: hosting).contains("API Base URL"),
+                "Base URL accessibility label missing: \(accessibilityLabels(in: hosting))")
+            try expect(
+                accessibilityLabels(in: hosting).contains("模型 ID"),
+                "model ID accessibility label missing")
+            guard let urlField = fields.first(where: { $0.accessibilityLabel() == "API Base URL" }),
+                let modelField = fields.first(where: { $0.accessibilityLabel() == "模型 ID" })
+            else { throw SpecFailure(message: "custom native inputs missing") }
+            try edit(urlField, value: "https://example.invalid/v1")
+            try edit(modelField, value: "custom-test-model")
+            window.endEditing(for: nil)
+            try expect(
+                model.baseURLDraft == "https://example.invalid/v1"
+                    && model.modelIDDraft == "custom-test-model",
+                "native input actions did not update profile drafts")
+            let saveVisible = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return controls(NSView.self, in: hosting).contains {
+                    $0.accessibilityLabel() == "保存模型配置" && $0.isAccessibilityEnabled()
+                }
+            }
+            try expect(saveVisible, "custom configuration save action missing")
+            guard
+                let save = controls(NSView.self, in: hosting).first(where: {
+                    $0.accessibilityLabel() == "保存模型配置" && $0.isAccessibilityEnabled()
+                })
+            else { throw SpecFailure(message: "custom save disappeared") }
+            try expect(
+                save.accessibilityPerformPress(), "custom save accessibility action refused press")
+            let configured = await eventually(before: .seconds(2)) {
+                model.hasValidProfile && model.selectedProfile.modelID == "custom-test-model"
+            }
+            try expect(configured, "native custom save did not persist configuration")
+            try expect(!model.isCheckingConnection && !model.isConnectionVerified)
+            pump(hosting)
+            try capture(window, name: "custom-narrow")
+            await model.shutdown()
+        }
+    }
+
+    @MainActor
+    private static func edit(_ field: NSTextField, value: String) throws {
+        field.stringValue = value
+        guard let action = field.action else {
+            throw SpecFailure(message: "native field has no commit action")
+        }
+        try expect(
+            NSApp.sendAction(action, to: field.target, from: field),
+            "native field commit action failed")
+    }
+
+    @MainActor
+    private static func accessibilityLabels(in root: NSView) -> [String] {
+        var visited = Set<ObjectIdentifier>()
+        var labels: [String] = []
+        func visit(_ object: AnyObject) {
+            guard visited.insert(ObjectIdentifier(object)).inserted else { return }
+            if let element = object as? any NSAccessibilityProtocol {
+                if let label = element.accessibilityLabel() { labels.append(label) }
+                for child in element.accessibilityChildren() ?? [] { visit(child as AnyObject) }
+            }
+            if let view = object as? NSView { view.subviews.forEach(visit) }
+        }
+        visit(root)
+        return labels
+    }
+
+    @MainActor
+    private static func capture(_ window: NSWindow, name: String) throws {
+        guard
+            let path = ProcessInfo.processInfo.environment[
+                "SPEAKER_REFINEMENT_PROVIDER_UI_ARTIFACTS"]
+        else { return }
+        let directory = URL(fileURLWithPath: path, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = [
+            "-x", "-l", String(window.windowNumber),
+            directory.appendingPathComponent(name + ".png").path,
+        ]
+        try process.run()
+        process.waitUntilExit()
+        try expect(process.terminationStatus == 0)
+    }
+
+    @MainActor
+    private static func controls<T: NSView>(_ type: T.Type, in root: NSView) -> [T] {
+        let own = (root as? T).map { [$0] } ?? []
+        return own + root.subviews.flatMap { controls(type, in: $0) }
+    }
+
+    @MainActor
+    private static func editableFields(in root: NSView) -> [NSTextField] {
+        controls(NSTextField.self, in: root).filter(\.isEditable)
+    }
+
+    @MainActor
+    private static func pump(_ root: NSView) {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        root.layoutSubtreeIfNeeded()
+    }
+}

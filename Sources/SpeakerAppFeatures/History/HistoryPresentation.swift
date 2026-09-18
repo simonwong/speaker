@@ -156,7 +156,7 @@ package enum HistoryPresentation {
                 return .deliveryUnconfirmed
             }
             if record.refinementStatus
-                == DeepSeekRefinementStatus.fellBack.rawValue
+                == TextRefinementStatus.fellBack.rawValue
             {
                 return .refinementFellBack
             }
@@ -272,5 +272,14 @@ extension HistoryRetentionPolicy {
         case .oneYear: Self.oneYearDisplayName
         case .forever: Self.foreverDisplayName
         }
+    }
+}
+
+extension VoiceInputHistoryRecord {
+    package var refinementProviderLabel: String {
+        if let refinementProviderID { return refinementProviderID.displayName }
+        return deepSeekText != nil || deepSeekRequestID != nil
+            || refinementStatus == "succeeded" || refinementStatus == "fellBack"
+            ? "DeepSeek" : "文字整理"
     }
 }

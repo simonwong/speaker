@@ -177,7 +177,7 @@ public enum HistoryRetentionPolicy: String, CaseIterable, Equatable, Sendable, C
     }
 }
 
-/// Per-mode user replacements for the built-in DeepSeek refinement prompts.
+/// Per-mode user replacements for the built-in text refinement prompts.
 /// Modes without a built-in prompt (Default Smoothing, Custom Mode) can never
 /// hold an override here.
 public struct RefinementPromptOverrides: Equatable, Sendable, Codable {
@@ -220,6 +220,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var shortcut: VoiceShortcutPreference
     public var microphone: MicrophonePreference
     public var refinement: RefinementPreference
+    public var refinementProviders: RefinementProviderSettings
     public var savedCustomRefinement: RefinementPreference?
     public var refinementPromptOverrides: RefinementPromptOverrides
     public var launchAtLogin: Bool
@@ -231,6 +232,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         shortcut: VoiceShortcutPreference = .functionKey,
         microphone: MicrophonePreference = .systemDefault,
         refinement: RefinementPreference = .defaultSmooth,
+        refinementProviders: RefinementProviderSettings = RefinementProviderSettings(),
         savedCustomRefinement: RefinementPreference? = nil,
         refinementPromptOverrides: RefinementPromptOverrides = RefinementPromptOverrides(),
         launchAtLogin: Bool = false,
@@ -241,6 +243,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.shortcut = shortcut
         self.microphone = microphone
         self.refinement = refinement
+        self.refinementProviders = refinementProviders
         self.savedCustomRefinement = savedCustomRefinement
         self.refinementPromptOverrides = refinementPromptOverrides
         self.launchAtLogin = launchAtLogin
@@ -257,6 +260,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         case shortcut
         case microphone
         case refinement
+        case refinementProviders
         case savedCustomRefinement
         case refinementPromptOverrides
         case launchAtLogin
@@ -280,6 +284,10 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
             RefinementPreference.self,
             forKey: .refinement
         )
+        refinementProviders =
+            try container.decodeIfPresent(
+                RefinementProviderSettings.self, forKey: .refinementProviders)
+            ?? RefinementProviderSettings()
         savedCustomRefinement = try container.decodeIfPresent(
             RefinementPreference.self,
             forKey: .savedCustomRefinement
@@ -375,6 +383,10 @@ public protocol AppSettingsStoring: Sendable {
     func updateRefinement(
         _ refinement: RefinementPreference
     ) async throws -> SpeakerAppSettings
+
+    @discardableResult
+    func updateRefinementProviders(_ providers: RefinementProviderSettings) async throws
+        -> SpeakerAppSettings
 
     @discardableResult
     func updateSavedCustomRefinement(
@@ -504,6 +516,16 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     ) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
         settings.refinement = refinement
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateRefinementProviders(_ providers: RefinementProviderSettings) throws
+        -> SpeakerAppSettings
+    {
+        var settings = try settingsForUpdate()
+        settings.refinementProviders = providers
         try save(settings)
         return settings
     }

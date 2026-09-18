@@ -193,10 +193,10 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
 
 }
 
-extension DeepSeekRefinementFailure {
+extension TextRefinementFailure {
     public var providerDiagnostic: VoiceProviderDiagnostic {
         VoiceProviderDiagnostic(
-            provider: "deepseek",
+            provider: "refinement",
             operation: .refinement,
             requestID: providerRequestID,
             code: kind.rawValue,

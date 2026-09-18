@@ -34,6 +34,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                         "pasteReceipt.unconfirmed",
                     deepSeekText: "DeepSeek 结果 beta",
                     deepSeekRequestID: "deepseek-log-1",
+                    refinementProviderID: .openAI,
+                    refinementModelID: "gpt-4.1-mini",
                     refinementModeName: "精简清理",
                     refinementPrompt: "只清理口语杂质",
                     refinementStatus: "succeeded",
@@ -87,6 +89,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 allRecords.last?.deliveryDiagnosticCode
                     == "pasteReceipt.unconfirmed"
             )
+            try expect(allRecords.last?.refinementProviderID == .openAI)
+            try expect(allRecords.last?.refinementModelID == "gpt-4.1-mini")
             try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")
             try expect(
                 allRecords.last?.dictionarySnapshotEntries
@@ -391,6 +395,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     finalText: "最终增量结果",
                     providerRequestID: "sqlite-request",
                     deepSeekText: "最终增量结果",
+                    refinementProviderID: .kimi,
+                    refinementModelID: "kimi-k2.6",
                     outcome: .delivered(id, applicationName: "TextEdit", text: "最终增量结果")
                 ))
 
@@ -400,6 +406,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             try expect(records.count == 1)
             try expect(records.first?.finalText == "最终增量结果")
+            try expect(records.first?.refinementProviderID == .kimi)
+            try expect(records.first?.refinementModelID == "kimi-k2.6")
             try expect(records.first?.applicationName == nil)
             try expect(status.recordCount == 1)
             try expect(

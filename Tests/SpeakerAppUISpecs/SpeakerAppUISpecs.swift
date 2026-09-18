@@ -141,6 +141,7 @@ struct SpeakerAppUISpecs {
             }
             await MicrophoneSelectionUISpecs.run(failures: &failures)
             await APIKeySettingsUISpecs.run(failures: &failures)
+            await RefinementProviderUISpecs.run(failures: &failures)
             await RefinementSelectionUISpecs.run(failures: &failures)
             await OnboardingFlowUISpecs.run(failures: &failures)
             await PendingCopyRecoveryUISpecs.run(failures: &failures)

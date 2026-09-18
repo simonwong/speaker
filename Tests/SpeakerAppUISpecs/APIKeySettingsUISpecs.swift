@@ -22,7 +22,7 @@ enum APIKeySettingsUISpecs {
                 service: CredentialedDoubaoTranscriber(credentials: credentials),
                 settingsStore: settings)
             let refinement = RefinementSettingsModel(
-                service: CredentialedDeepSeekTextRefiner(credentials: credentials),
+                service: CredentialedTextRefiner(credentials: credentials),
                 configuration: VoiceInputConfigurationController(), settingsStore: settings)
             doubao.apiKeyDraft = "synthetic-doubao-old"
             await doubao.save()
@@ -31,7 +31,7 @@ enum APIKeySettingsUISpecs {
             let hosting = NSHostingView(
                 rootView: APIKeySettingsPage(doubao: doubao, refinement: refinement))
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 760, height: 700), styleMask: [.titled],
+                contentRect: NSRect(x: 0, y: 0, width: 760, height: 850), styleMask: [.titled],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = hosting

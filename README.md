@@ -14,7 +14,7 @@
   </p>
 </div>
 
-Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the key while speaking and release it to finish, or short-press once to start and again to stop. Speaker streams audio to Doubao for real-time transcription, optionally refines the confirmed text with DeepSeek, and delivers the result to the input position that was focused when recording ended.
+Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the key while speaking and release it to finish, or short-press once to start and again to stop. Speaker streams audio to Doubao for real-time transcription, optionally refines the confirmed text with a selected text provider, and delivers the result to the input position that was focused when recording ended.
 
 If Speaker cannot prove that the original input target is still safe and current, it keeps the result in a HUD for explicit copying instead of risking delivery to the wrong place.
 
@@ -26,7 +26,7 @@ If Speaker cannot prove that the original input target is still safe and current
 - **Natural voice shortcut** — hold or short-press `Fn`, choose a custom shortcut, and press `Esc` to cancel at any time.
 - **Target-safe delivery** — the input target is frozen when recording ends; later window or focus changes never retarget the result.
 - **Real-time transcription** — audio streams to Doubao's `bigmodel_async` WebSocket ASR while you speak.
-- **Optional text refinement** — Default Smoothing uses Doubao only. Concise Cleanup, Full Rewrite, and Custom Modes use your DeepSeek key and send text only, never audio.
+- **Optional text refinement** — Default Smoothing uses Doubao only. Concise Cleanup, Full Rewrite, and Custom Modes use your selected text provider and model and send text only, never audio.
 - **Local controls** — Personal Dictionary, searchable Session Records, retention settings, and redacted diagnostics remain under the current macOS user account.
 - **Conservative privacy boundaries** — raw audio is never written to disk, secure input text is never stored in history, and Speaker changes the clipboard only after an explicit Copy action.
 
@@ -36,7 +36,7 @@ If Speaker cannot prove that the original input target is still safe and current
 | --- | --- |
 | Operating system | macOS 14 or later |
 | Transcription | A user-supplied Doubao API key and an activated streaming ASR resource |
-| Refinement | A DeepSeek API key is optional and is required only for non-default Refinement Modes |
+| Refinement | An optional DeepSeek, OpenAI, Kimi, GLM, or Custom API key enables non-default Refinement Modes |
 
 ## Download and run
 
@@ -79,10 +79,10 @@ Then enable Speaker again in System Settings. These commands do not reset permis
 
 1. Speaker captures microphone input in memory as 16 kHz, 16-bit mono PCM and streams it to Doubao in short chunks.
 2. Releasing the shortcut freezes the current Input Target and asks Doubao for the final Stage Result.
-3. Default Smoothing uses that Doubao result directly. Other Refinement Modes may send the confirmed text and selected instruction to DeepSeek.
+3. Default Smoothing uses that Doubao result directly. Other Refinement Modes may send the confirmed text and selected instruction to the selected Refinement Provider.
 4. Speaker revalidates the original Input Target before committing delivery. An uncertain, changed, closed, or secure target becomes a Pending Copy Result instead.
 
-Audio is sent only to Doubao. It is never sent to DeepSeek or persisted as a normal application artifact.
+Audio is sent only to Doubao. It is never sent to text refinement providers or persisted as a normal application artifact.
 
 ## Privacy
 

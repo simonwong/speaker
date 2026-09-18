@@ -19,7 +19,7 @@ enum RefinementSelectionUISpecs {
                 fileURL: directory.appendingPathComponent("keys.json"))
             try await store.save(apiKey: "synthetic-key", for: .deepSeek)
             let model = RefinementSettingsModel(
-                service: CredentialedDeepSeekTextRefiner(credentials: store),
+                service: CredentialedTextRefiner(credentials: store),
                 configuration: VoiceInputConfigurationController(),
                 settingsStore: VersionedLocalAppSettingsStore(
                     fileURL: directory.appendingPathComponent("settings.json")))

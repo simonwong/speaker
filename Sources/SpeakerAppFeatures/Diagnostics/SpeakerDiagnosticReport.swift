@@ -23,8 +23,9 @@ package enum SpeakerDiagnosticReport {
         package let refinement: String
         package let doubaoConfigured: Bool
         package let doubaoResource: String
-        package let deepSeekConfigured: Bool
-        package let deepSeekVerified: Bool
+        package let refinementConfigured: Bool
+        package let refinementVerified: Bool
+        package let refinementProfile: RefinementProviderProfile
         package let historyRecordCount: Int
         package let historyPersistence: String
         package let audioCaptureEnvironment: AudioCaptureEnvironmentSnapshot?
@@ -46,8 +47,9 @@ package enum SpeakerDiagnosticReport {
             refinement: String,
             doubaoConfigured: Bool,
             doubaoResource: String,
-            deepSeekConfigured: Bool,
-            deepSeekVerified: Bool,
+            refinementConfigured: Bool,
+            refinementVerified: Bool,
+            refinementProfile: RefinementProviderProfile = .legacyDeepSeek,
             historyRecordCount: Int,
             historyPersistence: String,
             audioCaptureEnvironment: AudioCaptureEnvironmentSnapshot? = nil,
@@ -68,8 +70,9 @@ package enum SpeakerDiagnosticReport {
             self.refinement = refinement
             self.doubaoConfigured = doubaoConfigured
             self.doubaoResource = doubaoResource
-            self.deepSeekConfigured = deepSeekConfigured
-            self.deepSeekVerified = deepSeekVerified
+            self.refinementConfigured = refinementConfigured
+            self.refinementVerified = refinementVerified
+            self.refinementProfile = refinementProfile
             self.historyRecordCount = historyRecordCount
             self.historyPersistence = historyPersistence
             self.audioCaptureEnvironment = audioCaptureEnvironment
@@ -94,8 +97,10 @@ package enum SpeakerDiagnosticReport {
             "refinement: \(clean(snapshot.refinement))",
             "doubaoConfigured: \(snapshot.doubaoConfigured)",
             "doubaoResource: \(clean(snapshot.doubaoResource))",
-            "deepSeekConfigured: \(snapshot.deepSeekConfigured)",
-            "deepSeekVerified: \(snapshot.deepSeekVerified)",
+            "refinementConfigured: \(snapshot.refinementConfigured)",
+            "refinementVerified: \(snapshot.refinementVerified)",
+            "refinementProvider: \(snapshot.refinementProfile.provider.rawValue)",
+            "refinementModel: \(diagnosticModel(snapshot.refinementProfile.modelID, provider: snapshot.refinementProfile.provider))",
             "historyRecords: \(max(0, snapshot.historyRecordCount))",
             "historyPersistence: \(clean(snapshot.historyPersistence))",
         ]
@@ -192,17 +197,25 @@ package enum SpeakerDiagnosticReport {
                 to: &lines
             )
             append(
-                "latestDeepSeekRequestID",
+                "latestRefinementProvider", value: record.refinementProviderID?.rawValue, to: &lines
+            )
+            if let provider = record.refinementProviderID, let model = record.refinementModelID {
+                append(
+                    "latestRefinementModel", value: diagnosticModel(model, provider: provider),
+                    to: &lines)
+            }
+            append(
+                "latestRefinementRequestID",
                 value: record.deepSeekRequestID,
                 to: &lines
             )
             append(
-                "latestDeepSeekCode",
+                "latestRefinementCode",
                 value: record.refinementFailureCode,
                 to: &lines
             )
             append(
-                "latestDeepSeekStatus",
+                "latestRefinementStatus",
                 value: record.refinementFailureStatusCode,
                 to: &lines
             )
@@ -214,6 +227,10 @@ package enum SpeakerDiagnosticReport {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    private static func diagnosticModel(_ model: String, provider: RefinementProviderID) -> String {
+        RefinementProviderCatalog.modelIDs(for: provider).contains(model) ? model : "custom"
     }
 
     private static func append(

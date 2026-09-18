@@ -161,7 +161,7 @@ package struct SpeakerOnboardingView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("DeepSeek 为可选项，之后可在设置中添加；默认顺滑只需豆包。")
+                Text("文字整理服务为可选项，之后可在设置中添加；默认顺滑只需豆包。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
