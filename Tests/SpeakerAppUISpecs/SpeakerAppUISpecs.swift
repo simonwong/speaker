@@ -1042,7 +1042,21 @@ struct SpeakerAppUISpecs {
                 window.orderOut(nil)
                 window.close()
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let deadline = Date().addingTimeInterval(2)
+            while Date() < deadline {
+                if let frameView = window.contentView?.superview,
+                    let tabs = segmentedControls(in: frameView).first(where: {
+                        $0.segmentCount == MainWindowTab.allCases.count
+                    }),
+                    let mask = tabs.superview?.layer?.mask as? CAShapeLayer,
+                    mask.path != nil
+                {
+                    break
+                }
+                RunLoop.current.run(
+                    until: min(deadline, Date().addingTimeInterval(0.01))
+                )
+            }
 
             guard let frameView = window.contentView?.superview,
                 let tabs = segmentedControls(in: frameView).first(where: {
