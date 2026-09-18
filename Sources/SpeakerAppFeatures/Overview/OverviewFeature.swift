@@ -13,6 +13,7 @@ package final class OverviewModel: ObservableObject {
 
     private let store: any LocalSessionHistoryStoring
     private let now: () -> Date
+    private var refreshID = UUID()
 
     package init(
         store: any LocalSessionHistoryStoring,
@@ -31,8 +32,13 @@ package final class OverviewModel: ObservableObject {
     }
 
     package func refresh() async {
-        referenceDate = now()
-        summary = await store.usageStatistics()
+        let id = UUID()
+        refreshID = id
+        let date = now()
+        let snapshot = await store.usageStatistics()
+        guard refreshID == id else { return }
+        referenceDate = date
+        summary = snapshot
     }
 }
 

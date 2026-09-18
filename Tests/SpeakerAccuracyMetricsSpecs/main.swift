@@ -16,6 +16,12 @@ private func manifestError(
     }
 }
 
+private func littleEndianBytes(_ value: UInt32) -> Data {
+    var data = Data()
+    data.append(littleEndian: value)
+    return data
+}
+
 private func wavData(
     sampleRate: UInt32 = 16_000,
     channels: UInt16 = 1,
@@ -53,6 +59,49 @@ extension Data {
         var little = value.littleEndian
         Swift.withUnsafeBytes(of: &little) { append(contentsOf: $0) }
     }
+}
+
+private func matrixAlignment(reference: [Int], hypothesis: [Int]) -> EditCounts {
+    let rows = reference.count + 1
+    let columns = hypothesis.count + 1
+    var distance = [[Int]](repeating: [Int](repeating: 0, count: columns), count: rows)
+    for row in 0..<rows { distance[row][0] = row }
+    for column in 0..<columns { distance[0][column] = column }
+    if rows > 1, columns > 1 {
+        for row in 1..<rows {
+            for column in 1..<columns {
+                let cost = reference[row - 1] == hypothesis[column - 1] ? 0 : 1
+                distance[row][column] = min(
+                    distance[row - 1][column - 1] + cost,
+                    distance[row - 1][column] + 1,
+                    distance[row][column - 1] + 1
+                )
+            }
+        }
+    }
+
+    var counts = EditCounts.zero
+    var row = reference.count
+    var column = hypothesis.count
+    while row > 0 || column > 0 {
+        if row > 0, column > 0 {
+            let cost = reference[row - 1] == hypothesis[column - 1] ? 0 : 1
+            if distance[row][column] == distance[row - 1][column - 1] + cost {
+                counts.substitutions += cost
+                row -= 1
+                column -= 1
+                continue
+            }
+        }
+        if row > 0, distance[row][column] == distance[row - 1][column] + 1 {
+            counts.deletions += 1
+            row -= 1
+            continue
+        }
+        counts.insertions += 1
+        column -= 1
+    }
+    return counts
 }
 
 @main
@@ -133,6 +182,37 @@ private struct SpeakerAccuracyMetricsSpecs {
             try expect(
                 emptyReference == EditCounts(substitutions: 0, deletions: 0, insertions: 2),
                 "empty reference counts were \(emptyReference)")
+        }
+
+        run(
+            "alignment preserves deterministic counts for every short binary sequence",
+            failures: &failures
+        ) {
+            let sequences = (0...5).flatMap { length in
+                (0..<(1 << length)).map { value in
+                    (0..<length).map { (value >> $0) & 1 }
+                }
+            }
+            for reference in sequences {
+                for hypothesis in sequences {
+                    try expect(
+                        EditAlignment.align(reference: reference, hypothesis: hypothesis)
+                            == matrixAlignment(reference: reference, hypothesis: hypothesis),
+                        "alignment changed for \(reference) and \(hypothesis)"
+                    )
+                }
+            }
+        }
+
+        run("alignment handles long transcripts", failures: &failures) {
+            let reference = Array(repeating: 0, count: 2_500)
+            var hypothesis = reference
+            hypothesis[1_250] = 1
+            hypothesis.append(2)
+            try expect(
+                EditAlignment.align(reference: reference, hypothesis: hypothesis)
+                    == EditCounts(substitutions: 1, deletions: 0, insertions: 1)
+            )
         }
 
         run("CER uses the normalized reference character count as denominator", failures: &failures)
@@ -283,6 +363,62 @@ private struct SpeakerAccuracyMetricsSpecs {
                 "float encoding was accepted")
             try expect(
                 failure(wavData(frameCount: 0)) == .emptyData, "empty data chunk was accepted")
+        }
+
+        run(
+            "WAV validation rejects truncated containers and incomplete PCM frames",
+            failures: &failures
+        ) {
+            let valid = wavData(frameCount: 2)
+            var shortRIFF = valid
+            shortRIFF.replaceSubrange(4..<8, with: littleEndianBytes(36))
+            var oversizedChunk = valid
+            oversizedChunk.replaceSubrange(40..<44, with: littleEndianBytes(UInt32.max))
+            var oddPCM = valid
+            oddPCM.replaceSubrange(40..<44, with: littleEndianBytes(3))
+            var wrongAlignment = valid
+            wrongAlignment[32] = 4
+            var wrongByteRate = valid
+            wrongByteRate.replaceSubrange(28..<32, with: littleEndianBytes(16_000))
+            for (name, malformed) in [
+                ("truncated RIFF", Data(valid.dropLast())),
+                ("data outside RIFF", shortRIFF),
+                ("oversized chunk", oversizedChunk),
+                ("incomplete frame", oddPCM),
+                ("wrong block alignment", wrongAlignment),
+                ("wrong byte rate", wrongByteRate),
+            ] {
+                try expectThrows(WAVFormatError.self, "accepted \(name)") {
+                    _ = try PCM16MonoWAV.parse(malformed)
+                }
+            }
+        }
+
+        run(
+            "WAV validation accepts padded metadata within the declared container",
+            failures: &failures
+        ) {
+            var data = wavData(frameCount: 2)
+            var metadata = Data("JUNK".utf8)
+            metadata.append(littleEndian: UInt32(3))
+            metadata.append(contentsOf: [1, 2, 3, 0])
+            data.insert(contentsOf: metadata, at: 36)
+            data.replaceSubrange(4..<8, with: littleEndianBytes(UInt32(data.count - 8)))
+            let parsed = try PCM16MonoWAV.parse(data)
+            try expect(parsed.pcm == Data(count: 4))
+            data.append(contentsOf: [9, 9, 9])
+            let withTrailingBytes = try PCM16MonoWAV.parse(data)
+            try expect(withTrailingBytes == parsed)
+        }
+
+        run("WAV validation accepts Data slices with nonzero indices", failures: &failures) {
+            let valid = wavData(frameCount: 2)
+            var prefixed = Data([0, 0, 0])
+            prefixed.append(valid)
+            let slice = prefixed.dropFirst(3)
+            try expect(slice.startIndex == 3)
+            let parsed = try PCM16MonoWAV.parse(slice)
+            try expect(parsed.pcm == Data(count: 4))
         }
 
         SpecSummary.finish(failures: failures, label: "accuracy metrics specs")

@@ -2,6 +2,10 @@ import Foundation
 
 public enum WAVFormatError: Error, Equatable, Sendable {
     case notRIFFWave
+    case invalidRIFFSize
+    case truncatedChunk
+    case invalidPCMLayout
+    case incompleteFrame
     case missingFormatChunk
     case unsupportedEncoding(UInt16)
     case unsupportedChannelCount(UInt16)
@@ -15,6 +19,10 @@ extension WAVFormatError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .notRIFFWave: "not a RIFF/WAVE file"
+        case .invalidRIFFSize: "RIFF size exceeds the file or omits the WAVE header"
+        case .truncatedChunk: "chunk exceeds the RIFF container or is missing its padding"
+        case .invalidPCMLayout: "PCM byte rate or block alignment does not match the format"
+        case .incompleteFrame: "PCM data ends with an incomplete frame"
         case .missingFormatChunk: "missing fmt chunk"
         case .unsupportedEncoding(let format): "unsupported encoding \(format); expected PCM (1)"
         case .unsupportedChannelCount(let channels):
@@ -45,14 +53,22 @@ public struct PCM16MonoWAV: Equatable, Sendable {
             string(data, 8..<12) == "WAVE"
         else { throw WAVFormatError.notRIFFWave }
 
+        let containerEnd = 8 + Int(uint32(data, 4))
+        guard containerEnd >= 12, containerEnd <= data.count else {
+            throw WAVFormatError.invalidRIFFSize
+        }
+
         var offset = 12
         var sawFormat = false
         var pcm: Data?
-        while offset + 8 <= data.count {
+        while offset < containerEnd {
+            guard containerEnd - offset >= 8 else { throw WAVFormatError.truncatedChunk }
             let chunkID = string(data, offset..<(offset + 4))
             let chunkSize = Int(uint32(data, offset + 4))
             let bodyStart = offset + 8
-            let bodyEnd = min(bodyStart + chunkSize, data.count)
+            let bodyEnd = bodyStart + chunkSize
+            let paddedEnd = bodyEnd + (chunkSize % 2)
+            guard paddedEnd <= containerEnd else { throw WAVFormatError.truncatedChunk }
             if chunkID == "fmt " {
                 guard bodyEnd - bodyStart >= 16 else { throw WAVFormatError.missingFormatChunk }
                 let audioFormat = uint16(data, bodyStart)
@@ -69,22 +85,34 @@ public struct PCM16MonoWAV: Equatable, Sendable {
                 guard bitsPerSample == 16 else {
                     throw WAVFormatError.unsupportedBitDepth(bitsPerSample)
                 }
+                guard uint16(data, bodyStart + 12) == Self.bytesPerFrame,
+                    uint32(data, bodyStart + 8) == Self.sampleRate * UInt32(Self.bytesPerFrame)
+                else { throw WAVFormatError.invalidPCMLayout }
                 sawFormat = true
             } else if chunkID == "data" {
                 guard sawFormat else { throw WAVFormatError.missingFormatChunk }
-                pcm = data.subdata(in: bodyStart..<bodyEnd)
-                break
+                if pcm == nil {
+                    pcm = data.subdata(
+                        in: (data.startIndex + bodyStart)..<(data.startIndex + bodyEnd))
+                }
             }
-            offset = bodyStart + chunkSize + (chunkSize % 2)
+            offset = paddedEnd
         }
         guard sawFormat else { throw WAVFormatError.missingFormatChunk }
         guard let pcm else { throw WAVFormatError.missingDataChunk }
         guard pcm.count >= Self.bytesPerFrame else { throw WAVFormatError.emptyData }
+        guard pcm.count.isMultiple(of: Self.bytesPerFrame) else {
+            throw WAVFormatError.incompleteFrame
+        }
         return PCM16MonoWAV(pcm: pcm)
     }
 
     private static func string(_ data: Data, _ range: Range<Int>) -> String {
-        String(decoding: data.subdata(in: range), as: UTF8.self)
+        String(
+            decoding: data[
+                (data.startIndex + range.lowerBound)..<(data.startIndex + range.upperBound)],
+            as: UTF8.self
+        )
     }
 
     private static func uint16(_ data: Data, _ offset: Int) -> UInt16 {
