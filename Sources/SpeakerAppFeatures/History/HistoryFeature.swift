@@ -27,6 +27,7 @@ package final class HistoryModel: ObservableObject {
     private let clipboard: any ClipboardWriting
     private let announce: (String) -> Void
     private let now: () -> Date
+    private var refreshID = UUID()
     private var feedbackTask: Task<Void, Never>?
 
     package init(
@@ -54,12 +55,15 @@ package final class HistoryModel: ObservableObject {
     }
 
     package func refresh() async {
-        referenceDate = now()
-        records = HistoryPresentation.filteredRecords(
-            await store.allRecords(),
-            query: query
-        )
+        let id = UUID()
+        refreshID = id
+        let date = now()
+        let snapshot = await store.allRecords()
+        guard refreshID == id else { return }
         let status = await store.persistenceStatus()
+        guard refreshID == id else { return }
+        referenceDate = date
+        records = HistoryPresentation.filteredRecords(snapshot, query: query)
         totalRecordCount = status.recordCount
         notice = status.notice.map(SpeakerCopy.History.pageNotice)
     }

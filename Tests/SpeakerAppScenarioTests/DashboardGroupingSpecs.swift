@@ -9,6 +9,68 @@ import SpeakerSpecSupport
 enum DashboardGroupingSpecs {
     @MainActor
     static func run(failures: inout [String]) async {
+        for suspendedRead in [DashboardHistoryStoreFake.Read.records, .status] {
+            await runAsync(
+                "history refresh discards superseded \(suspendedRead) responses",
+                failures: &failures
+            ) {
+                let initial = Date(timeIntervalSince1970: 1_000)
+                let latest = initial.addingTimeInterval(86_400)
+                var now = initial
+                let oldRecord = record(startedAt: initial)
+                let store = DashboardHistoryStoreFake(
+                    records: [oldRecord], summary: .empty, suspendedRead: suspendedRead
+                )
+                let model = HistoryModel(
+                    store: store, clipboard: DashboardClipboardFake(),
+                    announce: { _ in }, now: { now }
+                )
+                let first = Task { await model.refresh() }
+                guard await eventually(before: .seconds(2), condition: { await store.isSuspended })
+                else {
+                    first.cancel()
+                    throw SpecFailure(message: "first history read did not suspend")
+                }
+                let publishedIncompleteRecords = !model.records.isEmpty
+                now = latest
+                _ = await model.clear()
+                await store.resumeRead()
+                await first.value
+                try expect(!publishedIncompleteRecords, "an incomplete refresh published records")
+                try expect(model.records.isEmpty, "a cleared record reappeared")
+                try expect(model.totalRecordCount == 0, "a stale count replaced the clear result")
+                try expect(model.referenceDate == latest)
+            }
+        }
+
+        await runAsync("overview refresh discards superseded usage responses", failures: &failures)
+        {
+            let initial = Date(timeIntervalSince1970: 1_000)
+            let latest = initial.addingTimeInterval(86_400)
+            var now = initial
+            let oldSummary = VoiceInputUsageSummary(
+                totalRecognizedCharacterCount: 10, totalSpeakingMilliseconds: 100,
+                totalSessionCount: 1, daily: []
+            )
+            let store = DashboardHistoryStoreFake(
+                records: [], summary: oldSummary, suspendedRead: .usage
+            )
+            let model = OverviewModel(store: store, now: { now })
+            let first = Task { await model.refresh() }
+            guard await eventually(before: .seconds(2), condition: { await store.isSuspended })
+            else {
+                first.cancel()
+                throw SpecFailure(message: "first usage read did not suspend")
+            }
+            now = latest
+            await store.setSummary(.empty)
+            await model.refresh()
+            await store.resumeRead()
+            await first.value
+            try expect(model.summary == .empty, "older usage replaced the latest summary")
+            try expect(model.referenceDate == latest)
+        }
+
         await runAsync(
             "history dashboard state carries the refresh moment",
             failures: &failures
@@ -227,22 +289,32 @@ enum DashboardGroupingSpecs {
     }
 }
 
-/// A read-only history store: the dashboards only ever read from it here.
 private actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
     private var records: [VoiceInputHistoryRecord]
-    private let summary: VoiceInputUsageSummary
+    enum Read { case records, status, usage }
 
-    init(records: [VoiceInputHistoryRecord], summary: VoiceInputUsageSummary) {
+    private var summary: VoiceInputUsageSummary
+    private var suspendedRead: Read?
+    private var continuation: CheckedContinuation<Void, Never>?
+    var isSuspended: Bool { continuation != nil }
+
+    init(
+        records: [VoiceInputHistoryRecord], summary: VoiceInputUsageSummary,
+        suspendedRead: Read? = nil
+    ) {
         self.records = records
         self.summary = summary
+        self.suspendedRead = suspendedRead
     }
 
     func save(_ record: VoiceInputHistoryRecord) {
         records.append(record)
     }
 
-    func allRecords() -> [VoiceInputHistoryRecord] {
-        records
+    func allRecords() async -> [VoiceInputHistoryRecord] {
+        let snapshot = records
+        await suspendIfNeeded(.records)
+        return snapshot
     }
 
     func record(sessionID: VoiceInputSessionID) -> VoiceInputHistoryRecord? {
@@ -262,8 +334,10 @@ private actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
         return true
     }
 
-    func persistenceStatus() -> LocalHistoryPersistenceStatus {
-        LocalHistoryPersistenceStatus(recordCount: records.count, notice: nil)
+    func persistenceStatus() async -> LocalHistoryPersistenceStatus {
+        let snapshot = LocalHistoryPersistenceStatus(recordCount: records.count, notice: nil)
+        await suspendIfNeeded(.status)
+        return snapshot
     }
 
     func clearPersistenceNotice() {}
@@ -280,8 +354,25 @@ private actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
         true
     }
 
-    func usageStatistics() -> VoiceInputUsageSummary {
-        summary
+    func usageStatistics() async -> VoiceInputUsageSummary {
+        let snapshot = summary
+        await suspendIfNeeded(.usage)
+        return snapshot
+    }
+
+    func setSummary(_ summary: VoiceInputUsageSummary) {
+        self.summary = summary
+    }
+
+    func resumeRead() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    private func suspendIfNeeded(_ read: Read) async {
+        guard suspendedRead == read else { return }
+        suspendedRead = nil
+        await withCheckedContinuation { continuation = $0 }
     }
 }
 

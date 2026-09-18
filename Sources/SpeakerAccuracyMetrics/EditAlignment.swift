@@ -28,50 +28,39 @@ public struct EditCounts: Equatable, Codable, Sendable {
 public enum EditAlignment {
     /// Minimum-edit alignment of `hypothesis` against `reference` with unit
     /// costs. Ties are broken deterministically: match or substitution first,
-    /// then deletion, then insertion.
+    /// then deletion, then insertion. Working memory is linear in hypothesis length.
     public static func align<Unit: Equatable>(
         reference: [Unit],
         hypothesis: [Unit]
     ) -> EditCounts {
-        let rows = reference.count + 1
-        let columns = hypothesis.count + 1
-        var distance = [[Int]](repeating: [Int](repeating: 0, count: columns), count: rows)
-        for row in 0..<rows { distance[row][0] = row }
-        for column in 0..<columns { distance[0][column] = column }
-        if rows > 1, columns > 1 {
-            for row in 1..<rows {
-                for column in 1..<columns {
-                    let cost = reference[row - 1] == hypothesis[column - 1] ? 0 : 1
-                    distance[row][column] = min(
-                        distance[row - 1][column - 1] + cost,
-                        distance[row - 1][column] + 1,
-                        distance[row][column - 1] + 1
-                    )
-                }
-            }
+        guard !reference.isEmpty else {
+            return EditCounts(substitutions: 0, deletions: 0, insertions: hypothesis.count)
+        }
+        guard !hypothesis.isEmpty else {
+            return EditCounts(substitutions: 0, deletions: reference.count, insertions: 0)
         }
 
-        var counts = EditCounts.zero
-        var row = reference.count
-        var column = hypothesis.count
-        while row > 0 || column > 0 {
-            if row > 0, column > 0 {
-                let cost = reference[row - 1] == hypothesis[column - 1] ? 0 : 1
-                if distance[row][column] == distance[row - 1][column - 1] + cost {
-                    counts.substitutions += cost
-                    row -= 1
-                    column -= 1
-                    continue
-                }
-            }
-            if row > 0, distance[row][column] == distance[row - 1][column] + 1 {
-                counts.deletions += 1
-                row -= 1
-                continue
-            }
-            counts.insertions += 1
-            column -= 1
+        var row = (0...hypothesis.count).map {
+            EditCounts(substitutions: 0, deletions: 0, insertions: $0)
         }
-        return counts
+        for (referenceIndex, referenceUnit) in reference.enumerated() {
+            var diagonal = row[0]
+            row[0] = EditCounts(substitutions: 0, deletions: referenceIndex + 1, insertions: 0)
+            for (hypothesisIndex, hypothesisUnit) in hypothesis.enumerated() {
+                let column = hypothesisIndex + 1
+                let above = row[column]
+                var best = diagonal
+                best.substitutions += referenceUnit == hypothesisUnit ? 0 : 1
+                var deletion = above
+                deletion.deletions += 1
+                if deletion.total < best.total { best = deletion }
+                var insertion = row[column - 1]
+                insertion.insertions += 1
+                if insertion.total < best.total { best = insertion }
+                row[column] = best
+                diagonal = above
+            }
+        }
+        return row[hypothesis.count]
     }
 }
