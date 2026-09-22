@@ -51,16 +51,22 @@ enum RefinementSelectionUISpecs {
                     throw SpecFailure(message: "missing refinement card \(choice.id)")
                 }
                 try expect(button.accessibilityPerformPress(), "card click was rejected")
-                try await Task.sleep(for: .milliseconds(80))
+                var lastBitmap: NSBitmapImageRep?
+                var highlighted = HighlightedCards(count: 0, firstColumn: nil)
                 let rendered = await eventually(before: .seconds(2)) {
                     pumpUI()
                     hosting.layoutSubtreeIfNeeded()
-                    return hosting.bounds.width > 0
+                    hosting.displayIfNeeded()
+                    guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+                    else { return false }
+                    hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+                    lastBitmap = bitmap
+                    highlighted = highlightedCards(in: bitmap)
+                    return highlighted.count == 1 && highlighted.firstColumn == index
                 }
-                try expect(rendered)
-                guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
-                else { throw SpecFailure(message: "cannot render refinement cards") }
-                hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+                guard let bitmap = lastBitmap else {
+                    throw SpecFailure(message: "cannot render refinement cards")
+                }
                 if let root = ProcessInfo.processInfo.environment["SPEAKER_UI_CAPTURE_DIR"],
                     let png = bitmap.representation(using: .png, properties: [:])
                 {
@@ -69,51 +75,75 @@ enum RefinementSelectionUISpecs {
                         at: url, withIntermediateDirectories: true)
                     try png.write(to: url.appendingPathComponent("refinement-\(choice.id).png"))
                 }
-                // Long blue spans are the card borders or background, excluding icons and text.
-                var maximumHighlightedCards = 0
-                var firstHighlightedColumn: Int?
-                for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
-                    var spans = 0
-                    var length = 0
-                    for x in 0..<bitmap.pixelsWide {
-                        let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
-                        let blue =
-                            color.map {
-                                $0.blueComponent - $0.redComponent > 0.035
-                                    && $0.blueComponent > $0.greenComponent
-                            } ?? false
-                        if blue {
-                            length += 1
-                        } else {
-                            if length > 90 {
-                                spans += 1
-                                if firstHighlightedColumn == nil {
-                                    firstHighlightedColumn =
-                                        (x - length / 2) * 4 / bitmap.pixelsWide
-                                }
-                            }
-                            length = 0
-                        }
-                    }
-                    if length > 90 { spans += 1 }
-                    maximumHighlightedCards = max(maximumHighlightedCards, spans)
-                }
                 try expect(
-                    maximumHighlightedCards == 1,
-                    "refinement cards showed \(maximumHighlightedCards) simultaneous highlights")
+                    highlighted.count == 1,
+                    "refinement cards showed \(highlighted.count) simultaneous highlights")
+                try expect(
+                    rendered,
+                    "clicking \(choice.id) did not render its highlighted card before the deadline")
                 if choice == .custom {
                     try expect(
                         model.mode == previouslyActiveMode,
                         "opening an unfinished custom editor changed the active mode")
                 }
                 try expect(
-                    firstHighlightedColumn == RefinementChoice.allCases.firstIndex(of: choice),
-                    "clicking \(choice.id) highlighted column \(String(describing: firstHighlightedColumn)) instead of its own card"
+                    highlighted.firstColumn == RefinementChoice.allCases.firstIndex(of: choice),
+                    "clicking \(choice.id) highlighted column \(String(describing: highlighted.firstColumn)) instead of its own card"
                 )
             }
             await model.shutdown()
         }
     }
+    private struct HighlightedCards {
+        var count: Int
+        var firstColumn: Int?
+    }
+
+    @MainActor
+    private static func highlightedCards(in bitmap: NSBitmapImageRep) -> HighlightedCards {
+        var result = HighlightedCards(count: 0, firstColumn: nil)
+        // Scan every row: a thin horizontal border can fall between sampled rows.
+        for y in 0..<bitmap.pixelsHigh {
+            guard rowMayContainHighlight(y, in: bitmap) else { continue }
+            var spans = 0
+            var length = 0
+            for x in 0..<bitmap.pixelsWide {
+                if isBlue(x: x, y: y, in: bitmap) {
+                    length += 1
+                } else {
+                    if length > 90 {
+                        spans += 1
+                        if result.firstColumn == nil {
+                            result.firstColumn = (x - length / 2) * 4 / bitmap.pixelsWide
+                        }
+                    }
+                    length = 0
+                }
+            }
+            if length > 90 { spans += 1 }
+            result.count = max(result.count, spans)
+        }
+        return result
+    }
+
+    @MainActor
+    private static func rowMayContainHighlight(_ y: Int, in bitmap: NSBitmapImageRep) -> Bool {
+        var consecutive = 0
+        for x in stride(from: 0, to: bitmap.pixelsWide, by: 8) {
+            consecutive = isBlue(x: x, y: y, in: bitmap) ? consecutive + 1 : 0
+            // Every span longer than 90 pixels contains at least 11 samples.
+            if consecutive >= 11 { return true }
+        }
+        return false
+    }
+
+    @MainActor
+    private static func isBlue(x: Int, y: Int, in bitmap: NSBitmapImageRep) -> Bool {
+        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
+        return color.blueComponent - color.redComponent > 0.035
+            && color.blueComponent > color.greenComponent
+    }
+
     @MainActor
     private static func cardButton(named title: String, in view: NSView) -> (
         any NSAccessibilityButton

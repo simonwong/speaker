@@ -71,6 +71,7 @@ final class OnboardingPresenter {
 final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     private let settingsStore: VersionedLocalAppSettingsStore
     private let doubao: DoubaoSettingsModel
+    private let recognition: SpeechRecognitionSettingsModel
     private let migratingCredentials: MigratingProviderCredentialStore?
     private let dictionaryFileURL: URL
     private let legacyDictionaryFileURL: URL?
@@ -88,6 +89,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     init(
         settingsStore: VersionedLocalAppSettingsStore,
         doubao: DoubaoSettingsModel,
+        recognition: SpeechRecognitionSettingsModel,
         migratingCredentials: MigratingProviderCredentialStore?,
         dictionaryFileURL: URL,
         legacyDictionaryFileURL: URL?,
@@ -104,6 +106,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     ) {
         self.settingsStore = settingsStore
         self.doubao = doubao
+        self.recognition = recognition
         self.migratingCredentials = migratingCredentials
         self.dictionaryFileURL = dictionaryFileURL
         self.legacyDictionaryFileURL = legacyDictionaryFileURL
@@ -147,6 +150,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func loadRefinement() async {
+        await recognition.load()
         await refinement.load()
     }
 
@@ -248,6 +252,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     private let panel: VoiceInputPanelController
     private let refinement: RefinementSettingsModel
     private let doubao: DoubaoSettingsModel
+    private let recognition: SpeechRecognitionSettingsModel
     private let voiceInput: VoiceInputExperience
 
     init(
@@ -259,6 +264,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         panel: VoiceInputPanelController,
         refinement: RefinementSettingsModel,
         doubao: DoubaoSettingsModel,
+        recognition: SpeechRecognitionSettingsModel,
         voiceInput: VoiceInputExperience
     ) {
         self.shortcut = shortcut
@@ -269,6 +275,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         self.panel = panel
         self.refinement = refinement
         self.doubao = doubao
+        self.recognition = recognition
         self.voiceInput = voiceInput
     }
 
@@ -279,7 +286,10 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     func closeOnboarding() { onboarding.close() }
     func closePanel() { panel.stop() }
     func shutdownRefinement() async { await refinement.shutdown() }
-    func shutdownDoubao() async { await doubao.shutdown() }
+    func shutdownDoubao() async {
+        await recognition.shutdown()
+        await doubao.shutdown()
+    }
     func shutdownVoiceInput() async { await voiceInput.shutdown() }
     func awaitStartup() async { await startup.waitUntilFinished() }
     func flushPersistence() async {

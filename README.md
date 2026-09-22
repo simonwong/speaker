@@ -14,7 +14,7 @@
   </p>
 </div>
 
-Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the key while speaking and release it to finish, or short-press once to start and again to stop. Speaker streams audio to Doubao for real-time transcription, optionally refines the confirmed text with a selected text provider, and delivers the result to the input position that was focused when recording ended.
+Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the key while speaking and release it to finish, or short-press once to start and again to stop. Speaker transcribes with your choice of Doubao, OpenAI, or Alibaba Qwen, optionally refines the confirmed text with a separately selected text provider, and delivers the result to the input position that was focused when recording ended.
 
 If Speaker cannot prove that the original input target is still safe and current, it keeps the result in a HUD for explicit copying instead of risking delivery to the wrong place.
 
@@ -25,8 +25,8 @@ If Speaker cannot prove that the original input target is still safe and current
 
 - **Natural voice shortcut** — hold or short-press `Fn`, choose a custom shortcut, and press `Esc` to cancel at any time.
 - **Target-safe delivery** — the input target is frozen when recording ends; later window or focus changes never retarget the result.
-- **Real-time transcription** — audio streams to Doubao's `bigmodel_async` WebSocket ASR while you speak.
-- **Optional text refinement** — Default Smoothing uses Doubao only. Concise Cleanup, Full Rewrite, and Custom Modes use your selected text provider and model and send text only, never audio.
+- **Your choice of speech recognition** — Doubao streams while you speak; OpenAI and Qwen transcribe complete audio after recording ends.
+- **Optional text refinement** — Default Smoothing uses the selected recognition result directly. Concise Cleanup, Full Rewrite, and Custom Modes use your selected text provider and model and send text only, never audio.
 - **Local controls** — Personal Dictionary, searchable Session Records, retention settings, and redacted diagnostics remain under the current macOS user account.
 - **Conservative privacy boundaries** — raw audio is never written to disk, secure input text is never stored in history, and Speaker changes the clipboard only after an explicit Copy action.
 
@@ -35,7 +35,7 @@ If Speaker cannot prove that the original input target is still safe and current
 | Requirement | Details |
 | --- | --- |
 | Operating system | macOS 14 or later |
-| Transcription | A user-supplied Doubao API key and an activated streaming ASR resource |
+| Transcription | Your own Doubao, OpenAI, or Alibaba Qwen API key; Doubao also requires an activated streaming ASR resource |
 | Refinement | An optional DeepSeek, OpenAI, Kimi, GLM, or Custom API key enables non-default Refinement Modes |
 
 ## Download and run
@@ -62,7 +62,7 @@ The `xattr` command removes Gatekeeper's quarantine marker only from `/Applicati
 
 1. Follow Speaker's onboarding to request Microphone and Accessibility access.
 2. Enable `/Applications/Speaker.app` in **System Settings → Privacy & Security → Accessibility** when macOS opens that page.
-3. In **Doubao Speech**, enter an API key from the [Doubao Speech console](https://console.volcengine.com/speech/new/setting/apikeys?projectName=default), select a streaming resource enabled for that account, and run **Check Connection**.
+3. In **Speech Recognition**, choose Doubao, OpenAI, or Alibaba Qwen and save its API key. For Doubao, select an activated resource and run **Check Connection**. For Qwen, choose the region matching your key. Recognition and text-refinement keys are saved separately.
 4. Focus an input field in any app, then hold `Fn` while speaking and release it to finish. A short press followed by another short press also starts and stops recording.
 
 If an update leaves stale permission entries, reset only Speaker's local bundle identity:
@@ -77,12 +77,14 @@ Then enable Speaker again in System Settings. These commands do not reset permis
 
 ## How it works
 
-1. Speaker captures microphone input in memory as 16 kHz, 16-bit mono PCM and streams it to Doubao in short chunks.
-2. Releasing the shortcut freezes the current Input Target and asks Doubao for the final Stage Result.
-3. Default Smoothing uses that Doubao result directly. Other Refinement Modes may send the confirmed text and selected instruction to the selected Refinement Provider.
+1. Speaker captures microphone input in memory as 16 kHz, 16-bit mono PCM and sends it only to the selected Speech Recognition Provider. Doubao streams in short chunks; OpenAI and Qwen receive an in-memory WAV when recording ends.
+2. Releasing the shortcut freezes the current Input Target and waits for the final recognition Stage Result.
+3. Default Smoothing uses that recognition result directly. Other Refinement Modes may send the confirmed text and selected instruction to the selected Refinement Provider.
 4. Speaker revalidates the original Input Target before committing delivery. An uncertain, changed, closed, or secure target becomes a Pending Copy Result instead.
 
-Audio is sent only to Doubao. It is never sent to text refinement providers or persisted as a normal application artifact.
+Audio is sent only to the selected Speech Recognition Provider. It is never sent to text refinement providers or persisted as a normal application artifact.
+
+OpenAI complete-audio recognition supports up to five minutes per recording; Qwen supports up to three minutes to stay within its encoded request limit. Audio remains in memory. Saving a new provider Key does not send a paid probe; its first recognition attempt verifies actual account and model availability.
 
 ## Privacy
 

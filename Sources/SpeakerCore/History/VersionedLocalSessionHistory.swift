@@ -353,6 +353,7 @@ package struct HistoryRecordV1: Codable {
     let transcription: String?
     let finalText: String?
     let transcriptionProvider: String?
+    let transcriptionModelID: String?
     let providerRequestID: String?
     let providerErrorCode: String?
     let providerOperation: String?
@@ -385,6 +386,7 @@ package struct HistoryRecordV1: Codable {
         transcription = record.transcription
         finalText = record.finalText
         transcriptionProvider = record.transcriptionProvider
+        transcriptionModelID = record.transcriptionModelID
         providerRequestID = record.providerRequestID
         providerErrorCode = record.providerErrorCode
         providerOperation = record.providerOperation
@@ -420,6 +422,7 @@ package struct HistoryRecordV1: Codable {
                 transcription: transcription,
                 finalText: finalText,
                 transcriptionProvider: transcriptionProvider,
+                transcriptionModelID: transcriptionModelID,
                 providerRequestID: providerRequestID,
                 providerErrorCode: providerErrorCode,
                 providerOperation: providerOperation,

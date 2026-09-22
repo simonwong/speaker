@@ -197,7 +197,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 configuration: VoiceInputConfigurationController(
                     refinementMode: .conciseCleanup()
                 ),
-                doubao: ContextualTranscriberFake(text: "豆包已确认结果"),
+                transcriber: ContextualTranscriberFake(text: "豆包已确认结果"),
                 refinement: OptionalTextRefinementPipeline(refiner: refiner)
             )
             let sessions = VoiceInputSessions(

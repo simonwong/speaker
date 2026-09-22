@@ -49,6 +49,12 @@ struct SpeakerAppUISpecs {
                     rootView: SpeakerOnboardingView(
                         permissions: permissions,
                         doubao: model,
+                        recognition: SpeechRecognitionSettingsModel(
+                            credentials: LocalFileProviderCredentialStore(
+                                fileURL: directory.appendingPathComponent("recognition-keys.json")),
+                            configuration: VoiceInputConfigurationController(),
+                            settingsStore: VersionedLocalAppSettingsStore(
+                                fileURL: directory.appendingPathComponent("settings.json"))),
                         requestPermission: { _ in },
                         refreshPermissions: {},
                         announce: { _ in },

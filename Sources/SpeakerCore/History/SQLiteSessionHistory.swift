@@ -613,6 +613,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             transcription: record.transcription,
             finalText: record.finalText,
             transcriptionProvider: record.transcriptionProvider,
+            transcriptionModelID: record.transcriptionModelID,
             providerRequestID: record.providerRequestID,
             providerErrorCode: "application.interrupted.\(stage)",
             providerOperation: record.providerOperation,

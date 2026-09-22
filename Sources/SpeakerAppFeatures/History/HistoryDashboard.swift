@@ -648,7 +648,7 @@ package struct HistoryExpandedRecord: View {
             if let transcription = record.transcription,
                 !transcription.isEmpty, transcription != presentation.text
             {
-                stageResult(title: "豆包转录", text: transcription)
+                stageResult(title: "\(record.transcriptionProviderLabel) 转录", text: transcription)
             }
 
             if let refinement = record.deepSeekText,
@@ -716,7 +716,7 @@ package struct HistoryExpandedRecord: View {
         if let providerRequestID = record.providerRequestID {
             lines.append(
                 DiagnosticLine(
-                    label: "\(record.transcriptionProvider ?? "转录提供商") 请求 ID：",
+                    label: "\(record.transcriptionProviderLabel) 请求 ID：",
                     identifier: providerRequestID
                 )
             )
@@ -741,6 +741,7 @@ package struct HistoryExpandedRecord: View {
     private var metadataLine: String {
         [
             record.startedAt.formatted(date: .abbreviated, time: .shortened),
+            record.transcriptionModelID.map { "\(record.transcriptionProviderLabel) · \($0)" },
             record.refinementModelID.map { "\(record.refinementProviderLabel) · \($0)" },
             Self.durationText(milliseconds: record.durationMilliseconds),
         ].compactMap { $0 }.joined(separator: " · ")

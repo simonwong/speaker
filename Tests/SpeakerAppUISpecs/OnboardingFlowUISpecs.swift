@@ -31,6 +31,12 @@ enum OnboardingFlowUISpecs {
                 rootView: SpeakerOnboardingView(
                     permissions: permissions,
                     doubao: model,
+                    recognition: SpeechRecognitionSettingsModel(
+                        credentials: LocalFileProviderCredentialStore(
+                            fileURL: directory.appendingPathComponent("recognition-keys.json")),
+                        configuration: VoiceInputConfigurationController(),
+                        settingsStore: VersionedLocalAppSettingsStore(
+                            fileURL: directory.appendingPathComponent("settings.json"))),
                     requestPermission: { await permissions.request($0) },
                     refreshPermissions: { permissions.refresh() },
                     announce: { _ in },
@@ -116,6 +122,73 @@ enum OnboardingFlowUISpecs {
             try expect(completions == 1)
             await model.shutdown()
         }
+        await runAsync(
+            "onboarding recognition selection advances after key save without a paid probe",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "asr-onboarding-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let credentials = LocalFileProviderCredentialStore(
+                fileURL: directory.appendingPathComponent("keys.json"))
+            let settings = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            let recognition = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: settings)
+            await recognition.load()
+            await recognition.selectProvider(.openAI)
+            let doubao = DoubaoSettingsModel(
+                service: OnboardingDoubaoService(), settingsStore: settings)
+            let permissions = PermissionModel(
+                access: PermissionAccessFake(
+                    snapshot: .init(accessibility: .granted, microphone: .granted)))
+            permissions.refresh()
+            var completed = false
+            let hosting = NSHostingView(
+                rootView: SpeakerOnboardingView(
+                    permissions: permissions, doubao: doubao, recognition: recognition,
+                    requestPermission: { _ in }, refreshPermissions: { permissions.refresh() },
+                    announce: { _ in }, completion: { completed = true }))
+            let window = OnboardingWindowFactory.make(
+                visibleFrame: NSRect(x: 0, y: 0, width: 1000, height: 900), contentView: hosting)
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            let initial = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return button("下一步", in: hosting)?.isAccessibilityEnabled() == true
+            }
+            try expect(initial)
+            try expect(button("下一步", in: hosting)?.accessibilityPerformPress() == true)
+            let keyShown = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return !secureFields(in: hosting).isEmpty
+                    && button("下一步", in: hosting)?.isAccessibilityEnabled() == false
+            }
+            try expect(keyShown)
+            recognition.apiKeyDraft = "synthetic-asr-key"
+            await recognition.saveAPIKey()
+            let ready = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return button("下一步", in: hosting)?.isAccessibilityEnabled() == true
+            }
+            try expect(ready)
+            try expect(button("检查连接", in: hosting) == nil)
+            try expect(button("下一步", in: hosting)?.accessibilityPerformPress() == true)
+            let tutorial = await eventually(before: .seconds(2)) {
+                pump(hosting)
+                return button("开始使用 Speaker", in: hosting)?.isAccessibilityEnabled() == true
+            }
+            try expect(tutorial && !completed)
+            await recognition.deleteAPIKey()
+            pump(hosting)
+            try expect(button("开始使用 Speaker", in: hosting)?.isAccessibilityEnabled() == false)
+            await recognition.shutdown()
+            await doubao.shutdown()
+        }
         await reviewGuide(failures: &failures)
     }
 
@@ -141,7 +214,14 @@ enum OnboardingFlowUISpecs {
             var completed = false
             let hosting = NSHostingView(
                 rootView: SpeakerOnboardingView(
-                    permissions: permissions, doubao: model, requestPermission: { _ in },
+                    permissions: permissions, doubao: model,
+                    recognition: SpeechRecognitionSettingsModel(
+                        credentials: LocalFileProviderCredentialStore(
+                            fileURL: directory.appendingPathComponent("keys.json")),
+                        configuration: VoiceInputConfigurationController(),
+                        settingsStore: VersionedLocalAppSettingsStore(
+                            fileURL: directory.appendingPathComponent("settings.json"))),
+                    requestPermission: { _ in },
                     refreshPermissions: {}, announce: { _ in }, mode: .review,
                     completion: { completed = true }))
             let window = OnboardingWindowFactory.make(

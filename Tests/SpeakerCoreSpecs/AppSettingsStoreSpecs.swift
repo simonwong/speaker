@@ -27,6 +27,7 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             let legacyLoaded = await store.load()
             try expect(legacyLoaded.settings.microphone == .systemDefault)
             try expect(legacyLoaded.settings.refinementProviders.selectedProfile == .legacyDeepSeek)
+            try expect(legacyLoaded.settings.speechRecognitionProviders.selectedProfile == .doubao)
             try expect(legacyLoaded.settings.launchAtLogin)
             try await store.updateMicrophone(.device(uid: "synthetic-stable-device"))
             async let shortcut = store.updateShortcut(
@@ -51,6 +52,28 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             try expect(reset.microphone == .systemDefault)
             try expect(
                 reset.shortcut == restored.shortcut && reset.refinement == restored.refinement)
+        }
+
+        await runAsync(
+            "speech recognition settings retain provider models and region across restarts",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-asr-settings-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            var providers = SpeechRecognitionProviderSettings()
+            let openAI = SpeechRecognitionProfile(provider: .openAI, model: "gpt-4o-transcribe")
+            let qwen = SpeechRecognitionProfile(provider: .qwen, region: .singapore)
+            try providers.select(openAI)
+            try await store.updateSpeechRecognitionProviders(providers)
+            try providers.select(qwen)
+            try await store.updateSpeechRecognitionProviders(providers)
+            let restored = await VersionedLocalAppSettingsStore(fileURL: fileURL).load().settings
+            try expect(restored.speechRecognitionProviders.selectedProfile == qwen)
+            try expect(restored.speechRecognitionProviders.profile(for: .openAI) == openAI)
+            try expect(restored.refinementProviders == RefinementProviderSettings())
         }
 
         await runAsync(

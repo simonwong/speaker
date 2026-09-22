@@ -9,6 +9,97 @@ enum APIKeySettingsUISpecs {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
+            "recognition provider model region and independent key controls work at narrow width",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "asr-ui-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let credentials = LocalFileProviderCredentialStore(
+                fileURL: directory.appendingPathComponent("keys.json"))
+            try await credentials.save(apiKey: "text-refinement-only", for: .openAI)
+            let settings = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: settings)
+            let doubao = DoubaoSettingsModel(
+                service: CredentialedDoubaoTranscriber(credentials: credentials),
+                settingsStore: settings)
+            await model.load()
+            let hosting = NSHostingView(
+                rootView: SpeechRecognitionSettingsCard(model: model, doubao: doubao).padding(12)
+                    .frame(width: 400))
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 700), styleMask: [.titled],
+                backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = hosting
+            window.orderFrontRegardless()
+            defer {
+                window.orderOut(nil)
+                window.close()
+            }
+            let rendered = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return !popupButtons(in: hosting).isEmpty
+            }
+            try expect(rendered)
+            try select("OpenAI 语音识别", in: hosting)
+            let switched = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return model.selectedProvider == .openAI
+                    && popupButtons(in: hosting).contains {
+                        $0.itemTitles.contains("gpt-4o-transcribe")
+                    }
+            }
+            try expect(switched && !model.hasStoredKey)
+            try select("gpt-4o-transcribe", in: hosting)
+            let selected = await eventually(before: .seconds(2)) {
+                model.selectedProfile.model == "gpt-4o-transcribe"
+            }
+            try expect(selected)
+            model.apiKeyDraft = "speech-recognition-only"
+            let saveVisible = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return buttons(named: "保存 Key", in: hosting).contains {
+                    $0.isAccessibilityEnabled()
+                }
+            }
+            try expect(saveVisible)
+            try expect(
+                buttons(named: "保存 Key", in: hosting).first?.accessibilityPerformPress() == true)
+            let saved = await eventually(before: .seconds(2)) {
+                model.hasStoredKey && model.apiKeyDraft.isEmpty
+            }
+            try expect(saved)
+            try expect(
+                secureFields(in: hosting).allSatisfy {
+                    !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
+                })
+            try expect(hosting.frame.width <= 400)
+            try expect(
+                buttons(named: "检查连接", in: hosting).isEmpty, "ASR implied a free validation request"
+            )
+            let textKey = try await credentials.apiKey(for: .openAI)
+            let audioKey = try await credentials.apiKey(for: .openAITranscription)
+            try expect(textKey == "text-refinement-only" && audioKey == "speech-recognition-only")
+            try select("阿里千问语音识别", in: hosting)
+            let qwen = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return popupButtons(in: hosting).contains { $0.itemTitles.contains("新加坡") }
+            }
+            try expect(qwen)
+            try select("新加坡", in: hosting)
+            let region = await eventually(before: .seconds(2)) {
+                model.selectedProfile.region == .singapore
+            }
+            try expect(region && !model.hasStoredKey)
+            await model.shutdown()
+            await doubao.shutdown()
+        }
+
+        await runAsync(
             "saved provider keys remain editable and replace without deletion", failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -29,7 +120,12 @@ enum APIKeySettingsUISpecs {
             refinement.apiKeyDraft = "synthetic-deepseek-old"
             await refinement.saveAPIKey()
             let hosting = NSHostingView(
-                rootView: APIKeySettingsPage(doubao: doubao, refinement: refinement))
+                rootView: APIKeySettingsPage(
+                    doubao: doubao, refinement: refinement,
+                    recognition: SpeechRecognitionSettingsModel(
+                        credentials: credentials,
+                        configuration: VoiceInputConfigurationController(), settingsStore: settings)
+                ))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 760, height: 850), styleMask: [.titled],
                 backing: .buffered, defer: false)
@@ -129,6 +225,19 @@ enum APIKeySettingsUISpecs {
             await doubao.shutdown()
             await refinement.shutdown()
         }
+    }
+
+    @MainActor
+    private static func popupButtons(in view: NSView) -> [NSPopUpButton] {
+        (view as? NSPopUpButton).map { [$0] } ?? view.subviews.flatMap { popupButtons(in: $0) }
+    }
+
+    @MainActor
+    private static func select(_ title: String, in view: NSView) throws {
+        guard let control = popupButtons(in: view).first(where: { $0.itemTitles.contains(title) }),
+            let index = control.itemTitles.firstIndex(of: title)
+        else { throw SpecFailure(message: "picker option missing: \(title)") }
+        control.menu?.performActionForItem(at: index)
     }
 
     @MainActor

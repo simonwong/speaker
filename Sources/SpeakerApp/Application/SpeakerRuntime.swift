@@ -10,6 +10,7 @@ final class SpeakerRuntime: ObservableObject {
     let voiceInput: VoiceInputExperience
     let history: SQLiteSessionHistory
     let doubaoSettings: DoubaoSettingsModel
+    let recognitionSettings: SpeechRecognitionSettingsModel
     let refinementSettings: RefinementSettingsModel
     let dictionarySettings: DictionarySettingsModel
     let historyModel: HistoryModel
@@ -49,6 +50,7 @@ final class SpeakerRuntime: ObservableObject {
         loginItemSettings: loginItemSettings,
         historyRetention: historyRetention,
         doubao: doubaoSettings,
+        recognition: recognitionSettings,
         refinement: refinementSettings,
         dictionary: dictionarySettings,
         softwareUpdate: softwareUpdate,
@@ -115,7 +117,8 @@ final class SpeakerRuntime: ObservableObject {
         let configuration = VoiceInputConfigurationController()
         let processor = DefaultVoiceTextProcessor(
             configuration: configuration,
-            doubao: doubao,
+            transcriber: CredentialedSpeechTranscriber(
+                credentials: dependencies.credentials.store, doubao: doubao),
             refinement: OptionalTextRefinementPipeline(refiner: textRefiner)
         )
         let settingsStore = dependencies.settingsStore
@@ -157,6 +160,11 @@ final class SpeakerRuntime: ObservableObject {
             settingsStore: settingsStore
         )
         self.doubaoSettings = doubaoSettings
+        let recognitionSettings = SpeechRecognitionSettingsModel(
+            credentials: dependencies.credentials.store,
+            configuration: configuration,
+            settingsStore: settingsStore)
+        self.recognitionSettings = recognitionSettings
         let refinementSettings = RefinementSettingsModel(
             service: textRefiner,
             configuration: configuration,
@@ -226,6 +234,7 @@ final class SpeakerRuntime: ObservableObject {
                 SpeakerOnboardingWindowController(
                     permissions: permissions,
                     doubao: doubaoSettings,
+                    recognition: recognitionSettings,
                     requestPermission: { permission in
                         await onboardingPermissionCoordinator.request(permission)
                     },
@@ -244,6 +253,7 @@ final class SpeakerRuntime: ObservableObject {
             stages: SpeakerRuntimeStartupStages(
                 settingsStore: settingsStore,
                 doubao: doubaoSettings,
+                recognition: recognitionSettings,
                 migratingCredentials: dependencies.credentials.migrating,
                 dictionaryFileURL: dependencies.dictionaryStore.fileURL,
                 legacyDictionaryFileURL: dependencies.legacyDictionaryFileURL,
@@ -271,6 +281,7 @@ final class SpeakerRuntime: ObservableObject {
                 panel: panel,
                 refinement: refinementSettings,
                 doubao: doubaoSettings,
+                recognition: recognitionSettings,
                 voiceInput: voiceInput
             )
         )
@@ -444,6 +455,9 @@ final class SpeakerRuntime: ObservableObject {
                 refinement: refinementSettings.mode.diagnosticKind,
                 doubaoConfigured: doubaoSettings.hasConfiguredKey,
                 doubaoResource: doubaoSettings.resource.rawValue,
+                recognitionProfile: recognitionSettings.selectedProfile,
+                recognitionConfigured: recognitionSettings.selectedProvider == .doubao
+                    ? doubaoSettings.hasConfiguredKey : recognitionSettings.hasStoredKey,
                 refinementConfigured: refinementSettings.hasStoredKey,
                 refinementVerified: refinementSettings.isConnectionVerified,
                 refinementProfile: refinementSettings.selectedProfile,

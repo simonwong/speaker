@@ -333,9 +333,9 @@ actor StreamingContextualTranscriberFake: ContextualSpeechTranscribing,
     }
 }
 
-actor ChatCompletionTransportFake: ChatCompletionTransport {
+actor ChatCompletionTransportFake: ChatCompletionTransport, SpeechRecognitionTransport {
     let response: ChatCompletionTransportResponse
-    private var requests: [URLRequest] = []
+    private(set) var requests: [URLRequest] = []
 
     init(response: ChatCompletionTransportResponse) {
         self.response = response

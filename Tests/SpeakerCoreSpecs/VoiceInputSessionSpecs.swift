@@ -657,7 +657,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 configuration: VoiceInputConfigurationController(
                     refinementMode: .conciseCleanup()
                 ),
-                doubao: ContextualTranscriberFake(text: secret),
+                transcriber: ContextualTranscriberFake(text: secret),
                 refinement: OptionalTextRefinementPipeline(refiner: refiner)
             )
             let sessions = VoiceInputSessions(

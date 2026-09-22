@@ -221,6 +221,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var microphone: MicrophonePreference
     public var refinement: RefinementPreference
     public var refinementProviders: RefinementProviderSettings
+    public var speechRecognitionProviders: SpeechRecognitionProviderSettings
     public var savedCustomRefinement: RefinementPreference?
     public var refinementPromptOverrides: RefinementPromptOverrides
     public var launchAtLogin: Bool
@@ -233,6 +234,8 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         microphone: MicrophonePreference = .systemDefault,
         refinement: RefinementPreference = .defaultSmooth,
         refinementProviders: RefinementProviderSettings = RefinementProviderSettings(),
+        speechRecognitionProviders: SpeechRecognitionProviderSettings =
+            SpeechRecognitionProviderSettings(),
         savedCustomRefinement: RefinementPreference? = nil,
         refinementPromptOverrides: RefinementPromptOverrides = RefinementPromptOverrides(),
         launchAtLogin: Bool = false,
@@ -244,6 +247,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.microphone = microphone
         self.refinement = refinement
         self.refinementProviders = refinementProviders
+        self.speechRecognitionProviders = speechRecognitionProviders
         self.savedCustomRefinement = savedCustomRefinement
         self.refinementPromptOverrides = refinementPromptOverrides
         self.launchAtLogin = launchAtLogin
@@ -261,6 +265,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         case microphone
         case refinement
         case refinementProviders
+        case speechRecognitionProviders
         case savedCustomRefinement
         case refinementPromptOverrides
         case launchAtLogin
@@ -288,6 +293,10 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
             try container.decodeIfPresent(
                 RefinementProviderSettings.self, forKey: .refinementProviders)
             ?? RefinementProviderSettings()
+        speechRecognitionProviders =
+            try container.decodeIfPresent(
+                SpeechRecognitionProviderSettings.self, forKey: .speechRecognitionProviders)
+            ?? SpeechRecognitionProviderSettings()
         savedCustomRefinement = try container.decodeIfPresent(
             RefinementPreference.self,
             forKey: .savedCustomRefinement
@@ -386,6 +395,11 @@ public protocol AppSettingsStoring: Sendable {
 
     @discardableResult
     func updateRefinementProviders(_ providers: RefinementProviderSettings) async throws
+        -> SpeakerAppSettings
+
+    @discardableResult
+    func updateSpeechRecognitionProviders(_ providers: SpeechRecognitionProviderSettings)
+        async throws
         -> SpeakerAppSettings
 
     @discardableResult
@@ -526,6 +540,17 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     {
         var settings = try settingsForUpdate()
         settings.refinementProviders = providers
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateSpeechRecognitionProviders(_ providers: SpeechRecognitionProviderSettings)
+        throws
+        -> SpeakerAppSettings
+    {
+        var settings = try settingsForUpdate()
+        settings.speechRecognitionProviders = try providers.validated()
         try save(settings)
         return settings
     }

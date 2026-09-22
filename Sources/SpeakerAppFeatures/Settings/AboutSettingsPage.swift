@@ -66,7 +66,7 @@ private struct AboutSettingsPage: View {
         ) {
             SpeakerRow(
                 "音频",
-                detail: "只在内存中转换并发送给豆包，不写入磁盘或历史。",
+                detail: "只在内存中转换并发送给所选语音识别服务，不写入磁盘或历史。",
                 icon: "waveform"
             )
             SettingsRowDivider()
