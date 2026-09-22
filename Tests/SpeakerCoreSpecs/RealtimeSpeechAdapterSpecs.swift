@@ -7,6 +7,31 @@ enum RealtimeSpeechAdapterSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
+            "realtime response limits remain distinct from network failures",
+            failures: &failures
+        ) {
+            let cases: [(any Error, SpeechRecognitionFailureKind)] = [
+                (RealtimeSpeechTransportError.responseTooLarge, .responseTooLarge),
+                (RealtimeSpeechTransportError.invalidMessage, .invalidResponse),
+                (URLError(.networkConnectionLost), .transport),
+            ]
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                for (error, expected) in cases {
+                    let socket = RealtimeSpeechSocketFake(provider: provider, receiveError: error)
+                    let client = makeClient(RealtimeSpeechConnectorFake(socket: socket))
+                    let stream = AsyncStream<Data> { $0.finish() }
+                    do {
+                        _ = try await client.transcribe(stream, context: context(provider))
+                        throw SpecFailure(message: "failed transport returned a result")
+                    } catch let failure as SpeechRecognitionFailure {
+                        try expect(failure.provider == provider && failure.kind == expected)
+                    }
+                    let closed = await socket.closed
+                    try expect(closed)
+                }
+            }
+        }
+        await runAsync(
             "realtime speech uploads before EOF and commits only after capture acceptance",
             failures: &failures
         ) {

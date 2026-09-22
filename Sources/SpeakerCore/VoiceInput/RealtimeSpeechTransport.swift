@@ -59,6 +59,12 @@ private actor URLSessionRealtimeSpeechConnection: RealtimeSpeechConnection {
         if let response = task.response as? HTTPURLResponse, response.statusCode != 101 {
             return RealtimeSpeechTransportError.httpStatus(response.statusCode)
         }
+        let failure = error as NSError
+        if failure.domain == NSPOSIXErrorDomain,
+            failure.code == Int(POSIXErrorCode.EMSGSIZE.rawValue)
+        {
+            return RealtimeSpeechTransportError.responseTooLarge
+        }
         return error
     }
 
@@ -72,5 +78,6 @@ private actor URLSessionRealtimeSpeechConnection: RealtimeSpeechConnection {
 
 package enum RealtimeSpeechTransportError: Error {
     case invalidMessage
+    case responseTooLarge
     case httpStatus(Int)
 }
