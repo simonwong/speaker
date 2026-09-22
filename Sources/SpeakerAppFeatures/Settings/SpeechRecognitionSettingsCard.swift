@@ -12,7 +12,7 @@ package struct SpeechRecognitionSettingsCard: View {
 
     package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-            SettingsCard("语音识别", subtitle: "接收录音并转成文字；切换仅影响下一次录音", icon: "waveform") {
+            SettingsCard("语音识别", icon: "waveform") {
                 Picker(
                     "服务商",
                     selection: Binding(
@@ -33,7 +33,7 @@ package struct SpeechRecognitionSettingsCard: View {
                         .disabled(model.isMutating)
                     SettingsRowDivider()
                     StatusBadge(
-                        text: model.hasStoredKey ? "Key 已保存 · 待首次识别验证" : "未配置",
+                        text: model.hasStoredKey ? "Key 已保存" : "未配置",
                         icon: model.hasStoredKey ? "key.fill" : "key.slash",
                         color: .secondary)
                     ProviderKeyEditor(
@@ -46,17 +46,9 @@ package struct SpeechRecognitionSettingsCard: View {
                         save: { await model.saveAPIKey() },
                         delete: { await model.deleteAPIKey() })
                     Text(
-                        model.selectedProfile.method == .streaming
-                            ? "录音时持续发送音频，结束后交付完整文字。取消会停止后续发送，已发送的音频无法撤回。"
-                            : "录音结束并通过本地检查后发送完整音频，再交付识别文字。"
-                    )
-                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
-                    Text("首次识别时验证账号与模型；保存 Key 不会发送测试请求。此 Key 与文字整理独立。")
-                        .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
-                    Text(
                         model.selectedProvider == .openAI
-                            ? "每次录音最多 5 分钟；需使用 OpenAI 支持地区的账号与网络。"
-                            : "每次录音最多 3 分钟；北京与新加坡 Key 分开保存，不会自动跨地域重试。"
+                            ? "单次录音上限：5 分钟"
+                            : "单次录音上限：3 分钟"
                     )
                     .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
                 }
@@ -95,8 +87,6 @@ package struct SpeechRecognitionSettingsCard: View {
             }
             .pickerStyle(.menu)
             .accessibilityLabel("语音识别方式")
-            Text("切换识别方式会选择对应模型；现有 Key 可继续使用。")
-                .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
             if model.selectedProvider == .qwen {
                 Picker(
                     "地域",

@@ -52,7 +52,7 @@ private struct HistoryRetentionSettingsRow: View {
     @ObservedObject var model: HistoryRetentionSettingsModel
 
     var body: some View {
-        SpeakerRow("保存历史", detail: "历史只保存在本机") {
+        SpeakerRow("保存历史") {
             Picker(
                 "保存历史",
                 selection: Binding(

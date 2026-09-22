@@ -78,16 +78,16 @@ package struct MicrophoneSelectionState: Equatable {
         return nil
     }
 
-    package var captureDescription: String {
-        guard isPreferenceReady else { return "正在加载已保存的麦克风选择。" }
+    package var captureDescription: String? {
+        guard isPreferenceReady else { return "正在加载…" }
         if let actual = routing.actualDevice {
             let prefix = routing.isTesting ? "正在测试" : "本次录音"
             if actual.uid != resolvedDevice?.uid {
-                return "\(prefix)：\(deviceTitle(actual))。新选择从下次录音或测试生效。"
+                return "\(prefix)：\(deviceTitle(actual))；下次使用新选择"
             }
             return "\(prefix)：\(deviceTitle(actual))。"
         }
-        return "录音中切换麦克风，从下次录音生效。"
+        return nil
     }
 
     private func deviceTitle(_ device: MicrophoneDevice) -> String {

@@ -20,7 +20,7 @@ package struct LoginItemPresentation: Equatable, Sendable {
         "已请求登录时启动，需要在系统设置的“登录项”中批准。"
     package static let registrationMissingNotice =
         "登录时启动已在系统中关闭；打开开关可以重新启用。"
-    package static let unavailableNotice = "当前 Speaker 构建无法注册登录项。"
+    package static let unavailableNotice = "无法设置登录时自动启动。"
 
     package let registrationState: LoginItemRegistrationState
     package let isEnabled: Bool

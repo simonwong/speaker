@@ -1177,52 +1177,37 @@ struct SpeakerAppScenarioSpecs {
             try expect(reader.signingMode == .developerID)
             try expect(
                 reader.buildIdentity.displayText
-                    == "版本 1.2.3（45）· 源码 abc123"
+                    == "1.2.3"
             )
             try expect(
                 SpeakerBuildInfoReader { _ in nil }.signingMode == .unknown
             )
         }
 
-        run("build signing mode exposes the permission identity boundary", failures: &failures) {
+        run(
+            "build signing mode gates local smoke and retains diagnostic identity",
+            failures: &failures
+        ) {
             let adHoc = SpeakerSigningMode(infoValue: "development-ad-hoc")
             try expect(adHoc == .developmentAdHoc)
-            try expect(!adHoc.permissionIdentityIsStable)
-            try expect(
-                adHoc.permissionIdentityNotice?.contains("麦克风和辅助功能")
-                    == true
-            )
             try expect(adHoc.diagnosticValue == "development-ad-hoc")
+            try expect(adHoc.permitsLocalDeliverySmoke)
 
             let local = SpeakerSigningMode(infoValue: "development-signed")
-            try expect(!local.permissionIdentityIsStable)
-            try expect(
-                local.displayName
-                    == SpeakerSigningMode.developmentSignedDisplayName
-            )
-            try expect(
-                local.permissionIdentityNotice?.contains("同一个代码签名 identity")
-                    == true
-            )
+            try expect(local == .developmentSigned)
             try expect(local.permitsLocalDeliverySmoke)
 
             let production = SpeakerSigningMode(infoValue: "developer-id")
-            try expect(production.permissionIdentityIsStable)
-            try expect(
-                production.displayName
-                    == SpeakerSigningMode.developerIDDisplayName
-            )
+            try expect(production == .developerID)
             try expect(!production.permitsLocalDeliverySmoke)
 
             let unknown = SpeakerSigningMode(infoValue: nil)
             try expect(unknown == .unknown)
-            try expect(unknown.permissionIdentityNotice != nil)
-            try expect(!unknown.permissionIdentityIsStable)
             try expect(!unknown.permitsLocalDeliverySmoke)
         }
 
         run(
-            "build identity presents version, numeric build and source revision",
+            "build identity presents only the version",
             failures: &failures
         ) {
             let identity = SpeakerBuildIdentity(
@@ -1233,7 +1218,7 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(
                 identity.displayText
-                    == "版本 1.2.3（45）· 源码 abc123def456-dirty"
+                    == "1.2.3"
             )
         }
 
@@ -1256,7 +1241,7 @@ struct SpeakerAppScenarioSpecs {
                 SoftwareUpdateState
                     .unavailable(.developmentBuild)
                     .unavailableMessage
-                    == SoftwareUpdateState.developmentBuildMessage
+                    == SoftwareUpdateState.notCheckableMessage
             )
             try expect(
                 SoftwareUpdateConfiguration(

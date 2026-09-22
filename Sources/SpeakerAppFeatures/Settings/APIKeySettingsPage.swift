@@ -30,7 +30,7 @@ package struct DoubaoSettingsCard: View {
     package var body: some View {
         SettingsCard(
             "豆包语音",
-            subtitle: "边说边转录，默认启用语义顺滑；每次录音最多 10 分钟",
+            subtitle: "单次录音上限：10 分钟",
             icon: "waveform.badge.mic"
         ) {
             statusRow
@@ -75,7 +75,7 @@ package struct DoubaoSettingsCard: View {
     }
 
     private var resourceRow: some View {
-        SpeakerRow("流式资源", detail: "须与控制台已开通的套餐一致") {
+        SpeakerRow("流式资源") {
             Picker(
                 "流式资源",
                 selection: Binding(
@@ -126,7 +126,6 @@ package struct RefinementProviderSettingsCard: View {
     package var body: some View {
         SettingsCard(
             "文字整理 · 可选",
-            subtitle: "只发送转录文字、整理规则和个人词库，不发送音频",
             icon: "sparkles"
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -168,9 +167,6 @@ package struct RefinementProviderSettingsCard: View {
                     }
                     .pickerStyle(.menu)
                     .accessibilityLabel("文字整理模型")
-
-                    Text("推荐模型优先考虑成本，随 App 更新；也可选择「其他模型…」手动填写。")
-                        .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
                 }
 
                 if model.selectedProvider == .custom {
@@ -178,7 +174,7 @@ package struct RefinementProviderSettingsCard: View {
                         "API Base URL", placeholder: "https://api.example.com/v1",
                         text: $model.baseURLDraft)
                     Text(
-                        "使用兼容 OpenAI 的 HTTPS Base URL；Speaker 会追加 /chat/completions。更换地址后须重新填写 Key。"
+                        "兼容 OpenAI 的 HTTPS 地址，无需填写 /chat/completions。"
                     )
                     .font(SpeakerTypography.footnote)
                     .foregroundStyle(.secondary)
@@ -230,8 +226,6 @@ package struct RefinementProviderSettingsCard: View {
                     if model.isCheckingConnection { ProgressView().controlSize(.small) }
                     Spacer()
                 }
-                Text("手动检查会发送一小段测试文字，可能产生服务商用量费用。")
-                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
             }
             if let credentialNotice = model.credentialNotice {
                 SettingsNotice(text: credentialNotice, color: .red)

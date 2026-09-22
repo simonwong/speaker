@@ -674,7 +674,7 @@ package final class RefinementSettingsModel: ObservableObject {
         case .invalidCredential, .authentication:
             "\(providerName) Key 无效，请重新保存后检查连接。"
         case .credentialAccessDenied:
-            "macOS 拒绝访问 \(providerName) 凭据，请检查当前构建身份后重试。"
+            "macOS 拒绝访问 \(providerName) 凭据，请重新保存 Key。"
         case .credentialInteractionUnavailable:
             "\(providerName) 凭据当前不可用，请解锁 Mac 后重试。"
         case .credentialMalformed:

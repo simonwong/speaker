@@ -124,7 +124,14 @@ enum APIKeySettingsUISpecs {
             try expect(qwen, "Qwen region picker did not render")
             try select("新加坡", in: hosting)
             let region = await eventually(before: .seconds(2)) {
-                model.selectedProfile.region == .singapore && !model.isMutating
+                pumpUI()
+                return model.selectedProfile.region == .singapore && !model.isMutating
+                    && popupButtons(in: hosting).contains {
+                        $0.titleOfSelectedItem == "新加坡" && $0.isEnabled
+                    }
+                    && popupButtons(in: hosting).contains {
+                        $0.itemTitles.contains("流式识别（边录边传）") && $0.isEnabled
+                    }
             }
             try expect(
                 region && !model.hasStoredKey,

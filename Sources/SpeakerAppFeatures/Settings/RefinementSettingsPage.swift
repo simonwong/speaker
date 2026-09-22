@@ -31,7 +31,7 @@ package struct RefinementSettingsPage: View {
     private var modeCard: some View {
         SettingsCard(
             "整理模式",
-            subtitle: "默认模式直接使用识别结果；其他模式使用 \(model.providerName)，需先配置 Key",
+            subtitle: model.hasStoredKey ? nil : "配置文字整理 Key 后解锁其他模式",
             icon: "text.alignleft"
         ) {
             LazyVGrid(
@@ -70,7 +70,6 @@ private struct RefinementPromptEditorCard: View {
     var body: some View {
         SettingsCard(
             "“\(promptEditor.title)”提示词",
-            subtitle: "提示词只保存在本机，修改后对新会话生效",
             icon: "text.quote"
         ) {
             RefinementPromptTextEditor(
@@ -118,7 +117,6 @@ private struct CustomRefinementModeCard: View {
     var body: some View {
         SettingsCard(
             "自定义模式",
-            subtitle: "说清楚希望保留、删除和重组的内容",
             icon: "slider.horizontal.3"
         ) {
             if model.choice != .custom {

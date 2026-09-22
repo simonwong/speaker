@@ -11,7 +11,6 @@ package struct SpeakerOnboardingView: View {
     let requestPermission: (PermissionKind) async -> Void
     let refreshPermissions: () -> Void
     let announce: AccessibilityAnnounce
-    let buildInfo: SpeakerBuildInfoReader
     let shortcutName: () -> String
     let mode: OnboardingMode
 
@@ -22,7 +21,6 @@ package struct SpeakerOnboardingView: View {
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
         announce: @escaping AccessibilityAnnounce,
-        buildInfo: SpeakerBuildInfoReader = .main,
         shortcutName: @escaping () -> String = { "Fn" },
         mode: OnboardingMode = .setup,
         completion: @escaping () -> Void
@@ -34,7 +32,6 @@ package struct SpeakerOnboardingView: View {
         self.requestPermission = requestPermission
         self.refreshPermissions = refreshPermissions
         self.announce = announce
-        self.buildInfo = buildInfo
         self.shortcutName = shortcutName
         self.mode = mode
     }
@@ -163,21 +160,10 @@ package struct SpeakerOnboardingView: View {
                     purpose: "用于响应键盘快捷键，并把文字输入你正在使用的应用。")
                 Button("重新检查权限", action: refreshPermissions)
                     .font(.callout)
-                if let notice = buildInfo.signingMode.permissionIdentityNotice {
-                    SettingsNotice(text: notice, color: .orange)
-                }
             }
         case .apiKey:
             VStack(alignment: .leading, spacing: 14) {
                 SpeechRecognitionSettingsCard(model: recognition, doubao: doubao)
-                Text("Key 只保存在这台 Mac。语音直接发送到所选服务，费用由服务商收取。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("文字整理为可选项，之后可在设置中添加。默认模式直接使用识别结果；豆包保留原生语义顺滑。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         case .shortcut:
             VStack(alignment: .leading, spacing: 18) {
@@ -195,7 +181,7 @@ package struct SpeakerOnboardingView: View {
                     icon: "hand.point.up.left", title: "长按键盘快捷键",
                     detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
                 tutorialRow(icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
-                Text("打开任意应用的输入框，再使用键盘快捷键。录音结束时所在的输入框，就是文字的输入位置。快捷键可随时在设置中更改。")
+                Text("打开输入框后使用快捷键，文字将输入到结束录音时所在的输入框。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -326,7 +312,7 @@ package struct SpeakerOnboardingView: View {
                 : "权限尚未全部开启，请返回第一步检查。"
         }
         if recognition.selectedProvider != .doubao {
-            return "保存所选语音识别服务的 Key 后继续；首次录音会发送音频并验证账号与模型。"
+            return "保存所选语音识别服务的 Key 后继续。"
         }
         return "保存豆包 Key，选择已开通的资源，再点击「检查连接」。连接成功后继续。"
     }
