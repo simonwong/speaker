@@ -11,12 +11,37 @@ public enum QwenASRRegion: String, Codable, CaseIterable, Sendable {
     case singapore
 }
 
+public enum SpeechRecognitionMethod: String, Codable, CaseIterable, Sendable {
+    case streaming
+    case completeRecording
+    case unsupported
+
+    public static let allCases: [Self] = [.streaming, .completeRecording]
+
+    public static func defaultMethod(for provider: SpeechRecognitionProviderID) -> Self {
+        provider == .doubao ? .streaming : .completeRecording
+    }
+}
+
 public enum SpeechRecognitionProviderCatalog {
-    public static func modelIDs(for provider: SpeechRecognitionProviderID) -> [String] {
-        switch provider {
-        case .doubao: ["bigmodel_async"]
-        case .openAI: ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
-        case .qwen: ["qwen3-asr-flash"]
+    public static func methods(for provider: SpeechRecognitionProviderID)
+        -> [SpeechRecognitionMethod]
+    {
+        provider == .doubao ? [.streaming] : [.streaming, .completeRecording]
+    }
+
+    public static func modelIDs(
+        for provider: SpeechRecognitionProviderID, method: SpeechRecognitionMethod? = nil
+    ) -> [String] {
+        switch (provider, method ?? .defaultMethod(for: provider)) {
+        case (.doubao, .streaming): ["bigmodel_async"]
+        case (.doubao, .completeRecording): []
+        case (.openAI, .streaming): ["gpt-live-transcribe"]
+        case (.openAI, .completeRecording):
+            ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
+        case (.qwen, .streaming): ["qwen3-asr-flash-realtime"]
+        case (.qwen, .completeRecording): ["qwen3-asr-flash"]
+        case (_, .unsupported): []
         }
     }
 }
@@ -24,15 +49,37 @@ public enum SpeechRecognitionProviderCatalog {
 public struct SpeechRecognitionProfile: Codable, Equatable, Sendable {
     public var provider: SpeechRecognitionProviderID
     public var model: String
+    public var method: SpeechRecognitionMethod
     public var region: QwenASRRegion
 
     public init(
         provider: SpeechRecognitionProviderID, model: String? = nil,
-        region: QwenASRRegion = .beijing
+        region: QwenASRRegion = .beijing, method: SpeechRecognitionMethod? = nil
     ) {
         self.provider = provider
-        self.model = model ?? SpeechRecognitionProviderCatalog.modelIDs(for: provider)[0]
+        self.method = method ?? .defaultMethod(for: provider)
+        self.model =
+            model ?? SpeechRecognitionProviderCatalog.modelIDs(for: provider, method: self.method)
+            .first ?? ""
         self.region = region
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider, model, region, method
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try values.decode(SpeechRecognitionProviderID.self, forKey: .provider)
+        model = try values.decode(String.self, forKey: .model)
+        region = try values.decode(QwenASRRegion.self, forKey: .region)
+        if values.contains(.method) {
+            method =
+                (try? values.decode(String.self, forKey: .method))
+                .flatMap(SpeechRecognitionMethod.init(rawValue:)) ?? .unsupported
+        } else {
+            method = .defaultMethod(for: provider)
+        }
     }
 
     public static let doubao = Self(provider: .doubao)
@@ -51,10 +98,13 @@ public struct SpeechRecognitionProfile: Codable, Equatable, Sendable {
 
     public func validated() throws -> Self {
         let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard SpeechRecognitionProviderCatalog.modelIDs(for: provider).contains(normalized) else {
+        guard
+            SpeechRecognitionProviderCatalog.modelIDs(for: provider, method: method).contains(
+                normalized)
+        else {
             throw SpeechRecognitionFailure(provider: provider, kind: .invalidConfiguration)
         }
-        return Self(provider: provider, model: normalized, region: region)
+        return Self(provider: provider, model: normalized, region: region, method: method)
     }
 
     package var endpoint: URL {

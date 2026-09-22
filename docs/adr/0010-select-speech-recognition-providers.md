@@ -2,6 +2,8 @@
 
 Status: Accepted
 
+The complete-audio-only restriction for OpenAI and Qwen is superseded by [ADR-0011](0011-select-the-speech-recognition-method.md). Provider selection and credential isolation remain accepted.
+
 Date: 2026-09-22
 
 This supersedes ADR-0009's Doubao-only audio restriction. The user selects Doubao, OpenAI, or Alibaba Qwen as the Speech Recognition Provider. The Refinement Provider remains a separate text-only choice. Each Voice Input Session snapshots the recognition provider, model, and region when recording starts; later settings changes apply to the next session. Credentials are resolved from that snapshot's namespace. There is no automatic provider or region fallback.

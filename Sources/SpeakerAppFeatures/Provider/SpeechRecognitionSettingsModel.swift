@@ -21,6 +21,16 @@ extension QwenASRRegion {
     }
 }
 
+extension SpeechRecognitionMethod {
+    package var displayName: String {
+        switch self {
+        case .streaming: "流式识别（边录边传）"
+        case .completeRecording: "整段识别（录完上传）"
+        case .unsupported: "不支持的识别方式"
+        }
+    }
+}
+
 @MainActor
 package final class SpeechRecognitionSettingsModel: ObservableObject {
     @Published package private(set) var providers = SpeechRecognitionProviderSettings()
@@ -54,7 +64,8 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
     package var isMutating: Bool { isUpdatingKey || isUpdatingProvider }
     package var hasValidProfile: Bool { (try? selectedProfile.validated()) != nil }
     package var modelIDs: [String] {
-        let listed = SpeechRecognitionProviderCatalog.modelIDs(for: selectedProvider)
+        let listed = SpeechRecognitionProviderCatalog.modelIDs(
+            for: selectedProvider, method: selectedProfile.method)
         let selected = selectedProfile.model
         return selected.isEmpty || listed.contains(selected) ? listed : listed + [selected]
     }
@@ -109,20 +120,34 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
         let retained = providers.profile(for: provider)
         let selected =
             (try? retained.validated())
-            ?? SpeechRecognitionProfile(provider: provider, region: retained.region)
+            ?? SpeechRecognitionProfile(
+                provider: provider, region: retained.region,
+                method: SpeechRecognitionProviderCatalog.methods(for: provider).contains(
+                    retained.method)
+                    ? retained.method : .defaultMethod(for: provider))
         await saveProfile(selected)
+    }
+
+    package func selectMethod(_ method: SpeechRecognitionMethod) async {
+        guard method != selectedProfile.method else { return }
+        await saveProfile(
+            SpeechRecognitionProfile(
+                provider: selectedProvider, region: selectedProfile.region, method: method))
     }
 
     package func selectModel(_ model: String) async {
         await saveProfile(
             SpeechRecognitionProfile(
-                provider: selectedProvider, model: model, region: selectedProfile.region))
+                provider: selectedProvider, model: model, region: selectedProfile.region,
+                method: selectedProfile.method))
     }
 
     package func selectRegion(_ region: QwenASRRegion) async {
         guard selectedProvider == .qwen else { return }
         await saveProfile(
-            SpeechRecognitionProfile(provider: .qwen, model: selectedProfile.model, region: region))
+            SpeechRecognitionProfile(
+                provider: .qwen, model: selectedProfile.model, region: region,
+                method: selectedProfile.method))
     }
 
     private func saveProfile(_ profile: SpeechRecognitionProfile) async {

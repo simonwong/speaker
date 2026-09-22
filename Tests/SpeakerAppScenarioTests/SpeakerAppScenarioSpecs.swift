@@ -15,6 +15,99 @@ struct SpeakerAppScenarioSpecs {
         var failures: [String] = []
 
         await runAsync(
+            "recognition method selection persists compatible models reuses keys and freezes snapshots",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "asr-method-settings-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "audio-openai", for: .openAITranscription)
+            try await credentials.save(apiKey: "audio-singapore", for: .qwenASRSingapore)
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: configuration, settingsStore: store)
+            await model.load()
+            await model.selectMethod(.completeRecording)
+            try expect(model.selectedProfile == .doubao && model.notice != nil)
+            await model.selectProvider(.openAI)
+            await model.selectModel("gpt-4o-transcribe")
+            let frozen = await configuration.captureSnapshot()
+            model.apiKeyDraft = "unsaved-draft"
+            await model.selectMethod(.streaming)
+            try expect(model.selectedProfile.model == "gpt-live-transcribe")
+            try expect(model.modelIDs == ["gpt-live-transcribe"])
+            try expect(model.hasStoredKey && model.apiKeyDraft.isEmpty)
+            try expect(frozen.recognitionProvider.method == .completeRecording)
+            try expect(frozen.recognitionProvider.model == "gpt-4o-transcribe")
+            let selected = await configuration.captureSnapshot()
+            try expect(selected.recognitionProvider.method == .streaming)
+            await model.selectModel("gpt-4o-transcribe")
+            try expect(model.selectedProfile.method == .streaming && model.notice != nil)
+            try expect(model.selectedProfile.model == "gpt-live-transcribe")
+            await model.selectProvider(.qwen)
+            await model.selectRegion(.singapore)
+            await model.selectMethod(.streaming)
+            try expect(
+                model.selectedProfile.model == "qwen3-asr-flash-realtime" && model.hasStoredKey)
+            let frozenQwen = await configuration.captureSnapshot()
+            await model.selectRegion(.beijing)
+            try expect(model.selectedProfile.method == .streaming && !model.hasStoredKey)
+            try expect(frozenQwen.recognitionProvider.region == .singapore)
+            await model.selectRegion(.singapore)
+            let restarted = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(fileURL: fileURL))
+            await restarted.load()
+            try expect(restarted.selectedProfile == model.selectedProfile && restarted.hasStoredKey)
+            await restarted.selectProvider(.openAI)
+            try expect(restarted.selectedProfile.method == .streaming && restarted.hasStoredKey)
+            await restarted.selectMethod(.completeRecording)
+            try expect(
+                restarted.selectedProfile.model == "gpt-transcribe" && restarted.hasStoredKey)
+            try expect(restarted.modelIDs.contains("gpt-4o-transcribe"))
+            try expect(!restarted.modelIDs.contains("gpt-live-transcribe"))
+            await model.shutdown()
+            await restarted.shutdown()
+        }
+
+        await runAsync(
+            "recognition unknown persisted method stays selected and refuses readiness until corrected",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "asr-unknown-method-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            var providers = SpeechRecognitionProviderSettings()
+            try providers.select(SpeechRecognitionProfile(provider: .openAI))
+            try await store.updateSpeechRecognitionProviders(providers)
+            let original = try String(contentsOf: fileURL, encoding: .utf8)
+            try original.replacingOccurrences(of: "completeRecording", with: "futureMethod")
+                .write(to: fileURL, atomically: false, encoding: .utf8)
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "present-audio-key", for: .openAITranscription)
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: configuration,
+                settingsStore: VersionedLocalAppSettingsStore(fileURL: fileURL))
+            await model.load()
+            let snapshot = await configuration.captureSnapshot()
+            try expect(snapshot.recognitionProvider.provider == .openAI)
+            try expect(snapshot.recognitionProvider.method == .unsupported)
+            try expect(model.selectedProvider == .openAI && !model.hasValidProfile)
+            try expect(!model.hasStoredKey && model.notice != nil)
+            await model.selectMethod(.streaming)
+            try expect(model.selectedProfile.method == .streaming && model.hasStoredKey)
+            let restored = await VersionedLocalAppSettingsStore(fileURL: fileURL).load().settings
+            try expect(restored.speechRecognitionProviders.selectedProfile == model.selectedProfile)
+            await model.shutdown()
+        }
+
+        await runAsync(
             "recognition invalid saved model remains selected and cannot borrow Doubao readiness",
             failures: &failures
         ) {
@@ -1725,7 +1818,7 @@ struct SpeakerAppScenarioSpecs {
                     doubaoConfigured: true,
                     doubaoResource: "volc.bigasr.sauc.duration",
                     recognitionProfile: SpeechRecognitionProfile(
-                        provider: .qwen, region: .singapore),
+                        provider: .qwen, region: .singapore, method: .streaming),
                     recognitionConfigured: true,
                     refinementConfigured: true,
                     refinementVerified: false,
@@ -1764,7 +1857,8 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(report.contains("latestRefinementRequestID: deepseek-safe-id"))
             try expect(report.contains("recognitionProvider: qwen"))
-            try expect(report.contains("recognitionModel: qwen3-asr-flash"))
+            try expect(report.contains("recognitionModel: qwen3-asr-flash-realtime"))
+            try expect(report.contains("recognitionMethod: streaming"))
             try expect(report.contains("recognitionRegion: singapore"))
             try expect(report.contains("recognitionConfigured: true"))
             try expect(report.contains("refinementProvider: custom"))

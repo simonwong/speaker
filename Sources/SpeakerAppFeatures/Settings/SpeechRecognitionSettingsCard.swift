@@ -45,7 +45,13 @@ package struct SpeechRecognitionSettingsCard: View {
                         deletionMessage: "只删除当前语音识别服务与地域的 Key；文字整理 Key 不受影响。",
                         save: { await model.saveAPIKey() },
                         delete: { await model.deleteAPIKey() })
-                    Text("录音结束后发送音频，首次识别时验证账号与模型；保存 Key 不会发送测试请求。此 Key 与文字整理独立。")
+                    Text(
+                        model.selectedProfile.method == .streaming
+                            ? "录音时持续发送音频，结束后交付完整文字。取消会停止后续发送，已发送的音频无法撤回。"
+                            : "录音结束并通过本地检查后发送完整音频，再交付识别文字。"
+                    )
+                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
+                    Text("首次识别时验证账号与模型；保存 Key 不会发送测试请求。此 Key 与文字整理独立。")
                         .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
                     Text(
                         model.selectedProvider == .openAI
@@ -68,6 +74,29 @@ package struct SpeechRecognitionSettingsCard: View {
 
     private var profileControls: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Picker(
+                "识别方式",
+                selection: Binding(
+                    get: { model.selectedProfile.method },
+                    set: { method in Task { await model.selectMethod(method) } }
+                )
+            ) {
+                if model.selectedProfile.method == .unsupported {
+                    Text(SpeechRecognitionMethod.unsupported.displayName)
+                        .tag(SpeechRecognitionMethod.unsupported)
+                        .disabled(true)
+                }
+                ForEach(
+                    SpeechRecognitionProviderCatalog.methods(for: model.selectedProvider),
+                    id: \.self
+                ) { method in
+                    Text(method.displayName).tag(method)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityLabel("语音识别方式")
+            Text("切换识别方式会选择对应模型；现有 Key 可继续使用。")
+                .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
             if model.selectedProvider == .qwen {
                 Picker(
                     "地域",

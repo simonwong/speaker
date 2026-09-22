@@ -25,7 +25,7 @@ If Speaker cannot prove that the original input target is still safe and current
 
 - **Natural voice shortcut** — hold or short-press `Fn`, choose a custom shortcut, and press `Esc` to cancel at any time.
 - **Target-safe delivery** — the input target is frozen when recording ends; later window or focus changes never retarget the result.
-- **Your choice of speech recognition** — Doubao streams while you speak; OpenAI and Qwen transcribe complete audio after recording ends.
+- **Your choice of speech recognition** — Choose Doubao, OpenAI, or Qwen. OpenAI and Qwen offer streaming while you speak or complete-recording recognition after you finish.
 - **Optional text refinement** — Default Smoothing uses the selected recognition result directly. Concise Cleanup, Full Rewrite, and Custom Modes use your selected text provider and model and send text only, never audio.
 - **Local controls** — Personal Dictionary, searchable Session Records, retention settings, and redacted diagnostics remain under the current macOS user account.
 - **Conservative privacy boundaries** — raw audio is never written to disk, secure input text is never stored in history, and Speaker changes the clipboard only after an explicit Copy action.
@@ -62,7 +62,7 @@ The `xattr` command removes Gatekeeper's quarantine marker only from `/Applicati
 
 1. Follow Speaker's onboarding to request Microphone and Accessibility access.
 2. Enable `/Applications/Speaker.app` in **System Settings → Privacy & Security → Accessibility** when macOS opens that page.
-3. In **Speech Recognition**, choose Doubao, OpenAI, or Alibaba Qwen and save its API key. For Doubao, select an activated resource and run **Check Connection**. For Qwen, choose the region matching your key. Recognition and text-refinement keys are saved separately.
+3. In **Speech Recognition**, choose Doubao, OpenAI, or Alibaba Qwen and save its API key. OpenAI and Qwen let you select a recognition method and a compatible model. For Doubao, select an activated resource and run **Check Connection**. For Qwen, choose the region matching your key. Recognition and text-refinement keys are saved separately.
 4. Focus an input field in any app, then hold `Fn` while speaking and release it to finish. A short press followed by another short press also starts and stops recording.
 
 If an update leaves stale permission entries, reset only Speaker's local bundle identity:
@@ -77,14 +77,14 @@ Then enable Speaker again in System Settings. These commands do not reset permis
 
 ## How it works
 
-1. Speaker captures microphone input in memory as 16 kHz, 16-bit mono PCM and sends it only to the selected Speech Recognition Provider. Doubao streams in short chunks; OpenAI and Qwen receive an in-memory WAV when recording ends.
+1. Speaker captures microphone input in memory as 16 kHz, 16-bit mono PCM and sends it only to the selected Speech Recognition Provider. Doubao streams in short chunks. OpenAI and Qwen use your selected method: streaming audio while recording, or an in-memory WAV after recording passes local validation. OpenAI streaming converts the audio to 24 kHz in memory.
 2. Releasing the shortcut freezes the current Input Target and waits for the final recognition Stage Result.
 3. Default Smoothing uses that recognition result directly. Other Refinement Modes may send the confirmed text and selected instruction to the selected Refinement Provider.
 4. Speaker revalidates the original Input Target before committing delivery. An uncertain, changed, closed, or secure target becomes a Pending Copy Result instead.
 
 Audio is sent only to the selected Speech Recognition Provider. It is never sent to text refinement providers or persisted as a normal application artifact.
 
-OpenAI complete-audio recognition supports up to five minutes per recording; Qwen supports up to three minutes to stay within its encoded request limit. Audio remains in memory. Saving a new provider Key does not send a paid probe; its first recognition attempt verifies actual account and model availability.
+Speaker allows up to five minutes per OpenAI recording and three minutes per Qwen recording with either method. Existing settings keep their original method. Streaming sends audio before final local validation; cancellation stops further transmission but cannot recall audio already received by the provider. Only confirmed final text reaches refinement and delivery. Neither method is guaranteed to be more accurate. Audio remains in memory. Saving a new provider Key does not send a paid probe; its first recognition attempt verifies actual account and model availability.
 
 ## Privacy
 
