@@ -264,6 +264,9 @@ package struct RealtimeSpeechTranscriber: Sendable {
         -> SpeechRecognitionFailure
     {
         if let failure = error as? SpeechRecognitionFailure { return failure }
+        if case RealtimeSpeechTransportError.responseTooLarge = error {
+            return .init(provider: provider, kind: .responseTooLarge)
+        }
         if case RealtimeSpeechTransportError.httpStatus(let status) = error {
             return .init(
                 provider: provider,

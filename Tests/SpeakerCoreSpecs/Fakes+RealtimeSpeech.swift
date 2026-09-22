@@ -16,6 +16,7 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
     let updates: Bool
     let completes: Bool
     let mode: String
+    let receiveError: (any Error)?
     private var queue: [String] = []
     private var waiter: CheckedContinuation<String, Error>?
     private(set) var sent: [String] = []
@@ -24,12 +25,13 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
 
     init(
         provider: SpeechRecognitionProviderID, creation: Bool = true, updates: Bool = true,
-        completes: Bool = true, mode: String = ""
+        completes: Bool = true, mode: String = "", receiveError: (any Error)? = nil
     ) {
         self.provider = provider
         self.updates = updates
         self.completes = completes
         self.mode = mode
+        self.receiveError = receiveError
         if creation { queue = [#"{"type":"session.created"}"#] }
     }
     func send(_ text: String) async throws {
@@ -76,6 +78,7 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
     }
     func receive() async throws -> String {
         receiveCount += 1
+        if let receiveError { throw receiveError }
         if mode.hasPrefix("http-"), let status = Int(mode.dropFirst(5)) {
             throw RealtimeSpeechTransportError.httpStatus(status)
         }
