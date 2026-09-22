@@ -7,7 +7,6 @@ struct DictionarySettingsPage: View {
     var body: some View {
         SettingsCard(
             "个人词库",
-            subtitle: "人名、术语、产品名，为语音识别提供拼写提示",
             icon: "text.book.closed"
         ) {
             HStack(spacing: 8) {
@@ -51,10 +50,6 @@ struct DictionarySettingsPage: View {
                     }
                 }
             }
-
-            Text("只有词条文本会随识别请求发送给所选语音识别服务；启用文字整理模式时，词条文本也会一并发送给所选文字整理服务。")
-                .font(SpeakerTypography.footnote)
-                .foregroundStyle(.tertiary)
 
             if let notice = model.notice {
                 SettingsNotice(text: notice)

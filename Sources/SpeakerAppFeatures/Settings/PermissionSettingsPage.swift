@@ -4,22 +4,12 @@ import SwiftUI
 struct PermissionSettingsPage: View {
     @ObservedObject var permissions: PermissionModel
     let requestPermission: (PermissionKind) async -> Void
-    var buildInfo = SpeakerBuildInfoReader.main
-
-    private var signingMode: SpeakerSigningMode {
-        buildInfo.signingMode
-    }
 
     var body: some View {
         SettingsCard {
-            if let notice = signingMode.permissionIdentityNotice {
-                SettingsNotice(text: notice, color: .orange)
-                SettingsRowDivider()
-            }
-
             PermissionSettingsRow(
                 title: "麦克风",
-                explanation: "音频只在内存中流式处理，不写入磁盘或历史。",
+                explanation: "录制语音",
                 kind: .microphone,
                 state: permissions.snapshot.microphone,
                 requestPermission: requestPermission
@@ -29,7 +19,7 @@ struct PermissionSettingsPage: View {
 
             PermissionSettingsRow(
                 title: "辅助功能",
-                explanation: "监听全局快捷键，并把文字送达结束录音时的输入框。",
+                explanation: "响应快捷键并输入文字",
                 kind: .accessibility,
                 state: permissions.snapshot.accessibility,
                 requestPermission: requestPermission

@@ -20,7 +20,7 @@ package struct SpeakerBuildIdentity: Equatable, Sendable {
     }
 
     package var displayText: String {
-        "版本 \(version)（\(build)）· 源码 \(sourceRevision)"
+        version
     }
 
     private static func displayValue(_ value: String?) -> String {
@@ -93,33 +93,6 @@ package enum SpeakerSigningMode: Equatable, Sendable {
         }
     }
 
-    package static let developmentAdHocDisplayName = "本机开发签名"
-    package static let developmentSignedDisplayName = "本机具名签名"
-    package static let developerIDDisplayName = "正式发布签名"
-    package static let unknownDisplayName = "未识别的签名"
-
-    package var displayName: String {
-        switch self {
-        case .developmentAdHoc:
-            Self.developmentAdHocDisplayName
-        case .developmentSigned:
-            Self.developmentSignedDisplayName
-        case .developerID:
-            Self.developerIDDisplayName
-        case .unknown:
-            Self.unknownDisplayName
-        }
-    }
-
-    package var permissionIdentityIsStable: Bool {
-        switch self {
-        case .developerID:
-            true
-        case .developmentAdHoc, .developmentSigned, .unknown:
-            false
-        }
-    }
-
     package var permitsLocalDeliverySmoke: Bool {
         switch self {
         case .developmentAdHoc, .developmentSigned:
@@ -129,21 +102,6 @@ package enum SpeakerSigningMode: Equatable, Sendable {
         }
     }
 
-    package var permissionIdentityNotice: String? {
-        switch self {
-        case .developmentAdHoc:
-            return """
-                当前是本机开发签名。重新构建后，macOS 可能要求重新授予麦克风和辅助功能权限；\
-                如果列表中已有 Speaker，请先移除旧项，再添加当前安装的 Speaker.app。
-                """
-        case .unknown:
-            return "当前构建的签名身份无法确认，麦克风和辅助功能授权可能无法跨版本保持。"
-        case .developmentSigned:
-            return "本机开发构建只有持续使用同一个代码签名 identity，才能保持麦克风和辅助功能权限。"
-        case .developerID:
-            return nil
-        }
-    }
 }
 
 package struct DeliverySmokeLaunchRequest: Equatable, Sendable {

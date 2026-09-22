@@ -61,7 +61,6 @@ private struct AboutSettingsPage: View {
     private var privacyBoundaryCard: some View {
         SettingsCard(
             AboutSection.privacyBoundary.title,
-            subtitle: "每一类数据去了哪里",
             icon: AboutSection.privacyBoundary.icon
         ) {
             SpeakerRow(
@@ -100,7 +99,6 @@ private struct AboutSettingsPage: View {
     private var versionCard: some View {
         SettingsCard(
             AboutSection.version.title,
-            subtitle: "更新与源码",
             icon: AboutSection.version.icon
         ) {
             SpeakerRow("当前版本") {

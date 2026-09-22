@@ -38,8 +38,8 @@ package struct MicrophoneSelectionMenu: View {
                 Text(notice)
                 Button("刷新麦克风列表", action: model.refresh)
             }
-            if model.state.routing.actualDevice != nil {
-                Text(model.state.captureDescription)
+            if let description = model.state.captureDescription {
+                Text(description)
             }
             if model.state.persistenceFailed {
                 Text("麦克风选择尚未保存，退出后可能恢复旧选择。")
@@ -78,7 +78,7 @@ package struct MicrophoneSettingsPage: View {
                 Button("重试保存麦克风选择", action: model.retryPersistence)
             }
             SettingsRowDivider()
-            SpeakerRow("测试麦克风", detail: "仅检查本地输入电平，8 秒内自动停止，不发送到语音服务。") {
+            SpeakerRow("测试麦克风") {
                 switch model.state.testStatus {
                 case .idle:
                     Button("开始测试", action: model.startLevelTest)
