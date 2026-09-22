@@ -23,6 +23,7 @@ struct SpeakerCoreSpecs {
         await RefinementProviderSpecs.run(failures: &failures)
         await SpeechRecognitionSessionSafetySpecs.run(failures: &failures)
         await SpeechRecognitionAdapterSpecs.run(failures: &failures)
+        await RealtimeSpeechAdapterSpecs.run(failures: &failures)
         await CredentialStoreSpecs.run(failures: &failures)
         await SessionHistorySpecs.run(failures: &failures)
         await PersonalDictionarySpecs.run(failures: &failures)

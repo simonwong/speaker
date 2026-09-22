@@ -34,6 +34,12 @@ The user-selected service and model that turns a Voice Input Session's audio int
 
 _Avoid_: audio refinement provider, automatic model router
 
+**Speech Recognition Method**
+
+The user's choice to send audio for recognition while speaking or after the complete recording passes local validation. It is fixed for each Voice Input Session and does not change when or where confirmed text is delivered.
+
+_Avoid_: output streaming, Refinement Mode
+
 **Default Smoothing**
 
 The built-in Refinement Mode that uses the Speech Recognition Provider's confirmed text without a separate refinement request. Its cleanup depends on that provider's recognition capabilities.

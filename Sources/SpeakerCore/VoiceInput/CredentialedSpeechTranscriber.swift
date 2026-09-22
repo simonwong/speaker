@@ -113,15 +113,18 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
     private let credentials: any ProviderCredentialStoring
     private let doubao: any ContextualSpeechTranscribing & StreamingContextualSpeechTranscribing
     private let transport: any SpeechRecognitionTransport
+    private let realtimeConnector: any RealtimeSpeechConnecting
 
     public init(
         credentials: any ProviderCredentialStoring,
         doubao: any ContextualSpeechTranscribing & StreamingContextualSpeechTranscribing,
-        transport: any SpeechRecognitionTransport = URLSessionSpeechRecognitionTransport()
+        transport: any SpeechRecognitionTransport = URLSessionSpeechRecognitionTransport(),
+        realtimeConnector: any RealtimeSpeechConnecting = URLSessionRealtimeSpeechConnector()
     ) {
         self.credentials = credentials
         self.doubao = doubao
         self.transport = transport
+        self.realtimeConnector = realtimeConnector
     }
 
     public static func maximumAudioSeconds(for provider: SpeechRecognitionProviderID) -> Int? {
@@ -151,6 +154,19 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         do { pcm = try SpeechRecognitionWAV.pcm(from: audio.data) } catch {
             throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidAudio)
         }
+        if profile.method == .streaming {
+            guard pcm.count <= Self.maximumPCMBytes(for: profile.provider) else {
+                throw SpeechRecognitionFailure(provider: profile.provider, kind: .audioTooLarge)
+            }
+            guard !pcm.isEmpty, pcm.count.isMultiple(of: 2) else {
+                throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidAudio)
+            }
+            let stream = AsyncStream<Data> { continuation in
+                continuation.yield(pcm)
+                continuation.finish()
+            }
+            return try await recognizeLive(stream, profile: profile, context: context)
+        }
         return try await recognize(pcm, profile: profile, hotwords: context.hotwords)
     }
 
@@ -161,6 +177,9 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         let profile = try context.recognitionProvider.validated()
         if profile.provider == .doubao {
             return try await doubao.transcribe(audioChunks, context: context)
+        }
+        if profile.method == .streaming {
+            return try await recognizeLive(audioChunks, profile: profile, context: context)
         }
         var pcm = Data()
         let maximum = Self.maximumPCMBytes(for: profile.provider)
@@ -192,6 +211,37 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         guard !pcm.isEmpty, pcm.count.isMultiple(of: 2) else {
             throw SpeechRecognitionFailure(provider: provider, kind: .invalidAudio)
         }
+        let apiKey = try await apiKey(for: profile)
+        try Task.checkCancellation()
+        let request = try Self.request(pcm, profile: profile, apiKey: apiKey, hotwords: hotwords)
+        let response: ChatCompletionTransportResponse
+        do { response = try await transport.send(request) } catch {
+            try Task.checkCancellation()
+            if error is CancellationError { throw CancellationError() }
+            let kind: SpeechRecognitionFailureKind
+            switch error {
+            case SpeechRecognitionTransportError.responseTooLarge: kind = .responseTooLarge
+            case SpeechRecognitionTransportError.invalidResponse: kind = .invalidResponse
+            default: kind = .transport
+            }
+            throw SpeechRecognitionFailure(provider: provider, kind: kind)
+        }
+        try Task.checkCancellation()
+        return try Self.result(response, provider: provider)
+    }
+
+    private func recognizeLive(
+        _ chunks: AsyncStream<Data>, profile: SpeechRecognitionProfile,
+        context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        let apiKey = try await apiKey(for: profile)
+        try Task.checkCancellation()
+        return try await RealtimeSpeechTranscriber(connector: realtimeConnector).transcribe(
+            chunks, profile: profile, apiKey: apiKey, context: context)
+    }
+
+    private func apiKey(for profile: SpeechRecognitionProfile) async throws -> String {
+        let provider = profile.provider
         let apiKey: String
         do {
             guard let stored = try await credentials.apiKey(for: profile.credentialProviderID),
@@ -209,22 +259,7 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
             try Task.checkCancellation()
             throw SpeechRecognitionFailure(provider: provider, kind: .credentialUnavailable)
         }
-        try Task.checkCancellation()
-        let request = try Self.request(pcm, profile: profile, apiKey: apiKey, hotwords: hotwords)
-        let response: ChatCompletionTransportResponse
-        do { response = try await transport.send(request) } catch {
-            try Task.checkCancellation()
-            if error is CancellationError { throw CancellationError() }
-            let kind: SpeechRecognitionFailureKind
-            switch error {
-            case SpeechRecognitionTransportError.responseTooLarge: kind = .responseTooLarge
-            case SpeechRecognitionTransportError.invalidResponse: kind = .invalidResponse
-            default: kind = .transport
-            }
-            throw SpeechRecognitionFailure(provider: provider, kind: kind)
-        }
-        try Task.checkCancellation()
-        return try Self.result(response, provider: provider)
+        return apiKey
     }
 
     private static func request(

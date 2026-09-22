@@ -44,21 +44,24 @@ enum APIKeySettingsUISpecs {
                 pumpUI()
                 return !popupButtons(in: hosting).isEmpty
             }
-            try expect(rendered)
+            try expect(rendered, "recognition provider picker did not render")
             try select("OpenAI 语音识别", in: hosting)
             let switched = await eventually(before: .seconds(2)) {
                 pumpUI()
                 return model.selectedProvider == .openAI
+                    && !model.isMutating
                     && popupButtons(in: hosting).contains {
                         $0.itemTitles.contains("gpt-4o-transcribe")
                     }
             }
-            try expect(switched && !model.hasStoredKey)
+            try expect(
+                switched && !model.hasStoredKey,
+                "OpenAI provider switch failed or borrowed refinement credential")
             try select("gpt-4o-transcribe", in: hosting)
             let selected = await eventually(before: .seconds(2)) {
-                model.selectedProfile.model == "gpt-4o-transcribe"
+                model.selectedProfile.model == "gpt-4o-transcribe" && !model.isMutating
             }
-            try expect(selected)
+            try expect(selected, "complete recording model selection failed")
             model.apiKeyDraft = "speech-recognition-only"
             let saveVisible = await eventually(before: .seconds(2)) {
                 pumpUI()
@@ -66,17 +69,17 @@ enum APIKeySettingsUISpecs {
                     $0.isAccessibilityEnabled()
                 }
             }
-            try expect(saveVisible)
+            try expect(saveVisible, "recognition key save action not enabled")
             try expect(
                 buttons(named: "保存 Key", in: hosting).first?.accessibilityPerformPress() == true)
             let saved = await eventually(before: .seconds(2)) {
                 model.hasStoredKey && model.apiKeyDraft.isEmpty
             }
-            try expect(saved)
+            try expect(saved, "recognition key save did not finish")
             try expect(
                 secureFields(in: hosting).allSatisfy {
                     !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
-                })
+                }, "recognition credential editor clipped at narrow width")
             try expect(hosting.frame.width <= 400)
             try expect(
                 buttons(named: "检查连接", in: hosting).isEmpty, "ASR implied a free validation request"
@@ -84,17 +87,61 @@ enum APIKeySettingsUISpecs {
             let textKey = try await credentials.apiKey(for: .openAI)
             let audioKey = try await credentials.apiKey(for: .openAITranscription)
             try expect(textKey == "text-refinement-only" && audioKey == "speech-recognition-only")
+            try select("流式识别（边录边传）", in: hosting)
+            let streaming = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return model.selectedProfile.method == .streaming
+                    && !model.isMutating
+                    && popupButtons(in: hosting).contains {
+                        $0.itemTitles.contains("gpt-live-transcribe")
+                    }
+            }
+            try expect(
+                streaming && model.hasStoredKey,
+                "OpenAI streaming controls or saved credential missing")
+            try expect(
+                !popupButtons(in: hosting).contains {
+                    $0.itemTitles.contains("gpt-4o-transcribe")
+                })
+            try select("整段识别（录完上传）", in: hosting)
+            let completeRecording = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return model.selectedProfile.method == .completeRecording
+                    && !model.isMutating
+                    && popupButtons(in: hosting).contains {
+                        $0.itemTitles.contains("gpt-transcribe")
+                    }
+            }
+            try expect(
+                completeRecording && model.hasStoredKey,
+                "OpenAI complete recording controls or saved credential missing")
             try select("阿里千问语音识别", in: hosting)
             let qwen = await eventually(before: .seconds(2)) {
                 pumpUI()
-                return popupButtons(in: hosting).contains { $0.itemTitles.contains("新加坡") }
+                return !model.isMutating
+                    && popupButtons(in: hosting).contains { $0.itemTitles.contains("新加坡") }
             }
-            try expect(qwen)
+            try expect(qwen, "Qwen region picker did not render")
             try select("新加坡", in: hosting)
             let region = await eventually(before: .seconds(2)) {
-                model.selectedProfile.region == .singapore
+                model.selectedProfile.region == .singapore && !model.isMutating
             }
-            try expect(region && !model.hasStoredKey)
+            try expect(
+                region && !model.hasStoredKey,
+                "Qwen region switch failed or borrowed Beijing credential")
+            try select("流式识别（边录边传）", in: hosting)
+            let qwenStreaming = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return model.selectedProfile.method == .streaming
+                    && !model.isMutating
+                    && popupButtons(in: hosting).contains {
+                        $0.itemTitles.contains("qwen3-asr-flash-realtime")
+                    }
+            }
+            try expect(
+                qwenStreaming && model.selectedProfile.region == .singapore,
+                "Qwen streaming controls or retained region missing")
+
             await model.shutdown()
             await doubao.shutdown()
         }

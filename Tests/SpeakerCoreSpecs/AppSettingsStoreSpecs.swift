@@ -55,6 +55,57 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "speech recognition methods migrate legacy profiles and reject incompatible models",
+            failures: &failures
+        ) {
+            for provider in SpeechRecognitionProviderID.allCases {
+                let original = SpeechRecognitionProfile(provider: provider)
+                let encoded = try JSONEncoder().encode(original)
+                var document = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+                document.removeValue(forKey: "method")
+                let legacy = try JSONDecoder().decode(
+                    SpeechRecognitionProfile.self,
+                    from: JSONSerialization.data(withJSONObject: document))
+                try expect(legacy == original)
+                try expect(legacy.method == (provider == .doubao ? .streaming : .completeRecording))
+                for method in SpeechRecognitionProviderCatalog.methods(for: provider) {
+                    let profile = try SpeechRecognitionProfile(provider: provider, method: method)
+                        .validated()
+                    let restored = try JSONDecoder().decode(
+                        SpeechRecognitionProfile.self, from: JSONEncoder().encode(profile))
+                    try expect(restored == profile)
+                    try expect(profile.credentialProviderID == original.credentialProviderID)
+                }
+                document["method"] = "future-recognition-method"
+                let unsupported = try JSONDecoder().decode(
+                    SpeechRecognitionProfile.self,
+                    from: JSONSerialization.data(withJSONObject: document))
+                try expect(unsupported.method == .unsupported)
+                try expect(unsupported.provider == provider && unsupported.model == original.model)
+                do {
+                    _ = try unsupported.validated()
+                    throw SpecFailure(message: "unknown recognition method silently accepted")
+                } catch let failure as SpeechRecognitionFailure {
+                    try expect(failure.kind == .invalidConfiguration)
+                }
+            }
+            for profile in [
+                SpeechRecognitionProfile(provider: .doubao, method: .completeRecording),
+                SpeechRecognitionProfile(
+                    provider: .openAI, model: "gpt-transcribe", method: .streaming),
+                SpeechRecognitionProfile(
+                    provider: .qwen, model: "qwen3-asr-flash-realtime", method: .completeRecording),
+            ] {
+                do {
+                    _ = try profile.validated()
+                    throw SpecFailure(message: "incompatible recognition method accepted")
+                } catch let failure as SpeechRecognitionFailure {
+                    try expect(failure.kind == .invalidConfiguration)
+                }
+            }
+        }
+
+        await runAsync(
             "speech recognition settings retain provider models and region across restarts",
             failures: &failures
         ) {
@@ -65,7 +116,8 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
             var providers = SpeechRecognitionProviderSettings()
             let openAI = SpeechRecognitionProfile(provider: .openAI, model: "gpt-4o-transcribe")
-            let qwen = SpeechRecognitionProfile(provider: .qwen, region: .singapore)
+            let qwen = SpeechRecognitionProfile(
+                provider: .qwen, region: .singapore, method: .streaming)
             try providers.select(openAI)
             try await store.updateSpeechRecognitionProviders(providers)
             try providers.select(qwen)
