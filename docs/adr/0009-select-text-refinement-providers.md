@@ -2,6 +2,8 @@
 
 Status: Accepted
 
+The Doubao-only audio restriction is superseded by [ADR-0010](0010-select-speech-recognition-providers.md). The text-refinement boundary and credential isolation remain accepted.
+
 Date: 2026-09-18
 
 This supersedes ADR-0003's single text-provider restriction. Doubao remains the only audio provider; Default Smoothing ends with its confirmed Stage Result. Other Refinement Modes send only that text, the instruction, and the press-time Personal Dictionary Entry words to the explicitly selected Refinement Provider. DeepSeek, OpenAI, Kimi, and GLM have built-in catalogs; Custom accepts an HTTPS base URL and model ID. There is no automatic provider or region fallback.

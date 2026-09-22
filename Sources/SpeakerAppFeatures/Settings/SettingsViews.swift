@@ -167,7 +167,8 @@ private struct SettingsOverviewView: View {
         case .apiKeys:
             APIKeySettingsPage(
                 doubao: workspace.doubao,
-                refinement: workspace.refinement
+                refinement: workspace.refinement,
+                recognition: workspace.recognition
             )
         case .refinement:
             RefinementSettingsPage(model: workspace.refinement)

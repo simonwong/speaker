@@ -8,6 +8,7 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let permissions: PermissionModel
     private let doubao: DoubaoSettingsModel
+    private let recognition: SpeechRecognitionSettingsModel
     private let requestPermission: (PermissionKind) async -> Void
     private let refreshPermissions: () -> Void
     private let announce: AccessibilityAnnounce
@@ -18,6 +19,7 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
     init(
         permissions: PermissionModel,
         doubao: DoubaoSettingsModel,
+        recognition: SpeechRecognitionSettingsModel,
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
         announce: @escaping AccessibilityAnnounce,
@@ -27,6 +29,7 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
     ) {
         self.permissions = permissions
         self.doubao = doubao
+        self.recognition = recognition
         self.requestPermission = requestPermission
         self.refreshPermissions = refreshPermissions
         self.announce = announce
@@ -44,6 +47,7 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
         let content = SpeakerOnboardingView(
             permissions: permissions,
             doubao: doubao,
+            recognition: recognition,
             requestPermission: requestPermission,
             refreshPermissions: refreshPermissions,
             announce: announce,

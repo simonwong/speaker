@@ -8,6 +8,9 @@ public enum ProviderID: String, CaseIterable, Sendable {
     case kimi
     case glm
     case customRefinement = "custom-refinement"
+    case openAITranscription = "openai-transcription"
+    case qwenASRBeijing = "qwen-asr-beijing"
+    case qwenASRSingapore = "qwen-asr-singapore"
 }
 
 public enum ProviderCredentialStoreError: Error, Equatable, Sendable {

@@ -5,6 +5,7 @@ import SwiftUI
 package struct SpeakerOnboardingView: View {
     @ObservedObject var permissions: PermissionModel
     @ObservedObject var doubao: DoubaoSettingsModel
+    @ObservedObject var recognition: SpeechRecognitionSettingsModel
     @State private var step: OnboardingStep = .permissions
     let completion: () -> Void
     let requestPermission: (PermissionKind) async -> Void
@@ -17,6 +18,7 @@ package struct SpeakerOnboardingView: View {
     package init(
         permissions: PermissionModel,
         doubao: DoubaoSettingsModel,
+        recognition: SpeechRecognitionSettingsModel,
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
         announce: @escaping AccessibilityAnnounce,
@@ -27,6 +29,7 @@ package struct SpeakerOnboardingView: View {
     ) {
         self.permissions = permissions
         self.doubao = doubao
+        self.recognition = recognition
         self.completion = completion
         self.requestPermission = requestPermission
         self.refreshPermissions = refreshPermissions
@@ -42,7 +45,10 @@ package struct SpeakerOnboardingView: View {
             doubaoStatus: doubao.status,
             hasStoredDoubaoKey: doubao.hasStoredKey,
             mode: mode,
-            isUpdatingDoubaoKey: doubao.isUpdatingKey
+            isUpdatingDoubaoKey: doubao.isUpdatingKey,
+            recognitionProvider: recognition.selectedProvider,
+            hasStoredRecognitionKey: recognition.hasStoredKey && recognition.hasValidProfile,
+            isUpdatingRecognition: recognition.isMutating
         )
     }
 
@@ -66,6 +72,7 @@ package struct SpeakerOnboardingView: View {
         .task {
             refreshPermissions()
             await doubao.refresh()
+            await recognition.refresh()
         }
         .onChange(of: permissions.snapshot) { previous, current in
             for permission in PermissionKind.allCases
@@ -75,12 +82,17 @@ package struct SpeakerOnboardingView: View {
             }
         }
         .onChange(of: doubao.status) { _, status in
+            guard recognition.selectedProvider == .doubao else { return }
             switch status {
             case .checking: announce("正在检查豆包连接")
             case .success: announce("豆包连接成功，可以进入下一步")
             case .failure(let message): announce("豆包连接失败：\(message)")
             case .loading, .unconfigured, .configured: break
             }
+        }
+        .onChange(of: recognition.hasStoredKey) { _, stored in
+            guard recognition.selectedProvider != .doubao else { return }
+            announce(stored ? "语音识别 Key 已保存，首次录音时验证账号与模型" : "请保存当前语音识别服务的 Key")
         }
         .onChange(of: step) { _, current in
             announce("第 \(current.rawValue + 1) 步，共 3 步：\(current.title)")
@@ -104,7 +116,7 @@ package struct SpeakerOnboardingView: View {
     private var stepDescription: String {
         switch step {
         case .permissions: "先让 Speaker 听见你，并将文字输入其他应用。"
-        case .apiKey: "使用你自己的豆包账号，将语音转成文字。"
+        case .apiKey: "选择语音识别服务，用自己的账号将语音转成文字。"
         case .shortcut: "记住键盘上的快捷键，就能在任何输入框中开始。"
         }
     }
@@ -157,12 +169,12 @@ package struct SpeakerOnboardingView: View {
             }
         case .apiKey:
             VStack(alignment: .leading, spacing: 14) {
-                DoubaoSettingsCard(model: doubao)
-                Text("Key 只保存在这台 Mac。语音直接发送到你的豆包账号，费用由服务商收取。连接检查需由你手动发起。")
+                SpeechRecognitionSettingsCard(model: recognition, doubao: doubao)
+                Text("Key 只保存在这台 Mac。语音直接发送到所选服务，费用由服务商收取。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("文字整理服务为可选项，之后可在设置中添加；默认顺滑只需豆包。")
+                Text("文字整理为可选项，之后可在设置中添加。默认模式直接使用识别结果；豆包保留原生语义顺滑。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -312,6 +324,9 @@ package struct SpeakerOnboardingView: View {
             return step == .permissions
                 ? "两项权限都开启后，点击「下一步」。也可以稍后在设置中完成。"
                 : "权限尚未全部开启，请返回第一步检查。"
+        }
+        if recognition.selectedProvider != .doubao {
+            return "保存所选语音识别服务的 Key 后继续；首次录音会发送音频并验证账号与模型。"
         }
         return "保存豆包 Key，选择已开通的资源，再点击「检查连接」。连接成功后继续。"
     }

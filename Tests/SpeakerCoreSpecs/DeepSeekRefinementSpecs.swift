@@ -15,7 +15,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     dictionary: try PersonalDictionary(entries: [.init(word: "Speaker")]),
                     refinementMode: .defaultSmooth
                 ),
-                doubao: doubao,
+                transcriber: doubao,
                 refinement: OptionalTextRefinementPipeline(
                     refiner: DeepSeekRefinerFake(result: .success(.init(text: "不应采用")))
                 )
@@ -41,7 +41,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     dictionary: try PersonalDictionary(entries: [.init(word: "Speaker")]),
                     refinementMode: .conciseCleanup()
                 ),
-                doubao: doubao,
+                transcriber: doubao,
                 refinement: OptionalTextRefinementPipeline(
                     refiner: DeepSeekRefinerFake(result: .success(.init(text: "精修结果")))
                 )
@@ -65,7 +65,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 configuration: VoiceInputConfigurationController(
                     refinementMode: .defaultSmooth
                 ),
-                doubao: smoothing,
+                transcriber: smoothing,
                 refinement: OptionalTextRefinementPipeline(
                     refiner: DeepSeekRefinerFake(result: .success(.init(text: "不应采用")))
                 )
@@ -81,7 +81,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 configuration: VoiceInputConfigurationController(
                     refinementMode: .fullRewrite()
                 ),
-                doubao: refining,
+                transcriber: refining,
                 refinement: OptionalTextRefinementPipeline(
                     refiner: DeepSeekRefinerFake(result: .success(.init(text: "精修结果")))
                 )
@@ -134,7 +134,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                         dictionary: dictionary,
                         refinementMode: mode
                     ),
-                    doubao: ContextualTranscriberFake(text: "豆包已确认结果"),
+                    transcriber: ContextualTranscriberFake(text: "豆包已确认结果"),
                     refinement: OptionalTextRefinementPipeline(refiner: refiner)
                 )
 
@@ -162,7 +162,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     dictionary: dictionary,
                     refinementMode: .defaultSmooth
                 ),
-                doubao: ContextualTranscriberFake(text: "豆包已确认结果"),
+                transcriber: ContextualTranscriberFake(text: "豆包已确认结果"),
                 refinement: OptionalTextRefinementPipeline(
                     refiner: smoothingRefiner
                 )
@@ -701,13 +701,14 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             let configuration = VoiceInputConfigurationController(
                 dictionary: initialDictionary,
                 refinementMode: .conciseCleanup(),
-                refinementProvider: .defaultProfile(for: .openAI)
+                refinementProvider: .defaultProfile(for: .openAI),
+                recognitionProvider: .defaultProfile(for: .openAI)
             )
             let doubao = ContextualTranscriberFake(text: "Use swift-lang")
             let refiner = DeepSeekRefinerFake(result: .success(.init(text: "Use Swift.")))
             let processor = DefaultVoiceTextProcessor(
                 configuration: configuration,
-                doubao: doubao,
+                transcriber: doubao,
                 refinement: OptionalTextRefinementPipeline(refiner: refiner)
             )
             let delivery = TextDeliveryFake(result: .delivered)
@@ -725,6 +726,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
 
             await sessions.send(.pressed)
             await configuration.replaceDictionary(.empty)
+            try await configuration.selectRecognitionProvider(.defaultProfile(for: .qwen))
             try await configuration.selectRefinementProvider(
                 .defaultProfile(for: .kimi), mode: .fullRewrite())
             await sessions.send(.released)
@@ -734,6 +736,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             let contexts = await refiner.contexts
             try expect(contexts.map(\.provider) == [.defaultProfile(for: .openAI)])
             let next = await configuration.captureSnapshot()
+            try expect(next.recognitionProvider.provider == .qwen)
             try expect(next.refinementProvider.provider == .kimi)
             try expect(next.refinementMode == .fullRewrite())
             let refinementModes = await refiner.modes
@@ -744,6 +747,8 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(refinementModes == [.conciseCleanup()])
             try expect(refinementInputs == ["Use swift-lang"])
             try expect(deliveredTexts == ["Use Swift."])
+            try expect(record?.transcriptionProvider == "openai")
+            try expect(record?.transcriptionModelID == "gpt-transcribe")
             try expect(record?.transcription == "Use swift-lang")
             try expect(record?.deepSeekText == "Use Swift.")
             try expect(record?.refinementProviderID == .openAI)
@@ -756,6 +761,167 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(record?.dictionaryReplacements.isEmpty == true)
             try expect(record?.stageDurationsMilliseconds["targetCapture"] != nil)
             try expect(record?.stageDurationsMilliseconds["delivery"] != nil)
+        }
+        await runAsync(
+            "speech recognition selection freezes at press and applies to the next session",
+            failures: &failures
+        ) {
+            let openAI = SpeechRecognitionProfile(provider: .openAI)
+            let qwen = SpeechRecognitionProfile(provider: .qwen, region: .singapore)
+            let configuration = VoiceInputConfigurationController(recognitionProvider: openAI)
+            let transcriber = SpeechTranscriberFake(text: "Use Swift 6")
+            let refiner = DeepSeekRefinerFake(result: .success(.init(text: "unused")))
+            let processor = DefaultVoiceTextProcessor(
+                configuration: configuration, transcriber: transcriber,
+                refinement: OptionalTextRefinementPipeline(refiner: refiner)
+            )
+            let history = SessionHistoryFake()
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                textProcessor: processor, delivery: delivery,
+                clipboard: ClipboardFake(), history: history
+            )
+            await sessions.send(.pressed)
+            try await configuration.selectRecognitionProvider(qwen)
+            await sessions.send(.released)
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            await sessions.shutdown()
+            let contexts = await transcriber.contexts
+            try expect(contexts.map(\.recognitionProvider) == [openAI, qwen])
+            let records = await history.records
+            try expect(records.map(\.transcriptionProvider) == ["openai", "qwen"])
+            try expect(records.map(\.transcriptionModelID) == [openAI.model, qwen.model])
+            try expect(records.allSatisfy { $0.finalText == "Use Swift 6" })
+            try expect(records[0].stageDurationsMilliseconds["openai"] != nil)
+            try expect(records[1].stageDurationsMilliseconds["qwen"] != nil)
+            let calls = await refiner.callCount
+            try expect(calls == 0)
+            let delivered = await delivery.deliveredTexts
+            try expect(delivered == ["Use Swift 6", "Use Swift 6"])
+        }
+
+        await runAsync(
+            "speech recognition fallback preserves selected ASR attribution and original text",
+            failures: &failures
+        ) {
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let profile = SpeechRecognitionProfile(provider: provider)
+                let refiner = DeepSeekRefinerFake(result: .failure(.init(kind: .malformedJSON)))
+                let processor = DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(
+                        refinementMode: .conciseCleanup(),
+                        refinementProvider: .defaultProfile(for: .kimi),
+                        recognitionProvider: profile),
+                    transcriber: SpeechTranscriberFake(text: "No, use version 6"),
+                    refinement: OptionalTextRefinementPipeline(refiner: refiner)
+                )
+                let history = SessionHistoryFake()
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                    textProcessor: processor, delivery: TextDeliveryFake(result: .delivered),
+                    clipboard: ClipboardFake(), history: history
+                )
+                await sessions.send(.pressed)
+                await sessions.send(.released)
+                await sessions.shutdown()
+                let record = await history.records.last
+                try expect(record?.transcriptionProvider == provider.rawValue)
+                try expect(record?.transcriptionModelID == profile.model)
+                try expect(record?.refinementProviderID == .kimi)
+                try expect(record?.transcription == "No, use version 6")
+                try expect(record?.finalText == "No, use version 6")
+                try expect(record?.refinementStatus == "fellBack")
+                let inputs = await refiner.inputs
+                try expect(inputs == ["No, use version 6"])
+            }
+        }
+
+        await runAsync(
+            "speech recognition failures retain provider model and redact secure request IDs",
+            failures: &failures
+        ) {
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let profile = SpeechRecognitionProfile(provider: provider)
+                let processor = DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(recognitionProvider: profile),
+                    transcriber: SpeechTranscriberFake(
+                        text: "unused",
+                        failure: .init(
+                            provider: provider, kind: .authentication,
+                            requestID: "synthetic-request")),
+                    refinement: OptionalTextRefinementPipeline(
+                        refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused"))))
+                )
+                let history = SessionHistoryFake()
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
+                    textProcessor: processor, delivery: TextDeliveryFake(result: .delivered),
+                    clipboard: ClipboardFake(), history: history
+                )
+                await sessions.send(.pressed)
+                await sessions.send(.released)
+                await sessions.shutdown()
+                let record = await history.records.last
+                try expect(record?.transcriptionProvider == provider.rawValue)
+                try expect(record?.transcriptionModelID == profile.model)
+                try expect(record?.providerRequestID == nil)
+                try expect(record?.transcription == nil && record?.finalText == nil)
+                try expect(record?.providerErrorCode == "authentication")
+            }
+        }
+
+        await runAsync(
+            "speech recognition cancellation rejects late selected provider results",
+            failures: &failures
+        ) {
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let profile = SpeechRecognitionProfile(provider: provider)
+                let transcriber = SpeechTranscriberFake(
+                    text: "late result", delaysResponse: true, ignoresCancellation: true)
+                let refiner = DeepSeekRefinerFake(result: .success(.init(text: "unused")))
+                let processor = DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(
+                        refinementMode: .conciseCleanup(), recognitionProvider: profile),
+                    transcriber: transcriber,
+                    refinement: OptionalTextRefinementPipeline(refiner: refiner)
+                )
+                let history = SessionHistoryFake()
+                let delivery = TextDeliveryFake(result: .delivered)
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                    textProcessor: processor, delivery: delivery,
+                    clipboard: ClipboardFake(), history: history
+                )
+                await sessions.send(.pressed)
+                let release = Task { await sessions.send(.released) }
+                let didStart = await eventually(before: .seconds(2)) {
+                    await transcriber.callCount == 1
+                }
+                try expect(didStart)
+                await sessions.send(.cancel)
+                await transcriber.resume()
+                await release.value
+                await sessions.shutdown()
+                let record = await history.records.last
+                try expect(record?.outcome.isCancelled == true)
+                try expect(record?.transcriptionProvider == provider.rawValue)
+                try expect(record?.transcriptionModelID == profile.model)
+                try expect(record?.cancelledAtStage == provider.rawValue)
+                try expect(record?.transcription == nil && record?.finalText == nil)
+                let texts = await delivery.deliveredTexts
+                try expect(texts.isEmpty)
+                let refinementCalls = await refiner.callCount
+                try expect(refinementCalls == 0)
+            }
         }
     }
 }

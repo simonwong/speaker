@@ -1,20 +1,23 @@
 import SpeakerCore
 import SwiftUI
 
-/// The API Keys page: one card per provider seam, Doubao first because
-/// transcription cannot start without it.
 package struct APIKeySettingsPage: View {
     let doubao: DoubaoSettingsModel
     let refinement: RefinementSettingsModel
+    let recognition: SpeechRecognitionSettingsModel
 
-    package init(doubao: DoubaoSettingsModel, refinement: RefinementSettingsModel) {
+    package init(
+        doubao: DoubaoSettingsModel, refinement: RefinementSettingsModel,
+        recognition: SpeechRecognitionSettingsModel
+    ) {
         self.doubao = doubao
         self.refinement = refinement
+        self.recognition = recognition
     }
 
     package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-            DoubaoSettingsCard(model: doubao)
+            SpeechRecognitionSettingsCard(model: recognition, doubao: doubao)
             RefinementProviderSettingsCard(model: refinement)
         }
     }
@@ -27,7 +30,7 @@ package struct DoubaoSettingsCard: View {
     package var body: some View {
         SettingsCard(
             "豆包语音",
-            subtitle: "边说边转录，默认启用语义顺滑",
+            subtitle: "边说边转录，默认启用语义顺滑；每次录音最多 10 分钟",
             icon: "waveform.badge.mic"
         ) {
             statusRow
@@ -271,7 +274,7 @@ package struct RefinementProviderSettingsCard: View {
     }
 }
 
-private struct ProviderKeyEditor: View {
+struct ProviderKeyEditor: View {
     @Binding var draft: String
     let providerName: String
     let hasStoredKey: Bool

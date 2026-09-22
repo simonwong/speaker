@@ -26,7 +26,7 @@ package enum OnboardingStep: Int, CaseIterable, Sendable {
     package var title: String {
         switch self {
         case .permissions: "允许必要权限"
-        case .apiKey: "连接豆包语音"
+        case .apiKey: "选择语音识别"
         case .shortcut: "学会快捷键"
         }
     }
@@ -38,23 +38,34 @@ package struct OnboardingPresentation: Equatable, Sendable {
     package let doubaoStatus: DoubaoConnectionStatus
     package let hasStoredDoubaoKey: Bool
     package let isUpdatingDoubaoKey: Bool
+    package let recognitionProvider: SpeechRecognitionProviderID
+    package let hasStoredRecognitionKey: Bool
+    package let isUpdatingRecognition: Bool
 
     package init(
         permissions: PermissionSnapshot,
         doubaoStatus: DoubaoConnectionStatus,
         hasStoredDoubaoKey: Bool,
         mode: OnboardingMode = .setup,
-        isUpdatingDoubaoKey: Bool = false
+        isUpdatingDoubaoKey: Bool = false,
+        recognitionProvider: SpeechRecognitionProviderID = .doubao,
+        hasStoredRecognitionKey: Bool = false,
+        isUpdatingRecognition: Bool = false
     ) {
         self.mode = mode
         self.permissions = permissions
         self.doubaoStatus = doubaoStatus
         self.hasStoredDoubaoKey = hasStoredDoubaoKey
         self.isUpdatingDoubaoKey = isUpdatingDoubaoKey
+        self.recognitionProvider = recognitionProvider
+        self.hasStoredRecognitionKey = hasStoredRecognitionKey
+        self.isUpdatingRecognition = isUpdatingRecognition
     }
 
     package var isReady: Bool {
-        permissions.allGranted && hasStoredDoubaoKey && connectionSucceeded && !isUpdatingDoubaoKey
+        guard permissions.allGranted, !isUpdatingRecognition else { return false }
+        if recognitionProvider != .doubao { return hasStoredRecognitionKey }
+        return hasStoredDoubaoKey && connectionSucceeded && !isUpdatingDoubaoKey
     }
 
     private var connectionSucceeded: Bool {

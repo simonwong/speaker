@@ -273,6 +273,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let transcription: String?
     public let finalText: String?
     public let transcriptionProvider: String?
+    public let transcriptionModelID: String?
     public let providerRequestID: String?
     public let providerErrorCode: String?
     public let providerOperation: String?
@@ -305,6 +306,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         transcription: String?,
         finalText: String?,
         transcriptionProvider: String? = nil,
+        transcriptionModelID: String? = nil,
         providerRequestID: String? = nil,
         providerErrorCode: String? = nil,
         providerOperation: String? = nil,
@@ -336,6 +338,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.transcription = transcription
         self.finalText = finalText
         self.transcriptionProvider = transcriptionProvider
+        self.transcriptionModelID = transcriptionModelID
         self.providerRequestID = providerRequestID
         self.providerErrorCode = providerErrorCode
         self.providerOperation = providerOperation

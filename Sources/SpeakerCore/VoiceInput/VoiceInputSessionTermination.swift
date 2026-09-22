@@ -69,8 +69,10 @@ enum VoiceInputTerminalRecordBuilder {
             transcription: mayPersistBody ? termination.transcription : nil,
             finalText: mayPersistBody ? termination.finalText : nil,
             transcriptionProvider: providerDiagnostic?.provider
+                ?? snapshot?.recognitionProvider.provider.rawValue
                 ?? termination.transcriptionProvider
                 ?? (processedText == nil ? nil : "doubao"),
+            transcriptionModelID: snapshot?.recognitionProvider.model,
             providerRequestID: mayPersistProviderRequestID
                 ? (providerDiagnostic?.requestID ?? termination.providerRequestID)
                 : nil,

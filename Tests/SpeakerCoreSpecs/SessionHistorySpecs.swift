@@ -27,7 +27,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     applicationName: "TextEdit",
                     transcription: "豆包原文 alpha",
                     finalText: "最终文本",
-                    transcriptionProvider: "doubao",
+                    transcriptionProvider: "openai",
+                    transcriptionModelID: "gpt-transcribe",
                     providerRequestID: "request-log-1",
                     providerErrorCode: nil,
                     deliveryDiagnosticCode:
@@ -84,11 +85,12 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(allRecords.map(\.sessionID) == [secondID, firstID])
             try expect(allRecords.last?.transcription == "豆包原文 alpha")
             try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
-            try expect(allRecords.last?.transcriptionProvider == "doubao")
+            try expect(allRecords.last?.transcriptionProvider == "openai")
             try expect(
                 allRecords.last?.deliveryDiagnosticCode
                     == "pasteReceipt.unconfirmed"
             )
+            try expect(allRecords.last?.transcriptionModelID == "gpt-transcribe")
             try expect(allRecords.last?.refinementProviderID == .openAI)
             try expect(allRecords.last?.refinementModelID == "gpt-4.1-mini")
             try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")

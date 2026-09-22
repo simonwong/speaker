@@ -31,7 +31,7 @@ package struct RefinementSettingsPage: View {
     private var modeCard: some View {
         SettingsCard(
             "整理模式",
-            subtitle: "默认顺滑只用豆包；其他模式使用 \(model.providerName)，需先配置 Key",
+            subtitle: "默认模式直接使用识别结果；其他模式使用 \(model.providerName)，需先配置 Key",
             icon: "text.alignleft"
         ) {
             LazyVGrid(

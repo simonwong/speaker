@@ -5,16 +5,31 @@ import SpeakerCore
 ///
 /// `delaysResponse` holds the answer open until `resume()`, which is how a case reaches the
 /// Waiting For Result state and observes what User Cancellation does to a late Stage Result.
-public actor SpeechTranscriberFake: SpeechTranscribing {
+public actor SpeechTranscriberFake: ContextualSpeechTranscribing {
     public let text: String
     public let delaysResponse: Bool
+    public let ignoresCancellation: Bool
+    public let failure: SpeechRecognitionFailure?
+    public private(set) var contexts: [SpeechTranscriptionContext] = []
     public private(set) var callCount = 0
     public private(set) var cancellationCount = 0
     private var continuation: CheckedContinuation<Void, Never>?
 
-    public init(text: String, delaysResponse: Bool = false) {
+    public init(
+        text: String, delaysResponse: Bool = false, ignoresCancellation: Bool = false,
+        failure: SpeechRecognitionFailure? = nil
+    ) {
         self.text = text
         self.delaysResponse = delaysResponse
+        self.ignoresCancellation = ignoresCancellation
+        self.failure = failure
+    }
+
+    public func transcribe(
+        _ audio: CapturedAudio, context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        contexts.append(context)
+        return try await transcribe(audio)
     }
 
     public func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
@@ -28,7 +43,8 @@ public actor SpeechTranscriberFake: SpeechTranscribing {
                 Task { await self.markCancelled() }
             }
         }
-        try Task.checkCancellation()
+        if !ignoresCancellation { try Task.checkCancellation() }
+        if let failure { throw failure }
         return TranscriptionResult(text: text, providerRequestID: "local-spec")
     }
 

@@ -31,6 +31,7 @@ package final class SettingsWorkspace {
     let loginItemSettings: LoginItemSettingsModel
     let historyRetention: HistoryRetentionSettingsModel
     let doubao: DoubaoSettingsModel
+    let recognition: SpeechRecognitionSettingsModel
     let refinement: RefinementSettingsModel
     let dictionary: DictionarySettingsModel
     let softwareUpdate: SoftwareUpdateFeature
@@ -50,6 +51,7 @@ package final class SettingsWorkspace {
         loginItemSettings: LoginItemSettingsModel,
         historyRetention: HistoryRetentionSettingsModel,
         doubao: DoubaoSettingsModel,
+        recognition: SpeechRecognitionSettingsModel,
         refinement: RefinementSettingsModel,
         dictionary: DictionarySettingsModel,
         softwareUpdate: SoftwareUpdateFeature,
@@ -67,6 +69,7 @@ package final class SettingsWorkspace {
         self.loginItemSettings = loginItemSettings
         self.historyRetention = historyRetention
         self.doubao = doubao
+        self.recognition = recognition
         self.refinement = refinement
         self.dictionary = dictionary
         self.softwareUpdate = softwareUpdate
@@ -83,6 +86,7 @@ package final class SettingsWorkspace {
         refreshPermissions()
         microphones.refresh()
         await doubao.refresh()
+        await recognition.refresh()
         await loginItemSettings.refresh()
         await historyRetention.refresh()
     }
@@ -111,7 +115,7 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .defaultSmooth: "只使用豆包语义顺滑"
+        case .defaultSmooth: "直接使用识别结果，不额外整理"
         case .conciseCleanup: "清理重复、停顿和口语"
         case .fullRewrite: "重组为清晰完整的文本"
         case .custom: "按照你自己的提示词整理"

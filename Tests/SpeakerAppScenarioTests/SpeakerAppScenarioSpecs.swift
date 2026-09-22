@@ -14,6 +14,268 @@ struct SpeakerAppScenarioSpecs {
     static func main() async {
         var failures: [String] = []
 
+        await runAsync(
+            "recognition invalid saved model remains selected and cannot borrow Doubao readiness",
+            failures: &failures
+        ) {
+            var settings = SpeakerAppSettings.default
+            settings.speechRecognitionProviders = SpeechRecognitionProviderSettings(
+                selectedProvider: .openAI,
+                profiles: [
+                    "openai": SpeechRecognitionProfile(
+                        provider: .openAI, model: "unsupported-model")
+                ])
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(
+                apiKey: "present-but-invalid-profile", for: .openAITranscription)
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: configuration,
+                settingsStore: ScenarioAppSettingsStore(settings: settings))
+            await model.load()
+            let snapshot = await configuration.captureSnapshot()
+            try expect(
+                model.selectedProvider == .openAI
+                    && snapshot.recognitionProvider.model == "unsupported-model")
+            try expect(!model.hasValidProfile && !model.hasStoredKey && model.notice != nil)
+            await model.refresh()
+            try expect(!model.hasStoredKey)
+            await model.selectModel("gpt-transcribe")
+            try expect(model.hasValidProfile && model.hasStoredKey)
+        }
+
+        await runAsync(
+            "recognition explicitly restores an inactive invalid model without changing Qwen region",
+            failures: &failures
+        ) {
+            var settings = SpeakerAppSettings.default
+            settings.speechRecognitionProviders = SpeechRecognitionProviderSettings(
+                selectedProvider: .doubao,
+                profiles: [
+                    "qwen": SpeechRecognitionProfile(
+                        provider: .qwen, model: "retired-qwen-model", region: .singapore)
+                ])
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "singapore-key", for: .qwenASRSingapore)
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore(settings: settings))
+            await model.load()
+            try expect(model.selectedProvider == .doubao)
+            await model.selectProvider(.qwen)
+            try expect(model.selectedProfile.model == "qwen3-asr-flash")
+            try expect(model.selectedProfile.region == .singapore && model.hasStoredKey)
+        }
+
+        await runAsync(
+            "recognition settings preserve models regions keys and restart selection",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "asr-settings-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "text-only", for: .openAI)
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: configuration, settingsStore: store)
+            await model.load()
+            await model.selectProvider(.openAI)
+            try expect(!model.hasStoredKey, "text refinement credential leaked into ASR")
+            await model.selectModel("gpt-4o-transcribe")
+            model.apiKeyDraft = "audio-openai"
+            await model.saveAPIKey()
+            let frozen = await configuration.captureSnapshot()
+            await model.selectProvider(.qwen)
+            model.apiKeyDraft = "audio-beijing"
+            await model.saveAPIKey()
+            await model.selectRegion(.singapore)
+            try expect(!model.hasStoredKey, "Beijing credential leaked into Singapore")
+            model.apiKeyDraft = "audio-singapore"
+            await model.saveAPIKey()
+            await model.deleteAPIKey()
+            let awaitedExpectation1 =
+                await credentials.apiKey(for: .qwenASRBeijing) == "audio-beijing"
+            try expect(awaitedExpectation1)
+            let awaitedExpectation2 = await credentials.apiKey(for: .openAI) == "text-only"
+            try expect(awaitedExpectation2)
+            await model.selectProvider(.openAI)
+            try expect(model.selectedProfile.model == "gpt-4o-transcribe" && model.hasStoredKey)
+            await model.selectProvider(.qwen)
+            try expect(model.selectedProfile.region == .singapore && !model.hasStoredKey)
+            try expect(frozen.recognitionProvider.provider == .openAI)
+            let restarted = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(
+                    fileURL: directory.appendingPathComponent("settings.json")))
+            await restarted.load()
+            try expect(restarted.selectedProfile == model.selectedProfile)
+            await restarted.selectProvider(.openAI)
+            try expect(
+                restarted.selectedProfile.model == "gpt-4o-transcribe" && restarted.hasStoredKey)
+        }
+
+        await runAsync(
+            "recognition settings publish only durable selection and preserve failed key draft",
+            failures: &failures
+        ) {
+            let store = ScenarioAppSettingsStore()
+            let credentials = ScenarioProviderCredentialStore()
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: configuration, settingsStore: store)
+            await model.load()
+            await store.setFailProviderWrites(true)
+            await model.selectProvider(.openAI)
+            try expect(model.selectedProvider == .doubao)
+            let snapshot = await configuration.captureSnapshot()
+            try expect(snapshot.recognitionProvider == .doubao)
+            try expect(model.notice != nil)
+            await store.setFailProviderWrites(false)
+            await model.selectProvider(.openAI)
+            model.apiKeyDraft = "old-asr"
+            await model.saveAPIKey()
+            await credentials.setSaveError(.storageUnavailable)
+            model.apiKeyDraft = "replacement-asr"
+            await model.saveAPIKey()
+            try expect(
+                model.hasStoredKey && model.apiKeyDraft == "replacement-asr" && model.notice != nil)
+            let awaitedExpectation3 =
+                await credentials.apiKey(for: .openAITranscription) == "old-asr"
+            try expect(awaitedExpectation3)
+            model.discardKeyDraft()
+            try expect(model.apiKeyDraft.isEmpty)
+        }
+
+        await runAsync(
+            "recognition settings reject concurrent key changes and drain pending save on shutdown",
+            failures: &failures
+        ) {
+            let credentials = ScenarioProviderCredentialStore()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore())
+            await model.load()
+            await model.selectProvider(.openAI)
+            await credentials.pauseSaves()
+            model.apiKeyDraft = "first-asr"
+            let save = Task { await model.saveAPIKey() }
+            let awaitedExpectation4 = await eventually(before: .seconds(2)) {
+                await credentials.pendingSaveCount == 1
+            }
+            try expect(awaitedExpectation4)
+            await model.selectProvider(.qwen)
+            await model.deleteAPIKey()
+            try expect(model.selectedProvider == .openAI)
+            model.apiKeyDraft = "newer-draft"
+            var shutdownFinished = false
+            let shutdown = Task {
+                await model.shutdown()
+                shutdownFinished = true
+            }
+            let awaitedExpectation5 = await eventually(before: .seconds(2)) {
+                model.apiKeyDraft.isEmpty
+            }
+            try expect(awaitedExpectation5)
+            try expect(!shutdownFinished, "shutdown returned before credential write settled")
+            await credentials.resumeSaves()
+            await save.value
+            await shutdown.value
+            try expect(shutdownFinished && !model.hasStoredKey)
+            let awaitedExpectation6 =
+                await credentials.apiKey(for: .openAITranscription) == "first-asr"
+            try expect(awaitedExpectation6)
+            await model.selectProvider(.qwen)
+            try expect(model.selectedProvider == .openAI)
+        }
+
+        await runAsync(
+            "recognition credential refresh cannot overwrite a later provider selection",
+            failures: &failures
+        ) {
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "old-provider-key", for: .doubao)
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore())
+            await model.load()
+            await credentials.pauseNextRead()
+            let refresh = Task { await model.refresh() }
+            let awaitedExpectation7 = await eventually(before: .seconds(2)) {
+                await credentials.pendingReadCount == 1
+            }
+            try expect(awaitedExpectation7)
+            await model.selectProvider(.openAI)
+            try expect(!model.hasStoredKey)
+            await credentials.resumeReads()
+            await refresh.value
+            try expect(model.selectedProvider == .openAI && !model.hasStoredKey)
+        }
+
+        await runAsync(
+            "recognition shutdown drains settings writes before erasure", failures: &failures
+        ) {
+            let store = ScenarioAppSettingsStore()
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: ScenarioProviderCredentialStore(), configuration: configuration,
+                settingsStore: store)
+            await model.load()
+            await store.pauseRecognitionWrites()
+            let selection = Task { await model.selectProvider(.openAI) }
+            let pending = await eventually(before: .seconds(2)) {
+                await store.pendingRecognitionWriteCount == 1
+            }
+            try expect(pending)
+            var shutdownStarted = false
+            var shutdownFinished = false
+            let shutdown = Task {
+                shutdownStarted = true
+                await model.shutdown()
+                shutdownFinished = true
+            }
+            let started = await eventually(before: .seconds(2)) { shutdownStarted }
+            try expect(started && !shutdownFinished)
+            await store.resumeRecognitionWrites()
+            await selection.value
+            await shutdown.value
+            let stored = await store.settings.speechRecognitionProviders.selectedProvider
+            let active = await configuration.captureSnapshot().recognitionProvider.provider
+            try expect(stored == .openAI && active == .doubao && shutdownFinished)
+        }
+
+        run("recognition limit and stage labels reflect selected provider", failures: &failures) {
+            try expect(!VoiceInputFailure.recordingLimitReached.userTitle.contains("10"))
+            try expect(VoiceInputFailure.recordingLimitReached.userGuidance.contains("语音识别设置"))
+            try expect(VoiceInputProcessingStage.transcribingAnnouncement == "正在等待语音识别结果")
+        }
+
+        run(
+            "onboarding accepts saved ASR credentials without claiming live validation",
+            failures: &failures
+        ) {
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let ready = OnboardingPresentation(
+                    permissions: .init(accessibility: .granted, microphone: .granted),
+                    doubaoStatus: .unconfigured, hasStoredDoubaoKey: false,
+                    recognitionProvider: provider, hasStoredRecognitionKey: true)
+                try expect(ready.isReady && ready.canContinue(from: .apiKey))
+                let absent = OnboardingPresentation(
+                    permissions: .init(accessibility: .granted, microphone: .granted),
+                    doubaoStatus: .success(nil), hasStoredDoubaoKey: true,
+                    recognitionProvider: provider, hasStoredRecognitionKey: false)
+                try expect(!absent.isReady, "old Doubao success unlocked another provider")
+                let saving = OnboardingPresentation(
+                    permissions: .init(accessibility: .granted, microphone: .granted),
+                    doubaoStatus: .unconfigured, hasStoredDoubaoKey: false,
+                    recognitionProvider: provider, hasStoredRecognitionKey: true,
+                    isUpdatingRecognition: true)
+                try expect(!saving.isReady)
+            }
+        }
+
         run(
             "Doubao refresh preserves a verified connection for an existing key",
             failures: &failures
@@ -1462,6 +1724,9 @@ struct SpeakerAppScenarioSpecs {
                     refinement: "custom",
                     doubaoConfigured: true,
                     doubaoResource: "volc.bigasr.sauc.duration",
+                    recognitionProfile: SpeechRecognitionProfile(
+                        provider: .qwen, region: .singapore),
+                    recognitionConfigured: true,
                     refinementConfigured: true,
                     refinementVerified: false,
                     refinementProfile: .init(
@@ -1498,6 +1763,10 @@ struct SpeakerAppScenarioSpecs {
                 )
             )
             try expect(report.contains("latestRefinementRequestID: deepseek-safe-id"))
+            try expect(report.contains("recognitionProvider: qwen"))
+            try expect(report.contains("recognitionModel: qwen3-asr-flash"))
+            try expect(report.contains("recognitionRegion: singapore"))
+            try expect(report.contains("recognitionConfigured: true"))
             try expect(report.contains("refinementProvider: custom"))
             try expect(report.contains("refinementModel: custom"))
             try expect(report.contains("latestSessionStages: doubao=900,targetCapture=20"))
@@ -4189,6 +4458,16 @@ private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {
 private actor ScenarioAppSettingsStore: AppSettingsStoring {
     private(set) var settings: SpeakerAppSettings
     private var failProviderWrites = false
+    private var pausesRecognitionWrites = false
+    private var recognitionWriteWaiters: [CheckedContinuation<Void, Never>] = []
+    func pauseRecognitionWrites() { pausesRecognitionWrites = true }
+    var pendingRecognitionWriteCount: Int { recognitionWriteWaiters.count }
+    func resumeRecognitionWrites() {
+        pausesRecognitionWrites = false
+        let waiters = recognitionWriteWaiters
+        recognitionWriteWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
 
     func setFailProviderWrites(_ value: Bool) { failProviderWrites = value }
 
@@ -4205,6 +4484,18 @@ private actor ScenarioAppSettingsStore: AppSettingsStoring {
         _ refinement: RefinementPreference
     ) -> SpeakerAppSettings {
         settings.refinement = refinement
+        return settings
+    }
+
+    @discardableResult
+    func updateSpeechRecognitionProviders(_ providers: SpeechRecognitionProviderSettings)
+        async throws -> SpeakerAppSettings
+    {
+        if pausesRecognitionWrites {
+            await withCheckedContinuation { recognitionWriteWaiters.append($0) }
+        }
+        if failProviderWrites { throw AppSettingsStoreError.writeFailed(reason: "fixture") }
+        settings.speechRecognitionProviders = providers
         return settings
     }
 
@@ -4468,6 +4759,15 @@ private struct PersistenceFailure: LocalizedError {
 private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
     private var values: [ProviderID: String] = [:]
     private var saveError: ProviderCredentialStoreError?
+    private var pausesNextRead = false
+    private var readWaiters: [CheckedContinuation<Void, Never>] = []
+    func pauseNextRead() { pausesNextRead = true }
+    var pendingReadCount: Int { readWaiters.count }
+    func resumeReads() {
+        let waiters = readWaiters
+        readWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
     private var pausesSaves = false
     private var saveWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -4492,8 +4792,13 @@ private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
         values[provider] = normalized
     }
 
-    func apiKey(for provider: ProviderID) -> String? {
-        values[provider]
+    func apiKey(for provider: ProviderID) async -> String? {
+        let result = values[provider]
+        if pausesNextRead {
+            pausesNextRead = false
+            await withCheckedContinuation { readWaiters.append($0) }
+        }
+        return result
     }
 
     func deleteAPIKey(for provider: ProviderID) {

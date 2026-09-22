@@ -234,6 +234,16 @@ extension HistoryRetentionPolicy {
 }
 
 extension VoiceInputHistoryRecord {
+    package var transcriptionProviderLabel: String {
+        switch transcriptionProvider {
+        case "doubao": "豆包语音"
+        case "openai": "OpenAI"
+        case "qwen": "阿里千问"
+        case "local": "本机录音"
+        default: "语音识别"
+        }
+    }
+
     package var refinementProviderLabel: String {
         if let refinementProviderID { return refinementProviderID.displayName }
         return deepSeekText != nil || deepSeekRequestID != nil

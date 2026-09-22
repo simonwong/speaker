@@ -19,8 +19,8 @@ package struct VoiceInputFailurePresentation {
         settingsDestination: nil
     )
     package static let recordingLimitReached = Self(
-        title: "录音已达到 10 分钟上限",
-        guidance: "为保护隐私并避免持续计费，本次语音输入已停止。请重新开始。",
+        title: "录音已达到当前上限",
+        guidance: "本次语音输入已停止。请缩短录音；长度限制可在语音识别设置中查看。",
         icon: "timer",
         settingsDestination: nil
     )
@@ -43,13 +43,13 @@ package struct VoiceInputFailurePresentation {
         settingsDestination: nil
     )
     package static let providerNotConfigured = Self(
-        title: "还没有配置豆包",
+        title: "还没有配置语音识别",
         guidance: "在语音识别设置中填入 API Key 即可开始使用。",
         icon: "key.slash",
         settingsDestination: .apiKeys
     )
     package static let providerAuthenticationFailed = Self(
-        title: "豆包 API Key 无效",
+        title: "语音识别 API Key 无效",
         guidance: "请在设置中重新保存正确的 API Key。",
         icon: "key.slash",
         settingsDestination: .apiKeys
@@ -79,7 +79,7 @@ package struct VoiceInputFailurePresentation {
         settingsDestination: nil
     )
     package static let providerUnavailable = Self(
-        title: "豆包服务暂时不可用",
+        title: "语音识别服务暂时不可用",
         guidance: "稍后重试，录音不会保存在本机。",
         icon: "exclamationmark.triangle.fill",
         settingsDestination: nil
@@ -109,13 +109,13 @@ package struct VoiceInputFailurePresentation {
         settingsDestination: nil
     )
     package static let providerReceivedNoAudio = Self(
-        title: "豆包没有收到音频",
+        title: "语音识别服务没有收到音频",
         guidance: "本次请求没有可识别的音频数据，请重新录音。",
         icon: "text.badge.xmark",
         settingsDestination: nil
     )
     package static let providerReturnedNoText = Self(
-        title: "豆包没有返回文字",
+        title: "语音识别服务没有返回文字",
         guidance: "本次识别已经结束，但结果中没有文字。",
         icon: "text.badge.xmark",
         settingsDestination: nil

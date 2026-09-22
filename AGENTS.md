@@ -1,6 +1,6 @@
 # Speaker Agent Guide
 
-Speaker is a macOS 14+ menu-bar voice input tool. A Voice Input Session records through a global shortcut, streams audio to Doubao, optionally refines text with the selected Refinement Provider, then delivers to the Input Target frozen when recording ends. Audio never crosses the text-refinement seam.
+Speaker is a macOS 14+ menu-bar voice input tool. A Voice Input Session records through a global shortcut, transcribes with the selected Speech Recognition Provider, optionally refines text with the selected Refinement Provider, then delivers to the Input Target frozen when recording ends. Audio never crosses the text-refinement seam.
 
 ## Read by task
 

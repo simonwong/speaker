@@ -193,6 +193,10 @@ package enum SpeakerCopy {
     package enum Failure {
         package static func message(for error: any Error) -> String {
             switch error {
+            case let error as SpeechRecognitionFailure:
+                error.kind == .invalidConfiguration
+                    ? "已保存的语音识别配置不受支持，请重新选择服务商与模型。"
+                    : error.userFailure.userGuidance
             case let error as ProviderCredentialStoreError:
                 message(for: error)
             case let error as AppSettingsStoreError:

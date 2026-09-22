@@ -13,5 +13,6 @@ ADRs preserve decisions whose rationale future architecture work must understand
 | [0007](0007-specify-behavior-through-sequential-executables.md) | Accepted | Specify behavior through sequential `@main` executables instead of XCTest |
 | [0008](0008-freeze-the-capture-microphone.md) | Accepted | Freeze the capture microphone per Voice Input Session and fail closed on loss |
 | [0009](0009-select-text-refinement-providers.md) | Accepted | Freeze the selected text-only Refinement Provider and isolate its credentials |
+| [0010](0010-select-speech-recognition-providers.md) | Accepted | Select the Speech Recognition Provider independently and freeze its model, region, and credential ownership |
 
 Create a new ADR when a load-bearing decision changes. Keep superseded ADRs as history and link the replacement rather than rewriting the old decision.

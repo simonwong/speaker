@@ -21,6 +21,10 @@ actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
     private var cancelledStartIDs: Set<UUID> = []
     private var firstAudioChunksContinuation: CheckedContinuation<Void, Never>?
     private let delaysFirstAudioChunks: Bool
+    private let delaysFirstStop: Bool
+    private let firstStopError: AudioCaptureError?
+    private var firstStopContinuation: CheckedContinuation<Void, Never>?
+    var hasPendingStop: Bool { firstStopContinuation != nil }
     private(set) var audioChunksCount = 0
     private(set) var startCount = 0
     private(set) var stopCount = 0
@@ -33,10 +37,14 @@ actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
             duration: .seconds(1),
             peakPower: -12
         ),
-        delaysFirstAudioChunks: Bool = false
+        delaysFirstAudioChunks: Bool = false,
+        delaysFirstStop: Bool = false,
+        firstStopError: AudioCaptureError? = nil
     ) {
         self.stoppedAudio = stoppedAudio
         self.delaysFirstAudioChunks = delaysFirstAudioChunks
+        self.delaysFirstStop = delaysFirstStop
+        self.firstStopError = firstStopError
     }
 
     var isActive: Bool { activeStartID != nil }
@@ -90,17 +98,27 @@ actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
 
     func stop() async throws -> CapturedAudio {
         stopCount += 1
+        let firstStop = stopCount == 1
         activeStartID = nil
         continuation?.finish()
         continuation = nil
         failureContinuation?.finish()
         failureContinuation = nil
         activeFailure = nil
+        if firstStop, delaysFirstStop {
+            await withCheckedContinuation { firstStopContinuation = $0 }
+        }
+        if firstStop, let firstStopError { throw firstStopError }
         try AudioCaptureQualityPolicy.validate(
             duration: stoppedAudio.duration,
             peakPower: stoppedAudio.peakPower
         )
         return stoppedAudio
+    }
+
+    func resumeFirstStop() {
+        firstStopContinuation?.resume()
+        firstStopContinuation = nil
     }
 
     func cancel() async {

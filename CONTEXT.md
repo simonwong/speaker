@@ -24,13 +24,19 @@ _Avoid_: rule, transcription prompt
 
 **Refinement Provider**
 
-The user-selected service and model that may refine a confirmed Doubao Stage Result. Its destination and credential ownership are fixed for each Voice Input Session; it never receives audio.
+The user-selected service and model that may refine a confirmed recognition Stage Result. Its destination and credential ownership are fixed for each Voice Input Session; it never receives audio.
 
 _Avoid_: transcription provider, model router
 
+**Speech Recognition Provider**
+
+The user-selected service and model that turns a Voice Input Session's audio into a Stage Result. Its destination and credential ownership are fixed for that session, independently of the Refinement Provider.
+
+_Avoid_: audio refinement provider, automatic model router
+
 **Default Smoothing**
 
-The built-in Refinement Mode that removes pauses, fillers, and repeated speech without deliberately reorganizing the content. It uses Doubao only.
+The built-in Refinement Mode that uses the Speech Recognition Provider's confirmed text without a separate refinement request. Its cleanup depends on that provider's recognition capabilities.
 
 _Avoid_: default rule, smart rewrite
 
@@ -66,7 +72,7 @@ _Avoid_: failed text, lost result
 
 **Session Record**
 
-The local history record for a Voice Input Session. It may contain Stage Results, the Refinement Mode and Refinement Provider, status, provider request identifiers, structured failure codes, the Personal Dictionary snapshot, timing, and content-free diagnostics, but never raw audio, target-application identity, or free-text provider messages.
+The local history record for a Voice Input Session. It may contain Stage Results, the Speech Recognition Provider, the Refinement Mode and Refinement Provider, status, provider request identifiers, structured failure codes, the Personal Dictionary snapshot, timing, and content-free diagnostics, but never raw audio, target-application identity, or free-text provider messages.
 
 _Avoid_: recording history, chat record
 

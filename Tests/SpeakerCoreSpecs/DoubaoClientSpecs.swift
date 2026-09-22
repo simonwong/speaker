@@ -743,7 +743,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             for (kind, expectedFailure) in cases {
                 let processor = DefaultVoiceTextProcessor(
                     configuration: VoiceInputConfigurationController(),
-                    doubao: DoubaoFailureTranscriber(
+                    transcriber: DoubaoFailureTranscriber(
                         failure: .init(
                             kind: kind,
                             providerRequestID: "doubao-mapping-log"
@@ -774,7 +774,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
         ) {
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(),
-                doubao: CredentialFailureTranscriber(error: .interactionUnavailable),
+                transcriber: CredentialFailureTranscriber(error: .interactionUnavailable),
                 refinement: OptionalTextRefinementPipeline(
                     refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused")))
                 )

@@ -5,17 +5,20 @@ public struct VoiceTextProcessingSnapshot: Equatable, Sendable {
     public let dictionaryContext: DictionaryRequestContext
     public let refinementMode: TextRefinementMode
     public let refinementProvider: RefinementProviderProfile
+    public let recognitionProvider: SpeechRecognitionProfile
 
     public init(
         dictionary: PersonalDictionarySnapshot,
         dictionaryContext: DictionaryRequestContext,
         refinementMode: TextRefinementMode,
-        refinementProvider: RefinementProviderProfile = .legacyDeepSeek
+        refinementProvider: RefinementProviderProfile = .legacyDeepSeek,
+        recognitionProvider: SpeechRecognitionProfile = .doubao
     ) {
         self.dictionary = dictionary
         self.dictionaryContext = dictionaryContext
         self.refinementMode = refinementMode
         self.refinementProvider = refinementProvider
+        self.recognitionProvider = recognitionProvider
     }
 
     public static let empty = {
@@ -117,13 +120,19 @@ public enum SpeechTranscriptionPurpose: Equatable, Sendable {
 public struct SpeechTranscriptionContext: Equatable, Sendable {
     public let hotwords: [String]
     public let purpose: SpeechTranscriptionPurpose
+    public let recognitionProvider: SpeechRecognitionProfile
+    public let audioCaptureCompletion: AudioCaptureCompletionGate?
 
     public init(
         hotwords: [String],
-        purpose: SpeechTranscriptionPurpose
+        purpose: SpeechTranscriptionPurpose,
+        recognitionProvider: SpeechRecognitionProfile = .doubao,
+        audioCaptureCompletion: AudioCaptureCompletionGate? = nil
     ) {
         self.hotwords = hotwords
         self.purpose = purpose
+        self.recognitionProvider = recognitionProvider
+        self.audioCaptureCompletion = audioCaptureCompletion
     }
 }
 
@@ -147,21 +156,43 @@ public protocol StreamingVoiceTextProcessing: Sendable {
         snapshot: VoiceTextProcessingSnapshot,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult
+
+    func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        audioCaptureCompletion: AudioCaptureCompletionGate,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult
+
+}
+
+extension StreamingVoiceTextProcessing {
+    public func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        audioCaptureCompletion: AudioCaptureCompletionGate,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        try await processStreaming(audioChunks, snapshot: snapshot, progress: progress)
+    }
 }
 
 public actor VoiceInputConfigurationController {
     private var dictionary: PersonalDictionary
     private var refinementMode: TextRefinementMode
     private var refinementProvider: RefinementProviderProfile
+    private var recognitionProvider: SpeechRecognitionProfile
 
     public init(
         dictionary: PersonalDictionary = .empty,
         refinementMode: TextRefinementMode = .defaultSmooth,
-        refinementProvider: RefinementProviderProfile = .legacyDeepSeek
+        refinementProvider: RefinementProviderProfile = .legacyDeepSeek,
+        recognitionProvider: SpeechRecognitionProfile = .doubao
     ) {
         self.dictionary = dictionary
         self.refinementMode = refinementMode
         self.refinementProvider = refinementProvider
+        self.recognitionProvider = recognitionProvider
     }
 
     public func captureSnapshot() -> VoiceTextProcessingSnapshot {
@@ -171,7 +202,8 @@ public actor VoiceInputConfigurationController {
             dictionaryContext: DictionaryRequestContextBuilder.makeContext(
                 from: dictionarySnapshot),
             refinementMode: refinementMode,
-            refinementProvider: refinementProvider
+            refinementProvider: refinementProvider,
+            recognitionProvider: recognitionProvider
         )
     }
 
@@ -190,6 +222,14 @@ public actor VoiceInputConfigurationController {
         refinementMode = validatedMode
     }
 
+    public func restoreRecognitionProvider(_ profile: SpeechRecognitionProfile) {
+        recognitionProvider = profile
+    }
+
+    public func selectRecognitionProvider(_ profile: SpeechRecognitionProfile) throws {
+        recognitionProvider = try profile.validated()
+    }
+
     public func currentRefinementMode() -> TextRefinementMode { refinementMode }
 
     public func selectRefinementMode(_ mode: TextRefinementMode) throws {
@@ -199,16 +239,16 @@ public actor VoiceInputConfigurationController {
 
 public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
     private let configuration: VoiceInputConfigurationController
-    private let doubao: any ContextualSpeechTranscribing
+    private let transcriber: any ContextualSpeechTranscribing
     private let refinement: OptionalTextRefinementPipeline
 
     public init(
         configuration: VoiceInputConfigurationController,
-        doubao: any ContextualSpeechTranscribing,
+        transcriber: any ContextualSpeechTranscribing,
         refinement: OptionalTextRefinementPipeline
     ) {
         self.configuration = configuration
-        self.doubao = doubao
+        self.transcriber = transcriber
         self.refinement = refinement
     }
 
@@ -222,24 +262,29 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
         let clock = ContinuousClock()
-        let doubaoStarted = clock.now
-        let doubaoResult: TranscriptionResult
+        let transcriptionStarted = clock.now
+        let transcriptionResult: TranscriptionResult
         do {
-            doubaoResult = try await doubao.transcribe(
+            transcriptionResult = try await transcriber.transcribe(
                 audio,
                 context: Self.transcriptionContext(for: snapshot)
+            )
+        } catch let failure as SpeechRecognitionFailure {
+            throw VoiceTextProcessingFailure(
+                userFailure: failure.userFailure,
+                providerDiagnostic: failure.providerDiagnostic
             )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
         } catch let failure as ProviderCredentialStoreError {
             throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
         }
-        let doubaoDuration = doubaoStarted.duration(to: clock.now)
+        let transcriptionDuration = transcriptionStarted.duration(to: clock.now)
         return try await finishProcessing(
-            doubaoResult,
+            transcriptionResult,
             snapshot: snapshot,
             recordingDuration: audio.duration,
-            doubaoDuration: doubaoDuration,
+            transcriptionDuration: transcriptionDuration,
             progress: progress
         )
     }
@@ -249,63 +294,98 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         snapshot: VoiceTextProcessingSnapshot,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
-        guard let streamingDoubao = doubao as? any StreamingContextualSpeechTranscribing else {
+        try await transcribeStreaming(
+            audioChunks, snapshot: snapshot, audioCaptureCompletion: nil, progress: progress)
+    }
+
+    public func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        audioCaptureCompletion: AudioCaptureCompletionGate,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        try await transcribeStreaming(
+            audioChunks, snapshot: snapshot, audioCaptureCompletion: audioCaptureCompletion,
+            progress: progress)
+    }
+
+    private func transcribeStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        audioCaptureCompletion: AudioCaptureCompletionGate?,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        guard let streamingTranscriber = transcriber as? any StreamingContextualSpeechTranscribing
+        else {
             throw VoiceTextProcessingFailure(
                 userFailure: .transcriptionFailed,
-                providerDiagnostic: .init(provider: "doubao", code: "streamingUnavailable")
+                providerDiagnostic: .init(
+                    provider: snapshot.recognitionProvider.provider.rawValue,
+                    code: "streamingUnavailable"
+                )
             )
         }
         let clock = ContinuousClock()
-        let doubaoStarted = clock.now
-        let doubaoResult: TranscriptionResult
+        let transcriptionStarted = clock.now
+        let transcriptionResult: TranscriptionResult
         do {
-            doubaoResult = try await streamingDoubao.transcribe(
+            transcriptionResult = try await streamingTranscriber.transcribe(
                 audioChunks,
-                context: Self.transcriptionContext(for: snapshot)
+                context: Self.transcriptionContext(
+                    for: snapshot, audioCaptureCompletion: audioCaptureCompletion)
+            )
+        } catch let failure as SpeechRecognitionFailure {
+            throw VoiceTextProcessingFailure(
+                userFailure: failure.userFailure,
+                providerDiagnostic: failure.providerDiagnostic
             )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
         } catch let failure as ProviderCredentialStoreError {
             throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
         }
-        let doubaoDuration = doubaoStarted.duration(to: clock.now)
+        let transcriptionDuration = transcriptionStarted.duration(to: clock.now)
         return try await finishProcessing(
-            doubaoResult,
+            transcriptionResult,
             snapshot: snapshot,
             recordingDuration: nil,
-            doubaoDuration: doubaoDuration,
+            transcriptionDuration: transcriptionDuration,
             progress: progress
         )
     }
 
     private static func transcriptionContext(
-        for snapshot: VoiceTextProcessingSnapshot
+        for snapshot: VoiceTextProcessingSnapshot,
+        audioCaptureCompletion: AudioCaptureCompletionGate? = nil
     ) -> SpeechTranscriptionContext {
         SpeechTranscriptionContext(
             hotwords: snapshot.dictionaryContext.hotwords,
             purpose: snapshot.refinementMode.requiresRefinement
                 ? .refinementSource
-                : .defaultSmoothing
+                : .defaultSmoothing,
+            recognitionProvider: snapshot.recognitionProvider,
+            audioCaptureCompletion: audioCaptureCompletion
         )
     }
 
     private func finishProcessing(
-        _ doubaoResult: TranscriptionResult,
+        _ transcriptionResult: TranscriptionResult,
         snapshot: VoiceTextProcessingSnapshot,
         recordingDuration: Duration?,
-        doubaoDuration: Duration,
+        transcriptionDuration: Duration,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
+        try Task.checkCancellation()
         if snapshot.refinementMode.requiresRefinement {
             await progress(
                 .init(
                     stage: .refining,
-                    confirmedDoubaoResult: doubaoResult
+                    confirmedDoubaoResult: transcriptionResult
                 ))
         }
         let refinementStarted = ContinuousClock.now
         let refinementOutcome = try await refinement.refine(
-            doubaoText: doubaoResult.text,
+            doubaoText: transcriptionResult.text,
             mode: snapshot.refinementMode,
             dictionaryWords: snapshot.dictionary.entries.map(\.word),
             provider: snapshot.refinementProvider
@@ -313,7 +393,8 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         let refinementDuration = refinementStarted.duration(to: .now)
 
         var stageDurations = [
-            "doubao": Self.milliseconds(doubaoDuration),
+            snapshot.recognitionProvider.provider.rawValue: Self.milliseconds(
+                transcriptionDuration),
             "deepseek": snapshot.refinementMode.requiresRefinement
                 ? Self.milliseconds(refinementDuration)
                 : 0,
@@ -322,11 +403,11 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             stageDurations["recording"] = Self.milliseconds(recordingDuration)
         }
         return VoiceTextProcessingResult(
-            doubaoText: doubaoResult.text,
-            normalizedText: doubaoResult.text,
+            doubaoText: transcriptionResult.text,
+            normalizedText: transcriptionResult.text,
             deepSeekText: refinementOutcome.deepSeekText,
             finalText: refinementOutcome.finalText,
-            doubaoRequestID: doubaoResult.providerRequestID,
+            doubaoRequestID: transcriptionResult.providerRequestID,
             deepSeekRequestID: refinementOutcome.providerRequestID,
             refinementStatus: refinementOutcome.status,
             refinementFailure: refinementOutcome.failure,
@@ -357,6 +438,11 @@ struct BasicVoiceTextProcessor: VoiceTextProcessing {
         let result: TranscriptionResult
         do {
             result = try await transcriber.transcribe(audio)
+        } catch let failure as SpeechRecognitionFailure {
+            throw VoiceTextProcessingFailure(
+                userFailure: failure.userFailure,
+                providerDiagnostic: failure.providerDiagnostic
+            )
         } catch let failure as DoubaoASRFailure {
             throw VoiceTextProcessingFailure(doubaoFailure: failure)
         } catch let failure as ProviderCredentialStoreError {

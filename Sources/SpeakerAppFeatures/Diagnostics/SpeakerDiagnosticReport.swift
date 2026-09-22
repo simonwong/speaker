@@ -23,6 +23,8 @@ package enum SpeakerDiagnosticReport {
         package let refinement: String
         package let doubaoConfigured: Bool
         package let doubaoResource: String
+        package let recognitionProfile: SpeechRecognitionProfile
+        package let recognitionConfigured: Bool
         package let refinementConfigured: Bool
         package let refinementVerified: Bool
         package let refinementProfile: RefinementProviderProfile
@@ -47,6 +49,8 @@ package enum SpeakerDiagnosticReport {
             refinement: String,
             doubaoConfigured: Bool,
             doubaoResource: String,
+            recognitionProfile: SpeechRecognitionProfile = .doubao,
+            recognitionConfigured: Bool = false,
             refinementConfigured: Bool,
             refinementVerified: Bool,
             refinementProfile: RefinementProviderProfile = .legacyDeepSeek,
@@ -70,6 +74,8 @@ package enum SpeakerDiagnosticReport {
             self.refinement = refinement
             self.doubaoConfigured = doubaoConfigured
             self.doubaoResource = doubaoResource
+            self.recognitionProfile = recognitionProfile
+            self.recognitionConfigured = recognitionConfigured
             self.refinementConfigured = refinementConfigured
             self.refinementVerified = refinementVerified
             self.refinementProfile = refinementProfile
@@ -97,6 +103,10 @@ package enum SpeakerDiagnosticReport {
             "refinement: \(clean(snapshot.refinement))",
             "doubaoConfigured: \(snapshot.doubaoConfigured)",
             "doubaoResource: \(clean(snapshot.doubaoResource))",
+            "recognitionProvider: \(snapshot.recognitionProfile.provider.rawValue)",
+            "recognitionModel: \(SpeechRecognitionProviderCatalog.modelIDs(for: snapshot.recognitionProfile.provider).contains(snapshot.recognitionProfile.model) ? snapshot.recognitionProfile.model : "custom")",
+            "recognitionRegion: \(snapshot.recognitionProfile.provider == .qwen ? snapshot.recognitionProfile.region.rawValue : "notApplicable")",
+            "recognitionConfigured: \(snapshot.recognitionConfigured)",
             "refinementConfigured: \(snapshot.refinementConfigured)",
             "refinementVerified: \(snapshot.refinementVerified)",
             "refinementProvider: \(snapshot.refinementProfile.provider.rawValue)",

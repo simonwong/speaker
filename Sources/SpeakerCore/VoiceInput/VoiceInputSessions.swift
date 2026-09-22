@@ -32,6 +32,7 @@ public actor VoiceInputSessions {
     private var releasePending = false
     private var pendingReleaseCaptureHint: InputTargetCaptureHint?
     private var transcriptionTask: Task<VoiceTextProcessingResult, Error>?
+    private var audioCaptureCompletion: AudioCaptureCompletionGate?
     private var streamingCompletionTask: Task<Void, Never>?
     private var telemetryTask: Task<Void, Never>?
     private var captureFailureTask: Task<Void, Never>?
@@ -393,11 +394,14 @@ public actor VoiceInputSessions {
                 snapshot: snapshot
             )
             if let liveStream, let streamingProcessor {
+                let completion = AudioCaptureCompletionGate()
+                audioCaptureCompletion = completion
                 let sessions = self
                 transcriptionTask = Task {
                     try await streamingProcessor.processStreaming(
                         liveStream,
-                        snapshot: snapshot
+                        snapshot: snapshot,
+                        audioCaptureCompletion: completion
                     ) { progress in
                         await sessions.receivedProcessingProgress(
                             progress,
@@ -457,6 +461,7 @@ public actor VoiceInputSessions {
                 transcription: nil,
                 finalText: nil,
                 transcriptionProvider: problem.diagnostic?.provider,
+                transcriptionModelID: snapshot.recognitionProvider.model,
                 providerErrorCode: problem.diagnostic?.code,
                 providerOperation: problem.diagnostic?.operation.rawValue,
                 refinementModeName: snapshot.refinementMode.displayName,
@@ -505,8 +510,16 @@ public actor VoiceInputSessions {
                 matching: captureHint
             )
         }
+        let completion = audioCaptureCompletion
         let audioTask = Task<CapturedAudio, Error> {
-            try await audioCapture.stop()
+            do {
+                let audio = try await audioCapture.stop()
+                await completion?.accept()
+                return audio
+            } catch {
+                await completion?.reject()
+                throw error
+            }
         }
         finishingTask = Task { [weak self] in
             await self?.finishSession(
@@ -527,6 +540,10 @@ public actor VoiceInputSessions {
         audioTask: Task<CapturedAudio, Error>
     ) async {
         let (target, targetCaptureMilliseconds) = await targetTask.value
+        guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
+            await discard(target)
+            return
+        }
         historyTextPolicy =
             switch target {
             case .unavailable(.secureTarget): .redacted
@@ -538,6 +555,10 @@ public actor VoiceInputSessions {
         do {
             audio = try await audioTask.value
         } catch {
+            guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
+                await discard(target)
+                return
+            }
             transcriptionTask?.cancel()
             transcriptionTask = nil
             streamingCompletionTask?.cancel()
@@ -566,7 +587,7 @@ public actor VoiceInputSessions {
         let applicationName = target.applicationName
         stageAudit.advance(
             id: id,
-            stage: "doubao",
+            stage: snapshot.recognitionProvider.provider.rawValue,
             applicationName: applicationName,
             now: clock.monotonicNow
         )
@@ -604,12 +625,13 @@ public actor VoiceInputSessions {
         do {
             processedText = try await task.value
         } catch let failure as VoiceTextProcessingFailure {
-            transcriptionTask = nil
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
                 await discard(target)
                 return
             }
+            transcriptionTask = nil
             await discard(target)
+            guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
             await finishWithFailure(
                 id: id,
                 startedAt: startedAt,
@@ -619,12 +641,13 @@ public actor VoiceInputSessions {
             )
             return
         } catch {
-            transcriptionTask = nil
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
                 await discard(target)
                 return
             }
+            transcriptionTask = nil
             await discard(target)
+            guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
             await finishWithFailure(
                 id: id,
                 startedAt: startedAt,
@@ -634,14 +657,13 @@ public actor VoiceInputSessions {
             )
             return
         }
-        transcriptionTask = nil
-        streamingCompletionTask?.cancel()
-        streamingCompletionTask = nil
-
         guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
             await discard(target)
             return
         }
+        transcriptionTask = nil
+        streamingCompletionTask?.cancel()
+        streamingCompletionTask = nil
 
         switch target {
         case .writable(let targetSnapshot):
@@ -722,7 +744,7 @@ public actor VoiceInputSessions {
                             applicationName: targetSnapshot.applicationName,
                             transcription: nil,
                             finalText: nil,
-                            transcriptionProvider: "doubao",
+                            transcriptionProvider: snapshot.recognitionProvider.provider.rawValue,
                             providerRequestID: processedText.doubaoRequestID,
                             deliveryDiagnosticCode: outcome
                                 .deliveryDiagnostic?.code,
@@ -768,7 +790,7 @@ public actor VoiceInputSessions {
                         applicationName: nil,
                         transcription: nil,
                         finalText: nil,
-                        transcriptionProvider: "doubao",
+                        transcriptionProvider: snapshot.recognitionProvider.provider.rawValue,
                         providerRequestID: processedText.doubaoRequestID,
                         processingSnapshot: snapshot,
                         additionalStageDurations: sessionStageDurations,
@@ -863,6 +885,9 @@ public actor VoiceInputSessions {
         // Cancellation is committed before cleanup or history I/O. The overlay
         // disappears immediately and late results are fenced by `.finalizing`.
         publish(activity)
+        let completion = audioCaptureCompletion
+        audioCaptureCompletion = nil
+        await completion?.reject()
         await audioStart?.cancel()
         await audioCapture.cancel()
         let elapsed = max(0, Int(clock.date.timeIntervalSince(startedAt) * 1_000))
@@ -873,7 +898,8 @@ public actor VoiceInputSessions {
                 applicationName: nil,
                 transcription: confirmedDoubaoResult?.text,
                 finalText: nil,
-                transcriptionProvider: confirmedDoubaoResult == nil ? nil : "doubao",
+                transcriptionProvider: processingSnapshot?.recognitionProvider.provider.rawValue,
+                transcriptionModelID: processingSnapshot?.recognitionProvider.model,
                 providerRequestID: confirmedDoubaoResult?.providerRequestID,
                 refinementProviderID: processingSnapshot?.refinementMode.requiresRefinement == true
                     ? processingSnapshot?.refinementProvider.provider : nil,
@@ -950,6 +976,9 @@ public actor VoiceInputSessions {
             auditedStageDurations: audit.stageDurations,
             textPolicy: terminalHistoryTextPolicy
         )
+        let completion = audioCaptureCompletion
+        audioCaptureCompletion = nil
+        await completion?.reject()
         phase = .idle
         if !suppressTerminalPresentation {
             publish(termination.activity, notice: terminal.notice)
@@ -1091,7 +1120,10 @@ public actor VoiceInputSessions {
         // then fence late events while shutdown retains the settlement task.
         publish(activity)
         let audioCapture = audioCapture
+        let completion = audioCaptureCompletion
+        audioCaptureCompletion = nil
         activeRecordingSettlementTask = Task { [weak self] in
+            await completion?.reject()
             await audioCapture.cancel()
             await self?.completeActiveRecordingFailure(
                 id: id,
@@ -1121,7 +1153,9 @@ public actor VoiceInputSessions {
                 applicationName: nil,
                 transcription: nil,
                 finalText: nil,
-                transcriptionProvider: diagnostic?.provider ?? "doubao",
+                transcriptionProvider: diagnostic?.provider
+                    ?? snapshot.recognitionProvider.provider.rawValue,
+                transcriptionModelID: snapshot.recognitionProvider.model,
                 providerRequestID: diagnostic?.requestID,
                 providerErrorCode: diagnostic?.code,
                 providerOperation: diagnostic?.operation.rawValue,
@@ -1226,7 +1260,7 @@ public actor VoiceInputSessions {
         let auditStage =
             switch stage {
             case .capturingTarget: "targetCapture"
-            case .transcribing: "doubao"
+            case .transcribing: snapshot.recognitionProvider.provider.rawValue
             case .refining: "deepseek"
             case .delivering: "delivery"
             }
@@ -1268,7 +1302,8 @@ public actor VoiceInputSessions {
                 // text in SQLite/WAL before the target classification is applied.
                 transcription: nil,
                 finalText: nil,
-                transcriptionProvider: nil,
+                transcriptionProvider: snapshot?.recognitionProvider.provider.rawValue,
+                transcriptionModelID: snapshot?.recognitionProvider.model,
                 providerRequestID: nil,
                 refinementModeName: snapshot?.refinementMode.displayName,
                 refinementPrompt: snapshot?.refinementMode.refinementInstruction,
