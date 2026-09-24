@@ -7,6 +7,8 @@ package struct SpeakerOnboardingView: View {
     @ObservedObject var doubao: DoubaoSettingsModel
     @ObservedObject var recognition: SpeechRecognitionSettingsModel
     @State private var step: OnboardingStep = .permissions
+    @State private var movesForward = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let completion: () -> Void
     let requestPermission: (PermissionKind) async -> Void
     let refreshPermissions: () -> Void
@@ -75,7 +77,7 @@ package struct SpeakerOnboardingView: View {
             for permission in PermissionKind.allCases
             where previous[permission] != current[permission] {
                 let name = permission == .microphone ? "麦克风" : "辅助功能"
-                announce("\(name)：\(permissionStatus(current[permission]))")
+                announce("\(name)：\(PermissionStatusPresentation(state: current[permission]).text)")
             }
         }
         .onChange(of: doubao.status) { _, status in
@@ -101,9 +103,9 @@ package struct SpeakerOnboardingView: View {
             SpeakerIdentityTile(size: 48, accessibility: .named)
             VStack(alignment: .leading, spacing: 5) {
                 Text(step.title)
-                    .font(.title2.bold())
+                    .font(SpeakerTypography.pageTitle)
                 Text(stepDescription)
-                    .font(.callout)
+                    .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -123,7 +125,7 @@ package struct SpeakerOnboardingView: View {
             ForEach(OnboardingStep.allCases, id: \.rawValue) { item in
                 HStack(spacing: 6) {
                     Text("\(item.rawValue + 1)")
-                        .font(.caption.bold())
+                        .font(SpeakerTypography.footnote.weight(.semibold).monospacedDigit())
                         .frame(width: 24, height: 24)
                         .background(
                             item == step ? Color.accentColor : Color.secondary.opacity(0.12),
@@ -131,7 +133,10 @@ package struct SpeakerOnboardingView: View {
                         )
                         .foregroundStyle(item == step ? Color.white : Color.secondary)
                     Text(item.shortTitle)
-                        .font(.caption.weight(item == step ? .semibold : .regular))
+                        .font(
+                            SpeakerTypography.footnote.weight(
+                                item == step ? .semibold : .regular)
+                        )
                         .foregroundStyle(item == step ? .primary : .secondary)
                         .fixedSize(horizontal: true, vertical: false)
                 }
@@ -148,8 +153,26 @@ package struct SpeakerOnboardingView: View {
         .accessibilityLabel("第 \(step.rawValue + 1) 步，共 3 步：\(step.title)")
     }
 
-    @ViewBuilder
+    /// One step at a time: the next step slides in from the side it lies on
+    /// while the last one only fades. Reduce Motion keeps only the fade.
     private var stepContent: some View {
+        ZStack(alignment: .topLeading) {
+            content(for: step)
+                .id(step)
+                .transition(stepTransition)
+        }
+    }
+
+    private var stepTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(x: movesForward ? 16 : -16)),
+            removal: .opacity
+        )
+    }
+
+    @ViewBuilder
+    private func content(for step: OnboardingStep) -> some View {
         switch step {
         case .permissions:
             VStack(alignment: .leading, spacing: 16) {
@@ -159,7 +182,6 @@ package struct SpeakerOnboardingView: View {
                     .accessibility, title: "辅助功能", icon: "accessibility",
                     purpose: "用于响应键盘快捷键，并把文字输入你正在使用的应用。")
                 Button("重新检查权限", action: refreshPermissions)
-                    .font(.callout)
             }
         case .apiKey:
             VStack(alignment: .leading, spacing: 14) {
@@ -169,10 +191,9 @@ package struct SpeakerOnboardingView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     Text("当前键盘快捷键")
-                        .foregroundStyle(.secondary)
+                        .font(SpeakerTypography.bodyEmphasis)
                     Spacer()
-                    Text(shortcutName())
-                        .font(.title2.monospaced().bold())
+                    ShortcutKeycap(name: shortcutName())
                 }
                 tutorialRow(
                     icon: "hand.tap", title: "短按键盘快捷键", detail: "按一下 \(shortcutName()) 开始录音，再按一下结束。"
@@ -182,12 +203,11 @@ package struct SpeakerOnboardingView: View {
                     detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
                 tutorialRow(icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
                 Text("打开输入框后使用快捷键，文字将输入到结束录音时所在的输入框。")
-                    .font(.callout)
+                    .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(18)
-            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+            .speakerCard()
         }
     }
 
@@ -198,20 +218,24 @@ package struct SpeakerOnboardingView: View {
         purpose: String
     ) -> some View {
         let state = permissions.snapshot[permission]
+        let status = PermissionStatusPresentation(state: state)
         return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label(title, systemImage: icon)
-                    .font(.headline)
+            HStack(spacing: 10) {
+                SpeakerIconTile(symbol: icon, tint: status.tint)
+                Text(title)
+                    .font(SpeakerTypography.cardTitle)
                 Spacer()
-                Text(permissionStatus(state))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(state == .granted ? Color.green : Color.secondary)
+                StatusBadge(
+                    text: status.text,
+                    icon: status.symbolName,
+                    color: status.tint
+                )
             }
             Text(purpose)
-                .font(.callout)
+                .font(SpeakerTypography.caption)
                 .fixedSize(horizontal: false, vertical: true)
             Text(presentation.permissionInstructions(for: permission))
-                .font(.callout)
+                .font(SpeakerTypography.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let action = presentation.permissionAction(for: permission) {
@@ -221,22 +245,17 @@ package struct SpeakerOnboardingView: View {
                 .buttonStyle(SettingsButtonStyle())
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+        .speakerCard()
     }
 
     private func tutorialRow(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 28)
+        HStack(alignment: .top, spacing: 10) {
+            SpeakerIconTile(symbol: icon, tint: .accentColor)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(SpeakerTypography.bodyEmphasis)
                 Text(detail)
-                    .font(.callout)
+                    .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -248,7 +267,7 @@ package struct SpeakerOnboardingView: View {
             Divider()
             if !presentation.canContinue(from: step) {
                 Text(blockingMessage)
-                    .font(.caption)
+                    .font(SpeakerTypography.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -293,15 +312,22 @@ package struct SpeakerOnboardingView: View {
     }
 
     private func previousStep() {
-        step = step == .shortcut ? .apiKey : .permissions
+        go(to: step == .shortcut ? .apiKey : .permissions)
     }
 
     private func nextStep() {
         guard presentation.canContinue(from: step) else { return }
         switch step {
-        case .permissions: step = .apiKey
-        case .apiKey: step = .shortcut
+        case .permissions: go(to: .apiKey)
+        case .apiKey: go(to: .shortcut)
         case .shortcut: completion()
+        }
+    }
+
+    private func go(to destination: OnboardingStep) {
+        movesForward = destination.rawValue > step.rawValue
+        withAnimation(SpeakerMotion.change) {
+            step = destination
         }
     }
 
@@ -315,14 +341,5 @@ package struct SpeakerOnboardingView: View {
             return "保存所选语音识别服务的 Key 后继续。"
         }
         return "保存豆包 Key，选择已开通的资源，再点击「检查连接」。连接成功后继续。"
-    }
-
-    private func permissionStatus(_ state: PermissionState) -> String {
-        switch state {
-        case .granted: "已开启"
-        case .denied: "未开启"
-        case .notDetermined: "待允许"
-        case .restricted: "受限制"
-        }
     }
 }

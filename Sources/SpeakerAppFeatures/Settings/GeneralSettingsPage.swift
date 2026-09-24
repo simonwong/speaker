@@ -33,16 +33,19 @@ private struct LaunchAtLoginSettingsRow: View {
             )
             .toggleStyle(.switch)
             .labelsHidden()
+            .disabled(model.isUpdating)
         }
 
         if let notice = model.notice {
             SettingsNotice(text: notice, color: .orange)
         }
         if model.showsSystemSettingsButton {
-            Button("打开登录项设置") {
-                model.openSystemSettings()
+            HStack {
+                Spacer()
+                Button("打开登录项设置") {
+                    model.openSystemSettings()
+                }
             }
-            .controlSize(.small)
         }
     }
 }
@@ -66,9 +69,7 @@ private struct HistoryRetentionSettingsRow: View {
                     Text(policy.displayName).tag(policy)
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(maxWidth: 220, alignment: .trailing)
+            .settingsTrailingMenu()
             .disabled(model.isUpdating)
         }
 

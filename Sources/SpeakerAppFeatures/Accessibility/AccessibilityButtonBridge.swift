@@ -13,12 +13,20 @@ import SwiftUI
 struct AccessibilityButtonBridge: NSViewRepresentable {
     let label: String
     let hint: String?
+    let value: String?
     let isEnabled: Bool
     let action: () -> Void
 
-    init(label: String, hint: String? = nil, isEnabled: Bool = true, action: @escaping () -> Void) {
+    init(
+        label: String,
+        hint: String? = nil,
+        value: String? = nil,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
         self.label = label
         self.hint = hint
+        self.value = value
         self.isEnabled = isEnabled
         self.action = action
     }
@@ -27,7 +35,8 @@ struct AccessibilityButtonBridge: NSViewRepresentable {
         AccessibilityButtonBridgeView(
             label: label,
             hint: hint,
-            isEnabled: isEnabled,
+            value: value,
+            isEnabled: isEnabled(in: context),
             action: action
         )
     }
@@ -36,7 +45,19 @@ struct AccessibilityButtonBridge: NSViewRepresentable {
         _ view: AccessibilityButtonBridgeView,
         context: Context
     ) {
-        view.update(label: label, hint: hint, isEnabled: isEnabled, action: action)
+        view.update(
+            label: label,
+            hint: hint,
+            value: value,
+            isEnabled: isEnabled(in: context),
+            action: action
+        )
+    }
+
+    /// A `.disabled` ancestor disables the visible control, so the bridge
+    /// must not stay pressable for VoiceOver.
+    private func isEnabled(in context: Context) -> Bool {
+        isEnabled && context.environment.isEnabled
     }
 }
 
@@ -47,10 +68,16 @@ final class AccessibilityButtonBridgeView:
 {
     private var accessibilityAction: () -> Void
 
-    init(label: String, hint: String?, isEnabled: Bool, action: @escaping () -> Void) {
+    init(
+        label: String,
+        hint: String?,
+        value: String? = nil,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) {
         accessibilityAction = action
         super.init(frame: .zero)
-        update(label: label, hint: hint, isEnabled: isEnabled, action: action)
+        update(label: label, hint: hint, value: value, isEnabled: isEnabled, action: action)
     }
 
     @available(*, unavailable)
@@ -61,6 +88,7 @@ final class AccessibilityButtonBridgeView:
     func update(
         label: String,
         hint: String?,
+        value: String? = nil,
         isEnabled: Bool,
         action: @escaping () -> Void
     ) {
@@ -69,6 +97,7 @@ final class AccessibilityButtonBridgeView:
         setAccessibilityRole(.button)
         setAccessibilityLabel(label)
         setAccessibilityHelp(hint)
+        setAccessibilityValue(value)
         setAccessibilityEnabled(isEnabled)
     }
 

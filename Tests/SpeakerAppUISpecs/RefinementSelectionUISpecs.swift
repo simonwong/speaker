@@ -27,7 +27,11 @@ enum RefinementSelectionUISpecs {
             let hosting = NSHostingView(
                 rootView: RefinementSettingsPage(model: model).frame(width: 720, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
-                    .environment(\.colorScheme, .light).tint(.blue))
+                    .environment(\.colorScheme, .light).tint(.blue)
+                    // This spec checks which card ends up highlighted. Its async
+                    // run loop cannot advance SwiftUI animations, so it renders
+                    // each selection without the change animation.
+                    .transaction { $0.disablesAnimations = true })
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 600), styleMask: [.titled],
                 backing: .buffered, defer: false)
@@ -137,10 +141,12 @@ enum RefinementSelectionUISpecs {
         return false
     }
 
+    /// Only the saturated selection ring counts: a highlighted card's faint
+    /// tint fill is cut by its own text and must not read as a second card.
     @MainActor
     private static func isBlue(x: Int, y: Int, in bitmap: NSBitmapImageRep) -> Bool {
         guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
-        return color.blueComponent - color.redComponent > 0.035
+        return color.blueComponent - color.redComponent > 0.3
             && color.blueComponent > color.greenComponent
     }
 

@@ -50,9 +50,7 @@ struct SettingsCard<Content: View>: View {
                 content
             }
         }
-        .padding(SpeakerSurfaceMetrics.cardPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsGlassSurface(cornerRadius: SpeakerSurfaceMetrics.cardCornerRadius, tint: tint)
+        .speakerCard(tint: tint)
         .buttonStyle(SettingsButtonStyle())
         .textFieldStyle(SettingsTextFieldStyle())
     }
@@ -61,6 +59,16 @@ struct SettingsCard<Content: View>: View {
 struct SettingsRowDivider: View {
     var body: some View {
         Divider().opacity(0.6)
+    }
+}
+
+extension View {
+    /// A row's trailing menu: the row title names it, and every menu in a card
+    /// shares one right-hand column.
+    func settingsTrailingMenu() -> some View {
+        labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: SpeakerSurfaceMetrics.trailingControlWidth, alignment: .trailing)
     }
 }
 
@@ -104,11 +112,25 @@ package struct StatusBadge: View {
 package struct SettingsNotice: View {
     let text: String
     var color: Color = .secondary
+    private let icon: String?
     @Environment(\.colorSchemeContrast) private var contrast
 
-    package init(text: String, color: Color = .secondary) {
+    package init(text: String, color: Color = .secondary, icon: String? = nil) {
         self.text = text
         self.color = color
+        self.icon = icon
+    }
+
+    /// The glyph follows the notice's severity unless a caller names one, so
+    /// a red failure never wears an information icon.
+    private var symbolName: String {
+        if let icon { return icon }
+        switch color {
+        case .red: return "xmark.circle.fill"
+        case .orange: return "exclamationmark.triangle.fill"
+        case .green: return "checkmark.circle.fill"
+        default: return "info.circle.fill"
+        }
     }
 
     /// A neutral notice must not read as a coloured status, so `.secondary`
@@ -127,7 +149,7 @@ package struct SettingsNotice: View {
             Text(text)
                 .foregroundStyle(contrast == .increased ? Color.primary : color)
         } icon: {
-            Image(systemName: "info.circle.fill")
+            Image(systemName: symbolName)
                 .foregroundStyle(isNeutral ? Color.secondary : color)
         }
         .font(SpeakerTypography.caption)

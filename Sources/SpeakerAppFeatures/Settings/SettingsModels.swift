@@ -710,6 +710,10 @@ package final class DictionarySettingsModel: ObservableObject {
     private let store: any PersonalDictionaryStoring
     private let configuration: VoiceInputConfigurationController
     private var allowsPersistence = false
+    /// The last queued mutation. Each one starts from the entries the
+    /// previous one saved, so two quick deletes never write the first word
+    /// back.
+    private var pendingMutation: Task<Bool, Never>?
 
     package init(
         store: any PersonalDictionaryStoring,
@@ -768,11 +772,23 @@ package final class DictionarySettingsModel: ObservableObject {
     @discardableResult
     package func add(word: String) async -> Bool {
         let entry = DictionaryEntry(word: word)
-        return await save(entries + [entry])
+        return await mutate { $0 + [entry] }
     }
 
     package func delete(_ id: UUID) async {
-        _ = await save(entries.filter { $0.id != id })
+        _ = await mutate { $0.filter { $0.id != id } }
+    }
+
+    private func mutate(
+        _ transform: @escaping ([DictionaryEntry]) -> [DictionaryEntry]
+    ) async -> Bool {
+        let previous = pendingMutation
+        let mutation = Task {
+            _ = await previous?.value
+            return await save(transform(entries))
+        }
+        pendingMutation = mutation
+        return await mutation.value
     }
 
     private var requestContext: DictionaryRequestContext {
@@ -873,7 +889,7 @@ package enum ShortcutRecorderDecision: Equatable {
 
 package struct ShortcutRecorderPolicy {
     package static let recordingPrompt =
-        "请单独按下左/右 ⌥、⌃、⇧，或输入一个安全组合键。"
+        "请单独按下左/右 ⌥、⌃、⇧，或输入一个安全组合键；按 Esc 取消。"
     package static let soloCommandPrompt =
         "不支持单独使用 Command；请选择左/右 ⌥、⌃ 或 ⇧。"
     package static let missingModifierPrompt = "组合键必须包含至少一个修饰键。"

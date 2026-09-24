@@ -10,6 +10,9 @@ package final class OverviewModel: ObservableObject {
     /// The moment the last refresh read the store. Week, voiceprint, and
     /// heatmap windows are pinned to it instead of the wall clock.
     @Published package private(set) var referenceDate: Date
+    /// Whether a refresh has completed. The Overview entrance waits for the
+    /// first one and never replays, because the model outlives page switches.
+    @Published package private(set) var hasRefreshed = false
 
     private let store: any LocalSessionHistoryStoring
     private let now: () -> Date
@@ -27,7 +30,8 @@ package final class OverviewModel: ObservableObject {
     package var dashboardState: OverviewDashboardState {
         OverviewDashboardState(
             summary: summary,
-            referenceDate: referenceDate
+            referenceDate: referenceDate,
+            isLoaded: hasRefreshed
         )
     }
 
@@ -39,6 +43,7 @@ package final class OverviewModel: ObservableObject {
         guard refreshID == id else { return }
         referenceDate = date
         summary = snapshot
+        hasRefreshed = true
     }
 }
 

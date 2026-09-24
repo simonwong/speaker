@@ -13,29 +13,30 @@ package struct SpeechRecognitionSettingsCard: View {
     package var body: some View {
         VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
             SettingsCard("语音识别", icon: "waveform") {
-                Picker(
-                    "服务商",
-                    selection: Binding(
-                        get: { model.selectedProvider },
-                        set: { provider in Task { await model.selectProvider(provider) } }
-                    )
-                ) {
-                    ForEach(SpeechRecognitionProviderID.allCases, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider)
+                SpeakerRow("服务商") {
+                    Picker(
+                        "服务商",
+                        selection: Binding(
+                            get: { model.selectedProvider },
+                            set: { provider in Task { await model.selectProvider(provider) } }
+                        )
+                    ) {
+                        ForEach(SpeechRecognitionProviderID.allCases, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
                     }
+                    .settingsTrailingMenu()
+                    .accessibilityLabel("语音识别服务商")
+                    .disabled(model.isMutating)
                 }
-                .pickerStyle(.menu)
-                .accessibilityLabel("语音识别服务商")
-                .disabled(model.isMutating)
 
                 if model.selectedProvider != .doubao {
                     profileControls
-                        .disabled(model.isMutating)
                     SettingsRowDivider()
                     StatusBadge(
-                        text: model.hasStoredKey ? "Key 已保存" : "未配置",
-                        icon: model.hasStoredKey ? "key.fill" : "key.slash",
-                        color: .secondary)
+                        text: model.hasStoredKey ? "已配置" : "未配置",
+                        icon: model.hasStoredKey ? "checkmark.shield" : "key.slash",
+                        color: model.hasStoredKey ? .green : .secondary)
                     ProviderKeyEditor(
                         draft: $model.apiKeyDraft,
                         providerName: model.providerName,
@@ -65,56 +66,63 @@ package struct SpeechRecognitionSettingsCard: View {
     }
 
     private var profileControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker(
-                "识别方式",
-                selection: Binding(
-                    get: { model.selectedProfile.method },
-                    set: { method in Task { await model.selectMethod(method) } }
-                )
-            ) {
-                if model.selectedProfile.method == .unsupported {
-                    Text(SpeechRecognitionMethod.unsupported.displayName)
-                        .tag(SpeechRecognitionMethod.unsupported)
-                        .disabled(true)
-                }
-                ForEach(
-                    SpeechRecognitionProviderCatalog.methods(for: model.selectedProvider),
-                    id: \.self
-                ) { method in
-                    Text(method.displayName).tag(method)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityLabel("语音识别方式")
-            if model.selectedProvider == .qwen {
+        Group {
+            SpeakerRow("识别方式") {
                 Picker(
-                    "地域",
+                    "识别方式",
                     selection: Binding(
-                        get: { model.selectedProfile.region },
-                        set: { region in Task { await model.selectRegion(region) } }
+                        get: { model.selectedProfile.method },
+                        set: { method in Task { await model.selectMethod(method) } }
                     )
                 ) {
-                    ForEach(QwenASRRegion.allCases, id: \.self) { region in
-                        Text(region.displayName).tag(region)
+                    if model.selectedProfile.method == .unsupported {
+                        Text(SpeechRecognitionMethod.unsupported.displayName)
+                            .tag(SpeechRecognitionMethod.unsupported)
+                            .disabled(true)
+                    }
+                    ForEach(
+                        SpeechRecognitionProviderCatalog.methods(for: model.selectedProvider),
+                        id: \.self
+                    ) { method in
+                        Text(method.displayName).tag(method)
                     }
                 }
-                .pickerStyle(.menu)
-                .accessibilityLabel("语音识别地域")
+                .settingsTrailingMenu()
+                .accessibilityLabel("语音识别方式")
             }
-            Picker(
-                "模型",
-                selection: Binding(
-                    get: { model.selectedProfile.model },
-                    set: { modelID in Task { await model.selectModel(modelID) } }
-                )
-            ) {
-                ForEach(model.modelIDs, id: \.self) { modelID in
-                    Text(modelID).tag(modelID)
+            if model.selectedProvider == .qwen {
+                SpeakerRow("地域") {
+                    Picker(
+                        "地域",
+                        selection: Binding(
+                            get: { model.selectedProfile.region },
+                            set: { region in Task { await model.selectRegion(region) } }
+                        )
+                    ) {
+                        ForEach(QwenASRRegion.allCases, id: \.self) { region in
+                            Text(region.displayName).tag(region)
+                        }
+                    }
+                    .settingsTrailingMenu()
+                    .accessibilityLabel("语音识别地域")
                 }
             }
-            .pickerStyle(.menu)
-            .accessibilityLabel("语音识别模型")
+            SpeakerRow("模型") {
+                Picker(
+                    "模型",
+                    selection: Binding(
+                        get: { model.selectedProfile.model },
+                        set: { modelID in Task { await model.selectModel(modelID) } }
+                    )
+                ) {
+                    ForEach(model.modelIDs, id: \.self) { modelID in
+                        Text(modelID).tag(modelID)
+                    }
+                }
+                .settingsTrailingMenu()
+                .accessibilityLabel("语音识别模型")
+            }
         }
+        .disabled(model.isMutating)
     }
 }

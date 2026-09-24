@@ -1112,12 +1112,12 @@ struct SpeakerAppScenarioSpecs {
             failures: &failures
         ) {
             let checking = DoubaoStatusPresentation(status: .checking)
-            try expect(checking.text == SpeakerCopy.DoubaoStatus.checking)
+            try expect(checking.text == SpeakerCopy.ProviderStatus.checking)
             try expect(checking.symbolName == "arrow.triangle.2.circlepath")
 
             try expect(
                 DoubaoStatusPresentation(status: .loading).text
-                    == SpeakerCopy.DoubaoStatus.loading
+                    == SpeakerCopy.ProviderStatus.loading
             )
             try expect(
                 DoubaoStatusPresentation(status: .unconfigured).symbolName
@@ -1125,16 +1125,15 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(
                 DoubaoStatusPresentation(status: .configured).text
-                    == SpeakerCopy.DoubaoStatus.configured
+                    == SpeakerCopy.ProviderStatus.configured
             )
             try expect(
                 DoubaoStatusPresentation(status: .success("id")).text
-                    == SpeakerCopy.DoubaoStatus.success
+                    == SpeakerCopy.ProviderStatus.success
             )
-            try expect(
-                DoubaoStatusPresentation(status: .failure("网络中断")).text
-                    == "网络中断"
-            )
+            let failure = DoubaoStatusPresentation(status: .failure("网络中断"))
+            try expect(failure.text == SpeakerCopy.ProviderStatus.failure)
+            try expect(failure.symbolName == "xmark.circle.fill")
         }
 
         run(

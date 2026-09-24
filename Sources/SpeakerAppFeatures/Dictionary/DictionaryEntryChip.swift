@@ -8,6 +8,8 @@ package struct DictionaryEntryChip: View {
     private let qualityHint: DictionaryEntryQualityHint
     private let onDelete: () -> Void
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     package init(
         word: String,
@@ -43,7 +45,8 @@ package struct DictionaryEntryChip: View {
     }
 
     private var strokeColor: Color {
-        isOmitted ? Color.orange.opacity(0.35) : Color.primary.opacity(0.08)
+        if isOmitted { return Color.orange.opacity(contrast == .increased ? 0.8 : 0.35) }
+        return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
     }
 
     package var body: some View {
@@ -87,11 +90,16 @@ package struct DictionaryEntryChip: View {
                         // A glyph centred in a fixed 20pt hit circle.
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.primary)
-                        .opacity(isHovered ? 1 : 0.35)
+                        .opacity(isHovered || contrast == .increased ? 1 : 0.35)
                 }
                 .frame(width: 20, height: 20)
+                .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: isHovered)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(
+                SpeakerPressableButtonStyle(
+                    pressedScale: SpeakerMotion.compactPressedScale
+                )
+            )
             .contentShape(Circle())
             .accessibilityHidden(true)
             .overlay {

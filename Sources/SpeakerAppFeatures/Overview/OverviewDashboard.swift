@@ -11,13 +11,21 @@ private enum OverviewConstants {
 /// One overview snapshot: the usage totals and the moment they describe. The
 /// reference date travels with the state so week, voiceprint, and heatmap
 /// windows stay pinned instead of reading the wall clock while rendering.
+/// `isLoaded` is false only until the first snapshot of a launch arrives; the
+/// charts play their entrance on that change and nowhere else.
 package struct OverviewDashboardState: Equatable, Sendable {
     package let summary: VoiceInputUsageSummary
     package let referenceDate: Date
+    package let isLoaded: Bool
 
-    package init(summary: VoiceInputUsageSummary, referenceDate: Date) {
+    package init(
+        summary: VoiceInputUsageSummary,
+        referenceDate: Date,
+        isLoaded: Bool = true
+    ) {
         self.summary = summary
         self.referenceDate = referenceDate
+        self.isLoaded = isLoaded
     }
 }
 
@@ -39,16 +47,18 @@ package struct OverviewDashboard: View {
             OverviewHero(
                 summary: summary,
                 now: now,
+                isLoaded: state.isLoaded,
                 reduceMotion: reduceMotion
             )
             OverviewMetrics(summary: summary, now: now)
-                .padding(.top, 28)
+                .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
             OverviewHeatmapCard(
                 summary: summary,
                 now: now,
+                isLoaded: state.isLoaded,
                 reduceMotion: reduceMotion
             )
-            .padding(.top, 32)
+            .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
         }
     }
 }
@@ -56,6 +66,7 @@ package struct OverviewDashboard: View {
 private struct OverviewHero: View {
     let summary: VoiceInputUsageSummary
     let now: Date
+    let isLoaded: Bool
     let reduceMotion: Bool
     @ScaledMetric(relativeTo: .largeTitle)
     private var heroNumberSize = SpeakerTypography.heroNumberBaseSize
@@ -99,11 +110,17 @@ private struct OverviewHero: View {
             HStack(alignment: .center, spacing: 10) {
                 OverviewVoiceprint(
                     counts: voiceprintCounts,
+                    isLoaded: isLoaded,
                     reduceMotion: reduceMotion
                 )
                 Text("近 \(OverviewConstants.voiceprintDays) 天")
                     .font(SpeakerTypography.footnote)
                     .foregroundStyle(.tertiary)
+                    // The bars are hidden from VoiceOver; this line carries
+                    // what they show.
+                    .accessibilityLabel(
+                        "近 \(OverviewConstants.voiceprintDays) 天说出 \(voiceprintCounts.reduce(0, +).formatted(.number.grouping(.automatic))) 字"
+                    )
             }
             .padding(.top, 14)
 
@@ -119,10 +136,20 @@ private struct OverviewHero: View {
     }
 }
 
+/// The last 18 days as bars. They rise once, when the first snapshot of a
+/// launch arrives; later visits and new sessions only retarget bar heights.
 private struct OverviewVoiceprint: View {
     let counts: [Int]
+    let isLoaded: Bool
     let reduceMotion: Bool
-    @State private var isPresented = false
+    @State private var isPresented: Bool
+
+    init(counts: [Int], isLoaded: Bool, reduceMotion: Bool) {
+        self.counts = counts
+        self.isLoaded = isLoaded
+        self.reduceMotion = reduceMotion
+        _isPresented = State(initialValue: isLoaded)
+    }
 
     private var peak: Double {
         Double(max(1, counts.max() ?? 0))
@@ -148,24 +175,21 @@ private struct OverviewVoiceprint: View {
                     )
                     .opacity(count == 0 ? 1 : 0.55 + 0.45 * ratio)
                     .animation(
+                        reduceMotion ? nil : SpeakerMotion.change,
+                        value: ratio
+                    )
+                    .animation(
                         reduceMotion
                             ? nil
-                            : .spring(response: 0.45, dampingFraction: 0.74)
-                                .delay(0.2 + Double(index) * 0.028),
+                            : SpeakerMotion.easeOut(duration: 0.25)
+                                .delay(Double(index) * 0.03),
                         value: isPresented
                     )
             }
         }
         .frame(height: 26)
-        .task(id: counts) {
-            if reduceMotion {
-                isPresented = true
-                return
-            }
-            isPresented = false
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            isPresented = true
+        .onChange(of: isLoaded) { _, loaded in
+            if loaded, !isPresented { isPresented = true }
         }
         .accessibilityHidden(true)
     }
@@ -265,6 +289,7 @@ private struct MetricDivider: View {
 private struct OverviewHeatmapCard: View {
     let summary: VoiceInputUsageSummary
     let now: Date
+    let isLoaded: Bool
     let reduceMotion: Bool
 
     private var heatmap: ContributionHeatmap {
@@ -285,9 +310,14 @@ private struct OverviewHeatmapCard: View {
 
             ContributionHeatmapGrid(
                 heatmap: heatmap,
+                isLoaded: isLoaded,
                 reduceMotion: reduceMotion
             )
-            .id(heatmap.hasData)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("每日说出 · 近 \(ContributionHeatmap.defaultWeekCount) 周")
+            .accessibilityValue(
+                VoiceInputUsagePresentation.heatmapAccessibilitySummary(heatmap)
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .speakerCard()
@@ -303,8 +333,18 @@ private enum HeatmapMetrics {
 
 private struct ContributionHeatmapGrid: View {
     let heatmap: ContributionHeatmap
+    let isLoaded: Bool
     let reduceMotion: Bool
-    @State private var isPresented = false
+    /// Like the voiceprint, the grid sweeps in once per launch, on the first
+    /// snapshot, and is already in place on every later visit.
+    @State private var isPresented: Bool
+
+    init(heatmap: ContributionHeatmap, isLoaded: Bool, reduceMotion: Bool) {
+        self.heatmap = heatmap
+        self.isLoaded = isLoaded
+        self.reduceMotion = reduceMotion
+        _isPresented = State(initialValue: isLoaded)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -324,7 +364,9 @@ private struct ContributionHeatmapGrid: View {
                 }
             }
         }
-        .onAppear { isPresented = true }
+        .onChange(of: isLoaded) { _, loaded in
+            if loaded, !isPresented { isPresented = true }
+        }
     }
 
     private var monthAxis: some View {
@@ -380,7 +422,7 @@ private struct HeatmapCellView: View {
                 )
             )
             .aspectRatio(1, contentMode: .fit)
-            .scaleEffect(reduceMotion || isPresented ? 1 : 0.55)
+            .scaleEffect(reduceMotion || isPresented ? 1 : 0.94)
             .opacity(
                 cell.isFuture
                     ? 0
@@ -389,8 +431,8 @@ private struct HeatmapCellView: View {
             .animation(
                 reduceMotion
                     ? nil
-                    : .easeOut(duration: 0.24)
-                        .delay(0.3 + Double(column) * 0.007),
+                    : SpeakerMotion.easeOut(duration: 0.25)
+                        .delay(Double(column) * 0.005),
                 value: isPresented
             )
             .help(

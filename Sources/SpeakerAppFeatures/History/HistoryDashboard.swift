@@ -113,9 +113,9 @@ package struct HistoryDashboard: View {
     let actions: HistoryDashboardActions
     @State private var expandedRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
+    @State private var searchRefresh: Task<Void, Never>?
     @FocusState private var searchIsFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(
@@ -175,6 +175,16 @@ package struct HistoryDashboard: View {
                     .font(SpeakerTypography.body)
                     .focused($searchIsFocused)
                     .onSubmit(actions.refresh)
+                    // Typing filters after a short pause, so a query cleared
+                    // with the keyboard never leaves the list filtered.
+                    .onChange(of: query) {
+                        searchRefresh?.cancel()
+                        searchRefresh = Task {
+                            try? await Task.sleep(for: .milliseconds(200))
+                            guard !Task.isCancelled else { return }
+                            actions.refresh()
+                        }
+                    }
                 if !query.isEmpty {
                     Button {
                         query = ""
@@ -189,24 +199,7 @@ package struct HistoryDashboard: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(
-                Color.primary.opacity(0.05),
-                in: RoundedRectangle(
-                    cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-                    style: .continuous
-                )
-            )
-            .overlay {
-                RoundedRectangle(
-                    cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-                    style: .continuous
-                )
-                .strokeBorder(
-                    searchBorderColor,
-                    lineWidth: searchIsFocused ? 1.5 : 0.5
-                )
-            }
-            .animation(reduceMotion ? nil : .historyHover, value: searchIsFocused)
+            .speakerField(focused: searchIsFocused)
 
             Menu {
                 Button("刷新", systemImage: "arrow.clockwise", action: actions.refresh)
@@ -238,11 +231,6 @@ package struct HistoryDashboard: View {
         .padding(.vertical, 10)
         // Opaque, because the list scrolls under it.
         .background(Color.historyGround)
-    }
-
-    private var searchBorderColor: Color {
-        if searchIsFocused { return .accentColor.opacity(0.7) }
-        return Color.primary.opacity(contrast == .increased ? 0.28 : 0.08)
     }
 
     private var isSearching: Bool {
@@ -311,7 +299,7 @@ package struct HistoryDashboard: View {
             reduceMotion: reduceMotion,
             copy: { actions.copy(record) },
             toggleDetails: {
-                withAnimation(reduceMotion ? nil : .historyExpand) {
+                withAnimation(reduceMotion ? nil : SpeakerMotion.change) {
                     expandedRecordID =
                         expandedRecordID == record.sessionID
                         ? nil
@@ -327,19 +315,7 @@ package struct HistoryDashboard: View {
     @ViewBuilder
     private var statusFooter: some View {
         if let footer {
-            Label(footer.message, systemImage: footer.icon)
-                .font(SpeakerTypography.caption)
-                .foregroundStyle(footer.color)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    footer.color.opacity(0.10),
-                    in: RoundedRectangle(
-                        cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-                        style: .continuous
-                    )
-                )
+            SettingsNotice(text: footer.message, color: footer.color, icon: footer.icon)
                 .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
@@ -375,12 +351,6 @@ private struct HistoryFooterLine {
     let message: String
     let icon: String
     let color: Color
-}
-
-/// The tab's two motion rungs. Callers still gate them on Reduce Motion.
-extension Animation {
-    fileprivate static let historyHover = Animation.easeOut(duration: 0.12)
-    fileprivate static let historyExpand = Animation.easeOut(duration: 0.18)
 }
 
 extension Color {
@@ -429,21 +399,38 @@ private struct HistoryRecordRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                Text(presentation.time)
-                    .font(SpeakerTypography.mono)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .leading)
-                    .padding(.top, 2)
+                // A real button, so the keyboard and VoiceOver can expand a
+                // record and reach its actions, not only the pointer.
+                Button(action: toggleDetails) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(presentation.time)
+                            .font(SpeakerTypography.mono)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, alignment: .leading)
+                            .padding(.top, 2)
 
-                recordText
+                        recordText
 
-                if let problem = presentation.problem {
-                    Image(systemName: problem.icon)
-                        .font(SpeakerTypography.body)
-                        .foregroundStyle(problem.color)
-                        .padding(.top, 2)
-                        .help(problem.label)
-                        .accessibilityLabel(problem.label)
+                        if let problem = presentation.problem {
+                            Image(systemName: problem.icon)
+                                .font(SpeakerTypography.body)
+                                .foregroundStyle(problem.color)
+                                .padding(.top, 2)
+                                .help(problem.label)
+                                .accessibilityLabel(problem.label)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(isExpanded ? "已展开" : "已收起")
+                .accessibilityActions {
+                    if presentation.canCopy, !isBusy {
+                        Button("复制", action: copy)
+                    }
+                    if !isBusy {
+                        Button("删除") { confirmsDelete = true }
+                    }
                 }
 
                 // The action cluster always occupies its width, whether or not
@@ -462,7 +449,7 @@ private struct HistoryRecordRow: View {
                 )
                 .padding(.horizontal, 8)
                 .padding(.bottom, 12)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(.opacity.combined(with: .offset(y: -6)))
             }
         }
         .background(shape.fill(Color.primary.opacity(fillOpacity)))
@@ -481,7 +468,14 @@ private struct HistoryRecordRow: View {
             }
         #endif
         .onHover { pointerIsInside = $0 }
-        .animation(reduceMotion ? nil : .historyHover, value: isHovered)
+        .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: isHovered)
+        .contextMenu {
+            if presentation.canCopy {
+                Button("复制", action: copy).disabled(isBusy)
+            }
+            Button("删除…", role: .destructive) { confirmsDelete = true }
+                .disabled(isBusy)
+        }
         .confirmationDialog(
             "删除这条会话记录？",
             isPresented: $confirmsDelete,
@@ -573,6 +567,7 @@ private struct HistoryRowActionButton: View {
     let isEnabled: Bool
     let action: () -> Void
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var shape: RoundedRectangle {
         RoundedRectangle(
@@ -597,8 +592,13 @@ private struct HistoryRowActionButton: View {
                     )
                 )
                 .contentShape(shape)
+                .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: isHovered)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(
+            SpeakerPressableButtonStyle(
+                pressedScale: SpeakerMotion.compactPressedScale
+            )
+        )
         .disabled(!isEnabled)
         .onHover { isHovered = $0 }
         .help(label)
@@ -674,7 +674,6 @@ package struct HistoryExpandedRecord: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 8)
     }
 
     private func stageResult(title: String, text: String) -> some View {

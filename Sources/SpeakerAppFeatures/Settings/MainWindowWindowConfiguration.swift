@@ -5,6 +5,10 @@ import SwiftUI
 package enum MainWindowWindowConfiguration {
     package static func apply(to window: NSWindow) {
         window.contentMinSize = MainWindowLayout.minimumContentSize
+        // The title bar holds only the page tabs; it shares the page's
+        // background instead of reading as a separate header band.
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
     }
 }
 

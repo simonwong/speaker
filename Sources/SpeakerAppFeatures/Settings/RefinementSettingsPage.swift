@@ -74,6 +74,7 @@ private struct RefinementPromptEditorCard: View {
         ) {
             RefinementPromptTextEditor(
                 text: $model.promptDraft,
+                label: "“\(promptEditor.title)”提示词",
                 placeholder: "输入该模式的整理提示词……",
                 minHeight: 110
             )
@@ -125,7 +126,10 @@ private struct CustomRefinementModeCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            TextField("模式名称", text: $model.customName)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("模式名称").font(SpeakerTypography.caption)
+                TextField("模式名称", text: $model.customName, prompt: Text("例如：工作邮件"))
+            }
 
             HStack {
                 Spacer()
@@ -141,11 +145,15 @@ private struct CustomRefinementModeCard: View {
                 )
             }
 
-            RefinementPromptTextEditor(
-                text: $model.customPrompt,
-                placeholder: "例如：整理成简洁的工作邮件，保留所有数字和专有名词……",
-                minHeight: 130
-            )
+            VStack(alignment: .leading, spacing: 5) {
+                Text("提示词").font(SpeakerTypography.caption)
+                RefinementPromptTextEditor(
+                    text: $model.customPrompt,
+                    label: "自定义模式提示词",
+                    placeholder: "例如：整理成简洁的工作邮件，保留所有数字和专有名词……",
+                    minHeight: 130
+                )
+            }
 
             HStack {
                 Text(
@@ -173,6 +181,7 @@ private struct CustomRefinementModeCard: View {
 /// the placeholder and height differ.
 private struct RefinementPromptTextEditor: View {
     @Binding var text: String
+    let label: String
     let placeholder: String
     let minHeight: CGFloat
 
@@ -185,6 +194,7 @@ private struct RefinementPromptTextEditor: View {
                 .font(SpeakerTypography.body)
                 .scrollContentBackground(.hidden)
                 .padding(8)
+                .accessibilityLabel(label)
 
             if text.isEmpty {
                 Text(placeholder)
@@ -193,10 +203,11 @@ private struct RefinementPromptTextEditor: View {
                     .padding(.horizontal, 13)
                     .padding(.vertical, 16)
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .frame(minHeight: minHeight)
-        .settingsGlassSurface(focused: focused)
+        .speakerField(focused: focused)
     }
 }
 
@@ -206,60 +217,97 @@ private struct RefinementModeButton: View {
     let highlighted: Bool
     let locked: Bool
     let action: () -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.adaptiveGlassSurfaceStyle) private var surfaceStyle
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            style: .continuous
+        )
+    }
+
+    private var fillColor: Color {
+        highlighted ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.03)
+    }
+
+    @ViewBuilder
+    private func surface(_ content: some View) -> some View {
+        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
+            content.glassEffect(
+                .regular.tint(highlighted ? Color.accentColor.opacity(0.16) : nil).interactive(),
+                in: shape
+            )
+        } else {
+            content.background(fillColor, in: shape)
+        }
+    }
+
+    private var strokeColor: Color {
+        if highlighted { return Color.accentColor.opacity(0.8) }
+        return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
+    }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    Image(systemName: choice.icon)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(
-                            highlighted ? Color.accentColor : .secondary
-                        )
-                    Spacer()
-                    Image(
-                        systemName: selected
-                            ? "checkmark.circle.fill"
-                            : highlighted ? "pencil.circle" : locked ? "lock.fill" : "circle"
-                    )
-                    .foregroundStyle(
-                        highlighted ? Color.accentColor : Color.secondary.opacity(0.55)
-                    )
+            surface(label)
+                .overlay {
+                    shape.strokeBorder(strokeColor, lineWidth: highlighted ? 1.5 : 1)
                 }
-                Text(choice.title)
-                    .font(SpeakerTypography.bodyEmphasis)
-                    .foregroundStyle(.primary)
-                Text(choice.subtitle)
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
-            .settingsGlassSurface(
-                cornerRadius: 10,
-                tint: highlighted ? Color.accentColor.opacity(0.16) : nil,
-                interactive: true
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(
-                        highlighted
-                            ? Color.accentColor.opacity(0.8)
-                            : Color.primary.opacity(0.08),
-                        lineWidth: highlighted ? 1.5 : 1
-                    )
-            }
+                .contentShape(shape)
+                .animation(reduceMotion ? nil : SpeakerMotion.change, value: highlighted)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SpeakerPressableButtonStyle())
         .accessibilityHidden(true)
         .overlay {
             AccessibilityButtonBridge(
                 label: choice.title,
-                hint: selected ? "当前使用" : highlighted ? "正在编辑，尚未启用" : "未启用",
+                hint: choice.subtitle,
+                value: accessibilityState,
                 action: action
             )
         }
+    }
+
+    private var accessibilityState: String {
+        if selected { return "当前使用" }
+        if highlighted { return "正在编辑，尚未启用" }
+        if locked { return "需要先保存 API Key" }
+        return "未启用"
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Image(systemName: choice.icon)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(
+                        highlighted ? Color.accentColor : .secondary
+                    )
+                Spacer()
+                Image(
+                    systemName: selected
+                        ? "checkmark.circle.fill"
+                        : highlighted ? "pencil.circle" : locked ? "lock.fill" : "circle"
+                )
+                .foregroundStyle(
+                    highlighted
+                        ? Color.accentColor
+                        : Color.secondary.opacity(contrast == .increased ? 1 : 0.55)
+                )
+            }
+            Text(choice.title)
+                .font(SpeakerTypography.bodyEmphasis)
+                .foregroundStyle(.primary)
+            Text(choice.subtitle)
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                // Every card keeps two lines, so a row never mixes heights.
+                .lineLimit(2, reservesSpace: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
     }
 }

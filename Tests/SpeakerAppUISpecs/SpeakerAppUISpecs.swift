@@ -544,7 +544,7 @@ struct SpeakerAppUISpecs {
                 ),
                 (
                     VoiceInputHUDContractFixture.problem.presentation,
-                    CGSize(width: 330, height: 54)
+                    CGSize(width: 330, height: 44)
                 ),
             ]
             let presenter = VoiceInputPanelPresenter { presentation in
@@ -599,7 +599,7 @@ struct SpeakerAppUISpecs {
 
             try expect(presenter.evidence.isVisible)
             try expect(
-                presenter.evidence.windowSize == CGSize(width: 330, height: 54)
+                presenter.evidence.windowSize == CGSize(width: 330, height: 44)
             )
         }
 
@@ -626,6 +626,41 @@ struct SpeakerAppUISpecs {
             )
             reduced.present(.hidden)
             try expect(!reduced.evidence.isCollapsingActivity)
+        }
+
+        run(
+            "voice HUD presenter respects Reduce Motion when appearing",
+            failures: &failures
+        ) {
+            // The resting origin sits 24 pt above the bottom of the chosen
+            // screen's visible frame; the animated entrance starts 6 pt lower.
+            func restsOnScreen(_ origin: CGPoint) -> Bool {
+                NSScreen.screens.contains { $0.visibleFrame.minY + 24 == origin.y }
+            }
+
+            let animated = VoiceInputPanelPresenter(
+                reduceMotion: { false }
+            ) { _ in Color.clear }
+            defer { animated.stop() }
+            animated.present(
+                VoiceInputHUDContractFixture.recording.presentation
+            )
+            try expect(
+                !restsOnScreen(animated.evidence.windowOrigin),
+                "the animated entrance did not start below its resting place"
+            )
+
+            let reduced = VoiceInputPanelPresenter(
+                reduceMotion: { true }
+            ) { _ in Color.clear }
+            defer { reduced.stop() }
+            reduced.present(
+                VoiceInputHUDContractFixture.recording.presentation
+            )
+            try expect(
+                restsOnScreen(reduced.evidence.windowOrigin),
+                "Reduce Motion still moved the HUD into place"
+            )
         }
 
         run(
@@ -1025,7 +1060,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "main window tabs keep the native style without separators",
+            "main window tabs sit in the title bar without a tab-view bezel",
             failures: &failures
         ) {
             let selection = MainWindowSelectionFixture()
@@ -1040,58 +1075,56 @@ struct SpeakerAppUISpecs {
                 backing: .buffered,
                 defer: false
             )
-            window.contentView = NSHostingView(
+            let hosting = NSHostingView(
                 rootView: MainWindowGeometryFixture(selection: selection)
             )
+            hosting.sceneBridgingOptions = [.toolbars]
+            window.contentView = hosting
             window.orderFrontRegardless()
             defer {
                 window.orderOut(nil)
                 window.close()
             }
-            let deadline = Date().addingTimeInterval(2)
-            while Date() < deadline {
-                if let frameView = window.contentView?.superview,
-                    let tabs = segmentedControls(in: frameView).first(where: {
-                        $0.segmentCount == MainWindowTab.allCases.count
-                    }),
-                    let mask = tabs.superview?.layer?.mask as? CAShapeLayer,
-                    mask.path != nil
-                {
-                    break
+            @MainActor func pageTabs() -> NSSegmentedControl? {
+                guard let frameView = window.contentView?.superview else { return nil }
+                return segmentedControls(in: frameView).first {
+                    $0.segmentCount == MainWindowTab.allCases.count
                 }
+            }
+            let deadline = Date().addingTimeInterval(2)
+            while Date() < deadline, pageTabs() == nil {
                 RunLoop.current.run(
                     until: min(deadline, Date().addingTimeInterval(0.01))
                 )
             }
 
-            guard let frameView = window.contentView?.superview,
-                let tabs = segmentedControls(in: frameView).first(where: {
-                    $0.segmentCount == MainWindowTab.allCases.count
-                })
-            else {
-                throw SpecFailure(
-                    message: "top tabs were replaced with a custom control"
-                )
+            guard let tabs = pageTabs(), let content = window.contentView else {
+                throw SpecFailure(message: "the title bar has no page tabs")
             }
             try expect(
-                tabs.segmentStyle == .automatic,
-                "top tabs changed the native automatic style"
-            )
-            guard let mask = tabs.superview?.layer?.mask as? CAShapeLayer,
-                let path = mask.path
-            else {
-                throw SpecFailure(message: "top tab separators were still visible")
-            }
-            let segmentWidth =
-                tabs.superview!.bounds.width
-                / CGFloat(tabs.segmentCount)
-            try expect(
-                path.contains(CGPoint(x: segmentWidth / 2, y: 10)),
-                "separator mask hid tab content"
+                !tabs.isDescendant(of: content),
+                "page tabs sit in the content instead of the title bar"
             )
             try expect(
-                !path.contains(CGPoint(x: segmentWidth, y: 10)),
-                "separator mask kept an internal divider"
+                (0..<tabs.segmentCount).map { tabs.label(forSegment: $0) }
+                    == MainWindowTab.allCases.map(\.title),
+                "page tabs lost their titles or order"
+            )
+            try expect(
+                !hasTabView(in: content),
+                "a tab-view bezel still frames the page"
+            )
+            try expect(
+                window.titlebarAppearsTransparent
+                    && window.titlebarSeparatorStyle == .none,
+                "the title bar still reads as a separate header band"
+            )
+            tabs.selectedSegment = MainWindowTab.allCases.firstIndex(of: .dictionary)!
+            tabs.sendAction(tabs.action, to: tabs.target)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            try expect(
+                selection.selection == .dictionary,
+                "choosing a page tab did not select its page"
             )
         }
 
@@ -1245,6 +1278,37 @@ struct SpeakerAppUISpecs {
             try expect(description.hasPrefix("7月9日 · "))
             try expect(description.hasSuffix(" 字"))
             try expect(description.contains("204"))
+
+            let cell = { (day: Int, count: Int, isFuture: Bool) in
+                ContributionHeatmap.Cell(
+                    date: calendar.date(
+                        from: DateComponents(year: 2026, month: 7, day: day))!,
+                    recognizedCharacterCount: count,
+                    level: VoiceInputUsagePresentation.heatmapLevel(
+                        recognizedCharacterCount: count),
+                    isFuture: isFuture
+                )
+            }
+            let heatmap = ContributionHeatmap(
+                columns: [
+                    [cell(6, 0, false), cell(7, 300, false), cell(8, 1_204, false)],
+                    [cell(9, 100, false), cell(10, 0, true)],
+                ],
+                monthLabels: [],
+                hasData: true
+            )
+            let summary = VoiceInputUsagePresentation.heatmapAccessibilitySummary(
+                heatmap, calendar: calendar)
+            try expect(summary.contains("3 天有记录"), summary)
+            // Grouping separators follow the locale, like the cell text.
+            try expect(summary.contains("604 字，"), summary)
+            try expect(summary.contains("7月8日 · "), summary)
+            try expect(summary.hasSuffix("204 字"), summary)
+            try expect(
+                VoiceInputUsagePresentation.heatmapAccessibilitySummary(
+                    ContributionHeatmap(
+                        columns: [[cell(6, 0, false)]], monthLabels: [], hasData: false)
+                ) == "还没有记录")
         }
 
         run(
@@ -2153,22 +2217,20 @@ private struct MainWindowGeometryFixture: View {
 
     var body: some View {
         MainWindowLayoutContainer {
-            TabView(selection: $selection.selection) {
-                ForEach(MainWindowTab.allCases) { tab in
-                    Color.clear
-                        .frame(
-                            minWidth: tab == .dictionary ? 980 : 200,
-                            minHeight: tab == .about ? 700 : 200
-                        )
-                        .tabItem {
-                            Label(tab.title, systemImage: tab.icon)
-                        }
-                        .tag(tab)
-                }
+            MainWindowTabs(selection: $selection.selection) { tab in
+                Color.clear
+                    .frame(
+                        minWidth: tab == .dictionary ? 980 : 200,
+                        minHeight: tab == .about ? 700 : 200
+                    )
             }
-            .background(MainWindowTabSeparatorHider())
         }
     }
+}
+
+@MainActor
+private func hasTabView(in root: NSView) -> Bool {
+    root is NSTabView || root.subviews.contains(where: hasTabView(in:))
 }
 
 private struct SettingsOverviewScrollFixture: View {

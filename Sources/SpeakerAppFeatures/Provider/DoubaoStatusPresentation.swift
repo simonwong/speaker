@@ -13,28 +13,28 @@ package struct DoubaoStatusPresentation: Equatable, Sendable {
     package init(status: DoubaoConnectionStatus) {
         switch status {
         case .loading:
-            text = SpeakerCopy.DoubaoStatus.loading
+            text = SpeakerCopy.ProviderStatus.loading
             symbolName = "clock"
             tint = .secondary
         case .unconfigured:
-            text = SpeakerCopy.DoubaoStatus.unconfigured
+            text = SpeakerCopy.ProviderStatus.unconfigured
             symbolName = "key.slash"
             tint = .secondary
         case .configured:
-            text = SpeakerCopy.DoubaoStatus.configured
+            text = SpeakerCopy.ProviderStatus.configured
             symbolName = "checkmark.shield"
             tint = .green
         case .checking:
-            text = SpeakerCopy.DoubaoStatus.checking
+            text = SpeakerCopy.ProviderStatus.checking
             symbolName = "arrow.triangle.2.circlepath"
             tint = .blue
         case .success:
-            text = SpeakerCopy.DoubaoStatus.success
+            text = SpeakerCopy.ProviderStatus.success
             symbolName = "checkmark.circle.fill"
             tint = .green
-        case .failure(let message):
-            text = message
-            symbolName = "exclamationmark.triangle.fill"
+        case .failure:
+            text = SpeakerCopy.ProviderStatus.failure
+            symbolName = "xmark.circle.fill"
             tint = .red
         }
     }

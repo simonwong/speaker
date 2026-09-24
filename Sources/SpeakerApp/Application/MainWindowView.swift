@@ -13,53 +13,15 @@ struct MainWindowView: View {
         MainWindowLayoutContainer {
             switch dataErasure.state.workspaceRoute {
             case .normal:
-                TabView(selection: $mainWindow.selection) {
-                    OverviewView(model: overview)
-                        .tabItem {
-                            Label(
-                                MainWindowTab.overview.title,
-                                systemImage: MainWindowTab.overview.icon
-                            )
-                        }
-                        .tag(MainWindowTab.overview)
-
-                    HistoryView(model: history)
-                        .tabItem {
-                            Label(
-                                MainWindowTab.history.title,
-                                systemImage: MainWindowTab.history.icon
-                            )
-                        }
-                        .tag(MainWindowTab.history)
-
-                    DictionaryTabView(model: dictionary)
-                        .tabItem {
-                            Label(
-                                MainWindowTab.dictionary.title,
-                                systemImage: MainWindowTab.dictionary.icon
-                            )
-                        }
-                        .tag(MainWindowTab.dictionary)
-
-                    SettingsView(workspace: settingsWorkspace)
-                        .tabItem {
-                            Label(
-                                MainWindowTab.settings.title,
-                                systemImage: MainWindowTab.settings.icon
-                            )
-                        }
-                        .tag(MainWindowTab.settings)
-
-                    AboutView(workspace: settingsWorkspace)
-                        .tabItem {
-                            Label(
-                                MainWindowTab.about.title,
-                                systemImage: MainWindowTab.about.icon
-                            )
-                        }
-                        .tag(MainWindowTab.about)
+                MainWindowTabs(selection: $mainWindow.selection) { tab in
+                    switch tab {
+                    case .overview: OverviewView(model: overview)
+                    case .history: HistoryView(model: history)
+                    case .dictionary: DictionaryTabView(model: dictionary)
+                    case .settings: SettingsView(workspace: settingsWorkspace)
+                    case .about: AboutView(workspace: settingsWorkspace)
+                    }
                 }
-                .background(MainWindowTabSeparatorHider())
             case .erasing:
                 DataErasureInProgressView()
             case .aboutRecovery:

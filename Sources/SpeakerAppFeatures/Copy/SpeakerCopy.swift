@@ -7,14 +7,17 @@ import SpeakerCore
 /// present lives here so the same fact can never reach the user in two
 /// different sentences. Copy owned by a single surface stays with that view.
 package enum SpeakerCopy {
-    /// Doubao connection status wording. The settings page and the onboarding
-    /// window read the same entries through `DoubaoStatusPresentation`.
-    package enum DoubaoStatus {
+    /// Provider connection status wording. The Doubao badge, which the
+    /// settings page and the onboarding window share through
+    /// `DoubaoStatusPresentation`, and the refinement provider badge read the
+    /// same entries. A failure's detail belongs in the notice below the badge.
+    package enum ProviderStatus {
         package static let loading = "正在读取本机配置"
         package static let unconfigured = "未配置"
         package static let configured = "已配置"
         package static let checking = "正在检查连接"
         package static let success = "连接成功"
+        package static let failure = "连接失败"
     }
 
     /// The refinement mode names the settings picker, the menu bar menu and

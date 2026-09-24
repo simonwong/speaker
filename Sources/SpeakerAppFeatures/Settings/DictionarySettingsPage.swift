@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DictionarySettingsPage: View {
     @ObservedObject var model: DictionarySettingsModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         SettingsCard(
@@ -47,6 +48,7 @@ struct DictionarySettingsPage: View {
                         ) {
                             Task { await model.delete(entry.id) }
                         }
+                        .transition(chipTransition)
                     }
                 }
             }
@@ -55,6 +57,16 @@ struct DictionarySettingsPage: View {
                 SettingsNotice(text: notice)
             }
         }
+        .animation(
+            reduceMotion ? nil : SpeakerMotion.change,
+            value: model.entries.map(\.id)
+        )
+    }
+
+    /// Chips grow in from 90 %, never from nothing; Reduce Motion keeps only
+    /// the fade.
+    private var chipTransition: AnyTransition {
+        reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity)
     }
 
     private var hasOmittedEntries: Bool {
