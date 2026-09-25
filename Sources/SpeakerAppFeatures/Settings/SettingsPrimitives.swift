@@ -64,14 +64,22 @@ struct SettingsRowDivider: View {
 
 extension View {
     /// A row's trailing menu: the row title names it, and every menu in a card
-    /// shares one right-hand column.
+    /// shares one right-hand column. The large size draws the same capsule as
+    /// the buttons and fields.
     func settingsTrailingMenu() -> some View {
         labelsHidden()
             .pickerStyle(.menu)
+            .controlSize(.large)
             .frame(maxWidth: SpeakerSurfaceMetrics.trailingControlWidth, alignment: .trailing)
     }
 }
 
+/// A state beside its row: a filled-circle glyph in the state's colour and
+/// plain text. The glyph carries the colour, so a card of healthy states
+/// stays quiet; a state that asks for attention keeps full-strength text.
+///
+/// `icon` names a `*.circle.fill` symbol; its glyph draws white on the
+/// coloured circle.
 package struct StatusBadge: View {
     let text: String
     let icon: String
@@ -84,27 +92,21 @@ package struct StatusBadge: View {
         self.color = color
     }
 
+    /// Healthy and neutral states recede into secondary text.
+    private var isSettled: Bool { color == .green || color == .secondary }
+
     package var body: some View {
         Label {
             Text(text)
-                .foregroundStyle(contrast == .increased ? Color.primary : color)
+                .foregroundStyle(
+                    isSettled && contrast != .increased ? Color.secondary : Color.primary
+                )
         } icon: {
             Image(systemName: icon)
-                .font(SpeakerTypography.footnote.weight(.semibold))
-                .foregroundStyle(color)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, color)
         }
-        .font(SpeakerTypography.footnote.weight(.medium))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            color.opacity(contrast == .increased ? 0.2 : 0.12),
-            in: Capsule()
-        )
-        .overlay {
-            if contrast == .increased {
-                Capsule().stroke(color.opacity(0.75), lineWidth: 1)
-            }
-        }
+        .font(SpeakerTypography.footnote)
         .lineLimit(1)
     }
 }

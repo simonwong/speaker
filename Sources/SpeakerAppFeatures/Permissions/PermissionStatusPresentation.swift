@@ -14,19 +14,19 @@ package struct PermissionStatusPresentation: Equatable, Sendable {
         switch state {
         case .granted:
             text = "已开启"
-            symbolName = "checkmark"
+            symbolName = "checkmark.circle.fill"
             tint = .green
         case .denied:
             text = "未开启"
-            symbolName = "exclamationmark"
+            symbolName = "exclamationmark.circle.fill"
             tint = .orange
         case .notDetermined:
             text = "待允许"
-            symbolName = "exclamationmark"
+            symbolName = "exclamationmark.circle.fill"
             tint = .orange
         case .restricted:
             text = "受系统限制"
-            symbolName = "lock.fill"
+            symbolName = "lock.circle.fill"
             tint = .red
         }
     }

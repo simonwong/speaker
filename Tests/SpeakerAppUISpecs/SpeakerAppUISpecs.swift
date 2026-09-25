@@ -1060,7 +1060,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "main window tabs sit in the title bar without a tab-view bezel",
+            "main window tabs sit in the title bar without a tab-view bezel or segment hairlines",
             failures: &failures
         ) {
             let selection = MainWindowSelectionFixture()
@@ -1085,30 +1085,34 @@ struct SpeakerAppUISpecs {
                 window.orderOut(nil)
                 window.close()
             }
-            @MainActor func pageTabs() -> NSSegmentedControl? {
-                guard let frameView = window.contentView?.superview else { return nil }
-                return segmentedControls(in: frameView).first {
-                    $0.segmentCount == MainWindowTab.allCases.count
+            guard let content = window.contentView,
+                let frameView = content.superview
+            else {
+                throw SpecFailure(message: "the window has no content view")
+            }
+            @MainActor func toolbarItemHosts() -> [NSView] {
+                views(in: frameView).filter {
+                    String(describing: type(of: $0)).hasPrefix("ToolbarItemHostingView")
+                        && !$0.isDescendant(of: content)
                 }
             }
             let deadline = Date().addingTimeInterval(2)
-            while Date() < deadline, pageTabs() == nil {
+            while Date() < deadline, toolbarItemHosts().isEmpty {
                 RunLoop.current.run(
                     until: min(deadline, Date().addingTimeInterval(0.01))
                 )
             }
 
-            guard let tabs = pageTabs(), let content = window.contentView else {
-                throw SpecFailure(message: "the title bar has no page tabs")
-            }
             try expect(
-                !tabs.isDescendant(of: content),
-                "page tabs sit in the content instead of the title bar"
+                !toolbarItemHosts().isEmpty,
+                "the title bar has no page tabs"
             )
             try expect(
-                (0..<tabs.segmentCount).map { tabs.label(forSegment: $0) }
-                    == MainWindowTab.allCases.map(\.title),
-                "page tabs lost their titles or order"
+                !segmentedControls(in: frameView).contains {
+                    $0.segmentCount == MainWindowTab.allCases.count
+                },
+                "a segmented control, with a hairline between segments, "
+                    + "still draws the page tabs"
             )
             try expect(
                 !hasTabView(in: content),
@@ -1119,12 +1123,56 @@ struct SpeakerAppUISpecs {
                     && window.titlebarSeparatorStyle == .none,
                 "the title bar still reads as a separate header band"
             )
-            tabs.selectedSegment = MainWindowTab.allCases.firstIndex(of: .dictionary)!
-            tabs.sendAction(tabs.action, to: tabs.target)
+        }
+
+        run(
+            "clicking a page tab selects its page",
+            failures: &failures
+        ) {
+            let selection = MainWindowSelectionFixture()
+            let host = NSHostingView(
+                rootView: MainWindowTabBarFixture(selection: selection)
+            )
+            let window = NSWindow(
+                contentRect: NSRect(x: -10_000, y: -10_000, width: 420, height: 44),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            window.orderFrontRegardless()
+            defer { window.close() }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+            // Every title is two characters, so the five tabs share one width
+            // and the bar's centre lands on the middle tab.
+            try expect(MainWindowTab.allCases[2] == .dictionary)
+            let point = host.convert(
+                NSPoint(x: host.bounds.midX, y: host.bounds.midY),
+                to: nil
+            )
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(
+                    with: type,
+                    location: point,
+                    modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber,
+                    context: nil,
+                    eventNumber: 0,
+                    clickCount: 1,
+                    pressure: 1
+                )
+                guard let event else {
+                    throw SpecFailure(message: "could not synthesize a click")
+                }
+                window.sendEvent(event)
+            }
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
             try expect(
                 selection.selection == .dictionary,
-                "choosing a page tab did not select its page"
+                "clicking the middle page tab selected \(selection.selection)"
             )
         }
 
@@ -2149,6 +2197,11 @@ private func accessibilityLabels(in root: NSView) -> [String] {
 }
 
 @MainActor
+private func views(in root: NSView) -> [NSView] {
+    [root] + root.subviews.flatMap(views(in:))
+}
+
+@MainActor
 private func segmentedControls(in root: NSView) -> [NSSegmentedControl] {
     var controls: [NSSegmentedControl] = []
 
@@ -2210,6 +2263,14 @@ private func hudTopBorderLuminance(_ bitmap: NSBitmapImageRep) -> Double {
 @MainActor
 private final class MainWindowSelectionFixture: ObservableObject {
     @Published var selection: MainWindowTab = .overview
+}
+
+private struct MainWindowTabBarFixture: View {
+    @ObservedObject var selection: MainWindowSelectionFixture
+
+    var body: some View {
+        MainWindowTabBar(selection: $selection.selection)
+    }
 }
 
 private struct MainWindowGeometryFixture: View {

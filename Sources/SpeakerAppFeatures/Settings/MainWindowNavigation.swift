@@ -26,9 +26,9 @@ package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// The main window's five destinations. A native segmented control in the
-/// title bar picks one, and only that page fills the window, so no tab-view
-/// bezel sits between the toolbar and the page.
+/// The main window's five destinations. A tab bar in the title bar picks one,
+/// and only that page fills the window, so no tab-view bezel sits between the
+/// toolbar and the page.
 package struct MainWindowTabs<Page: View>: View {
     @Binding private var selection: MainWindowTab
     private let page: (MainWindowTab) -> Page
@@ -65,15 +65,62 @@ package struct MainWindowTabs<Page: View>: View {
             .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Picker("页面", selection: $selection) {
-                        ForEach(MainWindowTab.allCases) { tab in
-                            Text(tab.title).tag(tab)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    MainWindowTabBar(selection: $selection)
                 }
             }
+    }
+}
+
+/// The title-bar page switcher. A segmented control draws a hairline between
+/// every pair of unselected segments; this bar draws only the selected
+/// capsule, which slides to the new page, on the toolbar's own glass.
+/// Assistive technologies still meet a segmented picker.
+package struct MainWindowTabBar: View {
+    @Binding private var selection: MainWindowTab
+    @Namespace private var indicator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    package init(selection: Binding<MainWindowTab>) {
+        _selection = selection
+    }
+
+    package var body: some View {
+        HStack(spacing: 2) {
+            ForEach(MainWindowTab.allCases) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    label(for: tab)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        // Only the indicator slides; the page itself swaps at once.
+        .animation(reduceMotion ? nil : SpeakerMotion.change, value: selection)
+        .accessibilityRepresentation {
+            Picker("页面", selection: $selection) {
+                ForEach(MainWindowTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+
+    private func label(for tab: MainWindowTab) -> some View {
+        Text(tab.title)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background {
+                if selection == tab {
+                    Capsule()
+                        .fill(Color.primary.opacity(contrast == .increased ? 0.2 : 0.1))
+                        .matchedGeometryEffect(id: "selection", in: indicator)
+                }
+            }
+            .contentShape(Capsule())
     }
 }
 

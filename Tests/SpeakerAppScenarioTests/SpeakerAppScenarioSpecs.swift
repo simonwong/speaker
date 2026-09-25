@@ -1113,7 +1113,7 @@ struct SpeakerAppScenarioSpecs {
         ) {
             let checking = DoubaoStatusPresentation(status: .checking)
             try expect(checking.text == SpeakerCopy.ProviderStatus.checking)
-            try expect(checking.symbolName == "arrow.triangle.2.circlepath")
+            try expect(checking.symbolName == "arrow.triangle.2.circlepath.circle.fill")
 
             try expect(
                 DoubaoStatusPresentation(status: .loading).text
@@ -1121,7 +1121,7 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(
                 DoubaoStatusPresentation(status: .unconfigured).symbolName
-                    == "key.slash"
+                    == "key.circle.fill"
             )
             try expect(
                 DoubaoStatusPresentation(status: .configured).text

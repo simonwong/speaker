@@ -35,7 +35,7 @@ package struct SpeechRecognitionSettingsCard: View {
                     SettingsRowDivider()
                     StatusBadge(
                         text: model.hasStoredKey ? "已配置" : "未配置",
-                        icon: model.hasStoredKey ? "checkmark.shield" : "key.slash",
+                        icon: model.hasStoredKey ? "checkmark.circle.fill" : "key.circle.fill",
                         color: model.hasStoredKey ? .green : .secondary)
                     ProviderKeyEditor(
                         draft: $model.apiKeyDraft,

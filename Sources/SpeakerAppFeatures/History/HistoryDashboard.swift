@@ -197,8 +197,8 @@ package struct HistoryDashboard: View {
                     .accessibilityLabel("清空搜索")
                 }
             }
-            .padding(.horizontal, 10)
-            .frame(height: 28)
+            .padding(.horizontal, 12)
+            .frame(height: SpeakerSurfaceMetrics.fieldHeight)
             .speakerField(focused: searchIsFocused)
 
             Menu {
@@ -216,7 +216,10 @@ package struct HistoryDashboard: View {
                     // field's height: the size belongs to the box.
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(
+                        width: SpeakerSurfaceMetrics.fieldHeight,
+                        height: SpeakerSurfaceMetrics.fieldHeight
+                    )
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)

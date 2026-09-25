@@ -207,7 +207,7 @@ private struct RefinementPromptTextEditor: View {
             }
         }
         .frame(minHeight: minHeight)
-        .speakerField(focused: focused)
+        .speakerEditorField(focused: focused)
     }
 }
 

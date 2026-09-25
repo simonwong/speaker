@@ -257,8 +257,8 @@ package struct RefinementProviderSettingsCard: View {
     private var statusIcon: String {
         if model.isConnectionVerified { return "checkmark.circle.fill" }
         if model.connectionFailure != nil { return "xmark.circle.fill" }
-        if model.hasStoredKey { return "checkmark.shield" }
-        return "key.slash"
+        if model.hasStoredKey { return "checkmark.circle.fill" }
+        return "key.circle.fill"
     }
 
     private var statusColor: Color {
@@ -380,8 +380,8 @@ private struct RefinementConfigurationField: View {
                 label: label, placeholder: placeholder, text: $text, isFocused: $isFocused
             )
             .frame(height: 20)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .frame(height: SpeakerSurfaceMetrics.fieldHeight)
             .speakerField(focused: isFocused)
         }
     }

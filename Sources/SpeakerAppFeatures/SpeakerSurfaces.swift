@@ -16,6 +16,9 @@ package enum SpeakerSurfaceMetrics {
     package static let cardHeaderSpacing: CGFloat = 14
     package static let rowSpacing: CGFloat = 12
     package static let controlCornerRadius: CGFloat = 8
+    /// Single-line fields match the large capsule buttons and menus beside
+    /// them.
+    package static let fieldHeight: CGFloat = 28
     package static let chipCornerRadius: CGFloat = 8
     package static let iconTileSize: CGFloat = 28
     package static let iconTileCornerRadius: CGFloat = 7
@@ -74,21 +77,16 @@ package struct SpeakerPressableButtonStyle: ButtonStyle {
 /// The surface every editable field sits on: the History search bar,
 /// settings text fields, and prompt editors share one glass, one hairline, and
 /// one focus ring. Without Liquid Glass it falls back to an inset well.
-package struct SpeakerFieldSurface: ViewModifier {
+package struct SpeakerFieldSurface<FieldShape: InsettableShape>: ViewModifier {
     private let focused: Bool
+    private let shape: FieldShape
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.adaptiveGlassSurfaceStyle) private var surfaceStyle
 
-    nonisolated package init(focused: Bool) {
+    nonisolated package init(focused: Bool, shape: FieldShape) {
         self.focused = focused
-    }
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-            style: .continuous
-        )
+        self.shape = shape
     }
 
     private var borderColor: Color {
@@ -116,7 +114,11 @@ package struct SpeakerFieldSurface: ViewModifier {
     @ViewBuilder
     private func surface(_ content: Content) -> some View {
         if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.glassEffect(.regular, in: shape)
+            // Glass over the glass card samples almost the same colour, so a
+            // faint well underneath keeps the field legible as a field.
+            content
+                .background(Color.primary.opacity(0.05), in: shape)
+                .glassEffect(.regular, in: shape)
         } else {
             content.background(Color.primary.opacity(0.05), in: shape)
         }
@@ -124,9 +126,24 @@ package struct SpeakerFieldSurface: ViewModifier {
 }
 
 extension View {
-    /// Nonisolated so `TextFieldStyle` bodies can apply it.
+    /// A single-line field: a capsule, the same height and shape as the
+    /// buttons and menus beside it. Nonisolated so `TextFieldStyle` bodies
+    /// can apply it.
     nonisolated package func speakerField(focused: Bool) -> some View {
-        modifier(SpeakerFieldSurface(focused: focused))
+        modifier(SpeakerFieldSurface(focused: focused, shape: Capsule()))
+    }
+
+    /// A multi-line editor keeps a rounded rectangle; a capsule would clip
+    /// its corners.
+    nonisolated package func speakerEditorField(focused: Bool) -> some View {
+        modifier(
+            SpeakerFieldSurface(
+                focused: focused,
+                shape: RoundedRectangle(
+                    cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+                    style: .continuous
+                )
+            ))
     }
 }
 

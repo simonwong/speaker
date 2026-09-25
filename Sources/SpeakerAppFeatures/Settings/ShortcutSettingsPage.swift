@@ -127,9 +127,9 @@ struct ShortcutSettingsPage: View {
 
     private var shortcutStatusIcon: String {
         switch shortcut.activation {
-        case .active: "checkmark"
-        case .waitingForAccessibility, .unavailable: "exclamationmark"
-        case .stopped: "pause.fill"
+        case .active: "checkmark.circle.fill"
+        case .waitingForAccessibility, .unavailable: "exclamationmark.circle.fill"
+        case .stopped: "pause.circle.fill"
         }
     }
 
