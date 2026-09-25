@@ -83,7 +83,11 @@ enum RefinementProviderUISpecs {
                 pump(hosting)
                 return model.selectedProvider == .custom && editableFields(in: hosting).count == 3
             }
-            try expect(custom, "custom provider did not expose URL, model ID and secure Key fields")
+            let fieldsSeen = fieldSummary(in: hosting)
+            try expect(
+                custom,
+                "custom provider did not expose URL, model ID and secure Key fields: provider \(model.selectedProvider), popup \(provider.titleOfSelectedItem ?? "-") in window \(provider.window != nil), fields [\(fieldsSeen)]"
+            )
             let fields = editableFields(in: hosting)
             try expect(
                 fields.allSatisfy { !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty },
@@ -259,6 +263,16 @@ enum RefinementProviderUISpecs {
     @MainActor
     private static func editableFields(in root: NSView) -> [NSTextField] {
         controls(NSTextField.self, in: root).filter(\.isEditable)
+    }
+
+    /// Every editable field with its label and visibility, so a failure on a
+    /// CI runner shows what the card rendered.
+    @MainActor
+    private static func fieldSummary(in root: NSView) -> String {
+        editableFields(in: root).map { field in
+            let label = field.accessibilityLabel() ?? field.placeholderString ?? "-"
+            return "\(type(of: field)) \(label) hidden=\(field.isHiddenOrHasHiddenAncestor)"
+        }.joined(separator: "; ")
     }
 
     @MainActor
