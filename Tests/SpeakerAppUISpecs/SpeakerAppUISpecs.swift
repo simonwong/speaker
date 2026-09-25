@@ -153,14 +153,16 @@ struct SpeakerAppUISpecs {
             await PendingCopyRecoveryUISpecs.run(failures: &failures)
             onboardingFinished = true
         }
-        let onboardingDeadline = Date().addingTimeInterval(20)
+        // A hang guard, not a speed check: each spec bounds its own waits, and
+        // the whole batch takes 10–20 seconds on hosted CI runners.
+        let onboardingDeadline = Date().addingTimeInterval(60)
         while !onboardingFinished, Date() < onboardingDeadline {
             RunLoop.current.run(until: min(onboardingDeadline, Date().addingTimeInterval(0.01)))
         }
         guard onboardingFinished else {
             onboardingTask.cancel()
             SpecSummary.finish(
-                failures: ["the asynchronous UI specs did not finish within 20 seconds"],
+                failures: ["the asynchronous UI specs did not finish within 60 seconds"],
                 label: "AppKit UI specs"
             )
             return
