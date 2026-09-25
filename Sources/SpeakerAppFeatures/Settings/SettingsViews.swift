@@ -81,6 +81,9 @@ package struct DataErasureRecoveryView: View {
                 }
                 .disabled(dataErasure.state == .erasing)
             }
+            // The main window shows this view outside `SettingsView`, so it
+            // carries the settings button style itself.
+            .buttonStyle(SettingsButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)

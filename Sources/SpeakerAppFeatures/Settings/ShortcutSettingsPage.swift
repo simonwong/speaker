@@ -5,26 +5,26 @@ struct ShortcutSettingsPage: View {
     @ObservedObject var shortcut: VoiceShortcutFeature
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
     let openPermissionSettings: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-            SettingsCard {
-                recorderRow
+        SettingsCard {
+            recorderRow
 
-                if shortcutRecorder.isRecording,
-                    let notice = shortcutRecorder.notice
-                {
-                    recordingNotice(notice)
-                }
+            if shortcutRecorder.isRecording,
+                let notice = shortcutRecorder.notice
+            {
+                recordingNotice(notice)
+            }
 
-                if let notice = shortcut.notice {
-                    SettingsNotice(
-                        text: notice.message,
-                        color: noticeColor(notice.level)
-                    )
-                    if let recovery = notice.recovery {
-                        recoveryRow(recovery)
-                    }
+            if let notice = shortcut.notice {
+                SettingsNotice(
+                    text: notice.message,
+                    color: noticeColor(notice.level)
+                )
+                if let recovery = notice.recovery {
+                    recoveryRow(recovery)
                 }
             }
         }
@@ -32,29 +32,7 @@ struct ShortcutSettingsPage: View {
 
     private var recorderRow: some View {
         HStack(spacing: 14) {
-            Text(shortcut.preference.displayName)
-                .font(
-                    Font.system(.title2, design: .rounded).weight(.semibold)
-                )
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .frame(minWidth: 72, minHeight: 40)
-                .background(
-                    Color.primary.opacity(0.06),
-                    in: RoundedRectangle(
-                        cornerRadius: SpeakerSurfaceMetrics
-                            .controlCornerRadius,
-                        style: .continuous
-                    )
-                )
-                .overlay {
-                    RoundedRectangle(
-                        cornerRadius: SpeakerSurfaceMetrics
-                            .controlCornerRadius,
-                        style: .continuous
-                    )
-                    .stroke(Color.primary.opacity(0.10), lineWidth: 1)
-                }
+            ShortcutKeycap(name: shortcut.preference.displayName)
 
             StatusBadge(
                 text: shortcutStatusText,
@@ -79,26 +57,40 @@ struct ShortcutSettingsPage: View {
                     }
                 }
             }
-            .buttonStyle(SettingsButtonStyle(prominent: true))
+            // Cancel is the way out, not the recommended action.
+            .buttonStyle(SettingsButtonStyle(prominent: !shortcutRecorder.isRecording))
         }
     }
 
     private func recordingNotice(_ notice: String) -> some View {
         HStack(spacing: 9) {
-            Circle()
-                .fill(.red)
-                .frame(width: 8, height: 8)
+            Image(systemName: "circle.fill")
+                // A fixed 8pt recording light, not a text glyph.
+                .font(.system(size: 8))
+                .foregroundStyle(.red)
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+                .accessibilityHidden(true)
             Text(notice)
                 .font(SpeakerTypography.caption)
             Spacer()
         }
-        .padding(10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(
-            Color.primary.opacity(0.04),
-            in: RoundedRectangle(
-                cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-                style: .continuous
-            )
+            Color.primary.opacity(contrast == .increased ? 0.08 : 0.04),
+            in: noticeShape
+        )
+        .overlay {
+            if contrast == .increased {
+                noticeShape.stroke(Color.secondary.opacity(0.7), lineWidth: 1)
+            }
+        }
+    }
+
+    private var noticeShape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            style: .continuous
         )
     }
 
@@ -117,7 +109,6 @@ struct ShortcutSettingsPage: View {
                     openPermissionSettings()
                 }
             }
-            .controlSize(.small)
         }
     }
 
@@ -136,9 +127,9 @@ struct ShortcutSettingsPage: View {
 
     private var shortcutStatusIcon: String {
         switch shortcut.activation {
-        case .active: "checkmark"
-        case .waitingForAccessibility, .unavailable: "exclamationmark"
-        case .stopped: "pause.fill"
+        case .active: "checkmark.circle.fill"
+        case .waitingForAccessibility, .unavailable: "exclamationmark.circle.fill"
+        case .stopped: "pause.circle.fill"
         }
     }
 
@@ -156,5 +147,34 @@ struct ShortcutSettingsPage: View {
         case .warning: .orange
         case .error: .red
         }
+    }
+}
+
+/// The current shortcut drawn as one key. Settings and the onboarding
+/// tutorial show the same keycap.
+struct ShortcutKeycap: View {
+    let name: String
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            style: .continuous
+        )
+    }
+
+    var body: some View {
+        Text(name)
+            .font(Font.system(.title2, design: .rounded).weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(minWidth: 72, minHeight: 40)
+            .background(Color.primary.opacity(0.06), in: shape)
+            .overlay {
+                shape.strokeBorder(
+                    Color.primary.opacity(contrast == .increased ? 0.4 : 0.10),
+                    lineWidth: 1
+                )
+            }
     }
 }

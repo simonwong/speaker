@@ -125,6 +125,30 @@ public enum VoiceInputUsagePresentation {
         let count = recognizedCharacterCount.formatted(.number.grouping(.automatic))
         return "\(month)月\(day)日 · \(count) 字"
     }
+
+    /// What VoiceOver reads for the whole heatmap instead of 364 hover-only
+    /// cells: the total, the active days, and the busiest day.
+    public static func heatmapAccessibilitySummary(
+        _ heatmap: ContributionHeatmap,
+        calendar: Calendar = .current
+    ) -> String {
+        let days = heatmap.columns.joined().filter {
+            !$0.isFuture && $0.recognizedCharacterCount > 0
+        }
+        guard
+            let busiest = days.max(by: {
+                $0.recognizedCharacterCount < $1.recognizedCharacterCount
+            })
+        else { return "还没有记录" }
+        let total = days.reduce(0) { $0 + $1.recognizedCharacterCount }
+            .formatted(.number.grouping(.automatic))
+        let busiestDay = heatmapCellDescription(
+            date: busiest.date,
+            recognizedCharacterCount: busiest.recognizedCharacterCount,
+            calendar: calendar
+        )
+        return "共 \(total) 字，\(days.count) 天有记录；最多的一天是 \(busiestDay)"
+    }
 }
 
 /// A GitHub-style contribution heatmap: the last `weeks` calendar weeks laid out

@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
@@ -25,98 +24,103 @@ package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
         case .about: Self.aboutTitle
         }
     }
-
-    package var icon: String {
-        switch self {
-        case .overview: "chart.bar.xaxis"
-        case .history: "clock.arrow.circlepath"
-        case .settings: "gearshape"
-        case .dictionary: "text.book.closed"
-        case .about: "info.circle"
-        }
-    }
 }
 
-package struct MainWindowTabSeparatorHider: NSViewRepresentable {
-    package init() {}
+/// The main window's five destinations. A tab bar in the title bar picks one,
+/// and only that page fills the window, so no tab-view bezel sits between the
+/// toolbar and the page.
+package struct MainWindowTabs<Page: View>: View {
+    @Binding private var selection: MainWindowTab
+    private let page: (MainWindowTab) -> Page
 
-    package func makeNSView(context: Context) -> NSView {
-        MainWindowTabSeparatorConfiguratorView()
+    package init(
+        selection: Binding<MainWindowTab>,
+        @ViewBuilder page: @escaping (MainWindowTab) -> Page
+    ) {
+        _selection = selection
+        self.page = page
     }
 
-    package func updateNSView(_ nsView: NSView, context: Context) {
-        guard
-            let configurator = nsView
-                as? MainWindowTabSeparatorConfiguratorView
-        else { return }
-        configurator.scheduleConfiguration()
-    }
-}
-
-private final class MainWindowTabSeparatorConfiguratorView: NSView {
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        scheduleConfiguration()
-    }
-
-    override func layout() {
-        super.layout()
-        scheduleConfiguration()
-    }
-
-    func scheduleConfiguration() {
-        DispatchQueue.main.async { [weak self] in
-            self?.removeSeparators()
-        }
-    }
-
-    private func removeSeparators() {
-        guard let frameView = window?.contentView?.superview,
-            let tabs = segmentedControls(in: frameView).first(where: {
-                $0.segmentCount == MainWindowTab.allCases.count
-                    && $0.segmentStyle == .automatic
-            }),
-            let container = tabs.superview
-        else { return }
-
-        container.wantsLayer = true
-        let mask = CAShapeLayer()
-        mask.frame = container.bounds
-        let path = CGMutablePath()
-        let segmentWidth =
-            container.bounds.width
-            / CGFloat(tabs.segmentCount)
-        let gap: CGFloat = 1
-
-        for index in 0..<tabs.segmentCount {
-            let leadingGap = index == 0 ? 0 : gap / 2
-            let trailingGap = index == tabs.segmentCount - 1 ? 0 : gap / 2
-            path.addRect(
-                CGRect(
-                    x: CGFloat(index) * segmentWidth + leadingGap,
-                    y: 0,
-                    width: segmentWidth - leadingGap - trailingGap,
-                    height: container.bounds.height
-                ))
-        }
-
-        mask.path = path
-        mask.fillColor = NSColor.black.cgColor
-        container.layer?.mask = mask
-    }
-
-    private func segmentedControls(in root: NSView) -> [NSSegmentedControl] {
-        var controls: [NSSegmentedControl] = []
-
-        func visit(_ view: NSView) {
-            if let control = view as? NSSegmentedControl {
-                controls.append(control)
+    package var body: some View {
+        page(selection)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The title bar is transparent, so a scrolled page stops at its
+            // edge and fades into the window ground instead of passing
+            // behind the window controls and tabs.
+            .clipped()
+            .overlay(alignment: .top) {
+                LinearGradient(
+                    colors: [
+                        Color(nsColor: .windowBackgroundColor),
+                        Color(nsColor: .windowBackgroundColor).opacity(0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 10)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
-            view.subviews.forEach(visit)
-        }
+            // One ground under the title bar and the page.
+            .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    MainWindowTabBar(selection: $selection)
+                }
+            }
+    }
+}
 
-        visit(root)
-        return controls
+/// The title-bar page switcher. A segmented control draws a hairline between
+/// every pair of unselected segments; this bar draws only the selected
+/// capsule, which slides to the new page, on the toolbar's own glass.
+/// Assistive technologies still meet a segmented picker.
+package struct MainWindowTabBar: View {
+    @Binding private var selection: MainWindowTab
+    @Namespace private var indicator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    package init(selection: Binding<MainWindowTab>) {
+        _selection = selection
+    }
+
+    package var body: some View {
+        HStack(spacing: 2) {
+            ForEach(MainWindowTab.allCases) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    label(for: tab)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        // Only the indicator slides; the page itself swaps at once.
+        .animation(reduceMotion ? nil : SpeakerMotion.change, value: selection)
+        .accessibilityRepresentation {
+            Picker("页面", selection: $selection) {
+                ForEach(MainWindowTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+
+    private func label(for tab: MainWindowTab) -> some View {
+        Text(tab.title)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .background {
+                if selection == tab {
+                    Capsule()
+                        .fill(Color.primary.opacity(contrast == .increased ? 0.2 : 0.1))
+                        .matchedGeometryEffect(id: "selection", in: indicator)
+                }
+            }
+            .contentShape(Capsule())
     }
 }
 
@@ -139,7 +143,7 @@ package enum AboutSection: String, CaseIterable, Identifiable, Sendable {
     package var icon: String {
         switch self {
         case .privacyBoundary: "hand.raised.fill"
-        case .version: "waveform"
+        case .version: "info.circle"
         }
     }
 }

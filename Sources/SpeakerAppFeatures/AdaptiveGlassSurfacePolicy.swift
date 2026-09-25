@@ -15,6 +15,14 @@ extension EnvironmentValues {
         get { self[AdaptiveGlassSurfaceStyleOverrideKey.self] }
         set { self[AdaptiveGlassSurfaceStyleOverrideKey.self] = newValue }
     }
+
+    /// The style every main-window surface draws in: the override when a spec
+    /// sets one, otherwise the system policy.
+    package var adaptiveGlassSurfaceStyle: AdaptiveGlassSurfaceStyle {
+        adaptiveGlassSurfaceStyleOverride
+            ?? AdaptiveGlassSurfacePolicy.resolve(
+                reduceTransparency: accessibilityReduceTransparency)
+    }
 }
 
 package enum AdaptiveGlassSurfacePolicy {

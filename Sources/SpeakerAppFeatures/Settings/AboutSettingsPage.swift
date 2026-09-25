@@ -32,7 +32,7 @@ private struct AboutSettingsPage: View {
             identity
 
             privacyBoundaryCard
-                .padding(.top, 24)
+                .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
 
             versionCard
                 .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
@@ -83,6 +83,7 @@ private struct AboutSettingsPage: View {
             SettingsRowDivider()
 
             HStack {
+                Spacer()
                 if let privacyPolicyURL = ExternalLinks.privacyPolicy {
                     Button("查看完整隐私说明") {
                         routeEffects.openURL(privacyPolicyURL)
@@ -91,7 +92,6 @@ private struct AboutSettingsPage: View {
                 Button("打开本地数据文件夹") {
                     routeEffects.openURL(speakerApplicationSupportDirectory)
                 }
-                Spacer()
             }
         }
     }

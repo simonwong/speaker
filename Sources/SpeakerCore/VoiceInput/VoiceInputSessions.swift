@@ -605,7 +605,9 @@ public actor VoiceInputSessions {
             task = liveTask
         } else {
             let activeProcessor = textProcessor
-            task = Task {
+            // The task already holds the sessions strongly; saying so keeps the
+            // progress callback's weak capture from reading as a mismatch.
+            task = Task { [self] in
                 try await activeProcessor.process(
                     audio,
                     snapshot: snapshot

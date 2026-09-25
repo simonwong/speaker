@@ -87,19 +87,11 @@ package struct MenuBarContent: View {
             }
         case .refinementMode:
             Menu {
-                Button(SpeakerCopy.RefinementMode.defaultSmooth) {
-                    Task { await refinement.select(.defaultSmooth) }
-                }
-                Button(SpeakerCopy.RefinementMode.conciseCleanup) {
-                    Task { await refinement.select(.conciseCleanup) }
-                }
-                Button(SpeakerCopy.RefinementMode.fullRewrite) {
-                    Task { await refinement.select(.fullRewrite) }
-                }
+                refinementToggle(.defaultSmooth, title: SpeakerCopy.RefinementMode.defaultSmooth)
+                refinementToggle(.conciseCleanup, title: SpeakerCopy.RefinementMode.conciseCleanup)
+                refinementToggle(.fullRewrite, title: SpeakerCopy.RefinementMode.fullRewrite)
                 if let customModeName = refinement.savedCustomModeName {
-                    Button(customModeName) {
-                        Task { await refinement.selectSavedCustomMode() }
-                    }
+                    refinementToggle(.custom, title: customModeName)
                 }
             } label: {
                 Label(refinement.mode.displayName, systemImage: "text.alignleft")
@@ -175,5 +167,28 @@ package struct MenuBarContent: View {
         case .divider:
             Divider()
         }
+    }
+
+    /// A menu toggle shows the current mode's checkmark. Modes other than the
+    /// default need a saved Key, so they stay disabled rather than silently
+    /// refusing the click.
+    private func refinementToggle(_ choice: RefinementChoice, title: String) -> some View {
+        Toggle(
+            title,
+            isOn: Binding(
+                get: { refinement.choice == choice },
+                set: { isOn in
+                    guard isOn else { return }
+                    Task {
+                        if choice == .custom {
+                            await refinement.selectSavedCustomMode()
+                        } else {
+                            await refinement.select(choice)
+                        }
+                    }
+                }
+            )
+        )
+        .disabled(choice != .defaultSmooth && !refinement.hasStoredKey)
     }
 }

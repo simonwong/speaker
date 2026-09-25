@@ -56,6 +56,11 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$CACHE_ROOT/swiftpm"
 export CLANG_MODULE_CACHE_PATH="$CACHE_ROOT/clang"
 
 cd "$ROOT"
+# Swift 6.4 made Swift Build the default build system, and it records 14.0 as
+# the executable's linked SDK. macOS 26 then shows Speaker with the pre-26
+# appearance: no Liquid Glass and smaller window corners. The native build
+# system records the SDK actually used, as CI's default toolchain does.
+BUILD_SYSTEM_ARGUMENTS=(--build-system native)
 if [[ "${SPEAKER_SWIFT_RELEASE_ISOLATION:-0}" == "1" \
       && -z "${SPEAKER_SWIFT_SCRATCH_PATH:-}" ]]; then
     print -u2 "Release isolation requires SPEAKER_SWIFT_SCRATCH_PATH."
@@ -97,6 +102,7 @@ if [[ -n "${SPEAKER_SWIFT_SCRATCH_PATH:-}" ]]; then
     case "$SWIFT_SUBCOMMAND" in
         build|run|test)
             exec swift "$SWIFT_SUBCOMMAND" \
+                "${BUILD_SYSTEM_ARGUMENTS[@]}" \
                 --scratch-path "$SCRATCH_PATH" \
                 "${RELEASE_RESOLUTION_ARGUMENTS[@]}" \
                 "$@"
@@ -107,4 +113,9 @@ if [[ -n "${SPEAKER_SWIFT_SCRATCH_PATH:-}" ]]; then
             ;;
     esac
 fi
+case "${1:-}" in
+    build|run|test)
+        exec swift "$1" "${BUILD_SYSTEM_ARGUMENTS[@]}" "${@:2}"
+        ;;
+esac
 exec swift "$@"

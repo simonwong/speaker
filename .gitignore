@@ -9,3 +9,5 @@ DerivedData/
 # never be committed. The text-free report path is user-chosen, so keep it out
 # of the repository by hand.
 *.with-text.json
+
+.scratch/

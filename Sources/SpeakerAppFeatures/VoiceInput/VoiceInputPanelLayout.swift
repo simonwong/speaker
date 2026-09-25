@@ -31,17 +31,20 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
     }
 
     /// The strip's own footprint. Recording and processing share one pill so
-    /// the surface keeps a single identity from press to result.
+    /// the surface keeps a single identity from press to result; every state
+    /// shares the pill's height, so the HUD only ever changes width.
     package var contentSize: CGSize {
         switch self {
         case .processing, .recording:
-            CGSize(width: 118, height: 34)
+            CGSize(width: 118, height: Self.stripHeight)
         case .pendingCopy:
-            CGSize(width: 360, height: 34)
+            CGSize(width: 360, height: Self.stripHeight)
         case .problem:
-            CGSize(width: 320, height: 44)
+            CGSize(width: 320, height: Self.stripHeight)
         }
     }
+
+    private static let stripHeight: CGFloat = 34
 
     /// The panel footprint: the strip plus its inset on every edge.
     package var size: CGSize {

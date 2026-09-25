@@ -15,6 +15,9 @@ package final class LoginItemSettingsModel: ObservableObject {
     @Published package private(set) var isEnabled = false
     @Published package private(set) var notice: String?
     @Published package private(set) var showsSystemSettingsButton = false
+    /// True while a toggle is registering or unregistering, so a second
+    /// toggle cannot interleave with it.
+    @Published package private(set) var isUpdating = false
 
     private let service: any LoginItemServicing
     private let settingsStore: VersionedLocalAppSettingsStore
@@ -44,6 +47,9 @@ package final class LoginItemSettingsModel: ObservableObject {
     }
 
     package func setEnabled(_ enabled: Bool) async {
+        guard !isUpdating else { return }
+        isUpdating = true
+        defer { isUpdating = false }
         let previousDesiredEnabled = desiredEnabled
         do {
             try await setServiceEnabled(enabled)

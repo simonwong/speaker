@@ -62,20 +62,24 @@ package struct MicrophoneSettingsPage: View {
         SettingsCard {
             SpeakerRow("输入设备", detail: model.state.captureDescription) {
                 MicrophoneSelectionPicker(model: model)
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(maxWidth: 280, alignment: .trailing)
+                    .settingsTrailingMenu()
             }
             if let notice = model.state.deviceNotice {
                 SettingsNotice(text: notice, color: .orange)
-                Button("刷新麦克风列表", action: model.refresh)
+                HStack {
+                    Spacer()
+                    Button("刷新麦克风列表", action: model.refresh)
+                }
             }
             if model.state.persistenceFailed {
                 SettingsNotice(
                     text: "麦克风选择尚未保存，退出后可能恢复旧选择。",
                     color: .orange
                 )
-                Button("重试保存麦克风选择", action: model.retryPersistence)
+                HStack {
+                    Spacer()
+                    Button("重试保存麦克风选择", action: model.retryPersistence)
+                }
             }
             SettingsRowDivider()
             SpeakerRow("测试麦克风") {

@@ -137,6 +137,7 @@ private struct VoiceInputPanelHost<Content: View>: View {
         package let hostingSurfaceIsOpaque: Bool?
         package let hostingSurfaceBackgroundAlpha: CGFloat?
         package let windowSize: CGSize
+        package let windowOrigin: CGPoint
         package let contentSize: CGSize?
         package let isVisible: Bool
         package let isKeyWindow: Bool
@@ -254,6 +255,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
                 hostingSurfaceBackgroundAlpha:
                     hostingView.layer?.backgroundColor?.alpha,
                 windowSize: panel.frame.size,
+                windowOrigin: panel.frame.origin,
                 contentSize: panel.contentView?.frame.size,
                 isVisible: panel.isVisible,
                 isKeyWindow: panel.isKeyWindow,
@@ -285,8 +287,12 @@ package final class VoiceInputPanelPresenter<Content: View> {
         }
 
         let targetFrame = panel.frame
+        // Reduce Motion keeps the fade and drops the rise.
+        let rises = !wasVisible && !reduceMotion()
         if !wasVisible {
             panel.alphaValue = 0
+        }
+        if rises {
             panel.setFrame(
                 targetFrame.offsetBy(dx: 0, dy: -6),
                 display: false
@@ -296,9 +302,9 @@ package final class VoiceInputPanelPresenter<Content: View> {
         if panel.alphaValue < 1 {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = wasVisible ? 0.12 : 0.18
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                context.timingFunction = SpeakerMotion.easeOutTimingFunction()
                 panel.animator().alphaValue = 1
-                if !wasVisible {
+                if rises {
                     panel.animator().setFrame(targetFrame, display: true)
                 }
             }
@@ -333,7 +339,9 @@ package final class VoiceInputPanelPresenter<Content: View> {
             : nil
         NSAnimationContext.runAnimationGroup { context in
             context.duration = dismissal.fadeDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            // Ease-out answers at once; ease-in would hold the HUD on screen
+            // for the first half of the fade.
+            context.timingFunction = SpeakerMotion.easeOutTimingFunction()
             panel.animator().alphaValue = 0
         }
         scheduleDismissal(dismissal.completionDelay) { [weak self] in

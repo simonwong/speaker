@@ -151,7 +151,9 @@ private struct ActivityPill: View {
 
     var body: some View {
         ActivityHUDSurface(
-            width: isRevealed ? contentSize.width : 10,
+            // Hidden, the pill is a circle of its own height: it grows out of
+            // a dot and shrinks back into one, never from nothing.
+            width: isRevealed ? contentSize.width : contentSize.height,
             height: contentSize.height,
             palette: palette
         ) {
@@ -170,8 +172,10 @@ private struct ActivityPill: View {
                             height: contentSize.height
                         )
                 }
+                // Recording hands over to processing in place; Reduce Motion
+                // swaps the bars without moving them.
                 .animation(
-                    .easeInOut(duration: 0.35),
+                    reduceMotion ? nil : .easeInOut(duration: 0.2),
                     value: model.isProcessing
                 )
                 .accessibilityLabel(model.accessibilityTitle)
@@ -203,7 +207,7 @@ private struct ActivityPill: View {
                 .padding(.horizontal, 4)
             }
         }
-        .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+        .hudShadow()
         .padding(VoiceInputPanelLayout.contentInset)
         .accessibilityElement(children: .contain)
         .task {
@@ -214,7 +218,9 @@ private struct ActivityPill: View {
                 return
             }
             await Task.yield()
-            withAnimation(.smooth(duration: 0.42, extraBounce: 0.06)) {
+            // Shown on every shortcut press, so the reveal stays short and
+            // settles without overshoot.
+            withAnimation(.hudReveal) {
                 isRevealed = true
             }
         }
@@ -223,16 +229,16 @@ private struct ActivityPill: View {
                 if reduceMotion {
                     nil
                 } else if let dismissal {
-                    .easeIn(duration: dismissal.fadeDuration)
+                    .easeOut(duration: dismissal.fadeDuration)
                 } else {
-                    .smooth(duration: 0.3, extraBounce: 0.03)
+                    .hudReveal
                 }
             withAnimation(animation) {
                 isRevealed = dismissal == nil
             }
         }
         .onHover { hovered in
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            withAnimation(reduceMotion ? nil : SpeakerMotion.feedback) {
                 isHovered = hovered
             }
         }
@@ -524,6 +530,7 @@ private struct PendingCopyStrip: View {
                             .font(.caption)
                             .foregroundStyle(.red)
                             .fixedSize()
+                            .transition(.opacity)
                     }
                     Text(text)
                         .font(.callout)
@@ -535,6 +542,10 @@ private struct PendingCopyStrip: View {
                 }
                 .padding(.leading, controlsVisible ? 38 : 16)
                 .padding(.trailing, 38)
+                .animation(
+                    reduceMotion ? nil : SpeakerMotion.change,
+                    value: copyFailed
+                )
 
                 HStack {
                     HUDIconButton(
@@ -563,10 +574,10 @@ private struct PendingCopyStrip: View {
                 .padding(.horizontal, 4)
             }
         }
-        .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+        .hudShadow()
         .padding(VoiceInputPanelLayout.contentInset)
         .onHover { hovered in
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            withAnimation(reduceMotion ? nil : SpeakerMotion.feedback) {
                 isHovered = hovered
             }
         }
@@ -621,9 +632,10 @@ private struct ProblemStrip: View {
                 )
                 .keyboardShortcut(.cancelAction)
             }
-            .padding(.leading, 16)
-            .padding(.trailing, 9)
+            .padding(.leading, 14)
+            .padding(.trailing, 4)
         }
+        .hudShadow()
         .padding(VoiceInputPanelLayout.contentInset)
     }
 }
@@ -639,11 +651,19 @@ private struct HUDIconButton: View {
     let action: () -> Void
     @State private var isHovered = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .semibold))
+                // Copy turning into retry morphs the glyph instead of
+                // swapping it between frames.
+                .contentTransition(.symbolEffect(.replace))
+                .animation(
+                    reduceMotion ? nil : SpeakerMotion.change,
+                    value: symbol
+                )
                 .foregroundStyle(
                     prominent
                         ? (colorScheme == .dark ? Color.black : Color.white)
@@ -659,11 +679,20 @@ private struct HUDIconButton: View {
                     in: Circle()
                 )
                 .contentShape(Circle())
+                .scaleEffect(isVisible || reduceMotion ? 1 : 0.94)
                 .opacity(isVisible ? 1 : 0)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(
+            SpeakerPressableButtonStyle(
+                pressedScale: SpeakerMotion.compactPressedScale
+            )
+        )
         .allowsHitTesting(isVisible)
-        .onHover { isHovered = $0 }
+        .onHover { hovered in
+            withAnimation(reduceMotion ? nil : SpeakerMotion.feedback) {
+                isHovered = hovered
+            }
+        }
         .help(help)
         .accessibilityHidden(true)
         .overlay {
@@ -673,6 +702,18 @@ private struct HUDIconButton: View {
                 action: action
             )
         }
+    }
+}
+
+extension Animation {
+    /// The pill growing out of, or back into, its dot.
+    fileprivate static let hudReveal = Animation.smooth(duration: 0.26)
+}
+
+extension View {
+    /// One shadow for every HUD strip, kept inside the panel inset.
+    fileprivate func hudShadow() -> some View {
+        shadow(color: .black.opacity(0.16), radius: 3, y: 1)
     }
 }
 

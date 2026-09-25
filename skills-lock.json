@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "apple-design": {
+      "source": "emilkowalski/skills",
+      "sourceType": "github",
+      "skillPath": "skills/apple-design/SKILL.md",
+      "computedHash": "0190417d092a0df447b000154e39733ea6d97efad6d3bec8a6ce3845aeb88914"
+    },
     "code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -54,6 +60,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/implement/SKILL.md",
       "computedHash": "2139cfedf24791adbc839aaab6019cff158af1e28bfead020ec6e0ce01b3e74d"
+    },
+    "improve-animations": {
+      "source": "emilkowalski/skills",
+      "sourceType": "github",
+      "skillPath": "skills/improve-animations/SKILL.md",
+      "computedHash": "524ea241e41d58bbdd8e288700fe24f5725e2a2f3ae7186ad7cebf9055058356"
     },
     "improve-codebase-architecture": {
       "source": "mattpocock/skills",
@@ -126,6 +138,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/wayfinder/SKILL.md",
       "computedHash": "fa790eb4255b13d24d7e33ff4891ccd3d621558cc0ab87ae226777538ea16a8f"
+    },
+    "write-swift": {
+      "source": "emilkowalski/skills",
+      "sourceType": "github",
+      "skillPath": "skills/write-swift/SKILL.md",
+      "computedHash": "f20bb9cf51dbee1900b264820a12f1d3d378dc4d23ac758e7ba9e644c49a2459"
     },
     "writing-for-agents": {
       "source": "mattpocock/skills",

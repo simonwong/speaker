@@ -40,19 +40,23 @@ private struct PermissionSettingsRow: View {
             title,
             detail: explanation,
             icon: icon,
-            iconTint: color
+            iconTint: status.tint
         ) {
             HStack(spacing: 10) {
                 StatusBadge(
-                    text: statusTitle,
-                    icon: statusIcon,
-                    color: color
+                    text: status.text,
+                    icon: status.symbolName,
+                    color: status.tint
                 )
 
                 if state != .granted, state != .restricted {
                     Button(buttonTitle) {
                         Task { await requestPermission(kind) }
                     }
+                    // Both rows can show the same title; VoiceOver hears which.
+                    .accessibilityLabel(
+                        state == .notDetermined ? "请求\(title)权限" : "打开\(title)设置"
+                    )
                 }
             }
         }
@@ -65,37 +69,8 @@ private struct PermissionSettingsRow: View {
         }
     }
 
-    private var color: Color {
-        switch state {
-        case .granted:
-            .green
-        case .restricted:
-            .red
-        case .denied, .notDetermined:
-            .orange
-        }
-    }
-
-    private var statusTitle: String {
-        switch state {
-        case .granted:
-            "已授权"
-        case .restricted:
-            "受系统限制"
-        case .denied, .notDetermined:
-            "待完成"
-        }
-    }
-
-    private var statusIcon: String {
-        switch state {
-        case .granted:
-            "checkmark"
-        case .restricted:
-            "lock.fill"
-        case .denied, .notDetermined:
-            "exclamationmark"
-        }
+    private var status: PermissionStatusPresentation {
+        PermissionStatusPresentation(state: state)
     }
 
     private var buttonTitle: String {

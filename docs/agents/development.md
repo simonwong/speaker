@@ -26,7 +26,7 @@ Without `--confirm-paid-requests` the tool validates every input and prints the 
 
 ## Build and test
 
-Speaker requires Swift 6 and the macOS 26 SDK. Run build and test work through `scripts/*`; the wrappers take the active toolchain's macOS SDK from `xcrun`, refuse a major version below 26, announce the choice on stderr as `swiftw: using SDK <path>`, isolate the per-user module cache, and disable the nested SwiftPM sandbox. Override only the SDK with `SPEAKER_SDKROOT`, which CI sets to the same `xcrun` path. No versioned SDK path is hardcoded. Bare `swift build`, `swift run`, and `swift test` are not equivalent to CI.
+Speaker requires Swift 6 and the macOS 26 SDK. Run build and test work through `scripts/*`; the wrappers take the active toolchain's macOS SDK from `xcrun`, refuse a major version below 26, announce the choice on stderr as `swiftw: using SDK <path>`, isolate the per-user module cache, disable the nested SwiftPM sandbox, and pin `build`, `run`, and `test` to SwiftPM's native build system. Swift 6.4's default Swift Build records 14.0 as the executable's linked SDK, and macOS 26 then shows Speaker with the pre-26 appearance: no Liquid Glass and smaller window corners. `otool -l <executable> | grep -A4 LC_BUILD_VERSION` shows the recorded `sdk`. Override only the SDK with `SPEAKER_SDKROOT`, which CI sets to the same `xcrun` path. No versioned SDK path is hardcoded. Bare `swift build`, `swift run`, and `swift test` are not equivalent to CI.
 
 Use the tightest relevant specification executable while iterating:
 

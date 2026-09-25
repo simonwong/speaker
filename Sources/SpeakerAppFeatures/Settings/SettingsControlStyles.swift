@@ -1,29 +1,39 @@
 import SwiftUI
 
+/// Settings and onboarding buttons: native glass buttons on macOS 26, bordered
+/// buttons before it and under Reduce Transparency.
+///
+/// A regular-size button grows to the large capsule: at regular size the
+/// glass is a small rounded rectangle that all but vanishes on the glass
+/// card, and the large capsule matches the fields and menus beside it. A
+/// caller that asks for a smaller size keeps it.
 package struct SettingsButtonStyle: PrimitiveButtonStyle {
     var prominent = false
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.adaptiveGlassSurfaceStyleOverride) private var surfaceOverride
+    @Environment(\.adaptiveGlassSurfaceStyle) private var surfaceStyle
+    @Environment(\.controlSize) private var controlSize
+
+    package func makeBody(configuration: Configuration) -> some View {
+        styled(configuration)
+            .buttonBorderShape(.capsule)
+            .controlSize(controlSize == .regular ? .large : controlSize)
+    }
 
     @ViewBuilder
-    package func makeBody(configuration: Configuration) -> some View {
-        if #available(macOS 26.0, *), usesGlass {
+    private func styled(_ configuration: Configuration) -> some View {
+        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
             if prominent {
                 Button(configuration).buttonStyle(.glassProminent)
             } else {
+                // Glass over the glass card can sample nearly the card's own
+                // colour and vanish; a faint capsule underneath keeps its edge.
                 Button(configuration).buttonStyle(.glass)
+                    .background(Color.primary.opacity(0.06), in: Capsule())
             }
         } else if prominent {
             Button(configuration).buttonStyle(.borderedProminent)
         } else {
             Button(configuration).buttonStyle(.bordered)
         }
-    }
-
-    private var usesGlass: Bool {
-        (surfaceOverride
-            ?? AdaptiveGlassSurfacePolicy.resolve(reduceTransparency: reduceTransparency))
-            == .liquidGlass
     }
 }
 
@@ -34,74 +44,8 @@ package struct SettingsTextFieldStyle: TextFieldStyle {
         configuration
             .textFieldStyle(.plain)
             .focused($focused)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .settingsGlassSurface(focused: focused)
-    }
-}
-
-private struct SettingsGlassSurface: ViewModifier {
-    var cornerRadius: CGFloat
-    var tint: Color?
-    var interactive: Bool
-    var focused: Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.adaptiveGlassSurfaceStyleOverride) private var surfaceOverride
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-    }
-
-    private var surfaceStyle: AdaptiveGlassSurfaceStyle {
-        surfaceOverride
-            ?? AdaptiveGlassSurfacePolicy.resolve(reduceTransparency: reduceTransparency)
-    }
-
-    func body(content: Content) -> some View {
-        surface(content)
-            .overlay {
-                if focused || contrast == .increased {
-                    shape.strokeBorder(
-                        focused ? Color.accentColor : Color.primary.opacity(0.55),
-                        lineWidth: focused ? 2 : 1
-                    )
-                    .allowsHitTesting(false)
-                }
-            }
-    }
-
-    @ViewBuilder
-    private func surface(_ content: Content) -> some View {
-        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.glassEffect(.regular.tint(tint).interactive(interactive), in: shape)
-        } else if surfaceStyle == .opaque {
-            content
-                .background(Color(nsColor: .controlBackgroundColor), in: shape)
-                .overlay {
-                    shape.strokeBorder((tint ?? .primary).opacity(0.2), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-        } else {
-            content
-                .background(.regularMaterial, in: shape)
-                .overlay {
-                    shape.strokeBorder((tint ?? .primary).opacity(0.12), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-        }
-    }
-}
-
-extension View {
-    nonisolated package func settingsGlassSurface(
-        cornerRadius: CGFloat = SpeakerSurfaceMetrics.controlCornerRadius,
-        tint: Color? = nil,
-        interactive: Bool = false,
-        focused: Bool = false
-    ) -> some View {
-        modifier(
-            SettingsGlassSurface(
-                cornerRadius: cornerRadius, tint: tint, interactive: interactive, focused: focused))
+            .padding(.horizontal, 12)
+            .frame(minHeight: SpeakerSurfaceMetrics.fieldHeight)
+            .speakerField(focused: focused)
     }
 }

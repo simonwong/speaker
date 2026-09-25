@@ -39,14 +39,6 @@ struct SpeakerApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        // Secondary Preferences surface kept for the standard ⌘, shortcut and the
-        // voice HUD's "check speech settings" recovery, which routes through the
-        // system `openSettings` action. The tabbed main window is the primary UI.
-        Settings {
-            SettingsView(workspace: runtime.settingsWorkspace)
-                .frame(width: 860, height: 650)
-        }
-
         Window("Speaker", id: MainWindowModel.windowID) {
             MainWindowView(
                 mainWindow: runtime.mainWindow,
@@ -61,5 +53,13 @@ struct SpeakerApp: App {
             width: MainWindowLayout.preferredContentSize.width,
             height: MainWindowLayout.preferredContentSize.height
         )
+        // The page tabs are the title bar's only content.
+        .windowToolbarStyle(.unified(showsTitle: false))
+        .commands {
+            MainWindowSettingsCommands(
+                mainWindow: runtime.mainWindow,
+                navigation: runtime.settingsNavigation
+            )
+        }
     }
 }

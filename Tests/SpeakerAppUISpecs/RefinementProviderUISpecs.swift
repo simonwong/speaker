@@ -50,11 +50,14 @@ enum RefinementProviderUISpecs {
             else { throw SpecFailure(message: "built-in provider selector missing") }
             try expect(provider.itemTitles == ["DeepSeek", "OpenAI", "Kimi", "GLM", "自定义"])
             provider.menu?.performActionForItem(at: openAIIndex)
+            // SwiftUI drops a menu action while it still renders the picker
+            // disabled, even after the model has finished saving. Each step
+            // waits until the saved state is on screen, as a user would.
             let switched = await eventually(before: .seconds(2)) {
                 pump(hosting)
-                return model.selectedProvider == .openAI
+                return model.selectedProvider == .openAI && !model.isMutating
                     && controls(NSPopUpButton.self, in: hosting).contains {
-                        $0.itemTitles.contains("gpt-5.6-terra")
+                        $0.itemTitles.contains("gpt-5.6-terra") && $0.isEnabled
                     }
             }
             try expect(switched, "provider action did not update model options")
@@ -71,7 +74,9 @@ enum RefinementProviderUISpecs {
             else { throw SpecFailure(message: "OpenAI models missing") }
             models.menu?.performActionForItem(at: modelIndex)
             let saved = await eventually(before: .seconds(2)) {
-                model.selectedProfile.modelID == "gpt-5.6-terra"
+                pump(hosting)
+                return model.selectedProfile.modelID == "gpt-5.6-terra" && !model.isMutating
+                    && provider.isEnabled
             }
             try expect(saved, "model picker action was not persisted")
             try capture(window, name: "openai-narrow")
@@ -83,7 +88,11 @@ enum RefinementProviderUISpecs {
                 pump(hosting)
                 return model.selectedProvider == .custom && editableFields(in: hosting).count == 3
             }
-            try expect(custom, "custom provider did not expose URL, model ID and secure Key fields")
+            let fieldsSeen = fieldSummary(in: hosting)
+            try expect(
+                custom,
+                "custom provider did not expose URL, model ID and secure Key fields: provider \(model.selectedProvider), popup \(provider.titleOfSelectedItem ?? "-") in window \(provider.window != nil), fields [\(fieldsSeen)]"
+            )
             let fields = editableFields(in: hosting)
             try expect(
                 fields.allSatisfy { !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty },
@@ -259,6 +268,16 @@ enum RefinementProviderUISpecs {
     @MainActor
     private static func editableFields(in root: NSView) -> [NSTextField] {
         controls(NSTextField.self, in: root).filter(\.isEditable)
+    }
+
+    /// Every editable field with its label and visibility, so a failure on a
+    /// CI runner shows what the card rendered.
+    @MainActor
+    private static func fieldSummary(in root: NSView) -> String {
+        editableFields(in: root).map { field in
+            let label = field.accessibilityLabel() ?? field.placeholderString ?? "-"
+            return "\(type(of: field)) \(label) hidden=\(field.isHiddenOrHasHiddenAncestor)"
+        }.joined(separator: "; ")
     }
 
     @MainActor

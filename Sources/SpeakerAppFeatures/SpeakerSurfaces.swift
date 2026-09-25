@@ -1,3 +1,4 @@
+import QuartzCore
 import SwiftUI
 
 /// The main window's shared design language: one metric scale, one type
@@ -15,9 +16,135 @@ package enum SpeakerSurfaceMetrics {
     package static let cardHeaderSpacing: CGFloat = 14
     package static let rowSpacing: CGFloat = 12
     package static let controlCornerRadius: CGFloat = 8
+    /// Single-line fields match the large capsule buttons and menus beside
+    /// them.
+    package static let fieldHeight: CGFloat = 28
     package static let chipCornerRadius: CGFloat = 8
     package static let iconTileSize: CGFloat = 28
     package static let iconTileCornerRadius: CGFloat = 7
+    /// Widest a row's trailing menu may grow, so every picker in a card ends
+    /// on the same column.
+    package static let trailingControlWidth: CGFloat = 260
+}
+
+/// The main window's motion rungs. Each eases out and stays well under
+/// 300 ms; callers drop movement under Reduce Motion.
+package enum SpeakerMotion {
+    /// The strong ease-out every UI rung shares: it answers in the first
+    /// frames instead of easing into motion.
+    package static func easeOut(duration: TimeInterval) -> Animation {
+        .timingCurve(0.23, 1, 0.32, 1, duration: duration)
+    }
+    /// The same curve for AppKit window animations.
+    package static func easeOutTimingFunction() -> CAMediaTimingFunction {
+        CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    }
+    /// Hover, focus, and press feedback.
+    package static let feedback = easeOut(duration: 0.12)
+    /// A block appearing, leaving, or changing selection.
+    package static let change = easeOut(duration: 0.2)
+    /// How far a pressed plain control shrinks. Never towards zero.
+    package static let pressedScale: CGFloat = 0.97
+    /// Icon-only controls of 26 pt or less shrink a little further, so the
+    /// press still reads on so few pixels.
+    package static let compactPressedScale: CGFloat = 0.95
+}
+
+/// Plain-content buttons that answer a press: a slight shrink, or a dim
+/// under Reduce Motion. Disabled buttons fade like the plain style.
+package struct SpeakerPressableButtonStyle: ButtonStyle {
+    private let pressedScale: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    package init(pressedScale: CGFloat = SpeakerMotion.pressedScale) {
+        self.pressedScale = pressedScale
+    }
+
+    package func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? pressedScale : 1)
+            .opacity(opacity(pressed: configuration.isPressed))
+            .animation(SpeakerMotion.feedback, value: configuration.isPressed)
+    }
+
+    private func opacity(pressed: Bool) -> Double {
+        if !isEnabled { return 0.45 }
+        return pressed && reduceMotion ? 0.7 : 1
+    }
+}
+
+/// The surface every editable field sits on: the History search bar,
+/// settings text fields, and prompt editors share one glass, one hairline, and
+/// one focus ring. Without Liquid Glass it falls back to an inset well.
+package struct SpeakerFieldSurface<FieldShape: InsettableShape>: ViewModifier {
+    private let focused: Bool
+    private let shape: FieldShape
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.adaptiveGlassSurfaceStyle) private var surfaceStyle
+
+    nonisolated package init(focused: Bool, shape: FieldShape) {
+        self.focused = focused
+        self.shape = shape
+    }
+
+    private var borderColor: Color {
+        if focused { return .accentColor.opacity(0.7) }
+        // A glass field inside a glass card loses its edge in dark mode, so
+        // every style keeps a hairline.
+        return Color.primary.opacity(contrast == .increased ? 0.4 : 0.1)
+    }
+
+    private var borderWidth: CGFloat {
+        if focused { return 1.5 }
+        return contrast == .increased ? 1 : 0.5
+    }
+
+    package func body(content: Content) -> some View {
+        surface(content)
+            .overlay {
+                shape
+                    .strokeBorder(borderColor, lineWidth: borderWidth)
+                    .allowsHitTesting(false)
+                    .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: focused)
+            }
+    }
+
+    @ViewBuilder
+    private func surface(_ content: Content) -> some View {
+        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
+            // Glass over the glass card samples almost the same colour, so a
+            // faint well underneath keeps the field legible as a field.
+            content
+                .background(Color.primary.opacity(0.05), in: shape)
+                .glassEffect(.regular, in: shape)
+        } else {
+            content.background(Color.primary.opacity(0.05), in: shape)
+        }
+    }
+}
+
+extension View {
+    /// A single-line field: a capsule, the same height and shape as the
+    /// buttons and menus beside it. Nonisolated so `TextFieldStyle` bodies
+    /// can apply it.
+    nonisolated package func speakerField(focused: Bool) -> some View {
+        modifier(SpeakerFieldSurface(focused: focused, shape: Capsule()))
+    }
+
+    /// A multi-line editor keeps a rounded rectangle; a capsule would clip
+    /// its corners.
+    nonisolated package func speakerEditorField(focused: Bool) -> some View {
+        modifier(
+            SpeakerFieldSurface(
+                focused: focused,
+                shape: RoundedRectangle(
+                    cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+                    style: .continuous
+                )
+            ))
+    }
 }
 
 /// The only type ladder the main window uses.
@@ -55,11 +182,15 @@ package enum SpeakerTypography {
     }
 }
 
-/// The card paper: window background stays the ground, cards lift one step.
+/// The card every tab and the onboarding window share: Liquid Glass on
+/// macOS 26, the system material before it, and opaque paper under Reduce
+/// Transparency. A tint colours the glass and the edge only lightly, so a
+/// warning card reads as a hint rather than a slab.
 package struct SpeakerCardSurface: ViewModifier {
     private let tint: Color?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.adaptiveGlassSurfaceStyle) private var surfaceStyle
 
     package init(tint: Color?) {
         self.tint = tint
@@ -79,40 +210,60 @@ package struct SpeakerCardSurface: ViewModifier {
         if let tint {
             return tint.opacity(0.35)
         }
-        return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.07)
+        switch surfaceStyle {
+        case .liquidGlass: return .clear
+        case .systemMaterial: return Color.primary.opacity(0.12)
+        case .opaque: return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.07)
+        }
     }
 
     package func body(content: Content) -> some View {
-        content
-            .padding(SpeakerSurfaceMetrics.cardPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                shape
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .overlay {
-                        if colorScheme == .dark {
-                            shape.fill(Color.primary.opacity(0.045))
-                        }
-                    }
-                    .overlay {
-                        if let tint {
-                            shape.fill(tint.opacity(0.04))
-                        }
-                    }
-            }
-            .overlay {
-                shape.strokeBorder(
+        surface(
+            content
+                .padding(SpeakerSurfaceMetrics.cardPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        )
+        .overlay {
+            shape
+                .strokeBorder(
                     strokeColor,
                     lineWidth: contrast == .increased ? 1.5 : 1
                 )
+                .allowsHitTesting(false)
+        }
+        .shadow(
+            color: surfaceStyle == .opaque && colorScheme == .light
+                ? .black.opacity(0.04)
+                : .clear,
+            radius: 10,
+            y: 3
+        )
+    }
+
+    @ViewBuilder
+    private func surface(_ content: some View) -> some View {
+        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
+            content.glassEffect(.regular.tint(tint?.opacity(0.14)), in: shape)
+        } else if surfaceStyle == .opaque {
+            content.background { paper }
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
+    }
+
+    private var paper: some View {
+        shape
+            .fill(Color(nsColor: .controlBackgroundColor))
+            .overlay {
+                if colorScheme == .dark {
+                    shape.fill(Color.primary.opacity(0.045))
+                }
             }
-            .shadow(
-                color: colorScheme == .dark
-                    ? .clear
-                    : .black.opacity(0.04),
-                radius: 10,
-                y: 3
-            )
+            .overlay {
+                if let tint {
+                    shape.fill(tint.opacity(0.04))
+                }
+            }
     }
 }
 
@@ -149,6 +300,8 @@ package struct SpeakerIconTile: View {
                     style: .continuous
                 )
             )
+            // Decoration: the title beside it already says what it stands for.
+            .accessibilityHidden(true)
     }
 }
 
@@ -171,12 +324,15 @@ package struct SpeakerCardHeader: View {
     }
 
     package var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        // A lone title centres on its tile; a subtitle that may wrap keeps
+        // the tile beside the first line.
+        HStack(alignment: subtitle == nil ? .center : .top, spacing: 10) {
             SpeakerIconTile(symbol: icon, tint: tint)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(SpeakerTypography.cardTitle)
+                    .accessibilityAddTraits(.isHeader)
                 if let subtitle {
                     Text(subtitle)
                         .font(SpeakerTypography.caption)
@@ -228,6 +384,7 @@ package struct SpeakerSectionHeader: View {
             .font(SpeakerTypography.sectionHeader)
             .foregroundStyle(tint)
             .padding(.leading, 4)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -297,40 +454,6 @@ extension SpeakerRow where Trailing == EmptyView {
     }
 }
 
-/// A labelled read-only block of text: history detail and refinement prompts
-/// share this shape.
-package struct SpeakerTextBlock: View {
-    private let title: String
-    private let text: String
-    private let isPlaceholder: Bool
-
-    package init(title: String, text: String, isPlaceholder: Bool = false) {
-        self.title = title
-        self.text = text
-        self.isPlaceholder = isPlaceholder
-    }
-
-    package var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(SpeakerTypography.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(text)
-                .font(SpeakerTypography.body)
-                .foregroundStyle(isPlaceholder ? .secondary : .primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(
-                    Color.primary.opacity(0.04),
-                    in: RoundedRectangle(
-                        cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-                        style: .continuous
-                    )
-                )
-        }
-    }
-}
-
 package struct SpeakerEmptyState: View {
     private let title: String
     private let description: String
@@ -348,6 +471,7 @@ package struct SpeakerEmptyState: View {
                 .font(.largeTitle)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 2)
+                .accessibilityHidden(true)
             Text(title)
                 .font(SpeakerTypography.bodyEmphasis)
             Text(description)

@@ -87,24 +87,21 @@ package struct DoubaoSettingsCard: View {
                     Text(resource.displayName).tag(resource)
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(maxWidth: 260, alignment: .trailing)
+            .settingsTrailingMenu()
             .disabled(model.isUpdatingKey)
         }
     }
 
     private var actionRow: some View {
         HStack(spacing: 10) {
-            if case .checking = model.status {
-                ProgressView()
-                    .controlSize(.small)
-            }
-
-            Button("检查连接") {
+            Button(isChecking ? "检查中…" : "检查连接") {
                 model.checkConnection()
             }
             .disabled(isChecking || model.isUpdatingKey)
+            if isChecking {
+                ProgressView()
+                    .controlSize(.small)
+            }
             Spacer()
         }
     }
@@ -129,44 +126,48 @@ package struct RefinementProviderSettingsCard: View {
             icon: "sparkles"
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                Picker(
-                    "服务商",
-                    selection: Binding(
-                        get: { model.selectedProvider },
-                        set: { provider in Task { await model.selectProvider(provider) } }
-                    )
-                ) {
-                    ForEach(RefinementProviderID.allCases, id: \.self) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
-                }
-                .pickerStyle(.menu)
-                .accessibilityLabel("文字整理服务商")
-
-                if model.selectedProvider != .custom {
+                SpeakerRow("服务商") {
                     Picker(
-                        "模型",
+                        "服务商",
                         selection: Binding(
-                            get: {
-                                model.isEditingModelID
-                                    ? "__manual__" : model.selectedProfile.modelID
-                            },
-                            set: { modelID in
-                                if modelID == "__manual__" {
-                                    model.isEditingModelID = true
-                                } else {
-                                    Task { await model.selectModel(modelID) }
-                                }
-                            }
+                            get: { model.selectedProvider },
+                            set: { provider in Task { await model.selectProvider(provider) } }
                         )
                     ) {
-                        ForEach(model.modelIDs, id: \.self) { modelID in
-                            Text(model.modelTitle(for: modelID)).tag(modelID)
+                        ForEach(RefinementProviderID.allCases, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider)
                         }
-                        Text("其他模型…").tag("__manual__")
                     }
-                    .pickerStyle(.menu)
-                    .accessibilityLabel("文字整理模型")
+                    .settingsTrailingMenu()
+                    .accessibilityLabel("文字整理服务商")
+                }
+
+                if model.selectedProvider != .custom {
+                    SpeakerRow("模型") {
+                        Picker(
+                            "模型",
+                            selection: Binding(
+                                get: {
+                                    model.isEditingModelID
+                                        ? "__manual__" : model.selectedProfile.modelID
+                                },
+                                set: { modelID in
+                                    if modelID == "__manual__" {
+                                        model.isEditingModelID = true
+                                    } else {
+                                        Task { await model.selectModel(modelID) }
+                                    }
+                                }
+                            )
+                        ) {
+                            ForEach(model.modelIDs, id: \.self) { modelID in
+                                Text(model.modelTitle(for: modelID)).tag(modelID)
+                            }
+                            Text("其他模型…").tag("__manual__")
+                        }
+                        .settingsTrailingMenu()
+                        .accessibilityLabel("文字整理模型")
+                    }
                 }
 
                 if model.selectedProvider == .custom {
@@ -247,17 +248,17 @@ package struct RefinementProviderSettingsCard: View {
     }
 
     private var statusText: String {
-        if model.isConnectionVerified { return "已验证" }
-        if model.connectionFailure != nil { return "连接失败" }
-        if model.hasStoredKey { return "已配置" }
-        return "未配置"
+        if model.isConnectionVerified { return SpeakerCopy.ProviderStatus.success }
+        if model.connectionFailure != nil { return SpeakerCopy.ProviderStatus.failure }
+        if model.hasStoredKey { return SpeakerCopy.ProviderStatus.configured }
+        return SpeakerCopy.ProviderStatus.unconfigured
     }
 
     private var statusIcon: String {
         if model.isConnectionVerified { return "checkmark.circle.fill" }
         if model.connectionFailure != nil { return "xmark.circle.fill" }
-        if model.hasStoredKey { return "checkmark.shield" }
-        return "key.slash"
+        if model.hasStoredKey { return "checkmark.circle.fill" }
+        return "key.circle.fill"
     }
 
     private var statusColor: Color {
@@ -312,6 +313,9 @@ struct ProviderKeyEditor: View {
         )
         .textContentType(.password)
         .accessibilityLabel("\(providerName) API Key")
+        .onSubmit {
+            if canSave { saveDraft() }
+        }
     }
 
     private var actions: some View {
@@ -376,9 +380,9 @@ private struct RefinementConfigurationField: View {
                 label: label, placeholder: placeholder, text: $text, isFocused: $isFocused
             )
             .frame(height: 20)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .settingsGlassSurface(focused: isFocused)
+            .padding(.horizontal, 12)
+            .frame(height: SpeakerSurfaceMetrics.fieldHeight)
+            .speakerField(focused: isFocused)
         }
     }
 }

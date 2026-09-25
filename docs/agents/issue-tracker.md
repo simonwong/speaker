@@ -15,17 +15,13 @@ A read is complete when the issue's current state, project, labels, description,
 
 ## GitHub-linked issues
 
-Migrated issues carry the Linear label `source:github`, a `GitHub issue` link, and the original GitHub URL in their description. The GitHub issue carries `tracked-in-linear` and a backlink comment. Preserve original descriptions, attributed discussion, decisions, and source links; represent migrated parents and blockers through native Linear relations. Migration preserves open and closed states; moving an issue is not a resolution.
-
-The migration includes open GitHub issues plus the complete subtree of [Speaker's production map #111](https://github.com/simonwong/speaker/issues/111), including its completed children. Keep completed history outside that subtree in GitHub unless the user expands the scope.
-
-Before resolving either side, read both linked issues and their latest comments. Record the resolution and evidence in Linear, set `Done` for completed work or `Canceled` for a decision not to proceed, and close the linked GitHub issue with `gh issue close <number> --repo simonwong/speaker --reason completed` or `--reason 'not planned'`, respectively. Include a GitHub resolution comment linking to Linear and the evidence. If GitHub is already closed, reconcile Linear with its actual resolution; a merge or migration alone does not prove acceptance criteria are met.
+When a Linear issue links to a GitHub issue, read both issues and their latest comments before resolving either side. Record the resolution and evidence in Linear, set `Done` for completed work or `Canceled` for a decision not to proceed, and close the linked GitHub issue with `gh issue close <number> --repo simonwong/speaker --reason completed` or `--reason 'not planned'`, respectively. Include a GitHub resolution comment linking to Linear and the evidence. If GitHub is already closed, reconcile Linear with its actual resolution; a merged PR alone does not prove acceptance criteria are met.
 
 When reopening linked work, reopen both sides and restore the appropriate Linear state. Read back both systems after each transition. Report completion only when their states agree; if one write fails, report the remaining synchronization step and retry that step without duplicating the resolution comment. These are agent workflow obligations; links and labels do not install background synchronization.
 
 ## Wayfinding
 
-A wayfinding map is one Linear issue labeled `wayfinder:map`. Its child tickets belong to the same project, use the map's issue ID as `parentId`, and carry `wayfinder:<type>` (`research`, `prototype`, `grilling`, or `task`). Reuse exact existing labels; create missing labels in `Personal` when first needed. The map owns Notes, Decisions-so-far, and Fog, and lists children in frontier order using Linear identifiers.
+A wayfinding map is one Linear issue labeled `wayfinder:map`. Its child tickets belong to the same project, use the map's issue ID as `parentId`, and carry `wayfinder:<type>` (`research`, `prototype`, `grilling`, or `task`). Reuse exact existing workspace-level labels; create missing labels at workspace scope by omitting `teamId`. The map owns Notes, Decisions-so-far, and Fog, and lists children in frontier order using Linear identifiers.
 
 Represent blocking through Linear's native `blockedBy` / `blocks` relations. Resolve referenced issues before writing relations and preserve unrelated edges.
 

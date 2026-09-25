@@ -6,6 +6,7 @@ package struct SettingsOverviewScrollView<SectionContent: View>: View {
     @ObservedObject private var navigation: SettingsNavigationModel
     private let sectionContent: (SettingsGroup) -> SectionContent
     @Environment(\.mainWindowLayout) private var mainWindowLayout
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     package init(
         navigation: SettingsNavigationModel,
@@ -68,7 +69,8 @@ package struct SettingsOverviewScrollView<SectionContent: View>: View {
         proxy: ScrollViewProxy,
         animated: Bool = true
     ) {
-        if animated {
+        // A full-page scroll is the movement Reduce Motion removes.
+        if animated, !reduceMotion {
             withAnimation(.easeInOut(duration: 0.25)) {
                 proxy.scrollTo(target, anchor: .top)
             }
