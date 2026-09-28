@@ -16,13 +16,19 @@ package enum SpeakerVisualIdentity {
         blue: 0.46
     )
     package static let iconSurfaceTop = Color(
-        red: 0.13,
-        green: 0.13,
-        blue: 0.14
+        red: 0.984,
+        green: 0.973,
+        blue: 0.953
     )
     package static let iconSurfaceBottom = Color(
-        red: 0.08,
-        green: 0.08,
-        blue: 0.09
+        red: 0.894,
+        green: 0.867,
+        blue: 0.824
+    )
+    /// The app icon's translucent front layer, printed over the gold one.
+    package static let iconPrintCoral = Color(
+        red: 0.933,
+        green: 0.416,
+        blue: 0.298
     )
 }

@@ -31,131 +31,72 @@ package struct SpeakerBrandMarkShape: Shape {
     }
 }
 
-private struct SpeakerLayeredBrandStrokeShape: Shape {
+/// The two-colour print that carries the mark: a gold rear stroke and a
+/// translucent coral front stroke, offset along one diagonal. The menu bar
+/// glyph repeats the same offset in a single template colour.
+private enum SpeakerPrintedMark {
+    /// Unit direction from the rear layer to the front layer: down and to the
+    /// right, 50 degrees from vertical.
+    static let direction = CGVector(
+        dx: sin(50 * CGFloat.pi / 180),
+        dy: cos(50 * CGFloat.pi / 180)
+    )
+    static let frontOpacity = 0.78
+    static let rearGradient = LinearGradient(
+        stops: [
+            .init(color: Color(red: 0.953, green: 0.847, blue: 0.682), location: 0),
+            .init(color: Color(red: 1.000, green: 0.910, blue: 0.773), location: 0.32),
+            .init(color: Color(red: 0.949, green: 0.804, blue: 0.588), location: 0.62),
+            .init(color: Color(red: 0.910, green: 0.710, blue: 0.435), location: 1),
+        ],
+        startPoint: UnitPoint(x: 0.018, y: 0.5),
+        endPoint: UnitPoint(x: 0.982, y: 0.5)
+    )
+
+    static func stroke(lineWidth: CGFloat) -> StrokeStyle {
+        StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+    }
+}
+
+/// Mark geometry for one tile size. Small tiles use a larger frame, a thicker
+/// stroke, and a wider layer offset so both layers stay visible.
+private struct SpeakerPrintedMarkMetrics {
+    let markSize: CGSize
     let lineWidth: CGFloat
+    /// Half the offset between the layers; the rear moves by its negation.
+    let halfOffset: CGSize
+    /// Blur applied to the gold seen through the coral front layer.
+    let frostRadius: CGFloat
 
-    func path(in rect: CGRect) -> Path {
-        let centreLine = SpeakerBrandMarkShape().path(in: rect)
-        let rear = centreLine.strokedPath(
-            StrokeStyle(
-                lineWidth: lineWidth * 0.92,
-                lineCap: .round,
-                lineJoin: .round
-            )
-        )
-        let front = centreLine.strokedPath(
-            StrokeStyle(
-                lineWidth: lineWidth * 0.83,
-                lineCap: .round,
-                lineJoin: .round
-            )
-        )
-        var path = Path()
-        path.addPath(
-            rear,
-            transform: CGAffineTransform(
-                translationX: 0,
-                y: rect.height * 0.022
-            )
-        )
-        path.addPath(front)
-        return path
-    }
-}
-
-package struct SpeakerBrandMark: View {
-    package init() {}
-
-    package var body: some View {
-        GeometryReader { proxy in
-            let lineWidth = max(1, proxy.size.height * 0.29 * 1.14)
-            SpeakerLayeredBrandStrokeShape(lineWidth: lineWidth)
-                .fill()
+    init(tileSize size: CGFloat) {
+        let frame: (width: CGFloat, height: CGFloat)
+        let lineFraction: CGFloat
+        let offsetFraction: CGFloat
+        if size <= 16 {
+            frame = (0.68, 0.42)
+            lineFraction = 0.13
+            offsetFraction = 0.07
+        } else if size <= 32 {
+            frame = (0.714, 0.44)
+            lineFraction = 0.10
+            offsetFraction = 0.055
+        } else {
+            frame = (0.68, 0.41)
+            lineFraction = 0.08
+            offsetFraction = 0.045
         }
-        .accessibilityHidden(true)
+        let offset = size * offsetFraction
+        markSize = CGSize(width: size * frame.width, height: size * frame.height)
+        lineWidth = size * lineFraction
+        halfOffset = CGSize(
+            width: SpeakerPrintedMark.direction.dx * offset / 2,
+            height: SpeakerPrintedMark.direction.dy * offset / 2
+        )
+        frostRadius = size * 0.008
     }
 }
 
-private struct SpeakerFacetedBrandMark: View {
-    var body: some View {
-        GeometryReader { proxy in
-            let lineWidth = proxy.size.height * 0.18 * 1.14 * 1.14
-            let gradient = LinearGradient(
-                stops: [
-                    .init(color: Color(red: 0.953, green: 0.847, blue: 0.682), location: 0),
-                    .init(color: Color(red: 1.000, green: 0.910, blue: 0.773), location: 0.32),
-                    .init(color: Color(red: 0.949, green: 0.804, blue: 0.588), location: 0.62),
-                    .init(color: Color(red: 0.910, green: 0.710, blue: 0.435), location: 1),
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-
-            ZStack {
-                SpeakerLayeredBrandStrokeShape(lineWidth: lineWidth)
-                    .fill(gradient)
-
-                ZStack {
-                    NormalizedPolygon(points: [
-                        CGPoint(x: 0.05, y: 0.88),
-                        CGPoint(x: 0.28, y: 0.08),
-                        CGPoint(x: 0.43, y: 0.18),
-                        CGPoint(x: 0.52, y: 0.60),
-                        CGPoint(x: 0.38, y: 0.56),
-                        CGPoint(x: 0.22, y: 0.92),
-                    ])
-                    .fill(.white.opacity(0.18))
-
-                    NormalizedPolygon(points: [
-                        CGPoint(x: 0.43, y: 0.18),
-                        CGPoint(x: 0.55, y: 0.43),
-                        CGPoint(x: 0.61, y: 0.66),
-                        CGPoint(x: 0.52, y: 0.60),
-                    ])
-                    .fill(Color(red: 0.651, green: 0.420, blue: 0.239).opacity(0.125))
-
-                    NormalizedPolygon(points: [
-                        CGPoint(x: 0.36, y: 0.20),
-                        CGPoint(x: 0.43, y: 0.18),
-                        CGPoint(x: 0.52, y: 0.60),
-                        CGPoint(x: 0.46, y: 0.54),
-                    ])
-                    .fill(Color(red: 1.000, green: 0.945, blue: 0.827).opacity(0.04))
-                }
-                .mask {
-                    SpeakerLayeredBrandStrokeShape(lineWidth: lineWidth)
-                        .fill(.white)
-                }
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-private struct NormalizedPolygon: Shape {
-    let points: [CGPoint]
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard let first = points.first else { return path }
-        path.move(
-            to: CGPoint(
-                x: rect.minX + first.x * rect.width,
-                y: rect.minY + first.y * rect.height
-            ))
-        for point in points.dropFirst() {
-            path.addLine(
-                to: CGPoint(
-                    x: rect.minX + point.x * rect.width,
-                    y: rect.minY + point.y * rect.height
-                ))
-        }
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// The dark identity tile used only when a surface is naming Speaker itself.
+/// The light identity tile used only when a surface is naming Speaker itself.
 package enum SpeakerIdentityAccessibility: Sendable {
     case named
     case hidden
@@ -175,26 +116,8 @@ package struct SpeakerIdentityTile: View {
 
     package var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    SpeakerVisualIdentity.iconSurfaceTop,
-                    SpeakerVisualIdentity.iconSurfaceBottom,
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RadialGradient(
-                colors: [
-                    Color.white.opacity(size <= 32 ? 0.05 : 0.09),
-                    .clear,
-                ],
-                center: UnitPoint(x: 0.28, y: 0.22),
-                startRadius: 0,
-                endRadius: size * 0.48
-            )
-
-            mark
+            surface
+            printedMark
         }
         .frame(width: size, height: size)
         .clipShape(
@@ -210,7 +133,7 @@ package struct SpeakerIdentityTile: View {
             )
             .inset(by: max(0.5, size * 0.008))
             .stroke(
-                Color.white.opacity(size <= 32 ? 0.064 : 0.128),
+                Color.black.opacity(size <= 32 ? 0.1 : 0.07),
                 lineWidth: max(0.6, size * 0.0045)
             )
         }
@@ -220,33 +143,66 @@ package struct SpeakerIdentityTile: View {
         }
     }
 
-    @ViewBuilder
-    private var mark: some View {
-        let layout = markLayout
-        if size * layout.width > 24 {
-            SpeakerFacetedBrandMark()
-                .frame(
-                    width: size * layout.width,
-                    height: size * layout.height
-                )
-        } else {
-            SpeakerBrandMark()
-                .foregroundStyle(SpeakerVisualIdentity.warmAccent)
-                .frame(
-                    width: size * layout.width,
-                    height: size * layout.height
-                )
+    private var surface: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    SpeakerVisualIdentity.iconSurfaceTop,
+                    SpeakerVisualIdentity.iconSurfaceBottom,
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RadialGradient(
+                colors: [Color.white.opacity(0.7), .clear],
+                center: UnitPoint(x: 0.28, y: 0.22),
+                startRadius: 0,
+                endRadius: size * 0.55
+            )
         }
     }
 
-    private var markLayout: (width: CGFloat, height: CGFloat) {
-        if size <= 16 {
-            (0.68, 0.42)
-        } else if size <= 32 {
-            (0.714, 0.44)
-        } else {
-            (0.68, 0.41)
+    /// The coral front layer multiplies over whatever is behind it. Inside
+    /// its outline, the sharp gold is replaced by the surface and a blurred
+    /// copy of the gold, so the overlap reads as frosted glass.
+    private var printedMark: some View {
+        let metrics = SpeakerPrintedMarkMetrics(tileSize: size)
+        let half = metrics.halfOffset
+        return ZStack {
+            rearStroke(metrics)
+                .offset(x: -half.width, y: -half.height)
+
+            ZStack {
+                surface
+                rearStroke(metrics)
+                    .offset(x: -half.width, y: -half.height)
+                    .blur(radius: metrics.frostRadius)
+            }
+            .mask {
+                markStroke(metrics, Color.white)
+                    .offset(x: half.width, y: half.height)
+            }
+
+            markStroke(metrics, SpeakerVisualIdentity.iconPrintCoral)
+                .offset(x: half.width, y: half.height)
+                .opacity(SpeakerPrintedMark.frontOpacity)
+                .blendMode(.multiply)
         }
+        .compositingGroup()
+    }
+
+    private func rearStroke(_ metrics: SpeakerPrintedMarkMetrics) -> some View {
+        markStroke(metrics, SpeakerPrintedMark.rearGradient)
+    }
+
+    private func markStroke(
+        _ metrics: SpeakerPrintedMarkMetrics,
+        _ paint: some ShapeStyle
+    ) -> some View {
+        SpeakerBrandMarkShape()
+            .stroke(paint, style: SpeakerPrintedMark.stroke(lineWidth: metrics.lineWidth))
+            .frame(width: metrics.markSize.width, height: metrics.markSize.height)
     }
 
     @ViewBuilder
@@ -275,19 +231,21 @@ package struct SpeakerAppIconArtwork: View {
 private struct SpeakerMenuBarGlyph: View {
     let state: MenuBarIconState
 
+    /// The rear layer sits up and to the left of the front one, on the app
+    /// icon's diagonal. Recording raises the rear layer's opacity.
+    private static let halfOffset = CGSize(
+        width: SpeakerPrintedMark.direction.dx * 0.675,
+        height: SpeakerPrintedMark.direction.dy * 0.675
+    )
+
     var body: some View {
+        let half = Self.halfOffset
         ZStack {
-            SpeakerBrandMarkShape()
-                .stroke(
-                    Color.black,
-                    style: StrokeStyle(
-                        lineWidth: 2,
-                        lineCap: .round,
-                        lineJoin: .round
-                    )
-                )
-                .frame(width: 15.2, height: 10.6)
-                .offset(y: 1.2)
+            stroke
+                .opacity(state == .recording ? 0.8 : 0.4)
+                .offset(x: -half.width, y: -half.height)
+            stroke
+                .offset(x: half.width, y: half.height)
         }
         .frame(width: 20, height: 18)
         .overlay(alignment: .topTrailing) {
@@ -295,6 +253,13 @@ private struct SpeakerMenuBarGlyph: View {
                 .padding(.top, 0.4)
                 .padding(.trailing, 0.8)
         }
+    }
+
+    private var stroke: some View {
+        SpeakerBrandMarkShape()
+            .stroke(Color.black, style: SpeakerPrintedMark.stroke(lineWidth: 2))
+            .frame(width: 15.2, height: 10.6)
+            .offset(y: 1.2)
     }
 
     @ViewBuilder
