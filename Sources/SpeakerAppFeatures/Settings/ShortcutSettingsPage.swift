@@ -57,8 +57,6 @@ struct ShortcutSettingsPage: View {
                     }
                 }
             }
-            // Cancel is the way out, not the recommended action.
-            .buttonStyle(SettingsButtonStyle(prominent: !shortcutRecorder.isRecording))
         }
     }
 

@@ -324,8 +324,10 @@ struct ProviderKeyEditor: View {
                     .labelStyle(TrailingIconLabelStyle())
             }
             // The card's capsule style would otherwise dress the link as
-            // a button.
+            // a button. Link buttons ignore `tint` and draw the system link
+            // blue, so the colour is set here to stay neutral.
             .buttonStyle(.link)
+            .foregroundStyle(.secondary)
             .font(SpeakerTypography.caption)
             .speakerPointingHandCursor()
         }
@@ -344,6 +346,8 @@ struct ProviderKeyEditor: View {
     ) -> some View {
         Button(title, action: action)
             .buttonStyle(.link)
+            // Neutral text, not the system link blue.
+            .foregroundStyle(isEnabled ? .primary : .tertiary)
             .font(SpeakerTypography.caption)
             .disabled(!isEnabled)
             .speakerPointingHandCursor()
