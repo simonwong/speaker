@@ -242,11 +242,11 @@ package struct SpeakerAppIconArtwork: View {
 private struct SpeakerMenuBarGlyph: View {
     let state: MenuBarIconState
 
-    /// The rear layer sits up and to the left of the front one, on the app
-    /// icon's diagonal. Recording raises the rear layer's opacity.
+    /// The rear layer sits 2 pt up and to the left of the front one, on the
+    /// app icon's diagonal. Recording raises the rear layer's opacity.
     private static let halfOffset = CGSize(
-        width: SpeakerPrintedMark.direction.dx * 0.675,
-        height: SpeakerPrintedMark.direction.dy * 0.675
+        width: SpeakerPrintedMark.direction.dx,
+        height: SpeakerPrintedMark.direction.dy
     )
 
     var body: some View {
