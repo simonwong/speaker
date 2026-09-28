@@ -42,12 +42,15 @@ private enum SpeakerPrintedMark {
         dy: cos(50 * CGFloat.pi / 180)
     )
     static let frontOpacity = 0.78
+    /// The gold layer is drawn wider than the coral one, so it shows along
+    /// the coral's edges while the two layers still mostly overlap.
+    static let rearWidthScale: CGFloat = 1.35
     static let rearGradient = LinearGradient(
         stops: [
-            .init(color: Color(red: 0.941, green: 0.776, blue: 0.541), location: 0),
-            .init(color: Color(red: 0.969, green: 0.835, blue: 0.620), location: 0.32),
-            .init(color: Color(red: 0.929, green: 0.741, blue: 0.463), location: 0.62),
-            .init(color: Color(red: 0.878, green: 0.627, blue: 0.310), location: 1),
+            .init(color: Color(red: 0.953, green: 0.847, blue: 0.682), location: 0),
+            .init(color: Color(red: 1.000, green: 0.910, blue: 0.773), location: 0.32),
+            .init(color: Color(red: 0.949, green: 0.804, blue: 0.588), location: 0.62),
+            .init(color: Color(red: 0.910, green: 0.710, blue: 0.435), location: 1),
         ],
         startPoint: UnitPoint(x: 0.018, y: 0.5),
         endPoint: UnitPoint(x: 0.982, y: 0.5)
@@ -75,15 +78,15 @@ private struct SpeakerPrintedMarkMetrics {
         if size <= 16 {
             frame = (0.68, 0.42)
             lineFraction = 0.13
-            offsetFraction = 0.09
+            offsetFraction = 0.07
         } else if size <= 32 {
             frame = (0.714, 0.44)
             lineFraction = 0.10
-            offsetFraction = 0.085
+            offsetFraction = 0.055
         } else {
             frame = (0.68, 0.41)
             lineFraction = 0.08
-            offsetFraction = 0.07
+            offsetFraction = 0.045
         }
         let offset = size * offsetFraction
         markSize = CGSize(width: size * frame.width, height: size * frame.height)
@@ -193,15 +196,23 @@ package struct SpeakerIdentityTile: View {
     }
 
     private func rearStroke(_ metrics: SpeakerPrintedMarkMetrics) -> some View {
-        markStroke(metrics, SpeakerPrintedMark.rearGradient)
+        markStroke(
+            metrics,
+            SpeakerPrintedMark.rearGradient,
+            lineWidth: metrics.lineWidth * SpeakerPrintedMark.rearWidthScale
+        )
     }
 
     private func markStroke(
         _ metrics: SpeakerPrintedMarkMetrics,
-        _ paint: some ShapeStyle
+        _ paint: some ShapeStyle,
+        lineWidth: CGFloat? = nil
     ) -> some View {
         SpeakerBrandMarkShape()
-            .stroke(paint, style: SpeakerPrintedMark.stroke(lineWidth: metrics.lineWidth))
+            .stroke(
+                paint,
+                style: SpeakerPrintedMark.stroke(lineWidth: lineWidth ?? metrics.lineWidth)
+            )
             .frame(width: metrics.markSize.width, height: metrics.markSize.height)
     }
 
