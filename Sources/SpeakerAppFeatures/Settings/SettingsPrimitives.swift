@@ -94,10 +94,10 @@ package struct StatusBadge: View {
         self.color = color
     }
 
-    /// Healthy (green) and neutral (grey) states recede into secondary text;
+    /// Healthy (settled green) and neutral (grey) states recede into secondary text;
     /// only a state that asks for attention keeps full-strength text.
     package static func isSettled(_ color: Color) -> Bool {
-        color == .secondary || color == .green
+        color == .secondary || color == SpeakerVisualIdentity.settledGreen
     }
 
     private var isSettled: Bool { Self.isSettled(color) }

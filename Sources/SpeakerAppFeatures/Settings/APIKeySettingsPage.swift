@@ -210,7 +210,7 @@ package struct RefinementProviderSettingsCard: View {
 
     private var statusColor: Color {
         if model.connectionFailure != nil { return .red }
-        return model.hasStoredKey ? .green : .secondary
+        return model.hasStoredKey ? SpeakerVisualIdentity.settledGreen : .secondary
     }
 }
 
