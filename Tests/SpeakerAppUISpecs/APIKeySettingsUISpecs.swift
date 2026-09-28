@@ -174,12 +174,15 @@ enum APIKeySettingsUISpecs {
             refinement.apiKeyDraft = "synthetic-deepseek-old"
             await refinement.saveAPIKey()
             let hosting = NSHostingView(
-                rootView: APIKeySettingsPage(
-                    doubao: doubao, refinement: refinement,
-                    recognition: SpeechRecognitionSettingsModel(
-                        credentials: credentials,
-                        configuration: VoiceInputConfigurationController(), settingsStore: settings)
-                ))
+                rootView: VStack {
+                    SpeechRecognitionSettingsCard(
+                        model: SpeechRecognitionSettingsModel(
+                            credentials: credentials,
+                            configuration: VoiceInputConfigurationController(),
+                            settingsStore: settings),
+                        doubao: doubao)
+                    RefinementProviderSettingsCard(model: refinement)
+                })
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 760, height: 850), styleMask: [.titled],
                 backing: .buffered, defer: false)
@@ -190,14 +193,18 @@ enum APIKeySettingsUISpecs {
                 window.orderOut(nil)
                 window.close()
             }
+            let collapsed = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return buttons(named: "更换 Key", in: hosting).count == 2
+                    && visibleKeyFields(in: hosting) == 0
+            }
+            try expect(collapsed, "saved keys did not collapse behind their replace action")
+            try openReplacements(in: hosting)
             let visible = await eventually(before: .seconds(2)) {
                 pumpUI()
-                hosting.layoutSubtreeIfNeeded()
-                return secureFields(in: hosting).filter {
-                    $0.isEditable && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
-                }.count == 2
+                return visibleKeyFields(in: hosting) == 2
             }
-            try expect(visible, "saved keys hid their replacement fields")
+            try expect(visible, "replace action did not reveal the replacement fields")
             doubao.apiKeyDraft = "synthetic-doubao-new"
             refinement.apiKeyDraft = "synthetic-deepseek-new"
             let saveButtonsVisible = await eventually(before: .seconds(2)) {
@@ -225,6 +232,17 @@ enum APIKeySettingsUISpecs {
             try expect(
                 doubao.apiKeyDraft.isEmpty && refinement.apiKeyDraft.isEmpty,
                 "save did not clear drafts")
+            let recollapsed = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return visibleKeyFields(in: hosting) == 0
+            }
+            try expect(recollapsed, "a saved replacement left its field open")
+            try openReplacements(in: hosting)
+            let deletionShown = await eventually(before: .seconds(2)) {
+                pumpUI()
+                return buttons(named: "删除 Key", in: hosting).count == 2
+            }
+            try expect(deletionShown, "replace action did not reveal deletion")
             let deletionActions = buttons(named: "删除 Key", in: hosting)
             try expect(
                 deletionActions.count == 2,
@@ -278,6 +296,21 @@ enum APIKeySettingsUISpecs {
             try expect(deletedDoubao == nil && deletedDeepseek == nil)
             await doubao.shutdown()
             await refinement.shutdown()
+        }
+    }
+
+    @MainActor
+    private static func visibleKeyFields(in view: NSView) -> Int {
+        view.layoutSubtreeIfNeeded()
+        return secureFields(in: view).filter {
+            $0.isEditable && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
+        }.count
+    }
+
+    @MainActor
+    private static func openReplacements(in view: NSView) throws {
+        for button in buttons(named: "更换 Key", in: view) {
+            try expect(button.accessibilityPerformPress(), "replace action refused AX press")
         }
     }
 

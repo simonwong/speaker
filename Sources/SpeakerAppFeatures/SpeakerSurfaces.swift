@@ -1,3 +1,4 @@
+import AppKit
 import QuartzCore
 import SwiftUI
 
@@ -66,11 +67,67 @@ package struct SpeakerPressableButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduceMotion ? pressedScale : 1)
             .opacity(opacity(pressed: configuration.isPressed))
             .animation(SpeakerMotion.feedback, value: configuration.isPressed)
+            .speakerPointingHandCursor()
     }
 
     private func opacity(pressed: Bool) -> Double {
         if !isEnabled { return 0.45 }
         return pressed && reduceMotion ? 0.7 : 1
+    }
+}
+
+/// Every control that acts on a click shows the pointing hand while the
+/// pointer is over it. A disabled control keeps the arrow.
+package struct SpeakerPointingHandCursor: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    package func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.pointerStyle(isEnabled ? .link : nil)
+        } else {
+            content.modifier(LegacyPointingHandCursor(isActive: isEnabled))
+        }
+    }
+}
+
+/// macOS 14 has no `pointerStyle`, so the cursor stack is balanced by hand:
+/// one push on entry, one pop on exit, disable, or disappearance.
+private struct LegacyPointingHandCursor: ViewModifier {
+    let isActive: Bool
+    @State private var isHovered = false
+    @State private var hasPushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovered in
+                isHovered = hovered
+                sync(hovered: hovered, active: isActive)
+            }
+            .onChange(of: isActive) { _, active in
+                sync(hovered: isHovered, active: active)
+            }
+            .onDisappear {
+                isHovered = false
+                sync(hovered: false, active: isActive)
+            }
+    }
+
+    private func sync(hovered: Bool, active: Bool) {
+        let wantsHand = hovered && active
+        guard wantsHand != hasPushed else { return }
+        if wantsHand {
+            NSCursor.pointingHand.push()
+        } else {
+            NSCursor.pop()
+        }
+        hasPushed = wantsHand
+    }
+}
+
+extension View {
+    package func speakerPointingHandCursor() -> some View {
+        modifier(SpeakerPointingHandCursor())
     }
 }
 

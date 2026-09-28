@@ -167,14 +167,18 @@ private struct SettingsOverviewView: View {
                 permissions: workspace.permissions,
                 requestPermission: workspace.requestPermission
             )
-        case .apiKeys:
-            APIKeySettingsPage(
+        case .speechRecognition:
+            SpeechRecognitionSettingsCard(
+                model: workspace.recognition,
                 doubao: workspace.doubao,
-                refinement: workspace.refinement,
-                recognition: workspace.recognition
+                showsHeader: false
             )
         case .refinement:
-            RefinementSettingsPage(model: workspace.refinement)
+            // The provider and its key sit above the modes they unlock.
+            VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
+                RefinementProviderSettingsCard(model: workspace.refinement)
+                RefinementSettingsPage(model: workspace.refinement)
+            }
         case .general:
             GeneralSettingsPage(
                 loginItemSettings: workspace.loginItemSettings,

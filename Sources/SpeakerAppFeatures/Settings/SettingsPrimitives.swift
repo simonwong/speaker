@@ -70,13 +70,15 @@ extension View {
         labelsHidden()
             .pickerStyle(.menu)
             .controlSize(.large)
+            .speakerPointingHandCursor()
             .frame(maxWidth: SpeakerSurfaceMetrics.trailingControlWidth, alignment: .trailing)
     }
 }
 
 /// A state beside its row: a filled-circle glyph in the state's colour and
-/// plain text. The glyph carries the colour, so a card of healthy states
-/// stays quiet; a state that asks for attention keeps full-strength text.
+/// plain text. Healthy and neutral states are grey, so a card of them stays
+/// quiet; only a state that asks for attention is coloured and keeps
+/// full-strength text.
 ///
 /// `icon` names a `*.circle.fill` symbol; its glyph draws white on the
 /// coloured circle.
@@ -93,7 +95,7 @@ package struct StatusBadge: View {
     }
 
     /// Healthy and neutral states recede into secondary text.
-    private var isSettled: Bool { color == .green || color == .secondary }
+    private var isSettled: Bool { color == .secondary }
 
     package var body: some View {
         Label {
@@ -130,7 +132,6 @@ package struct SettingsNotice: View {
         switch color {
         case .red: return "xmark.circle.fill"
         case .orange: return "exclamationmark.triangle.fill"
-        case .green: return "checkmark.circle.fill"
         default: return "info.circle.fill"
         }
     }

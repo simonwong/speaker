@@ -527,6 +527,33 @@ struct SpeakerAppUISpecs {
             )
         }
 
+        run("voice HUD text strips fit their text within bounds", failures: &failures) {
+            let short = VoiceInputPanelLayout.problemWidth(title: "辅助功能权限不可用")
+            let long = VoiceInputPanelLayout.problemWidth(
+                title: String(repeating: "很长的错误说明", count: 12)
+            )
+            try expect(short < 260, "a short problem title kept a \(short) pt strip")
+            try expect(short >= 140)
+            try expect(long == 320, "a long problem title grew to \(long) pt")
+            let brief = VoiceInputPanelLayout.pendingCopyWidth(text: "好", failureTitle: nil)
+            let failed = VoiceInputPanelLayout.pendingCopyWidth(
+                text: "这是保留的转录文字。",
+                failureTitle: "复制失败"
+            )
+            let plain = VoiceInputPanelLayout.pendingCopyWidth(
+                text: "这是保留的转录文字。",
+                failureTitle: nil
+            )
+            try expect(brief == 160, "a one-character result used \(brief) pt")
+            try expect(failed > plain, "the copy failure title did not widen the strip")
+            try expect(
+                VoiceInputPanelLayout.pendingCopyWidth(
+                    text: String(repeating: "长", count: 200),
+                    failureTitle: nil
+                ) == 360
+            )
+        }
+
         run(
             "every voice HUD transition applies the destination geometry",
             failures: &failures
@@ -534,19 +561,30 @@ struct SpeakerAppUISpecs {
             let presentations: [(VoiceInputOverlayPresentation, CGSize)] = [
                 (
                     VoiceInputHUDContractFixture.processing.presentation,
-                    CGSize(width: 128, height: 44)
+                    CGSize(width: 114, height: 44)
                 ),
                 (
                     VoiceInputHUDContractFixture.recording.presentation,
-                    CGSize(width: 128, height: 44)
+                    CGSize(width: 114, height: 44)
                 ),
                 (
                     VoiceInputHUDContractFixture.pendingCopy.presentation,
-                    CGSize(width: 370, height: 44)
+                    CGSize(
+                        width: VoiceInputPanelLayout.pendingCopyWidth(
+                            text: "这是保留的转录文字。",
+                            failureTitle: nil
+                        ) + 10,
+                        height: 44
+                    )
                 ),
                 (
                     VoiceInputHUDContractFixture.problem.presentation,
-                    CGSize(width: 330, height: 44)
+                    CGSize(
+                        width: VoiceInputPanelLayout.problemWidth(
+                            title: "辅助功能权限不可用"
+                        ) + 10,
+                        height: 44
+                    )
                 ),
             ]
             let presenter = VoiceInputPanelPresenter { presentation in
@@ -601,7 +639,11 @@ struct SpeakerAppUISpecs {
 
             try expect(presenter.evidence.isVisible)
             try expect(
-                presenter.evidence.windowSize == CGSize(width: 330, height: 44)
+                presenter.evidence.windowSize
+                    == CGSize(
+                        width: VoiceInputPanelLayout.problemWidth(title: "辅助功能权限不可用") + 10,
+                        height: 44
+                    )
             )
         }
 

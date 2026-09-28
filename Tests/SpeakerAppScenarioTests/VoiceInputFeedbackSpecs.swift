@@ -192,7 +192,7 @@ enum VoiceInputFeedbackSpecs {
         experience.shortcutTarget.receive(.pressed)
         let recording = await eventually(before: .seconds(2)) { experience.state.isRecording }
         try expect(recording)
-        guard case .recording(_, _, let finish) = experience.state.overlay else {
+        guard case .recording(_, _, let finish, _) = experience.state.overlay else {
             throw SpecFailure(message: "recording action missing")
         }
         experience.perform(finish)

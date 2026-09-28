@@ -455,8 +455,13 @@ actor EarlyFailingStreamingProcessor: VoiceTextProcessing, StreamingVoiceTextPro
 actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextProcessing {
     private(set) var receivedChunkCount = 0
     private(set) var cancellationCount = 0
+    private let snapshot: VoiceTextProcessingSnapshot
 
-    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+    init(snapshot: VoiceTextProcessingSnapshot = .empty) {
+        self.snapshot = snapshot
+    }
+
+    func captureSnapshot() async -> VoiceTextProcessingSnapshot { snapshot }
 
     func process(
         _ audio: CapturedAudio,

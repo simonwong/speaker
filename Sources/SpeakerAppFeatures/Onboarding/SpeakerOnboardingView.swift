@@ -186,6 +186,7 @@ package struct SpeakerOnboardingView: View {
         case .apiKey:
             VStack(alignment: .leading, spacing: 14) {
                 SpeechRecognitionSettingsCard(model: recognition, doubao: doubao)
+                    .environment(\.collapsesStoredProviderKeys, false)
             }
         case .shortcut:
             VStack(alignment: .leading, spacing: 18) {
@@ -221,7 +222,7 @@ package struct SpeakerOnboardingView: View {
         let status = PermissionStatusPresentation(state: state)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                SpeakerIconTile(symbol: icon, tint: status.tint)
+                SpeakerIconTile(symbol: icon, tint: status.tileTint)
                 Text(title)
                     .font(SpeakerTypography.cardTitle)
                 Spacer()

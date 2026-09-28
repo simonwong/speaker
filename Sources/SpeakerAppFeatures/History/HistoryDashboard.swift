@@ -193,6 +193,7 @@ package struct HistoryDashboard: View {
                         Image(systemName: "xmark.circle.fill")
                     }
                     .buttonStyle(.plain)
+                    .speakerPointingHandCursor()
                     .foregroundStyle(.tertiary)
                     .accessibilityLabel("清空搜索")
                 }
@@ -225,6 +226,7 @@ package struct HistoryDashboard: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .speakerPointingHandCursor()
             .help("刷新与清空历史")
             .accessibilityLabel("历史选项")
         }
@@ -444,6 +446,7 @@ private struct HistoryRecordRow: View {
             .padding(.vertical, 10)
             .contentShape(Rectangle())
             .onTapGesture(perform: toggleDetails)
+            .speakerPointingHandCursor()
 
             if isExpanded {
                 HistoryExpandedRecord(
@@ -775,7 +778,7 @@ extension HistoryDashboardFeedback.Kind {
     fileprivate var color: Color {
         switch self {
         case .information: .secondary
-        case .success: .green
+        case .success: .secondary
         case .warning: .orange
         case .error: .red
         }

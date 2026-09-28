@@ -34,11 +34,11 @@ struct ShortcutSettingsPage: View {
         HStack(spacing: 14) {
             ShortcutKeycap(name: shortcut.preference.displayName)
 
-            StatusBadge(
-                text: shortcutStatusText,
-                icon: shortcutStatusIcon,
-                color: shortcutStatusColor
-            )
+            // The keycap already names a working shortcut; only a shortcut
+            // that is not listening needs words beside it.
+            if let status = shortcutStatus {
+                StatusBadge(text: status.text, icon: status.icon, color: status.color)
+            }
 
             Spacer()
 
@@ -112,32 +112,16 @@ struct ShortcutSettingsPage: View {
         }
     }
 
-    private var shortcutStatusText: String {
+    private var shortcutStatus: (text: String, icon: String, color: Color)? {
         switch shortcut.activation {
-        case .active(let preference):
-            preference == .functionKey ? "默认 Fn 已启用" : "自定义组合键已启用"
+        case .active:
+            nil
         case .waitingForAccessibility:
-            "已选择，等待辅助功能权限"
+            ("已选择，等待辅助功能权限", "exclamationmark.circle.fill", .orange)
         case .unavailable:
-            "已选择，但监听尚未启用"
+            ("已选择，但监听尚未启用", "exclamationmark.circle.fill", .orange)
         case .stopped:
-            "监听已停止"
-        }
-    }
-
-    private var shortcutStatusIcon: String {
-        switch shortcut.activation {
-        case .active: "checkmark.circle.fill"
-        case .waitingForAccessibility, .unavailable: "exclamationmark.circle.fill"
-        case .stopped: "pause.circle.fill"
-        }
-    }
-
-    private var shortcutStatusColor: Color {
-        switch shortcut.activation {
-        case .active: .green
-        case .waitingForAccessibility, .unavailable: .orange
-        case .stopped: .red
+            ("监听已停止", "pause.circle.fill", .red)
         }
     }
 

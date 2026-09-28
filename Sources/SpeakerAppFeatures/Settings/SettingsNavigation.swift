@@ -6,7 +6,7 @@ package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendab
     case shortcut
     case microphones
     case permissions
-    case apiKeys
+    case speechRecognition
     case refinement
     case general
     case localData
@@ -16,7 +16,7 @@ package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendab
     package static let shortcutTitle = "快捷键"
     package static let microphonesTitle = "麦克风"
     package static let permissionsTitle = "权限"
-    package static let apiKeysTitle = "API Key"
+    package static let speechRecognitionTitle = "语音识别"
     package static let refinementTitle = "整理"
     package static let generalTitle = "通用"
     package static let localDataTitle = "本地数据"
@@ -26,7 +26,7 @@ package enum SettingsGroup: String, CaseIterable, Hashable, Identifiable, Sendab
         case .shortcut: Self.shortcutTitle
         case .microphones: Self.microphonesTitle
         case .permissions: Self.permissionsTitle
-        case .apiKeys: Self.apiKeysTitle
+        case .speechRecognition: Self.speechRecognitionTitle
         case .refinement: Self.refinementTitle
         case .general: Self.generalTitle
         case .localData: Self.localDataTitle
