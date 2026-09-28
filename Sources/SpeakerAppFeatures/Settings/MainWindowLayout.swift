@@ -59,6 +59,8 @@ package struct MainWindowLayoutContainer<Content: View>: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // Controls take the brand coral, not the system accent colour.
+        .tint(SpeakerVisualIdentity.controlTint)
         .frame(
             minWidth: MainWindowLayout.minimumContentSize.width,
             minHeight: MainWindowLayout.minimumContentSize.height

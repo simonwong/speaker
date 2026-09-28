@@ -147,7 +147,7 @@ package struct SpeakerFieldSurface<FieldShape: InsettableShape>: ViewModifier {
     }
 
     private var borderColor: Color {
-        if focused { return .accentColor.opacity(0.7) }
+        if focused { return SpeakerVisualIdentity.controlTint.opacity(0.7) }
         // A glass field inside a glass card loses its edge in dark mode, so
         // every style keeps a hairline.
         return Color.primary.opacity(contrast == .increased ? 0.4 : 0.1)

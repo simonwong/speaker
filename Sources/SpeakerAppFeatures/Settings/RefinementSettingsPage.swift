@@ -240,14 +240,15 @@ private struct RefinementModeButton: View {
     }
 
     private var fillColor: Color {
-        highlighted ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.03)
+        highlighted ? SpeakerVisualIdentity.controlTint.opacity(0.10) : Color.primary.opacity(0.03)
     }
 
     @ViewBuilder
     private func surface(_ content: some View) -> some View {
         if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
             content.glassEffect(
-                .regular.tint(highlighted ? Color.accentColor.opacity(0.16) : nil).interactive(),
+                .regular.tint(highlighted ? SpeakerVisualIdentity.controlTint.opacity(0.16) : nil)
+                    .interactive(),
                 in: shape
             )
         } else {
@@ -256,7 +257,7 @@ private struct RefinementModeButton: View {
     }
 
     private var strokeColor: Color {
-        if highlighted { return Color.accentColor.opacity(0.8) }
+        if highlighted { return SpeakerVisualIdentity.controlTint.opacity(0.8) }
         return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
     }
 
@@ -294,7 +295,7 @@ private struct RefinementModeButton: View {
                 Image(systemName: choice.icon)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(
-                        highlighted ? Color.accentColor : .secondary
+                        highlighted ? SpeakerVisualIdentity.controlTint : .secondary
                     )
                 Spacer()
                 Image(
@@ -304,7 +305,7 @@ private struct RefinementModeButton: View {
                 )
                 .foregroundStyle(
                     highlighted
-                        ? Color.accentColor
+                        ? SpeakerVisualIdentity.controlTint
                         : Color.secondary.opacity(contrast == .increased ? 1 : 0.55)
                 )
             }

@@ -76,9 +76,9 @@ extension View {
 }
 
 /// A state beside its row: a filled-circle glyph in the state's colour and
-/// plain text. Healthy and neutral states are grey, so a card of them stays
-/// quiet; only a state that asks for attention is coloured and keeps
-/// full-strength text.
+/// plain text. Healthy states are settled green and neutral states grey, and
+/// both use secondary text, so a card of them stays quiet; only a state that
+/// asks for attention keeps full-strength text.
 ///
 /// `icon` names a `*.circle.fill` symbol; its glyph draws white on the
 /// coloured circle.

@@ -66,6 +66,7 @@ package struct SpeakerOnboardingView: View {
             footer
         }
         .buttonStyle(SettingsButtonStyle())
+        .tint(SpeakerVisualIdentity.controlTint)
         .frame(minWidth: 360, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
@@ -128,7 +129,8 @@ package struct SpeakerOnboardingView: View {
                         .font(SpeakerTypography.footnote.weight(.semibold).monospacedDigit())
                         .frame(width: 24, height: 24)
                         .background(
-                            item == step ? Color.accentColor : Color.secondary.opacity(0.12),
+                            item == step
+                                ? SpeakerVisualIdentity.controlTint : Color.secondary.opacity(0.12),
                             in: Circle()
                         )
                         .foregroundStyle(item == step ? Color.white : Color.secondary)
@@ -251,7 +253,7 @@ package struct SpeakerOnboardingView: View {
 
     private func tutorialRow(icon: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            SpeakerIconTile(symbol: icon, tint: .accentColor)
+            SpeakerIconTile(symbol: icon, tint: SpeakerVisualIdentity.controlTint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(SpeakerTypography.bodyEmphasis)

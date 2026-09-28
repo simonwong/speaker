@@ -112,7 +112,7 @@ enum RefinementSelectionUISpecs {
             var spans = 0
             var length = 0
             for x in 0..<bitmap.pixelsWide {
-                if isBlue(x: x, y: y, in: bitmap) {
+                if isCoral(x: x, y: y, in: bitmap) {
                     length += 1
                 } else {
                     if length > 90 {
@@ -134,20 +134,21 @@ enum RefinementSelectionUISpecs {
     private static func rowMayContainHighlight(_ y: Int, in bitmap: NSBitmapImageRep) -> Bool {
         var consecutive = 0
         for x in stride(from: 0, to: bitmap.pixelsWide, by: 8) {
-            consecutive = isBlue(x: x, y: y, in: bitmap) ? consecutive + 1 : 0
+            consecutive = isCoral(x: x, y: y, in: bitmap) ? consecutive + 1 : 0
             // Every span longer than 90 pixels contains at least 11 samples.
             if consecutive >= 11 { return true }
         }
         return false
     }
 
-    /// Only the saturated selection ring counts: a highlighted card's faint
-    /// tint fill is cut by its own text and must not read as a second card.
+    /// Only the saturated coral selection ring counts: a highlighted card's
+    /// faint tint fill is cut by its own text and must not read as a second
+    /// card.
     @MainActor
-    private static func isBlue(x: Int, y: Int, in bitmap: NSBitmapImageRep) -> Bool {
+    private static func isCoral(x: Int, y: Int, in bitmap: NSBitmapImageRep) -> Bool {
         guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
-        return color.blueComponent - color.redComponent > 0.3
-            && color.blueComponent > color.greenComponent
+        return color.redComponent - color.blueComponent > 0.3
+            && color.redComponent > color.greenComponent
     }
 
     @MainActor
