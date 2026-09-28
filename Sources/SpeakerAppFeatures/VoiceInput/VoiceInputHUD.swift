@@ -322,6 +322,7 @@ private struct ActivityWaveform: View {
     let levels: [Double]
     let reduceMotion: Bool
     let compact: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if phase == .processing, !reduceMotion {
@@ -353,8 +354,8 @@ private struct ActivityWaveform: View {
         case .recording:
             LinearGradient(
                 colors: [
-                    SpeakerVisualIdentity.warmAccent.opacity(0.5),
-                    SpeakerVisualIdentity.warmAccent.opacity(0.98),
+                    SpeakerVisualIdentity.warmCoral(for: colorScheme).opacity(0.5),
+                    SpeakerVisualIdentity.warmCoral(for: colorScheme).opacity(0.98),
                 ],
                 startPoint: .bottom,
                 endPoint: .top

@@ -184,7 +184,7 @@ package struct SpeakerIdentityTile: View {
                     .offset(x: half.width, y: half.height)
             }
 
-            markStroke(metrics, SpeakerVisualIdentity.iconPrintCoral)
+            markStroke(metrics, SpeakerVisualIdentity.warmCoral)
                 .offset(x: half.width, y: half.height)
                 .opacity(SpeakerPrintedMark.frontOpacity)
                 .blendMode(.multiply)

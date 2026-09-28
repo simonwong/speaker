@@ -143,6 +143,7 @@ private struct OverviewVoiceprint: View {
     let isLoaded: Bool
     let reduceMotion: Bool
     @State private var isPresented: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     init(counts: [Int], isLoaded: Bool, reduceMotion: Bool) {
         self.counts = counts
@@ -163,7 +164,10 @@ private struct OverviewVoiceprint: View {
                     .fill(
                         count == 0
                             ? Color.primary.opacity(0.07)
-                            : SpeakerVisualIdentity.warmAccent
+                            : SpeakerVisualIdentity.usageTrace(
+                                ratio * 1.1,
+                                colorScheme: colorScheme
+                            )
                     )
                     .frame(
                         width: 5,
@@ -481,13 +485,14 @@ private struct HeatmapLegend: View {
 private enum HeatmapPalette {
     static func color(forLevel level: Int, colorScheme: ColorScheme) -> Color {
         switch level {
-        case 1: SpeakerVisualIdentity.warmAccent.opacity(0.28)
-        case 2: SpeakerVisualIdentity.warmAccent.opacity(0.5)
-        case 3: SpeakerVisualIdentity.warmAccent.opacity(0.74)
-        case 4:
+        case 1:
+            SpeakerVisualIdentity.warmAccent.opacity(colorScheme == .dark ? 0.45 : 0.75)
+        case 2:
             colorScheme == .dark
                 ? SpeakerVisualIdentity.warmAccent
                 : SpeakerVisualIdentity.warmAccentDeep
+        case 3: SpeakerVisualIdentity.warmCoral(for: colorScheme).opacity(0.72)
+        case 4: SpeakerVisualIdentity.warmCoral(for: colorScheme)
         default: Color.primary.opacity(0.06)
         }
     }
