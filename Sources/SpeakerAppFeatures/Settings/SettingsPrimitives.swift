@@ -96,7 +96,7 @@ package struct StatusBadge: View {
 
     /// Healthy (settled green) and neutral (grey) states recede into secondary text;
     /// only a state that asks for attention keeps full-strength text.
-    package static func isSettled(_ color: Color) -> Bool {
+    nonisolated package static func isSettled(_ color: Color) -> Bool {
         color == .secondary || color == SpeakerVisualIdentity.settledGreen
     }
 
