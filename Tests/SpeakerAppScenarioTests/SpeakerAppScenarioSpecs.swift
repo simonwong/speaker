@@ -1135,13 +1135,15 @@ struct SpeakerAppScenarioSpecs {
             try expect(failure.text == SpeakerCopy.ProviderStatus.failure)
             try expect(failure.symbolName == "xmark.circle.fill")
 
-            // Only a state that needs action is coloured; working states stay grey.
-            for status in [DoubaoConnectionStatus.configured, .checking, .success("id")] {
-                try expect(DoubaoStatusPresentation(status: status).tint == .secondary)
+            // Healthy states are green, working states grey, and only a state
+            // that needs action colours its icon tile.
+            for status in [DoubaoConnectionStatus.configured, .success("id")] {
+                try expect(DoubaoStatusPresentation(status: status).tint == .green)
             }
+            try expect(DoubaoStatusPresentation(status: .checking).tint == .secondary)
             try expect(failure.tint == .red)
             let granted = PermissionStatusPresentation(state: .granted)
-            try expect(granted.tint == .secondary && granted.tileTint == nil)
+            try expect(granted.tint == .green && granted.tileTint == nil)
             try expect(PermissionStatusPresentation(state: .denied).tileTint == .orange)
         }
 

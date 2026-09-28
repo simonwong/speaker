@@ -5,7 +5,8 @@ import SwiftUI
 ///
 /// The settings page and the onboarding window both badge the same state, so
 /// they read the same text, SF Symbol and tint from here. A granted
-/// permission stays neutral grey; colour is kept for states that need action.
+/// permission gets a green circle and quiet text; the icon tile beside it
+/// stays plain, because only states that need action colour the tile.
 package struct PermissionStatusPresentation: Equatable, Sendable {
     package let text: String
     package let symbolName: String
@@ -16,7 +17,7 @@ package struct PermissionStatusPresentation: Equatable, Sendable {
         case .granted:
             text = "已开启"
             symbolName = "checkmark.circle.fill"
-            tint = .secondary
+            tint = .green
         case .denied:
             text = "未开启"
             symbolName = "exclamationmark.circle.fill"
@@ -33,5 +34,5 @@ package struct PermissionStatusPresentation: Equatable, Sendable {
     }
 
     /// The icon tile beside the badge: plain when nothing needs attention.
-    package var tileTint: Color? { tint == .secondary ? nil : tint }
+    package var tileTint: Color? { StatusBadge.isSettled(tint) ? nil : tint }
 }

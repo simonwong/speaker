@@ -24,7 +24,7 @@ package struct DoubaoStatusPresentation: Equatable, Sendable {
         case .configured:
             text = SpeakerCopy.ProviderStatus.configured
             symbolName = "checkmark.circle.fill"
-            tint = .secondary
+            tint = .green
         case .checking:
             text = SpeakerCopy.ProviderStatus.checking
             symbolName = "arrow.triangle.2.circlepath.circle.fill"
@@ -32,7 +32,7 @@ package struct DoubaoStatusPresentation: Equatable, Sendable {
         case .success:
             text = SpeakerCopy.ProviderStatus.success
             symbolName = "checkmark.circle.fill"
-            tint = .secondary
+            tint = .green
         case .failure:
             text = SpeakerCopy.ProviderStatus.failure
             symbolName = "xmark.circle.fill"

@@ -64,7 +64,7 @@ package struct SpeechRecognitionSettingsCard: View {
                 status: ProviderKeyStatus(
                     text: model.hasStoredKey ? "已配置" : "未配置",
                     icon: model.hasStoredKey ? "checkmark.circle.fill" : "key.circle.fill",
-                    color: .secondary),
+                    color: model.hasStoredKey ? .green : .secondary),
                 deletionMessage: "只删除当前语音识别服务与地域的 Key；文字整理 Key 不受影响。",
                 save: { await model.saveAPIKey() },
                 delete: { await model.deleteAPIKey() })

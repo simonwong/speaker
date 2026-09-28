@@ -209,7 +209,8 @@ package struct RefinementProviderSettingsCard: View {
     }
 
     private var statusColor: Color {
-        model.connectionFailure != nil ? .red : .secondary
+        if model.connectionFailure != nil { return .red }
+        return model.hasStoredKey ? .green : .secondary
     }
 }
 

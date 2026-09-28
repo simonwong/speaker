@@ -165,7 +165,7 @@ private struct OverviewVoiceprint: View {
                         count == 0
                             ? Color.primary.opacity(0.07)
                             : SpeakerVisualIdentity.usageTrace(
-                                ratio * 1.1,
+                                ratio,
                                 colorScheme: colorScheme
                             )
                     )
@@ -177,7 +177,6 @@ private struct OverviewVoiceprint: View {
                         x: 1,
                         y: reduceMotion || isPresented ? 1 : 0.1
                     )
-                    .opacity(count == 0 ? 1 : 0.55 + 0.45 * ratio)
                     .animation(
                         reduceMotion ? nil : SpeakerMotion.change,
                         value: ratio
@@ -271,7 +270,7 @@ private struct OverviewMetric: View {
                 .minimumScaleFactor(0.72)
             Text(label)
                 .font(SpeakerTypography.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -303,14 +302,6 @@ private struct OverviewHeatmapCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             let heatmap = heatmap
-
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("每日说出 · 近 \(ContributionHeatmap.defaultWeekCount) 周")
-                    .font(SpeakerTypography.sectionHeader)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                HeatmapLegend()
-            }
 
             ContributionHeatmapGrid(
                 heatmap: heatmap,
@@ -450,49 +441,14 @@ private struct HeatmapCellView: View {
     }
 }
 
-private struct HeatmapLegend: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text("少")
-                .font(SpeakerTypography.footnote)
-                .foregroundStyle(.secondary)
-            ForEach(0...4, id: \.self) { level in
-                RoundedRectangle(
-                    cornerRadius: HeatmapMetrics.corner,
-                    style: .continuous
-                )
-                .fill(
-                    HeatmapPalette.color(
-                        forLevel: level,
-                        colorScheme: colorScheme
-                    )
-                )
-                .frame(
-                    width: HeatmapMetrics.legendSwatch,
-                    height: HeatmapMetrics.legendSwatch
-                )
-            }
-            Text("多")
-                .font(SpeakerTypography.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 private enum HeatmapPalette {
     static func color(forLevel level: Int, colorScheme: ColorScheme) -> Color {
         switch level {
-        case 1:
-            SpeakerVisualIdentity.warmAccent.opacity(colorScheme == .dark ? 0.45 : 0.75)
-        case 2:
-            colorScheme == .dark
-                ? SpeakerVisualIdentity.warmAccent
-                : SpeakerVisualIdentity.warmAccentDeep
-        case 3: SpeakerVisualIdentity.warmCoral(for: colorScheme).opacity(0.72)
-        case 4: SpeakerVisualIdentity.warmCoral(for: colorScheme)
+        case 1...4:
+            SpeakerVisualIdentity.usageTrace(
+                Double(level - 1) / 3,
+                colorScheme: colorScheme
+            )
         default: Color.primary.opacity(0.06)
         }
     }

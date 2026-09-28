@@ -265,7 +265,7 @@ package struct SpeakerCardSurface: ViewModifier {
             return (tint ?? Color.primary).opacity(0.32)
         }
         if let tint {
-            return tint.opacity(0.35)
+            return tint.opacity(0.2)
         }
         switch surfaceStyle {
         case .liquidGlass: return .clear
@@ -300,7 +300,7 @@ package struct SpeakerCardSurface: ViewModifier {
     @ViewBuilder
     private func surface(_ content: some View) -> some View {
         if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.glassEffect(.regular.tint(tint?.opacity(0.14)), in: shape)
+            content.glassEffect(.regular.tint(tint?.opacity(0.04)), in: shape)
         } else if surfaceStyle == .opaque {
             content.background { paper }
         } else {
@@ -318,7 +318,7 @@ package struct SpeakerCardSurface: ViewModifier {
             }
             .overlay {
                 if let tint {
-                    shape.fill(tint.opacity(0.04))
+                    shape.fill(tint.opacity(0.02))
                 }
             }
     }
