@@ -40,7 +40,7 @@ private struct PermissionSettingsRow: View {
             title,
             detail: explanation,
             icon: icon,
-            iconTint: status.tint
+            iconTint: status.tileTint
         ) {
             HStack(spacing: 10) {
                 StatusBadge(

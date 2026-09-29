@@ -1,3 +1,4 @@
+import AppKit
 import QuartzCore
 import SwiftUI
 
@@ -66,11 +67,67 @@ package struct SpeakerPressableButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduceMotion ? pressedScale : 1)
             .opacity(opacity(pressed: configuration.isPressed))
             .animation(SpeakerMotion.feedback, value: configuration.isPressed)
+            .speakerPointingHandCursor()
     }
 
     private func opacity(pressed: Bool) -> Double {
         if !isEnabled { return 0.45 }
         return pressed && reduceMotion ? 0.7 : 1
+    }
+}
+
+/// Every control that acts on a click shows the pointing hand while the
+/// pointer is over it. A disabled control keeps the arrow.
+package struct SpeakerPointingHandCursor: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    @ViewBuilder
+    package func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.pointerStyle(isEnabled ? .link : nil)
+        } else {
+            content.modifier(LegacyPointingHandCursor(isActive: isEnabled))
+        }
+    }
+}
+
+/// macOS 14 has no `pointerStyle`, so the cursor stack is balanced by hand:
+/// one push on entry, one pop on exit, disable, or disappearance.
+private struct LegacyPointingHandCursor: ViewModifier {
+    let isActive: Bool
+    @State private var isHovered = false
+    @State private var hasPushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovered in
+                isHovered = hovered
+                sync(hovered: hovered, active: isActive)
+            }
+            .onChange(of: isActive) { _, active in
+                sync(hovered: isHovered, active: active)
+            }
+            .onDisappear {
+                isHovered = false
+                sync(hovered: false, active: isActive)
+            }
+    }
+
+    private func sync(hovered: Bool, active: Bool) {
+        let wantsHand = hovered && active
+        guard wantsHand != hasPushed else { return }
+        if wantsHand {
+            NSCursor.pointingHand.push()
+        } else {
+            NSCursor.pop()
+        }
+        hasPushed = wantsHand
+    }
+}
+
+extension View {
+    package func speakerPointingHandCursor() -> some View {
+        modifier(SpeakerPointingHandCursor())
     }
 }
 
@@ -90,7 +147,7 @@ package struct SpeakerFieldSurface<FieldShape: InsettableShape>: ViewModifier {
     }
 
     private var borderColor: Color {
-        if focused { return .accentColor.opacity(0.7) }
+        if focused { return SpeakerVisualIdentity.controlTint.opacity(0.7) }
         // A glass field inside a glass card loses its edge in dark mode, so
         // every style keeps a hairline.
         return Color.primary.opacity(contrast == .increased ? 0.4 : 0.1)
@@ -208,7 +265,7 @@ package struct SpeakerCardSurface: ViewModifier {
             return (tint ?? Color.primary).opacity(0.32)
         }
         if let tint {
-            return tint.opacity(0.35)
+            return tint.opacity(0.2)
         }
         switch surfaceStyle {
         case .liquidGlass: return .clear
@@ -243,7 +300,7 @@ package struct SpeakerCardSurface: ViewModifier {
     @ViewBuilder
     private func surface(_ content: some View) -> some View {
         if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
-            content.glassEffect(.regular.tint(tint?.opacity(0.14)), in: shape)
+            content.glassEffect(.regular.tint(tint?.opacity(0.04)), in: shape)
         } else if surfaceStyle == .opaque {
             content.background { paper }
         } else {
@@ -261,7 +318,7 @@ package struct SpeakerCardSurface: ViewModifier {
             }
             .overlay {
                 if let tint {
-                    shape.fill(tint.opacity(0.04))
+                    shape.fill(tint.opacity(0.02))
                 }
             }
     }

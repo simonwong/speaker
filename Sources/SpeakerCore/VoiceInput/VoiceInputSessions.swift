@@ -2,6 +2,21 @@ import Foundation
 
 public actor VoiceInputSessions {
     package static let standardMaximumRecordingDuration: Duration = .seconds(600)
+    /// How far ahead of a provider's audio bound recording ends itself, so
+    /// capture that is still draining when recording stops stays inside it.
+    package static let providerBoundMargin: Duration = .seconds(2)
+
+    /// The recording limit for one session: the standard limit, shortened
+    /// to end just inside the selected provider's audio bound.
+    package static func recordingLimit(
+        for provider: SpeechRecognitionProviderID,
+        standard: Duration = standardMaximumRecordingDuration
+    ) -> Duration {
+        guard let seconds = CredentialedSpeechTranscriber.maximumAudioSeconds(for: provider) else {
+            return standard
+        }
+        return min(standard, .seconds(seconds) - providerBoundMargin)
+    }
 
     private enum Phase: Equatable {
         case idle
@@ -37,6 +52,7 @@ public actor VoiceInputSessions {
     private var telemetryTask: Task<Void, Never>?
     private var captureFailureTask: Task<Void, Never>?
     private var recordingLimitTask: Task<Void, Never>?
+    private var recordingDeadline: Duration?
     private var activeRecordingSettlementTask: Task<Void, Never>?
     private var deliveryCommitGate: DeliveryCommitGate?
     private var deliveryTask: Task<DeliveryOutcome, Never>?
@@ -485,7 +501,8 @@ public actor VoiceInputSessions {
     }
 
     private func beginFinishingSession(
-        captureHint: InputTargetCaptureHint?
+        captureHint: InputTargetCaptureHint?,
+        endedAtRecordingLimit: Bool = false
     ) {
         guard case .recording(let id, let startedAt, let snapshot) = phase else { return }
         _ = cancelRecordingLimit()
@@ -495,7 +512,10 @@ public actor VoiceInputSessions {
         captureFailureTask = nil
         phase = .processing(id, startedAt: startedAt, snapshot: snapshot)
         stageAudit.advance(id: id, stage: "targetCapture", now: clock.monotonicNow)
-        publish(.processing(id, .capturingTarget, applicationName: nil))
+        publish(
+            .processing(id, .capturingTarget, applicationName: nil),
+            notice: endedAtRecordingLimit ? .recordingLimitReached : nil
+        )
         saveStage(
             .processing(id, .capturingTarget, applicationName: nil),
             id: id,
@@ -976,7 +996,8 @@ public actor VoiceInputSessions {
         let terminal = VoiceInputTerminalRecordBuilder.make(
             termination,
             auditedStageDurations: audit.stageDurations,
-            textPolicy: terminalHistoryTextPolicy
+            textPolicy: terminalHistoryTextPolicy,
+            now: clock.date
         )
         let completion = audioCaptureCompletion
         audioCaptureCompletion = nil
@@ -1092,8 +1113,7 @@ public actor VoiceInputSessions {
         id: VoiceInputSessionID,
         startedAt: Date,
         snapshot: VoiceTextProcessingSnapshot,
-        problem: VoiceInputProblem,
-        cancelsRecordingLimit: Bool = true
+        problem: VoiceInputProblem
     ) {
         guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
             return
@@ -1107,9 +1127,7 @@ public actor VoiceInputSessions {
         historyTextPolicy = .unclassified
         releasePending = false
         pendingReleaseCaptureHint = nil
-        if cancelsRecordingLimit {
-            _ = cancelRecordingLimit()
-        }
+        _ = cancelRecordingLimit()
         transcriptionTask?.cancel()
         transcriptionTask = nil
         streamingCompletionTask?.cancel()
@@ -1189,8 +1207,12 @@ public actor VoiceInputSessions {
         snapshot: VoiceTextProcessingSnapshot
     ) {
         _ = cancelRecordingLimit()
-        let duration = maximumRecordingDuration
+        let duration = Self.recordingLimit(
+            for: snapshot.recognitionProvider.provider,
+            standard: maximumRecordingDuration
+        )
         let clock = clock
+        recordingDeadline = clock.monotonicNow + duration
         recordingLimitTask = Task { [weak self] in
             do {
                 try await clock.sleep(for: duration)
@@ -1214,27 +1236,16 @@ public actor VoiceInputSessions {
         guard case .recording(id, startedAt: startedAt, snapshot: snapshot) = phase else {
             return
         }
-        failActiveRecording(
-            id: id,
-            startedAt: startedAt,
-            snapshot: snapshot,
-            problem: VoiceInputProblem(
-                failure: .recordingLimitReached,
-                diagnostic: VoiceProviderDiagnostic(
-                    provider: "local",
-                    operation: .transcription,
-                    code: "recording.limit_reached"
-                )
-            ),
-            cancelsRecordingLimit: false
-        )
-        recordingLimitTask = nil
+        // The limit ends recording the way a release does, at this moment:
+        // the Input Target is captured now and the audio so far is kept.
+        beginFinishingSession(captureHint: nil, endedAtRecordingLimit: true)
     }
 
     @discardableResult
     private func cancelRecordingLimit() -> Task<Void, Never>? {
         let task = recordingLimitTask
         recordingLimitTask = nil
+        recordingDeadline = nil
         task?.cancel()
         return task
     }
@@ -1244,7 +1255,17 @@ public actor VoiceInputSessions {
         for id: VoiceInputSessionID
     ) {
         guard case .recording(let activeID, _, _) = phase, activeID == id else { return }
-        publish(.recording(id), telemetry: telemetry)
+        let remaining = recordingDeadline.map { deadline in
+            max(0, Self.milliseconds(deadline - clock.monotonicNow))
+        }
+        publish(
+            .recording(id),
+            telemetry: RecordingTelemetry(
+                elapsedMilliseconds: telemetry.elapsedMilliseconds,
+                peakPower: telemetry.peakPower,
+                remainingMilliseconds: remaining
+            )
+        )
     }
 
     private func receivedProcessingProgress(

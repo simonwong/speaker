@@ -72,7 +72,8 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
     case recording(
         peakPower: Float?,
         cancelAction: VoiceInputExperienceAction,
-        finishAction: VoiceInputExperienceAction
+        finishAction: VoiceInputExperienceAction,
+        remainingSeconds: Int? = nil
     )
     case processing(
         title: String,
@@ -610,7 +611,7 @@ package final class VoiceInputExperience: ObservableObject {
             ),
             overlay: makeOverlay(
                 activity: activity,
-                peakPower: presentation.recordingTelemetry?.peakPower
+                telemetry: presentation.recordingTelemetry
             ),
             isRecording: activity.isRecording,
             diagnosticCode: diagnosticCode(for: activity)
@@ -626,9 +627,22 @@ package final class VoiceInputExperience: ObservableObject {
         }
     }
 
+    /// The recording HUD counts down only through the last stretch before
+    /// the recording limit, so ordinary dictation never shows a clock.
+    package static let recordingCountdownMilliseconds = 30_000
+
+    /// Whole seconds left, rounded up so the count never reads 0 while
+    /// recording continues; `nil` outside the countdown.
+    package static func countdownSeconds(remainingMilliseconds: Int?) -> Int? {
+        guard let remainingMilliseconds,
+            remainingMilliseconds <= recordingCountdownMilliseconds
+        else { return nil }
+        return max(1, (remainingMilliseconds + 999) / 1_000)
+    }
+
     private static func makeOverlay(
         activity: VoiceInputActivity,
-        peakPower: Float?
+        telemetry: RecordingTelemetry?
     ) -> VoiceInputOverlayPresentation {
         switch activity {
         case .idle, .delivered, .cancelled:
@@ -640,9 +654,12 @@ package final class VoiceInputExperience: ObservableObject {
             )
         case .recording(let id):
             .recording(
-                peakPower: peakPower,
+                peakPower: telemetry?.peakPower,
                 cancelAction: .init(sessionID: id, operation: .cancel),
-                finishAction: .init(sessionID: id, operation: .finishRecording)
+                finishAction: .init(sessionID: id, operation: .finishRecording),
+                remainingSeconds: countdownSeconds(
+                    remainingMilliseconds: telemetry?.remainingMilliseconds
+                )
             )
         case .processing(let id, _, _):
             .processing(

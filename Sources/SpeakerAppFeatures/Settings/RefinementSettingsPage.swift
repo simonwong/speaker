@@ -1,77 +1,89 @@
 import SpeakerCore
 import SwiftUI
 
-/// The 整理 page: mode selection first, then at most one editor card — the
-/// inspected built-in mode's prompt, or Custom Mode's own name and prompt.
+/// The 整理 page: one card with mode selection first, then at most one
+/// editor below it — the inspected built-in mode's prompt, or Custom Mode's
+/// own name and prompt.
 package struct RefinementSettingsPage: View {
     @ObservedObject var model: RefinementSettingsModel
 
     package init(model: RefinementSettingsModel) { self.model = model }
 
     package var body: some View {
-        VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-            modeCard
+        SettingsCard(
+            "整理模式",
+            subtitle: model.hasStoredKey ? nil : "配置文字整理 Key 后解锁其他模式",
+            icon: "text.alignleft"
+        ) {
+            modeGrid
 
             if let promptEditor = model.promptEditorState,
                 !model.isEditingCustomMode
             {
-                RefinementPromptEditorCard(
+                SettingsRowDivider()
+                RefinementPromptEditor(
                     model: model,
                     promptEditor: promptEditor
                 )
             }
 
             if model.isEditingCustomMode || model.choice == .custom {
-                CustomRefinementModeCard(model: model)
+                SettingsRowDivider()
+                CustomRefinementModeEditor(model: model)
             }
         }
         .disabled(model.isMutating)
     }
 
-    private var modeCard: some View {
-        SettingsCard(
-            "整理模式",
-            subtitle: model.hasStoredKey ? nil : "配置文字整理 Key 后解锁其他模式",
-            icon: "text.alignleft"
+    @ViewBuilder
+    private var modeGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 132), spacing: 10)],
+            spacing: 10
         ) {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 132), spacing: 10)],
-                spacing: 10
-            ) {
-                ForEach(RefinementChoice.allCases) { choice in
-                    RefinementModeButton(
-                        choice: choice,
-                        selected: model.choice == choice,
-                        highlighted: model.isEditingCustomMode
-                            ? choice == .custom : model.choice == choice,
-                        locked: choice != .defaultSmooth && !model.hasStoredKey
-                    ) {
-                        Task { await model.select(choice) }
-                    }
+            ForEach(RefinementChoice.allCases) { choice in
+                RefinementModeButton(
+                    choice: choice,
+                    selected: model.choice == choice,
+                    highlighted: model.isEditingCustomMode
+                        ? choice == .custom : model.choice == choice,
+                    locked: choice != .defaultSmooth && !model.hasStoredKey
+                ) {
+                    Task { await model.select(choice) }
                 }
             }
-
-            if let notice = model.notice {
-                SettingsNotice(
-                    text: notice,
-                    color: model.isConnectionVerified ? .green : .secondary
-                )
-            }
         }
+
+        if let notice = model.notice {
+            SettingsNotice(
+                text: notice,
+                icon: model.isConnectionVerified ? "checkmark.circle.fill" : nil
+            )
+        }
+    }
+}
+
+/// A titled block inside the 整理 card, below the mode grid.
+private struct RefinementEditorSectionTitle: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(SpeakerTypography.bodyEmphasis)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
 /// The built-in mode prompt editor. The prompt is saved on this Mac only and
 /// takes effect for new sessions.
-private struct RefinementPromptEditorCard: View {
+private struct RefinementPromptEditor: View {
     @ObservedObject var model: RefinementSettingsModel
     let promptEditor: RefinementPromptEditorState
 
     var body: some View {
-        SettingsCard(
-            "“\(promptEditor.title)”提示词",
-            icon: "text.quote"
-        ) {
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
+            RefinementEditorSectionTitle(title: "“\(promptEditor.title)”提示词")
+
             RefinementPromptTextEditor(
                 text: $model.promptDraft,
                 label: "“\(promptEditor.title)”提示词",
@@ -111,15 +123,14 @@ private struct RefinementPromptEditorCard: View {
 }
 
 /// Custom Mode's own name and prompt. The save condition lives on the model as
-/// `canSaveCustomMode`, so this card only renders it.
-private struct CustomRefinementModeCard: View {
+/// `canSaveCustomMode`, so this editor only renders it.
+private struct CustomRefinementModeEditor: View {
     @ObservedObject var model: RefinementSettingsModel
 
     var body: some View {
-        SettingsCard(
-            "自定义模式",
-            icon: "slider.horizontal.3"
-        ) {
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
+            RefinementEditorSectionTitle(title: "自定义模式")
+
             if model.choice != .custom {
                 Text("保存并启用后生效；当前使用「\(model.mode.displayName)」。")
                     .font(SpeakerTypography.footnote)
@@ -177,7 +188,7 @@ private struct CustomRefinementModeCard: View {
     }
 }
 
-/// The shared prompt text area: both editor cards show the same surface, only
+/// The shared prompt text area: both editors show the same surface, only
 /// the placeholder and height differ.
 private struct RefinementPromptTextEditor: View {
     @Binding var text: String
@@ -229,14 +240,15 @@ private struct RefinementModeButton: View {
     }
 
     private var fillColor: Color {
-        highlighted ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.03)
+        highlighted ? SpeakerVisualIdentity.controlTint.opacity(0.10) : Color.primary.opacity(0.03)
     }
 
     @ViewBuilder
     private func surface(_ content: some View) -> some View {
         if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
             content.glassEffect(
-                .regular.tint(highlighted ? Color.accentColor.opacity(0.16) : nil).interactive(),
+                .regular.tint(highlighted ? SpeakerVisualIdentity.controlTint.opacity(0.16) : nil)
+                    .interactive(),
                 in: shape
             )
         } else {
@@ -245,7 +257,7 @@ private struct RefinementModeButton: View {
     }
 
     private var strokeColor: Color {
-        if highlighted { return Color.accentColor.opacity(0.8) }
+        if highlighted { return SpeakerVisualIdentity.controlTint.opacity(0.8) }
         return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
     }
 
@@ -283,7 +295,7 @@ private struct RefinementModeButton: View {
                 Image(systemName: choice.icon)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(
-                        highlighted ? Color.accentColor : .secondary
+                        highlighted ? SpeakerVisualIdentity.controlTint : .secondary
                     )
                 Spacer()
                 Image(
@@ -293,7 +305,7 @@ private struct RefinementModeButton: View {
                 )
                 .foregroundStyle(
                     highlighted
-                        ? Color.accentColor
+                        ? SpeakerVisualIdentity.controlTint
                         : Color.secondary.opacity(contrast == .increased ? 1 : 0.55)
                 )
             }

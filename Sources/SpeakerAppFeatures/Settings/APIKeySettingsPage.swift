@@ -1,76 +1,41 @@
 import SpeakerCore
 import SwiftUI
 
-package struct APIKeySettingsPage: View {
-    let doubao: DoubaoSettingsModel
-    let refinement: RefinementSettingsModel
-    let recognition: SpeechRecognitionSettingsModel
-
-    package init(
-        doubao: DoubaoSettingsModel, refinement: RefinementSettingsModel,
-        recognition: SpeechRecognitionSettingsModel
-    ) {
-        self.doubao = doubao
-        self.refinement = refinement
-        self.recognition = recognition
-    }
-
-    package var body: some View {
-        VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-            SpeechRecognitionSettingsCard(model: recognition, doubao: doubao)
-            RefinementProviderSettingsCard(model: refinement)
-        }
-    }
-}
-
-package struct DoubaoSettingsCard: View {
+/// The Doubao rows inside the speech recognition card, laid out like the
+/// other providers: its option, then its key.
+struct DoubaoRecognitionSettings: View {
     @ObservedObject var model: DoubaoSettingsModel
 
-    package init(model: DoubaoSettingsModel) { self.model = model }
-    package var body: some View {
-        SettingsCard(
-            "豆包语音",
-            subtitle: "单次录音上限：10 分钟",
-            icon: "waveform.badge.mic"
-        ) {
-            statusRow
+    var body: some View {
+        resourceRow
 
-            SettingsRowDivider()
+        SettingsRowDivider()
 
-            ProviderKeyEditor(
-                draft: $model.apiKeyDraft,
-                providerName: "豆包语音",
-                hasStoredKey: model.hasConfiguredKey,
-                isUpdating: model.isUpdatingKey,
-                deletionMessage: "删除后将无法进行新的语音转录，历史记录不会受影响。",
-                save: { await model.save() },
-                delete: { await model.delete() }
-            )
-
-            if model.hasConfiguredKey {
-                resourceRow
-                actionRow
-            }
-            if case .failure(let message) = model.status {
-                SettingsNotice(text: message, color: .red)
-            }
-        }
-    }
-
-    private var statusRow: some View {
-        HStack {
-            StatusBadge(
+        ProviderKeyEditor(
+            draft: $model.apiKeyDraft,
+            providerName: "豆包语音",
+            hasStoredKey: model.hasConfiguredKey,
+            isUpdating: model.isUpdatingKey,
+            status: ProviderKeyStatus(
                 text: status.text,
                 icon: status.symbolName,
-                color: status.tint
-            )
-            .help(model.summary)
-            Spacer()
-            Link(
-                "打开豆包控制台",
-                destination: ExternalLinks.doubaoConsoleAPIKeys
-            )
-            .font(SpeakerTypography.caption)
+                color: status.tint,
+                help: model.summary
+            ),
+            connectionCheck: model.hasConfiguredKey
+                ? ProviderConnectionCheck(
+                    isChecking: isChecking,
+                    isEnabled: !isChecking && !model.isUpdatingKey,
+                    action: model.checkConnection
+                ) : nil,
+            console: ("豆包控制台", ExternalLinks.doubaoConsoleAPIKeys),
+            deletionMessage: "删除后将无法进行新的语音转录，历史记录不会受影响。",
+            save: { await model.save() },
+            delete: { await model.delete() }
+        )
+
+        if case .failure(let message) = model.status {
+            SettingsNotice(text: message, color: .red)
         }
     }
 
@@ -89,20 +54,6 @@ package struct DoubaoSettingsCard: View {
             }
             .settingsTrailingMenu()
             .disabled(model.isUpdatingKey)
-        }
-    }
-
-    private var actionRow: some View {
-        HStack(spacing: 10) {
-            Button(isChecking ? "检查中…" : "检查连接") {
-                model.checkConnection()
-            }
-            .disabled(isChecking || model.isUpdatingKey)
-            if isChecking {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Spacer()
         }
     }
 
@@ -200,7 +151,6 @@ package struct RefinementProviderSettingsCard: View {
             }
 
             SettingsRowDivider()
-            StatusBadge(text: statusText, icon: statusIcon, color: statusColor)
 
             ProviderKeyEditor(
                 draft: $model.apiKeyDraft,
@@ -208,6 +158,14 @@ package struct RefinementProviderSettingsCard: View {
                 hasStoredKey: model.hasStoredKey,
                 isUpdating: model.isMutating,
                 allowsSave: model.hasValidProfile && !model.hasProfileChanges,
+                status: ProviderKeyStatus(text: statusText, icon: statusIcon, color: statusColor),
+                connectionCheck: model.hasStoredKey
+                    ? ProviderConnectionCheck(
+                        isChecking: model.isCheckingConnection,
+                        isEnabled: !model.isCheckingConnection && !model.isMutating
+                            && !model.hasProfileChanges,
+                        action: model.checkConnection
+                    ) : nil,
                 deletionMessage: "只删除当前服务商的 Key，并切回默认顺滑；其他服务商与历史记录不受影响。",
                 save: { await model.saveAPIKey() },
                 delete: { await model.deleteAPIKey() }
@@ -216,17 +174,6 @@ package struct RefinementProviderSettingsCard: View {
             if !model.hasValidProfile || model.hasProfileChanges {
                 Text("先保存模型配置，再填写或更换 Key。")
                     .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
-            }
-            if model.hasStoredKey {
-                HStack {
-                    Button(model.isCheckingConnection ? "检查中…" : "检查连接") {
-                        model.checkConnection()
-                    }
-                    .disabled(
-                        model.isCheckingConnection || model.isMutating || model.hasProfileChanges)
-                    if model.isCheckingConnection { ProgressView().controlSize(.small) }
-                    Spacer()
-                }
             }
             if let credentialNotice = model.credentialNotice {
                 SettingsNotice(text: credentialNotice, color: .red)
@@ -262,36 +209,67 @@ package struct RefinementProviderSettingsCard: View {
     }
 
     private var statusColor: Color {
-        if model.isConnectionVerified { return .green }
         if model.connectionFailure != nil { return .red }
-        if model.hasStoredKey { return .green }
-        return .secondary
+        return model.hasStoredKey ? SpeakerVisualIdentity.settledGreen : .secondary
     }
 }
 
+/// What the key block's title line says about the stored key.
+struct ProviderKeyStatus {
+    let text: String
+    let icon: String
+    let color: Color
+    var help: String?
+}
+
+/// An explicit, user-started connection check beside the key status.
+struct ProviderConnectionCheck {
+    let isChecking: Bool
+    let isEnabled: Bool
+    let action: @MainActor () -> Void
+}
+
+/// The one block every provider uses for its key: a title line with the
+/// key's status and quiet text actions, then the field. A configured key
+/// collapses to its title line; 更换 Key opens the field, the console link,
+/// and deletion, and a successful save or 取消 closes them again. Save appears
+/// only once there is something to save.
 struct ProviderKeyEditor: View {
     @Binding var draft: String
     let providerName: String
     let hasStoredKey: Bool
     let isUpdating: Bool
     var allowsSave = true
+    let status: ProviderKeyStatus
+    var connectionCheck: ProviderConnectionCheck?
+    var console: (title: String, url: URL)?
     let deletionMessage: String
     let save: @MainActor () async -> Void
     let delete: @MainActor () async -> Void
     @State private var confirmingDelete = false
+    @State private var isReplacing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.collapsesStoredProviderKeys) private var collapsesStoredKey
+
+    /// A missing key always shows its field; a stored one only on request,
+    /// and while a save it started is still running.
+    private var showsField: Bool {
+        !collapsesStoredKey || !hasStoredKey || isReplacing || isUpdating
+    }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                keyField.frame(minWidth: 180)
-                actions.fixedSize()
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                keyField
-                actions
+        VStack(alignment: .leading, spacing: 8) {
+            titleLine
+
+            if showsField {
+                HStack(spacing: 8) {
+                    keyField
+                    actions
+                }
             }
         }
         .disabled(isUpdating)
+        .onChange(of: hasStoredKey) { isReplacing = false }
         .confirmationDialog(
             "删除 \(providerName) API Key？",
             isPresented: $confirmingDelete,
@@ -303,6 +281,87 @@ struct ProviderKeyEditor: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text(deletionMessage)
+        }
+    }
+
+    private var titleLine: some View {
+        HStack(spacing: 10) {
+            Text("API Key")
+                .font(SpeakerTypography.bodyEmphasis)
+            StatusBadge(text: status.text, icon: status.icon, color: status.color)
+                .help(status.help ?? "")
+
+            Spacer(minLength: 8)
+
+            if !showsField {
+                collapsedActions
+            } else {
+                editingActions
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var collapsedActions: some View {
+        if let connectionCheck {
+            if connectionCheck.isChecking {
+                ProgressView().controlSize(.small)
+            }
+            textAction(
+                connectionCheck.isChecking ? "检查中…" : "检查连接",
+                isEnabled: connectionCheck.isEnabled,
+                action: connectionCheck.action
+            )
+        }
+        textAction("更换 Key") { setReplacing(true) }
+    }
+
+    @ViewBuilder
+    private var editingActions: some View {
+        if let console {
+            Link(destination: console.url) {
+                Label(console.title, systemImage: "arrow.up.right")
+                    .labelStyle(TrailingIconLabelStyle())
+            }
+            // The card's capsule style would otherwise dress the link as
+            // a button. Link buttons ignore `tint` and draw the system link
+            // blue, so the colour is set here to stay neutral.
+            .buttonStyle(.link)
+            .foregroundStyle(.secondary)
+            .font(SpeakerTypography.caption)
+            .speakerPointingHandCursor()
+        }
+        if hasStoredKey && collapsesStoredKey {
+            textAction("取消") {
+                draft = ""
+                setReplacing(false)
+            }
+        }
+    }
+
+    private func textAction(
+        _ title: String,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.link)
+            // Neutral text, not the system link blue.
+            .foregroundStyle(isEnabled ? .primary : .tertiary)
+            .font(SpeakerTypography.caption)
+            .disabled(!isEnabled)
+            .speakerPointingHandCursor()
+            // Link-style buttons drop out of AppKit's accessibility tree
+            // until VoiceOver runs; the bridge keeps them reachable.
+            .accessibilityHidden(true)
+            .overlay {
+                AccessibilityButtonBridge(label: title, isEnabled: isEnabled, action: action)
+            }
+    }
+
+    private func setReplacing(_ replacing: Bool) {
+        withAnimation(reduceMotion ? nil : SpeakerMotion.change) {
+            isReplacing = replacing
         }
     }
 
@@ -319,27 +378,43 @@ struct ProviderKeyEditor: View {
     }
 
     private var actions: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             if isUpdating {
                 ProgressView().controlSize(.small)
             }
-            Button(saveTitle, action: saveDraft)
-                .buttonStyle(SettingsButtonStyle(prominent: true))
-                .disabled(!canSave)
-                .accessibilityHidden(true)
-                .overlay {
-                    AccessibilityButtonBridge(
-                        label: saveTitle,
-                        hint: "保存 \(providerName) API Key，不会自动发起连接检查",
-                        isEnabled: canSave,
-                        action: saveDraft
-                    )
-                }
+            if hasDraft || isUpdating {
+                Button(saveTitle, action: saveDraft)
+                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .disabled(!canSave)
+                    .fixedSize()
+                    .accessibilityHidden(true)
+                    .overlay {
+                        AccessibilityButtonBridge(
+                            label: saveTitle,
+                            hint: "保存 \(providerName) API Key，不会自动发起连接检查",
+                            isEnabled: canSave,
+                            action: saveDraft
+                        )
+                    }
+            }
 
             if hasStoredKey {
-                Button("删除 Key", role: .destructive) {
+                Button {
                     confirmingDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(SpeakerTypography.body)
+                        .foregroundStyle(.secondary)
+                        .frame(
+                            width: SpeakerSurfaceMetrics.fieldHeight,
+                            height: SpeakerSurfaceMetrics.fieldHeight
+                        )
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(
+                    SpeakerPressableButtonStyle(pressedScale: SpeakerMotion.compactPressedScale)
+                )
+                .help("删除 Key")
                 .accessibilityHidden(true)
                 .overlay {
                     AccessibilityButtonBridge(
@@ -357,14 +432,31 @@ struct ProviderKeyEditor: View {
         isUpdating ? "处理中…" : hasStoredKey ? "保存更换" : "保存 Key"
     }
 
+    private var hasDraft: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var canSave: Bool {
-        !isUpdating && allowsSave && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isUpdating && allowsSave && hasDraft
     }
 
     private func saveDraft() {
-        Task { await save() }
+        Task {
+            await save()
+            // The model clears the draft only when the key was saved.
+            if draft.isEmpty { setReplacing(false) }
+        }
     }
+}
 
+/// A link title followed by its glyph, like "豆包控制台 ↗".
+private struct TrailingIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 2) {
+            configuration.title
+            configuration.icon.imageScale(.small)
+        }
+    }
 }
 
 private struct RefinementConfigurationField: View {
@@ -441,5 +533,18 @@ private struct RefinementConfigurationTextField: NSViewRepresentable {
         @objc func commit(_ field: NSTextField) {
             text.wrappedValue = field.stringValue
         }
+    }
+}
+
+private struct CollapsesStoredProviderKeysKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// Whether a configured provider key folds behind 更换 Key. Onboarding
+    /// turns it off so a saved key that then fails validation stays editable.
+    package var collapsesStoredProviderKeys: Bool {
+        get { self[CollapsesStoredProviderKeysKey.self] }
+        set { self[CollapsesStoredProviderKeysKey.self] = newValue }
     }
 }

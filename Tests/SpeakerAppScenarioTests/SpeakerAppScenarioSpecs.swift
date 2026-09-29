@@ -341,7 +341,7 @@ struct SpeakerAppScenarioSpecs {
 
         run("recognition limit and stage labels reflect selected provider", failures: &failures) {
             try expect(!VoiceInputFailure.recordingLimitReached.userTitle.contains("10"))
-            try expect(VoiceInputFailure.recordingLimitReached.userGuidance.contains("语音识别设置"))
+            try expect(VoiceInputFailure.recordingLimitReached.userGuidance.contains("较短"))
             try expect(VoiceInputProcessingStage.transcribingAnnouncement == "正在等待语音识别结果")
         }
 
@@ -1134,6 +1134,20 @@ struct SpeakerAppScenarioSpecs {
             let failure = DoubaoStatusPresentation(status: .failure("网络中断"))
             try expect(failure.text == SpeakerCopy.ProviderStatus.failure)
             try expect(failure.symbolName == "xmark.circle.fill")
+
+            // Healthy states are green, working states grey, and only a state
+            // that needs action colours its icon tile.
+            for status in [DoubaoConnectionStatus.configured, .success("id")] {
+                try expect(
+                    DoubaoStatusPresentation(status: status).tint
+                        == SpeakerVisualIdentity.settledGreen)
+            }
+            try expect(DoubaoStatusPresentation(status: .checking).tint == .secondary)
+            try expect(failure.tint == .red)
+            let granted = PermissionStatusPresentation(state: .granted)
+            try expect(
+                granted.tint == SpeakerVisualIdentity.settledGreen && granted.tileTint == nil)
+            try expect(PermissionStatusPresentation(state: .denied).tileTint == .orange)
         }
 
         run(
@@ -1586,12 +1600,29 @@ struct SpeakerAppScenarioSpecs {
         }
 
         run(
+            "the recording HUD counts down only in the final seconds before the limit",
+            failures: &failures
+        ) {
+            let countdown = VoiceInputExperience.countdownSeconds(remainingMilliseconds:)
+            try expect(countdown(nil) == nil, "no deadline must not count down")
+            try expect(countdown(30_001) == nil, "counted down before the final 30 seconds")
+            try expect(countdown(30_000) == 30)
+            try expect(countdown(29_001) == 30, "partial seconds must round up")
+            try expect(countdown(1_000) == 1)
+            try expect(countdown(0) == 1, "the countdown must not show zero while recording")
+        }
+
+        run(
             "voice input notices are localized by the app presentation layer",
             failures: &failures
         ) {
             try expect(
                 VoiceInputNotice.copied.userMessage
                     == SpeakerCopy.Clipboard.textCopied
+            )
+            try expect(
+                VoiceInputNotice.recordingLimitReached.userMessage
+                    == VoiceInputNotice.recordingLimitReachedMessage
             )
             try expect(
                 VoiceInputNotice.refinementFellBack(.network).userMessage
@@ -3013,7 +3044,7 @@ struct SpeakerAppScenarioSpecs {
                     .shortcut,
                     .microphones,
                     .permissions,
-                    .apiKeys,
+                    .speechRecognition,
                     .refinement,
                     .general,
                     .localData,
@@ -3024,7 +3055,7 @@ struct SpeakerAppScenarioSpecs {
                     SettingsGroup.shortcutTitle,
                     SettingsGroup.microphonesTitle,
                     SettingsGroup.permissionsTitle,
-                    SettingsGroup.apiKeysTitle,
+                    SettingsGroup.speechRecognitionTitle,
                     SettingsGroup.refinementTitle,
                     SettingsGroup.generalTitle,
                     SettingsGroup.localDataTitle,
@@ -3935,7 +3966,7 @@ struct SpeakerAppScenarioSpecs {
                 let started = await waitUntil { experience.state.isRecording }
                 try expect(started)
                 if latched { experience.shortcutTarget.receive(.released) }
-                guard case .recording(_, _, let finishAction) = experience.state.overlay else {
+                guard case .recording(_, _, let finishAction, _) = experience.state.overlay else {
                     throw SpecFailure(message: "recording has no finish action")
                 }
                 experience.perform(finishAction)
@@ -3986,7 +4017,8 @@ struct SpeakerAppScenarioSpecs {
                 experience.shortcutTarget.receive(.pressed)
                 let started = await waitUntil { experience.state.isRecording }
                 try expect(started)
-                guard case .recording(_, let cancel, let finish) = experience.state.overlay else {
+                guard case .recording(_, let cancel, let finish, _) = experience.state.overlay
+                else {
                     throw SpecFailure(message: "recording controls unavailable")
                 }
                 experience.perform(cancelFirst ? cancel : finish)
@@ -4020,7 +4052,7 @@ struct SpeakerAppScenarioSpecs {
                 experience.shortcutTarget.receive(.pressed)
                 let started = await waitUntil { experience.state.isRecording }
                 try expect(started)
-                guard case .recording(_, _, let finish) = experience.state.overlay else {
+                guard case .recording(_, _, let finish, _) = experience.state.overlay else {
                     throw SpecFailure(message: "recording controls unavailable")
                 }
                 experience.perform(finish)
@@ -4178,9 +4210,11 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
-            "recording limit guidance reaches the production HUD and menu state",
+            "the recording limit ends recording and keeps the text in the production experience",
             failures: &failures
         ) {
+            @MainActor final class AnnouncementLog { var messages: [String] = [] }
+            let log = AnnouncementLog()
             let clock = ScenarioVoiceInputClock()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
@@ -4197,7 +4231,7 @@ struct SpeakerAppScenarioSpecs {
             )
             let experience = VoiceInputExperience(
                 sessions: sessions,
-                announce: { _ in }
+                announce: { log.messages.append($0) }
             )
             experience.start()
 
@@ -4205,40 +4239,23 @@ struct SpeakerAppScenarioSpecs {
             _ = await waitUntil { experience.state.isRecording }
             await clock.waitUntilSleeping(count: 1)
             clock.advance(by: .seconds(600))
-            let presented = await waitUntil {
-                experience.state.diagnosticCode
-                    == "failed.recordingLimitReached"
+            let retained = await waitUntil {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
             }
 
-            try expect(presented)
             try expect(
-                experience.state.menu.status?.title
-                    == VoiceInputFailurePresentation
-                    .recordingLimitReached.title
+                retained,
+                "the limit ended in \(String(describing: experience.state.diagnosticCode))"
             )
-            try expect(
-                experience.state.menu.notice
-                    == VoiceInputFailurePresentation
-                    .recordingLimitReached.guidance
-            )
-            if case .problem(let icon, let title, let guidance, let recovery, _) =
-                experience.state.overlay
-            {
-                try expect(icon == "timer")
-                try expect(
-                    title
-                        == VoiceInputFailurePresentation
-                        .recordingLimitReached.title
-                )
-                try expect(
-                    guidance
-                        == VoiceInputFailurePresentation
-                        .recordingLimitReached.guidance
-                )
-                try expect(recovery == nil)
-            } else {
-                throw SpecFailure(message: "recording limit did not reach the HUD")
+            if case .pendingCopy(_, let text, _, _, _, _) = experience.state.overlay {
+                try expect(text == "保留的文字", "retained \(text)")
             }
+            try expect(
+                log.messages.filter {
+                    $0 == VoiceInputNotice.recordingLimitReachedMessage
+                }.count == 1,
+                "announcements were \(log.messages)"
+            )
             await experience.shutdown()
         }
 
@@ -4249,10 +4266,10 @@ struct SpeakerAppScenarioSpecs {
             let cases: [(VoiceInputFailure, SettingsGroup)] = [
                 (.microphonePermissionDenied, .permissions),
                 (.microphoneUnavailable, .microphones),
-                (.providerNotConfigured, .apiKeys),
-                (.providerAuthenticationFailed, .apiKeys),
-                (.providerCredentialUnavailable, .apiKeys),
-                (.providerResourceUnavailable, .apiKeys),
+                (.providerNotConfigured, .speechRecognition),
+                (.providerAuthenticationFailed, .speechRecognition),
+                (.providerCredentialUnavailable, .speechRecognition),
+                (.providerResourceUnavailable, .speechRecognition),
             ]
             for (failure, destination) in cases {
                 let sessions = VoiceInputSessions(

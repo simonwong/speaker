@@ -95,6 +95,7 @@ package struct MicrophoneSettingsPage: View {
             }
             if model.state.testStatus == .testing {
                 ProgressView(value: model.state.testLevel)
+                    .tint(SpeakerVisualIdentity.controlTint)
                     .accessibilityLabel("麦克风输入电平")
                     .accessibilityValue("\(Int(model.state.testLevel * 100))%")
             }

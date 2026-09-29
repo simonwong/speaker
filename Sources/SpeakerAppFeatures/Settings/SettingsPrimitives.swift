@@ -70,13 +70,15 @@ extension View {
         labelsHidden()
             .pickerStyle(.menu)
             .controlSize(.large)
+            .speakerPointingHandCursor()
             .frame(maxWidth: SpeakerSurfaceMetrics.trailingControlWidth, alignment: .trailing)
     }
 }
 
 /// A state beside its row: a filled-circle glyph in the state's colour and
-/// plain text. The glyph carries the colour, so a card of healthy states
-/// stays quiet; a state that asks for attention keeps full-strength text.
+/// plain text. Healthy states are settled green and neutral states grey, and
+/// both use secondary text, so a card of them stays quiet; only a state that
+/// asks for attention keeps full-strength text.
 ///
 /// `icon` names a `*.circle.fill` symbol; its glyph draws white on the
 /// coloured circle.
@@ -92,8 +94,13 @@ package struct StatusBadge: View {
         self.color = color
     }
 
-    /// Healthy and neutral states recede into secondary text.
-    private var isSettled: Bool { color == .green || color == .secondary }
+    /// Healthy (settled green) and neutral (grey) states recede into secondary text;
+    /// only a state that asks for attention keeps full-strength text.
+    nonisolated package static func isSettled(_ color: Color) -> Bool {
+        color == .secondary || color == SpeakerVisualIdentity.settledGreen
+    }
+
+    private var isSettled: Bool { Self.isSettled(color) }
 
     package var body: some View {
         Label {
@@ -130,7 +137,6 @@ package struct SettingsNotice: View {
         switch color {
         case .red: return "xmark.circle.fill"
         case .orange: return "exclamationmark.triangle.fill"
-        case .green: return "checkmark.circle.fill"
         default: return "info.circle.fill"
         }
     }

@@ -32,7 +32,9 @@ private struct LaunchAtLoginSettingsRow: View {
                 )
             )
             .toggleStyle(.switch)
+            .tint(SpeakerVisualIdentity.controlTint)
             .labelsHidden()
+            .speakerPointingHandCursor()
             .disabled(model.isUpdating)
         }
 
@@ -92,7 +94,9 @@ private struct AutomaticUpdateSettingsRow: View {
                 )
             )
             .toggleStyle(.switch)
+            .tint(SpeakerVisualIdentity.controlTint)
             .labelsHidden()
+            .speakerPointingHandCursor()
             .disabled(!model.state.isAvailable)
         }
 

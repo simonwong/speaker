@@ -127,6 +127,9 @@ public enum VoiceInputActivity: Equatable, Sendable {
 
 public enum VoiceInputNotice: Equatable, Sendable {
     case copied
+    /// Recording reached the session's limit and ended itself; the audio
+    /// captured so far continues through recognition and delivery.
+    case recordingLimitReached
     case refinementFellBack(TextRefinementFailureKind?)
     case persistenceFailure(LocalHistoryPersistenceNotice)
 }
@@ -153,10 +156,14 @@ public struct VoiceInputPresentation: Equatable, Sendable {
 public struct RecordingTelemetry: Equatable, Sendable {
     public let elapsedMilliseconds: Int
     public let peakPower: Float
+    /// Time left before the session ends recording by itself. The session
+    /// fills it in; capture adapters leave it `nil`.
+    public let remainingMilliseconds: Int?
 
-    public init(elapsedMilliseconds: Int, peakPower: Float) {
+    public init(elapsedMilliseconds: Int, peakPower: Float, remainingMilliseconds: Int? = nil) {
         self.elapsedMilliseconds = elapsedMilliseconds
         self.peakPower = peakPower
+        self.remainingMilliseconds = remainingMilliseconds
     }
 }
 

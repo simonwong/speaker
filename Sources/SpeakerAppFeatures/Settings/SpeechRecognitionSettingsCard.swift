@@ -5,64 +5,73 @@ package struct SpeechRecognitionSettingsCard: View {
     @ObservedObject var model: SpeechRecognitionSettingsModel
     let doubao: DoubaoSettingsModel
 
-    package init(model: SpeechRecognitionSettingsModel, doubao: DoubaoSettingsModel) {
+    /// Settings already titles its section 语音识别, so it hides the card's
+    /// own header; onboarding shows the card alone and keeps it.
+    private let showsHeader: Bool
+
+    package init(
+        model: SpeechRecognitionSettingsModel,
+        doubao: DoubaoSettingsModel,
+        showsHeader: Bool = true
+    ) {
         self.model = model
         self.doubao = doubao
+        self.showsHeader = showsHeader
     }
 
     package var body: some View {
-        VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-            SettingsCard("语音识别", icon: "waveform") {
-                SpeakerRow("服务商") {
-                    Picker(
-                        "服务商",
-                        selection: Binding(
-                            get: { model.selectedProvider },
-                            set: { provider in Task { await model.selectProvider(provider) } }
-                        )
-                    ) {
-                        ForEach(SpeechRecognitionProviderID.allCases, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .settingsTrailingMenu()
-                    .accessibilityLabel("语音识别服务商")
-                    .disabled(model.isMutating)
-                }
-
-                if model.selectedProvider != .doubao {
-                    profileControls
-                    SettingsRowDivider()
-                    StatusBadge(
-                        text: model.hasStoredKey ? "已配置" : "未配置",
-                        icon: model.hasStoredKey ? "checkmark.circle.fill" : "key.circle.fill",
-                        color: model.hasStoredKey ? .green : .secondary)
-                    ProviderKeyEditor(
-                        draft: $model.apiKeyDraft,
-                        providerName: model.providerName,
-                        hasStoredKey: model.hasStoredKey,
-                        isUpdating: model.isMutating,
-                        allowsSave: model.hasValidProfile,
-                        deletionMessage: "只删除当前语音识别服务与地域的 Key；文字整理 Key 不受影响。",
-                        save: { await model.saveAPIKey() },
-                        delete: { await model.deleteAPIKey() })
-                    Text(
-                        model.selectedProvider == .openAI
-                            ? "单次录音上限：5 分钟"
-                            : "单次录音上限：3 分钟"
-                    )
-                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
-                }
-                if let notice = model.notice {
-                    SettingsNotice(text: notice, color: .red)
-                }
-            }
-            if model.selectedProvider == .doubao {
-                DoubaoSettingsCard(model: doubao)
-                    .disabled(model.isMutating)
+        Group {
+            if showsHeader {
+                SettingsCard("语音识别", icon: "waveform") { rows }
+            } else {
+                SettingsCard { rows }
             }
         }
         .onDisappear { model.discardKeyDraft() }
+    }
+
+    @ViewBuilder
+    private var rows: some View {
+        SpeakerRow("服务商") {
+            Picker(
+                "服务商",
+                selection: Binding(
+                    get: { model.selectedProvider },
+                    set: { provider in Task { await model.selectProvider(provider) } }
+                )
+            ) {
+                ForEach(SpeechRecognitionProviderID.allCases, id: \.self) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .settingsTrailingMenu()
+            .accessibilityLabel("语音识别服务商")
+            .disabled(model.isMutating)
+        }
+
+        if model.selectedProvider == .doubao {
+            DoubaoRecognitionSettings(model: doubao)
+                .disabled(model.isMutating)
+        } else {
+            profileControls
+            SettingsRowDivider()
+            ProviderKeyEditor(
+                draft: $model.apiKeyDraft,
+                providerName: model.providerName,
+                hasStoredKey: model.hasStoredKey,
+                isUpdating: model.isMutating,
+                allowsSave: model.hasValidProfile,
+                status: ProviderKeyStatus(
+                    text: model.hasStoredKey ? "已配置" : "未配置",
+                    icon: model.hasStoredKey ? "checkmark.circle.fill" : "key.circle.fill",
+                    color: model.hasStoredKey ? SpeakerVisualIdentity.settledGreen : .secondary),
+                deletionMessage: "只删除当前语音识别服务与地域的 Key；文字整理 Key 不受影响。",
+                save: { await model.saveAPIKey() },
+                delete: { await model.deleteAPIKey() })
+        }
+        if let notice = model.notice {
+            SettingsNotice(text: notice, color: .red)
+        }
     }
 
     private var profileControls: some View {

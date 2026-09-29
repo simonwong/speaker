@@ -109,8 +109,8 @@ private struct DictionaryCapacityBar: View {
     private var fillColor: Color {
         if isAtCapacity { return .orange }
         return colorScheme == .dark
-            ? SpeakerVisualIdentity.warmAccent
-            : SpeakerVisualIdentity.warmAccentDeep
+            ? SpeakerVisualIdentity.warmGold
+            : SpeakerVisualIdentity.warmGoldDeep
     }
 
     var body: some View {

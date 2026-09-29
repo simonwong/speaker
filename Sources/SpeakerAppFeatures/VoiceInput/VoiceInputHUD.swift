@@ -94,7 +94,7 @@ package struct VoiceInputHUD: View {
 /// object changing state rather than two windows swapping.
 private struct ActivityPillModel: Equatable {
     enum Phase: Equatable {
-        case recording(peakPower: Float?)
+        case recording(peakPower: Float?, remainingSeconds: Int?)
         case processing
     }
 
@@ -107,10 +107,11 @@ private struct ActivityPillModel: Equatable {
 
     init?(_ presentation: VoiceInputOverlayPresentation) {
         switch presentation {
-        case .recording(let peakPower, let cancelAction, let finishAction):
-            phase = .recording(peakPower: peakPower)
+        case .recording(let peakPower, let cancelAction, let finishAction, let remainingSeconds):
+            phase = .recording(peakPower: peakPower, remainingSeconds: remainingSeconds)
             layout = .recording
-            accessibilityTitle = "正在录音"
+            accessibilityTitle =
+                remainingSeconds.map { "正在录音，\(Self.countdownText($0))" } ?? "正在录音"
             cancelHint = "停止录音并忽略本次内容"
             self.cancelAction = cancelAction
             self.finishAction = finishAction
@@ -128,6 +129,21 @@ private struct ActivityPillModel: Equatable {
 
     var isProcessing: Bool {
         phase == .processing
+    }
+
+    /// Seconds left before the recording limit ends recording, during the
+    /// final countdown only.
+    var remainingSeconds: Int? {
+        guard case .recording(_, let remainingSeconds) = phase else { return nil }
+        return remainingSeconds
+    }
+
+    static func countdownText(_ seconds: Int) -> String {
+        "还剩 \(seconds) 秒"
+    }
+
+    static func compactCountdownText(_ seconds: Int) -> String {
+        "\(seconds) 秒"
     }
 }
 
@@ -158,27 +174,45 @@ private struct ActivityPill: View {
             palette: palette
         ) {
             ZStack {
-                ActivityWaveform(
-                    phase: model.phase,
-                    levels: levels,
-                    reduceMotion: reduceMotion,
-                    compact: controlsVisible
-                )
-                .frame(width: waveformWidth, height: contentSize.height)
-                .mask {
-                    Capsule()
-                        .frame(
-                            width: isRevealed ? waveformWidth : 2,
-                            height: contentSize.height
-                        )
+                // In the final seconds before the recording limit the count
+                // takes the waveform's place, so the pill keeps its size.
+                if let remainingSeconds = model.remainingSeconds {
+                    // Beside the revealed controls only the number fits.
+                    Text(
+                        controlsVisible
+                            ? ActivityPillModel.compactCountdownText(remainingSeconds)
+                            : ActivityPillModel.countdownText(remainingSeconds)
+                    )
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText(countsDown: true))
+                    .animation(
+                        reduceMotion ? nil : SpeakerMotion.feedback, value: remainingSeconds
+                    )
+                    .accessibilityLabel(model.accessibilityTitle)
+                } else {
+                    ActivityWaveform(
+                        phase: model.phase,
+                        levels: levels,
+                        reduceMotion: reduceMotion,
+                        compact: controlsVisible
+                    )
+                    .frame(width: waveformWidth, height: contentSize.height)
+                    .mask {
+                        Capsule()
+                            .frame(
+                                width: isRevealed ? waveformWidth : 2,
+                                height: contentSize.height
+                            )
+                    }
+                    // Recording hands over to processing in place; Reduce Motion
+                    // swaps the bars without moving them.
+                    .animation(
+                        reduceMotion ? nil : .easeInOut(duration: 0.2),
+                        value: model.isProcessing
+                    )
+                    .accessibilityLabel(model.accessibilityTitle)
                 }
-                // Recording hands over to processing in place; Reduce Motion
-                // swaps the bars without moving them.
-                .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 0.2),
-                    value: model.isProcessing
-                )
-                .accessibilityLabel(model.accessibilityTitle)
 
                 HStack {
                     HUDIconButton(
@@ -269,7 +303,7 @@ private struct ActivityPill: View {
     /// noise near the floor so silence reads as a flat dotted line while
     /// normal speech still spans most of the pill height.
     private var liveStrength: Double {
-        guard case .recording(let peakPower) = model.phase,
+        guard case .recording(let peakPower, _) = model.phase,
             let peakPower
         else { return 0 }
         let normalized = min(1, max(0, (Double(peakPower) + 52) / 44))
@@ -282,12 +316,13 @@ private struct ActivityPill: View {
 /// right); while processing they run a self-driven travelling wave in a
 /// cooler tone, signalling "no longer listening, still working".
 private struct ActivityWaveform: View {
-    static let barCount = 15
+    static let barCount = 13
 
     let phase: ActivityPillModel.Phase
     let levels: [Double]
     let reduceMotion: Bool
     let compact: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if phase == .processing, !reduceMotion {
@@ -300,7 +335,7 @@ private struct ActivityWaveform: View {
     }
 
     private func bars(at time: TimeInterval) -> some View {
-        HStack(spacing: compact ? 1 : 3.5) {
+        HStack(spacing: compact ? 0.75 : 3.5) {
             ForEach(0..<Self.barCount, id: \.self) { index in
                 Capsule()
                     .fill(barGradient)
@@ -319,8 +354,8 @@ private struct ActivityWaveform: View {
         case .recording:
             LinearGradient(
                 colors: [
-                    SpeakerVisualIdentity.warmAccent.opacity(0.5),
-                    SpeakerVisualIdentity.warmAccent.opacity(0.98),
+                    SpeakerVisualIdentity.warmCoral(for: colorScheme).opacity(0.5),
+                    SpeakerVisualIdentity.warmCoral(for: colorScheme).opacity(0.98),
                 ],
                 startPoint: .bottom,
                 endPoint: .top
@@ -459,10 +494,12 @@ private struct ActivityHUDSurface<Content: View>: View {
         .clipShape(surfaceShape)
     }
 
+    /// Circular corners: at half the strip height they meet as true
+    /// semicircles, where a continuous curve would flatten the ends.
     private var surfaceShape: RoundedRectangle {
         RoundedRectangle(
             cornerRadius: cornerRadius,
-            style: .continuous
+            style: .circular
         )
     }
 
@@ -494,7 +531,7 @@ private struct HUDVisualEffect: NSViewRepresentable {
         view.wantsLayer = true
         view.layer?.isOpaque = false
         view.layer?.cornerRadius = cornerRadius
-        view.layer?.cornerCurve = .continuous
+        view.layer?.cornerCurve = .circular
         view.layer?.masksToBounds = true
     }
 }
@@ -514,7 +551,12 @@ private struct PendingCopyStrip: View {
     private var controlsVisible: Bool { hoverOverride ?? isHovered }
 
     private var contentSize: CGSize {
-        VoiceInputPanelLayout.pendingCopy.contentSize
+        VoiceInputPanelLayout.pendingCopy(
+            width: VoiceInputPanelLayout.pendingCopyWidth(
+                text: text,
+                failureTitle: copyFailed ? title : nil
+            )
+        ).contentSize
     }
 
     var body: some View {
@@ -596,7 +638,9 @@ private struct ProblemStrip: View {
     let dismiss: () -> Void
 
     private var contentSize: CGSize {
-        VoiceInputPanelLayout.problem.contentSize
+        VoiceInputPanelLayout.problem(
+            width: VoiceInputPanelLayout.problemWidth(title: title)
+        ).contentSize
     }
 
     var body: some View {

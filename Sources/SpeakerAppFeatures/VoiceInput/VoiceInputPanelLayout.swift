@@ -1,4 +1,4 @@
-import CoreGraphics
+import AppKit
 
 /// The single source for Voice Input HUD classification and geometry.
 ///
@@ -8,8 +8,11 @@ import CoreGraphics
 package enum VoiceInputPanelLayout: Equatable, Sendable {
     case processing
     case recording
-    case pendingCopy
-    case problem
+    /// Text strips fit their content: the width is measured from the text
+    /// they show, between a floor that keeps them a pill and a ceiling past
+    /// which the text truncates.
+    case pendingCopy(width: CGFloat)
+    case problem(width: CGFloat)
 
     /// Transparent room the panel keeps around the strip so the drop shadow
     /// and the reveal animation are never clipped by the window edge.
@@ -23,10 +26,15 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
             self = .processing
         case .recording:
             self = .recording
-        case .pendingCopy:
-            self = .pendingCopy
-        case .problem:
-            self = .problem
+        case .pendingCopy(let title, let text, _, _, _, let copyFailed):
+            self = .pendingCopy(
+                width: Self.pendingCopyWidth(
+                    text: text,
+                    failureTitle: copyFailed ? title : nil
+                )
+            )
+        case .problem(_, let title, _, _, _):
+            self = .problem(width: Self.problemWidth(title: title))
         }
     }
 
@@ -36,12 +44,41 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
     package var contentSize: CGSize {
         switch self {
         case .processing, .recording:
-            CGSize(width: 118, height: Self.stripHeight)
-        case .pendingCopy:
-            CGSize(width: 360, height: Self.stripHeight)
-        case .problem:
-            CGSize(width: 320, height: Self.stripHeight)
+            CGSize(width: 104, height: Self.stripHeight)
+        case .pendingCopy(let width), .problem(let width):
+            CGSize(width: width, height: Self.stripHeight)
         }
+    }
+
+    /// Icon, title and close control, with the strip's own padding.
+    package static func problemWidth(title: String) -> CGFloat {
+        let chrome: CGFloat = 14 + 18 + 9 + 9 + 26 + 4
+        return fitted(
+            textWidth(title, style: .callout) + chrome,
+            minimum: 140,
+            maximum: 320
+        )
+    }
+
+    /// The text sits between the dismiss and copy controls; the width keeps
+    /// room for both so revealing dismiss on hover never truncates it.
+    package static func pendingCopyWidth(text: String, failureTitle: String?) -> CGFloat {
+        let chrome: CGFloat = 38 + 38
+        let failure = failureTitle.map { textWidth($0, style: .caption1) + 8 } ?? 0
+        return fitted(
+            textWidth(text, style: .callout) + failure + chrome,
+            minimum: 160,
+            maximum: 360
+        )
+    }
+
+    private static func textWidth(_ text: String, style: NSFont.TextStyle) -> CGFloat {
+        let font = NSFont.preferredFont(forTextStyle: style)
+        return NSAttributedString(string: text, attributes: [.font: font]).size().width
+    }
+
+    private static func fitted(_ width: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+        min(maximum, max(minimum, width.rounded(.up)))
     }
 
     private static let stripHeight: CGFloat = 34

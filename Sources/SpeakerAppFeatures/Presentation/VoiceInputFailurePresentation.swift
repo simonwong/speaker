@@ -19,8 +19,8 @@ package struct VoiceInputFailurePresentation {
         settingsDestination: nil
     )
     package static let recordingLimitReached = Self(
-        title: "录音已达到当前上限",
-        guidance: "本次语音输入已停止。请缩短录音；长度限制可在语音识别设置中查看。",
+        title: "录音超过了识别服务的上限",
+        guidance: "所选语音识别服务没有接受这段录音。请分成几段较短的录音再试。",
         icon: "timer",
         settingsDestination: nil
     )
@@ -46,19 +46,19 @@ package struct VoiceInputFailurePresentation {
         title: "还没有配置语音识别",
         guidance: "在语音识别设置中填入 API Key 即可开始使用。",
         icon: "key.slash",
-        settingsDestination: .apiKeys
+        settingsDestination: .speechRecognition
     )
     package static let providerAuthenticationFailed = Self(
         title: "语音识别 API Key 无效",
         guidance: "请在设置中重新保存正确的 API Key。",
         icon: "key.slash",
-        settingsDestination: .apiKeys
+        settingsDestination: .speechRecognition
     )
     package static let providerCredentialUnavailable = Self(
         title: "无法读取 API Key",
         guidance: "请在设置中重新保存 API Key。",
         icon: "key.slash",
-        settingsDestination: .apiKeys
+        settingsDestination: .speechRecognition
     )
     package static let noSpeechDetected = Self(
         title: "没有听清楚",
@@ -70,7 +70,7 @@ package struct VoiceInputFailurePresentation {
         title: "豆包语音服务尚未开通",
         guidance: "请在火山引擎控制台开通对应资源。",
         icon: "exclamationmark.triangle.fill",
-        settingsDestination: .apiKeys
+        settingsDestination: .speechRecognition
     )
     package static let providerRateLimited = Self(
         title: "操作太频繁",
