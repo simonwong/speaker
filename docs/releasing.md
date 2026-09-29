@@ -72,16 +72,29 @@ After CI succeeds for a push to `main`, it reads the explicit SemVer from
 `Resources/Info.plist`. If `v<SemVer>-dev` does not exist, CI creates a GitHub
 Prerelease containing one drag-to-Applications DMG, `Speaker-<SemVer>-arm64.dmg`.
 GitHub shows the asset's SHA-256 digest on the release page, so no separate
-checksum file is attached. The DMG is packaged from the already validated ad-hoc App; the internal CI ZIP remains
+checksum file is attached. The DMG is packaged from the already validated ad-hoc App after
+`./scripts/sign-development` re-signs it with the fixed development certificate; the internal CI ZIP remains
 a transport artifact. The installer presents Speaker and Applications side by
 side with installation instructions and embeds the Speaker logo as the mounted volume icon, without launching the App.
 Later commits using the same SemVer do not replace or republish that release;
 creating another development release requires a reviewed version change.
 
 Development prereleases use `com.local.speaker`, are not notarized, and are not
-part of the Sparkle update channel. They may require renewed Microphone and
-Accessibility permissions after installation. This path remains separate from
-the protected production workflow below.
+part of the Sparkle update channel. Their designated requirement names the
+certificate (`certificate leaf = H"…"`) rather than one build's CDHash, so
+Microphone and Accessibility grants carry over between development builds; the
+first install after an ad-hoc build (0.7.0 or earlier) asks for them once more.
+This path remains separate from the protected production workflow below.
+
+The certificate is a self-signed code-signing identity stored as the
+`SPEAKER_DEVELOPMENT_SIGNING_P12_BASE64` and
+`SPEAKER_DEVELOPMENT_SIGNING_P12_PASSWORD` secrets of the
+`development-prerelease` environment, which only the prerelease job reads. A
+missing secret fails the publication instead of falling back to ad-hoc signing.
+Replacing the certificate changes the designated requirement and costs every
+user one more permission grant, so renew it before it expires rather than
+generating a new one. `./scripts/test-sign-development` exercises the same
+re-signing with a throwaway certificate on every CI run.
 
 ## 正式候选构建
 

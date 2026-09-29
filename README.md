@@ -19,7 +19,7 @@ Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the ke
 If Speaker cannot prove that the original input target is still safe and current, it keeps the result in a HUD for explicit copying instead of risking delivery to the wrong place.
 
 > [!IMPORTANT]
-> Speaker development builds are ad-hoc signed and are not Apple-notarized. macOS will block the first launch until you explicitly remove the quarantine attribute from the downloaded `Speaker.app`. Only download builds from this repository's official [Releases](https://github.com/simonwong/speaker/releases) page.
+> Speaker development builds are signed with a self-signed development certificate and are not Apple-notarized. macOS will block the first launch until you explicitly remove the quarantine attribute from the downloaded `Speaker.app`. Only download builds from this repository's official [Releases](https://github.com/simonwong/speaker/releases) page.
 
 ## Highlights
 
@@ -56,7 +56,7 @@ open /Applications/Speaker.app
 
 Keep the downloaded DMG and checksum file in the same directory. The checksum command must report `OK` before you continue.
 
-The `xattr` command removes Gatekeeper's quarantine marker only from `/Applications/Speaker.app`; it does not disable Gatekeeper system-wide. Because each development build has an ad-hoc identity, updating Speaker can require macOS to approve Microphone and Accessibility access again.
+The `xattr` command removes Gatekeeper's quarantine marker only from `/Applications/Speaker.app`; it does not disable Gatekeeper system-wide. Development builds share one signing certificate, so Microphone and Accessibility approvals carry over when you update. Updating from 0.7.0 or earlier asks for them once more.
 
 ### First run
 

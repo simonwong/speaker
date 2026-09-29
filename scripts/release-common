@@ -1767,6 +1767,70 @@ verify_production_build_provenance_shape() {
         "$expected_build_number"
 }
 
+sign_embedded_sparkle() {
+    local framework="$1"
+    local identity="$2"
+    local timestamp_mode="$3"
+    local -a signing_arguments
+
+    signing_arguments=(
+        --force
+        --options runtime
+        --sign "$identity"
+    )
+    if [[ "$timestamp_mode" == "timestamp" ]]; then
+        signing_arguments+=(--timestamp)
+    fi
+
+    codesign "${signing_arguments[@]}" \
+        "$framework/Versions/Current/Updater.app" || return 1
+    codesign "${signing_arguments[@]}" \
+        "$framework/Versions/Current/Autoupdate" || return 1
+    codesign "${signing_arguments[@]}" "$framework"
+}
+
+# Signs a development bundle with one stable identity so macOS keeps its
+# Microphone and Accessibility grants across builds. Works on a fresh bundle
+# and on an already validated ad-hoc bundle that is re-signed for publication.
+sign_development_app() {
+    local app="$1"
+    local identity="$2"
+    local expected_bundle_identifier="$3"
+    local plist="$app/Contents/Info.plist"
+
+    /usr/libexec/PlistBuddy -c "Delete :SpeakerSigningMode" "$plist" 2>/dev/null || true
+    /usr/libexec/PlistBuddy -c "Add :SpeakerSigningMode string development-signed" "$plist" || return 1
+    sign_embedded_sparkle \
+        "$app/Contents/Frameworks/Sparkle.framework" \
+        "$identity" \
+        no-timestamp || return 1
+    codesign --force --sign "$identity" "$app" || return 1
+    verify_local_signed_app "$app" "$expected_bundle_identifier"
+}
+
+# Prints the SHA-1 of the only code-signing identity in `security
+# find-identity -p codesigning <keychain>` output. A self-signed development
+# certificate is untrusted on CI runners, so this reads the matching
+# identities rather than the valid-only list.
+single_code_signing_identity_hash() {
+    local identity_output="$1"
+    local -a hashes
+
+    hashes=("${(@f)$(
+        print -r -- "$identity_output" \
+            | awk '/Matching identities/ { matching = 1; next }
+                   /identities found/ { matching = 0 }
+                   matching' \
+            | sed -nE 's/^[[:space:]]*[0-9]+\) ([0-9A-F]{40}) ".*$/\1/p'
+    )}")
+    hashes=(${hashes:#})
+    if (( ${#hashes} != 1 )); then
+        release_error "Expected exactly one code-signing identity; found ${#hashes}."
+        return 1
+    fi
+    print -r -- "$hashes[1]"
+}
+
 verify_local_signed_app() {
     local app="$1"
     local expected_bundle_identifier="$2"
