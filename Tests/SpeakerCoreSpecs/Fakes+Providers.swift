@@ -123,6 +123,7 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
     private let failingSendIndex: Int?
     private let blockingSendFailureIndex: Int?
     private let blocksReceiveUntilClose: Bool
+    private let onClose: (@Sendable () -> Void)?
     private var responseIndex = 0
     private var isClosed = false
     private var blockedReceive: CheckedContinuation<Data, Error>?
@@ -138,7 +139,8 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         hangingSendIndex: Int? = nil,
         failingSendIndex: Int? = nil,
         blockingSendFailureIndex: Int? = nil,
-        blocksReceiveUntilClose: Bool = false
+        blocksReceiveUntilClose: Bool = false,
+        onClose: (@Sendable () -> Void)? = nil
     ) {
         self.responses = responses
         self.receiveError = receiveError
@@ -147,11 +149,18 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         self.failingSendIndex = failingSendIndex
         self.blockingSendFailureIndex = blockingSendFailureIndex
         self.blocksReceiveUntilClose = blocksReceiveUntilClose
+        self.onClose = onClose
     }
 
     func send(_ data: Data) async throws {
         let sendIndex = sentFrames.count
         sendAttemptCount += 1
+        // A closed socket rejects every later send at once, as
+        // URLSessionWebSocketTask does. Without this, a blocking send that
+        // starts after `close()` would wait for a release that never comes.
+        if isClosed {
+            throw URLError(.networkConnectionLost)
+        }
         if sendIndex == failingSendIndex {
             throw URLError(.networkConnectionLost)
         }
@@ -193,6 +202,7 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         blockedSend = nil
         blockedReceive?.resume(throwing: URLError(.cancelled))
         blockedReceive = nil
+        onClose?()
         for _ in 0..<8 {
             await Task.yield()
         }
