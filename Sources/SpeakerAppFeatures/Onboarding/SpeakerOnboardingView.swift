@@ -66,7 +66,6 @@ package struct SpeakerOnboardingView: View {
             footer
         }
         .buttonStyle(SettingsButtonStyle())
-        .tint(SpeakerVisualIdentity.controlTint)
         .frame(minWidth: 360, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
         .task {

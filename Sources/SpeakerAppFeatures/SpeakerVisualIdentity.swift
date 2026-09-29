@@ -4,8 +4,9 @@ import SwiftUI
 /// Speaker's brand colours, the two printed layers of the app icon. Coral,
 /// the front layer, is the primary brand colour: it marks live voice activity
 /// and heavy use. Gold, the rear layer, is the secondary one: it carries light
-/// use and quiet brand details. Speaker's windows tint their controls with
-/// `controlTint`, a deeper coral, instead of the system accent colour.
+/// use and quiet brand details. A few controls take `controlTint`, a deeper
+/// coral: the button that commits a page, switches, level meters, selection,
+/// and focus. Every other control stays neutral.
 package enum SpeakerVisualIdentity {
     /// The primary brand colour, tuned for light surfaces.
     package static let warmCoral = Color(
