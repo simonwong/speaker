@@ -289,8 +289,7 @@ jobs:
           SOURCE_CHECKSUM="$SOURCE_ZIP.sha256"
           RELEASE_ROOT="$RUNNER_TEMP/speaker-development-release"
           EXTRACT_ROOT="$RUNNER_TEMP/speaker-development-extract"
-          ASSET_BASENAME="Speaker-${VERSION}-development.dmg"
-          ASSET="$RELEASE_ROOT/$ASSET_BASENAME"
+          ASSET="$RELEASE_ROOT/Speaker-${VERSION}-arm64.dmg"
 
           mkdir -p "$RELEASE_ROOT" "$EXTRACT_ROOT"
           (cd "$CANDIDATE" && /usr/bin/shasum -a 256 -c \
@@ -306,9 +305,9 @@ jobs:
             -c 'Print :SpeakerSigningMode' \
             "$APP/Contents/Info.plist")" == "development-ad-hoc" ]]
           codesign --verify --deep --strict --verbose=2 "$APP"
+          # The asset name promises Apple Silicon only.
+          [[ "$(/usr/bin/lipo -archs "$APP/Contents/MacOS/SpeakerApp")" == "arm64" ]]
           ./scripts/package-dmg "$APP" "$ASSET"
-          (cd "$RELEASE_ROOT" && /usr/bin/shasum -a 256 \
-            "$ASSET_BASENAME" > "$ASSET_BASENAME.sha256")
 
       - name: Create GitHub development prerelease
         if: steps.release.outputs.publish == 'true'
@@ -330,9 +329,10 @@ jobs:
             "Source commit: \`$GITHUB_SHA\`" \
             > "$NOTES"
 
+          # GitHub shows each asset's SHA-256 digest on the release page, so
+          # the DMG ships alone, under its own file name.
           gh release create "$TAG" \
-            "$RELEASE_ROOT/Speaker-${VERSION}-development.dmg#Speaker ${VERSION} drag-to-Applications installer" \
-            "$RELEASE_ROOT/Speaker-${VERSION}-development.dmg.sha256#SHA-256 checksum" \
+            "$RELEASE_ROOT/Speaker-${VERSION}-arm64.dmg" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Speaker $VERSION Development Prerelease" \
