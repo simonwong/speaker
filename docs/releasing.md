@@ -70,8 +70,9 @@ Apple Development identity 时必须显式指定，避免构建在不同证书�
 
 After CI succeeds for a push to `main`, it reads the explicit SemVer from
 `Resources/Info.plist`. If `v<SemVer>-dev` does not exist, CI creates a GitHub
-Prerelease containing a drag-to-Applications DMG and its SHA-256 file. The DMG
-is packaged from the already validated ad-hoc App; the internal CI ZIP remains
+Prerelease containing one drag-to-Applications DMG, `Speaker-<SemVer>-arm64.dmg`.
+GitHub shows the asset's SHA-256 digest on the release page, so no separate
+checksum file is attached. The DMG is packaged from the already validated ad-hoc App; the internal CI ZIP remains
 a transport artifact. The installer presents Speaker and Applications side by
 side with installation instructions and embeds the Speaker logo as the mounted volume icon, without launching the App.
 Later commits using the same SemVer do not replace or republish that release;
