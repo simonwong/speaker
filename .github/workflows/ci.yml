@@ -191,6 +191,11 @@ jobs:
       - name: Verify install rollback
         run: ./scripts/test-install-rollback
 
+      - name: Verify development re-signing
+        env:
+          SPEAKER_SIGN_TEST_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
+        run: ./scripts/test-sign-development
+
       - name: Verify reviewed release identity guard
         run: ./scripts/test-release-identity
 
@@ -200,6 +205,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-26
     timeout-minutes: 10
+    # Holds the development signing certificate, so pull request builds never
+    # receive it.
+    environment: development-prerelease
     concurrency:
       group: speaker-development-prerelease
       cancel-in-progress: false
@@ -277,6 +285,54 @@ jobs:
             > "$ARTIFACT_ZIP"
           /usr/bin/ditto -x -k "$ARTIFACT_ZIP" "$CANDIDATE"
 
+      # A stable certificate keeps each user's Microphone and Accessibility
+      # grants across upgrades; ad-hoc signatures change with every build.
+      - name: Configure development signing keychain
+        if: steps.release.outputs.publish == 'true'
+        shell: zsh {0}
+        env:
+          DEVELOPMENT_P12_BASE64: ${{ secrets.SPEAKER_DEVELOPMENT_SIGNING_P12_BASE64 }}
+          DEVELOPMENT_P12_PASSWORD: ${{ secrets.SPEAKER_DEVELOPMENT_SIGNING_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          source scripts/release-common
+          for required in DEVELOPMENT_P12_BASE64 DEVELOPMENT_P12_PASSWORD; do
+            [[ -n "${(P)required}" ]] || {
+              print -u2 "Missing development signing secret: $required"
+              exit 1
+            }
+          done
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/speaker-development.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          P12_PATH="$RUNNER_TEMP/speaker-development-signing.p12"
+          print -rn -- "$DEVELOPMENT_P12_BASE64" \
+            | /usr/bin/base64 -D > "$P12_PATH"
+          chmod 600 "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -f pkcs12 \
+            -P "$DEVELOPMENT_P12_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH" >/dev/null
+          rm -f "$P12_PATH"
+
+          IDENTITY="$(single_code_signing_identity_hash \
+            "$(security find-identity -p codesigning "$KEYCHAIN_PATH")")"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_LOCAL_CODESIGN_IDENTITY "$IDENTITY"
+          append_github_environment_value \
+            "$GITHUB_ENV" SPEAKER_DEVELOPMENT_KEYCHAIN "$KEYCHAIN_PATH"
+
       - name: Verify and package development installer
         if: steps.release.outputs.publish == 'true'
         shell: zsh {0}
@@ -305,6 +361,10 @@ jobs:
             -c 'Print :SpeakerSigningMode' \
             "$APP/Contents/Info.plist")" == "development-ad-hoc" ]]
           codesign --verify --deep --strict --verbose=2 "$APP"
+          ./scripts/sign-development "$APP"
+          [[ "$(/usr/libexec/PlistBuddy \
+            -c 'Print :SpeakerSigningMode' \
+            "$APP/Contents/Info.plist")" == "development-signed" ]]
           # The asset name promises Apple Silicon only.
           [[ "$(/usr/bin/lipo -archs "$APP/Contents/MacOS/SpeakerApp")" == "arm64" ]]
           ./scripts/package-dmg "$APP" "$ASSET"
@@ -322,7 +382,7 @@ jobs:
           NOTES="$RUNNER_TEMP/speaker-development-release-notes.md"
           print -r -- 'Automated development build from the validated `main` commit.' \
             '' \
-            '> This app is ad-hoc signed and not notarized. It is intended for development testing only. macOS may require renewed Microphone and Accessibility permissions after installation.' \
+            '> This app is signed with a fixed development certificate and is not notarized. It is intended for development testing only. Microphone and Accessibility permissions carry over to later development builds; the first install after an ad-hoc build (0.7.0 or earlier) asks for them once more.' \
             '' \
             'Open the DMG, drag Speaker onto Applications, then open Speaker from Applications.' \
             '' \
@@ -338,3 +398,7 @@ jobs:
             --title "Speaker $VERSION Development Prerelease" \
             --notes-file "$NOTES" \
             --prerelease
+
+      - name: Remove development signing keychain
+        if: ${{ always() && env.SPEAKER_DEVELOPMENT_KEYCHAIN != '' }}
+        run: security delete-keychain "$SPEAKER_DEVELOPMENT_KEYCHAIN" || true

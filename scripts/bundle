@@ -87,28 +87,6 @@ cleanup_bundle() {
 }
 trap cleanup_bundle EXIT
 
-sign_embedded_sparkle() {
-    local framework="$1"
-    local identity="$2"
-    local timestamp_mode="$3"
-    local -a signing_arguments
-
-    signing_arguments=(
-        --force
-        --options runtime
-        --sign "$identity"
-    )
-    if [[ "$timestamp_mode" == "timestamp" ]]; then
-        signing_arguments+=(--timestamp)
-    fi
-
-    codesign "${signing_arguments[@]}" \
-        "$framework/Versions/Current/Updater.app"
-    codesign "${signing_arguments[@]}" \
-        "$framework/Versions/Current/Autoupdate"
-    codesign "${signing_arguments[@]}" "$framework"
-}
-
 remove_build_machine_rpaths() {
     local executable="$1"
     local path
@@ -322,17 +300,8 @@ if [[ "$SIGNING_IDENTITY" != "-" ]]; then
         "$BUILD_NUMBER"
     verify_production_sparkle_signatures "$APP" "$EXPECTED_TEAM_ID"
 elif [[ -n "$LOCAL_SIGNING_IDENTITY" ]]; then
-    /usr/libexec/PlistBuddy -c "Add :SpeakerSigningMode string development-signed" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SpeakerCredentialStorage string local-file" "$APP/Contents/Info.plist"
-    sign_embedded_sparkle \
-        "$APP/Contents/Frameworks/Sparkle.framework" \
-        "$LOCAL_SIGNING_IDENTITY" \
-        no-timestamp
-    codesign \
-        --force \
-        --sign "$LOCAL_SIGNING_IDENTITY" \
-        "$APP"
-    verify_local_signed_app "$APP" "$BUNDLE_IDENTIFIER"
+    sign_development_app "$APP" "$LOCAL_SIGNING_IDENTITY" "$BUNDLE_IDENTIFIER"
 else
     /usr/libexec/PlistBuddy -c "Add :SpeakerSigningMode string development-ad-hoc" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SpeakerCredentialStorage string local-file" "$APP/Contents/Info.plist"

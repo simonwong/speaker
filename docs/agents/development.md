@@ -60,7 +60,7 @@ Iterate with a filter, then run the whole executable. Daily checks avoid test wi
 
 The gate runs every step even after one fails, then prints a PASS/FAIL summary with each step's exit status and exits non-zero if any step failed, so one run reports every broken gate. The contract tests that read the repository and write only inside their own `mktemp` directory run concurrently with the sequential lane; every step that reenters SwiftPM on the shared `.build` directory, bundles the App, or installs it stays sequential. The runner helpers live in `scripts/test-runner-common` and are covered by `./scripts/test-scripts-test-summary`.
 
-For installer, release, or workflow changes, also inspect `.github/workflows/ci.yml` and run every directly relevant CI-only gate. `./scripts/test-install-rollback` is currently a CI-only gate and does not run inside `./scripts/test`. Such a change is test-complete only when the ordinary code gates and all directly relevant CI-only gates exit 0.
+For installer, release, or workflow changes, also inspect `.github/workflows/ci.yml` and run every directly relevant CI-only gate. `./scripts/test-install-rollback` and `./scripts/test-sign-development` are currently CI-only gates and do not run inside `./scripts/test`. Such a change is test-complete only when the ordinary code gates and all directly relevant CI-only gates exit 0.
 
 ## Continuous integration
 
@@ -113,6 +113,7 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `release` | Development “try my change” loop: release build, bundle, install, launch under a stable local identity. | developer |
 | `release-common` | Sourced library of fail-closed release validation helpers; it is never run directly. | `bundle`, `install`, `distribute`, `verify-published-update`, `test-release-*`, CI |
 | `run` | Runs `SpeakerApp` straight from SwiftPM without bundling. | developer |
+| `sign-development` | Re-signs a validated ad-hoc bundle with the stable identity in `SPEAKER_LOCAL_CODESIGN_IDENTITY`. | development prerelease CI |
 | `swiftw` | SwiftPM wrapper that pins the macOS 26 SDK, isolates module caches, and guards isolated scratch paths. | every other script, developer |
 | `target-capture-smoke` | Verifies Input Target freezing against a real machine. | developer |
 | `test` | Non-UI checks by default; `--ui-only` runs native UI checks and `--with-ui` runs the full deterministic gate. | developer, CI |
@@ -126,6 +127,7 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `test-release-evidence` | Checks dSYM binding and evidence ZIP integrity with a real executable. | `./scripts/test`, CI |
 | `test-release-identity` | Release identity, lock, promotion journal, and rollback counterexamples. | `./scripts/test` |
 | `test-runner-common` | Sourced helpers for parallel gate steps and the combined exit-status summary. | `./scripts/test`, `test-scripts-test-summary` |
+| `test-sign-development` | Re-signs a bundle copy with a throwaway untrusted certificate and checks the designated requirement names it; edits the keychain search list. | CI only |
 | `test-scripts-test-summary` | Proves the full gate keeps running after failures and reports every result. | `./scripts/test` |
 | `test-skills-lock` | Checks `skills-lock.json` is valid JSON and that every locked skill directory exists. | `./scripts/test` |
 | `test-workflow-security` | GitHub workflow permission, pinning, and trigger counterexamples. | `./scripts/test` |

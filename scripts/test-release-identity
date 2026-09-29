@@ -613,6 +613,37 @@ else
     [[ "$?" == 2 ]]
 fi
 
+UNTRUSTED_DEVELOPMENT='
+Policy: Code Signing
+  Matching identities
+  1) E7EF591C60E20785DFAFFB73E2C2FBB39B1AAA3F "Speaker Local Dev" (CSSMERR_TP_NOT_TRUSTED)
+     1 identities found
+
+  Valid identities only
+     0 valid identities found
+'
+[[ "$(single_code_signing_identity_hash "$UNTRUSTED_DEVELOPMENT")" \
+    == "E7EF591C60E20785DFAFFB73E2C2FBB39B1AAA3F" ]]
+
+for identity_output in \
+    '
+Policy: Code Signing
+  Matching identities
+     0 identities found
+' \
+    '
+Policy: Code Signing
+  Matching identities
+  1) E7EF591C60E20785DFAFFB73E2C2FBB39B1AAA3F "First"
+  2) 0123456789ABCDEF0123456789ABCDEF01234567 "Second"
+     2 identities found
+'; do
+    if single_code_signing_identity_hash "$identity_output" 2>/dev/null; then
+        print -u2 "A missing or ambiguous development signing identity was accepted."
+        exit 1
+    fi
+done
+
 for version in \
     "1.2.3" \
     "1.2.3-beta.1" \

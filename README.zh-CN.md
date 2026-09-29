@@ -19,7 +19,7 @@ Speaker 常驻菜单栏，默认使用 `Fn` 快捷键。你可以按住说话、
 如果 Speaker 无法确认原输入位置仍然安全有效，它会把结果保留在浮层中，等待你主动复制，而不会冒险把文字输入到错误的位置。
 
 > [!IMPORTANT]
-> Speaker 的开发版本使用 ad-hoc 签名，尚未经过 Apple 公证。macOS 会阻止首次启动，直到你明确移除所下载 `Speaker.app` 的隔离属性。请只从本仓库的官方 [Releases](https://github.com/simonwong/speaker/releases) 页面下载。
+> Speaker 的开发版本使用自签开发证书签名，尚未经过 Apple 公证。macOS 会阻止首次启动，直到你明确移除所下载 `Speaker.app` 的隔离属性。请只从本仓库的官方 [Releases](https://github.com/simonwong/speaker/releases) 页面下载。
 
 ## 主要功能
 
@@ -56,7 +56,7 @@ open /Applications/Speaker.app
 
 请把下载的 DMG 和 checksum 文件放在同一目录。校验命令必须显示 `OK`，再继续安装。
 
-`xattr` 命令只移除 `/Applications/Speaker.app` 的 Gatekeeper 隔离标记，不会关闭系统全局的 Gatekeeper。由于每个开发版本使用 ad-hoc 身份，更新 Speaker 后，macOS 可能要求重新授予麦克风和辅助功能权限。
+`xattr` 命令只移除 `/Applications/Speaker.app` 的 Gatekeeper 隔离标记，不会关闭系统全局的 Gatekeeper。开发版本使用同一张签名证书，更新后麦克风和辅助功能授权会保留。从 0.7.0 或更早版本更新时，需要再授权一次。
 
 ### 首次使用
 

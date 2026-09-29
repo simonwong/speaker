@@ -20,3 +20,4 @@ Speaker is a macOS 14+ menu-bar voice input tool. A Voice Input Session records 
 - Persist transcript text only after the Input Target security class is confirmed. Secure fields remain text-free in every state.
 - Route sensitive local files (`history.sqlite3`, `settings.json`, `personal-dictionary.json`, development `credentials.json`) through `OwnerOnlyFilePersistence`.
 - Keep product copy, SF Symbols, accessibility announcements, and presentation policy in `SpeakerAppFeatures`, not `SpeakerCore`.
+- Run every local `./scripts/bundle`, `./scripts/launch`, and `./scripts/release` with `SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Dev"`. The scripts auto-select only `Speaker Local Development` and otherwise fall back to ad-hoc signing, which silently drops the Microphone and Accessibility grants. A local install is done when `codesign -d -r- /Applications/Speaker.app` shows `certificate leaf = H"…"`, not `cdhash`.
