@@ -88,6 +88,8 @@ public func run(
     }
     SpecSelection.executed += 1
     SpecSelection.trace(name)
+    SpecCaseWatchdog.shared.begin(name)
+    defer { SpecCaseWatchdog.shared.end() }
     do {
         try body()
     } catch let failure as SpecFailure {
@@ -110,12 +112,67 @@ public func runAsync(
     }
     SpecSelection.executed += 1
     SpecSelection.trace(name)
+    SpecCaseWatchdog.shared.begin(name)
+    defer { SpecCaseWatchdog.shared.end() }
     do {
         try await body()
     } catch let failure as SpecFailure {
         failures.append("\(name): \(failure.message)")
     } catch {
         failures.append("\(name): \(error)")
+    }
+}
+
+/// Stops the executable when one case runs past its time limit and names
+/// that case, so a hung case fails within minutes instead of holding CI until
+/// the job timeout. The check runs on its own queue, so it still fires when
+/// the case blocks the main thread. `SPEAKER_SPEC_CASE_TIMEOUT_SECONDS`
+/// overrides the default limit.
+final class SpecCaseWatchdog: @unchecked Sendable {
+    static let shared = SpecCaseWatchdog()
+
+    /// About ten times the slowest case seen locally, to leave room for a
+    /// loaded CI runner.
+    static let defaultLimitSeconds = 120
+
+    private let limitSeconds: Int
+    private let lock = NSLock()
+    private var running: (name: String, deadline: DispatchTime)?
+    private let timer: DispatchSourceTimer
+
+    private init() {
+        limitSeconds =
+            ProcessInfo.processInfo.environment["SPEAKER_SPEC_CASE_TIMEOUT_SECONDS"]
+            .flatMap { Int($0) }
+            .flatMap { $0 > 0 ? $0 : nil }
+            ?? Self.defaultLimitSeconds
+        timer = DispatchSource.makeTimerSource(
+            queue: DispatchQueue(label: "SpecCaseWatchdog")
+        )
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [unowned self] in check() }
+        timer.resume()
+    }
+
+    func begin(_ name: String) {
+        let deadline = DispatchTime.now() + .seconds(limitSeconds)
+        lock.withLock { running = (name, deadline) }
+    }
+
+    func end() {
+        lock.withLock { running = nil }
+    }
+
+    private func check() {
+        guard let running = lock.withLock({ running }),
+            DispatchTime.now() >= running.deadline
+        else { return }
+        FileHandle.standardError.write(
+            Data(
+                "FAIL: \(running.name): still running after \(limitSeconds) s; stopping\n"
+                    .utf8)
+        )
+        Darwin.exit(1)
     }
 }
 

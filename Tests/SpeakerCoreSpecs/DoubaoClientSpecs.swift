@@ -169,6 +169,54 @@ enum DoubaoClientSpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "Doubao provider errors outrank a send attempted after the socket closed",
+            failures: &failures
+        ) {
+            // The second audio chunk arrives only once the receiver has closed
+            // the socket, so the blocking send starts after the close instead
+            // of being released by it.
+            let (audio, audioContinuation) = AsyncStream<Data>.makeStream()
+            audioContinuation.yield(Data([1]))
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [
+                    makeDoubaoServerError(
+                        code: 45_000_001,
+                        message: "resource not activated"
+                    )
+                ],
+                metadata: .init(
+                    httpStatusCode: 101,
+                    providerRequestID: "provider-error-after-close"
+                ),
+                blockingSendFailureIndex: 1,
+                onClose: {
+                    audioContinuation.yield(Data([2]))
+                    audioContinuation.finish()
+                }
+            )
+            let client = DoubaoStreamingASRClient(
+                configuration: .init(
+                    apiKey: "test-api-key",
+                    requestUserID: "request-user"
+                ),
+                connector: DoubaoWebSocketConnectorFake(
+                    connection: connection
+                )
+            )
+
+            do {
+                _ = try await client.transcribe(audio)
+                throw SpecFailure(message: "provider error was accepted")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .resourceNotActivated)
+                try expect(
+                    failure.providerRequestID
+                        == "provider-error-after-close"
+                )
+            }
+        }
+
+        await runAsync(
             "Doubao send failures close a receive that ignores task cancellation",
             failures: &failures
         ) {
