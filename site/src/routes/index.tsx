@@ -6,148 +6,73 @@ const GITHUB_URL = 'https://github.com/simonwong/speaker'
 const RELEASES_URL = `${GITHUB_URL}/releases`
 const PRIVACY_URL = `${GITHUB_URL}/blob/main/PRIVACY.md`
 
-const steps = [
+const points = [
   {
-    title: '按住 Fn 说话',
-    body: '按住说话、松开结束，也可以短按开始、再短按结束。按 Esc 随时取消。',
+    title: '自带 Key',
+    body: [
+      '语音识别可选豆包、OpenAI、阿里千问，文本整理可选 DeepSeek、OpenAI、Kimi、GLM 或自定义接口。',
+      'Key 由你自己提供，请求从你的 Mac 直接发给服务商，不经过任何中转。',
+    ],
   },
   {
-    title: '识别并整理',
-    body: '用豆包、OpenAI 或千问转成文字。需要时再交给文字模型精简或重写，这一步只发送文字。',
+    title: '纯本地',
+    body: [
+      '没有账号，没有服务端。设置、个人词库和历史记录只保存在这台 Mac 上。',
+      '音频只在内存中处理，不写入磁盘，只发送给你选择的识别服务。',
+    ],
   },
   {
-    title: '送达原输入位置',
-    body: '松开按键时锁定输入位置，之后切换窗口不会改变送达位置。',
-  },
-]
-
-const features = [
-  {
-    title: '快捷键可自定义',
-    body: '默认 Fn，也可以改成组合键，或单独使用一侧的 Option、Control、Shift。',
+    title: '语音转文字',
+    body: [
+      '在任意应用的输入框里按下快捷键说话，结束后文字出现在光标处。',
+      '把人名和术语加入个人词库，识别时会参考你的写法。原输入位置无法确认时，结果留在浮层里等你复制。',
+    ],
   },
   {
-    title: '不会输入到错误的位置',
-    body: '原输入位置已变化、已关闭或无法确认时，结果留在浮层里，由你主动复制。',
-  },
-  {
-    title: '自选语音识别',
-    body: '豆包、OpenAI、千问三选一。OpenAI 和千问可选边录边传，或录完再上传。',
-  },
-  {
-    title: '可选文本整理',
-    body: '精简清理、完整重写、自定义模式，支持 DeepSeek、OpenAI、Kimi、GLM 和自定义接口。',
-  },
-  {
-    title: '个人词库',
-    body: '把人名和专业术语加入词库，识别和整理时都会参考你的写法。',
-  },
-  {
-    title: '会话记录',
-    body: '历史记录保存在本机，可搜索、复制、删除，保留时长由你设定。',
+    title: '自定义模式',
+    body: [
+      '默认直接使用识别结果。也可以选择精简清理、完整重写，或者写一段自己的指令，让文字模型按你的要求整理。',
+      '整理只发送文字，不发送音频。整理失败时保留原始识别结果。',
+    ],
   },
 ]
-
-const privacy = [
-  '没有账号体系，没有共用的服务端。API Key 由你自己提供。',
-  '原始音频只在内存中处理，不写入磁盘，只发送给你选择的识别服务。',
-  '密码框等安全输入框不会自动送达，文字也不进入历史记录。',
-  '自动送达后恢复你原来的剪贴板内容，只有主动点击复制时才会留下结果。',
-]
-
-const waveform = [6, 10, 16, 24, 14, 28, 20, 32, 18, 26, 12, 22, 30, 16, 10, 20, 14, 8]
 
 function Home() {
   return (
-    <>
-      <header className="nav">
-        <div className="container nav-inner">
-          <a className="brand" href="/">
-            <img src="/icon.png" width={28} height={28} alt="" />
-            Speaker
-          </a>
-          <nav className="nav-links">
-            <a href={GITHUB_URL}>GitHub</a>
-            <a href={RELEASES_URL}>Releases</a>
-          </nav>
-        </div>
-      </header>
-
+    <div className="page">
       <main>
-        <section className="hero container">
-          <img className="hero-icon" src="/icon.png" width={112} height={112} alt="Speaker 应用图标" />
-          <h1>按住 Fn，说话。</h1>
+        <section className="hero">
+          <div className="brand">
+            <img src="/icon.png" width={56} height={56} alt="Speaker 应用图标" />
+            Speaker
+          </div>
+          <h1>说话代替打字</h1>
           <p className="lede">
-            <span>Speaker 是 macOS 菜单栏语音输入工具。</span>
-            <span>松开按键后，文字出现在你正在输入的位置。</span>
+            Speaker 是 macOS 上的语音输入工具，把你说的话转成文字，送到正在输入的位置。识别和整理用你自己的
+            API Key，没有账号和服务端，整理方式可以自己定义。
           </p>
           <div className="actions">
             <a className="button primary" href={RELEASES_URL}>
               下载公测版
             </a>
             <a className="button" href={GITHUB_URL}>
-              查看 GitHub
+              GitHub
             </a>
           </div>
           <p className="meta">macOS 14 及以上 · Apple 芯片 · MIT 开源</p>
-
-          <div className="hud" role="img" aria-label="录音浮层示意">
-            <span className="hud-dot" />
-            <span className="hud-bars">
-              {waveform.map((height, index) => (
-                <i key={index} style={{ height }} />
-              ))}
-            </span>
-            <kbd>Fn</kbd>
-          </div>
         </section>
 
-        <section className="container section">
-          <h2>三步完成一次输入</h2>
-          <ol className="steps">
-            {steps.map((step, index) => (
-              <li key={step.title}>
-                <span className="step-index">{index + 1}</span>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </li>
+        {points.map((point) => (
+          <section className="block" key={point.title}>
+            <h2>{point.title}</h2>
+            {point.body.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
             ))}
-          </ol>
-        </section>
+          </section>
+        ))}
 
-        <section className="container section">
-          <h2>功能</h2>
-          <ul className="features">
-            {features.map((feature) => (
-              <li key={feature.title}>
-                <h3>{feature.title}</h3>
-                <p>{feature.body}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="container section split">
-          <div>
-            <h2>隐私</h2>
-            <p className="section-note">
-              完整的数据处理说明见 <a href={PRIVACY_URL}>PRIVACY.md</a>。
-            </p>
-          </div>
-          <ul className="plain-list">
-            {privacy.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="container section split">
-          <div>
-            <h2>安装</h2>
-            <p className="section-note">
-              需要你自己的豆包、OpenAI 或阿里千问 API Key。
-            </p>
-          </div>
+        <section className="block">
+          <h2>安装</h2>
           <ol className="install">
             <li>
               在 <a href={RELEASES_URL}>GitHub Releases</a> 下载最新的{' '}
@@ -165,15 +90,13 @@ function Home() {
       </main>
 
       <footer className="footer">
-        <div className="container footer-inner">
-          <span>© {new Date().getFullYear()} Simon Wong · MIT License</span>
-          <nav className="nav-links">
-            <a href={GITHUB_URL}>GitHub</a>
-            <a href={RELEASES_URL}>Releases</a>
-            <a href={PRIVACY_URL}>隐私</a>
-          </nav>
-        </div>
+        <span>© {new Date().getFullYear()} Simon Wong · MIT</span>
+        <nav className="links">
+          <a href={GITHUB_URL}>GitHub</a>
+          <a href={RELEASES_URL}>Releases</a>
+          <a href={PRIVACY_URL}>隐私</a>
+        </nav>
       </footer>
-    </>
+    </div>
   )
 }

@@ -3,7 +3,7 @@
   <h1>Speaker</h1>
   <p>A privacy-conscious macOS voice-input tool that turns speech into text wherever you are typing.</p>
 
-  <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
+  <p><a href="https://speaker.simonwong.cn">speaker.simonwong.cn</a> · <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 
   <p>
     <a href="https://github.com/simonwong/speaker/actions/workflows/ci.yml"><img src="https://github.com/simonwong/speaker/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>

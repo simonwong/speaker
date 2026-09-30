@@ -3,7 +3,7 @@
   <h1>Speaker</h1>
   <p>一款注重隐私的 macOS 菜单栏语音输入工具，让你在任何输入位置直接把语音变成文字。</p>
 
-  <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
+  <p><a href="https://speaker.simonwong.cn">speaker.simonwong.cn</a> · <a href="README.md">English</a> · <strong>简体中文</strong></p>
 
   <p>
     <a href="https://github.com/simonwong/speaker/actions/workflows/ci.yml"><img src="https://github.com/simonwong/speaker/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
