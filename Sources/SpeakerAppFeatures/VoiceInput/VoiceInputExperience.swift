@@ -222,14 +222,23 @@ package final class VoiceInputExperience: ObservableObject {
     private var lastAnnouncedNoticeRevision: UInt64?
     private var isShuttingDown = false
     private var shutdownTask: Task<Void, Never>?
+    private let problemAutoDismissDelay: Duration
+    private var problemAutoDismissSessionID: VoiceInputSessionID?
+    private var problemAutoDismissTask: Task<Void, Never>?
+
+    /// How long a Session Problem without a settings recovery stays on screen
+    /// before it dismisses itself.
+    package static let defaultProblemAutoDismissDelay: Duration = .seconds(5)
 
     package init(
         sessions: VoiceInputSessions,
         releaseCaptureHint:
             @escaping @Sendable () -> InputTargetCaptureHint? = { nil },
+        problemAutoDismissDelay: Duration = defaultProblemAutoDismissDelay,
         announce: @escaping Announce
     ) {
         self.sessions = sessions
+        self.problemAutoDismissDelay = problemAutoDismissDelay
         self.announce = announce
         self.releaseCaptureHint = releaseCaptureHint
         let dispatcher = VoiceInputTriggerDispatcher(
@@ -419,6 +428,7 @@ package final class VoiceInputExperience: ObservableObject {
             return
         }
         isShuttingDown = true
+        cancelProblemAutoDismiss()
         triggerIntakeGate.close()
         escapeGate.setActive(false)
         let commandTask = commandTask
@@ -500,6 +510,35 @@ package final class VoiceInputExperience: ObservableObject {
         escapeGate.setActive(presentation.activity.isActive || state.menu.dismissAction != nil)
         announceTransitionIfNeeded(presentation.activity)
         announceNoticeIfNeeded(presentation)
+        scheduleProblemAutoDismissIfNeeded(presentation.activity)
+    }
+
+    /// A visible problem that only informs the user closes on its own. One
+    /// that offers settings recovery stays until the user acts on it, and the
+    /// timer dismisses only the session that started it.
+    private func scheduleProblemAutoDismissIfNeeded(_ activity: VoiceInputActivity) {
+        guard case .failed(let id, let failure) = activity,
+            !Self.endsSilently(activity),
+            !failure.needsSettings
+        else {
+            cancelProblemAutoDismiss()
+            return
+        }
+        guard problemAutoDismissSessionID != id else { return }
+        cancelProblemAutoDismiss()
+        problemAutoDismissSessionID = id
+        let delay = problemAutoDismissDelay
+        problemAutoDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.perform(.init(sessionID: id, operation: .dismissResult))
+        }
+    }
+
+    private func cancelProblemAutoDismiss() {
+        problemAutoDismissTask?.cancel()
+        problemAutoDismissTask = nil
+        problemAutoDismissSessionID = nil
     }
 
     private func announceTransitionIfNeeded(_ activity: VoiceInputActivity) {
@@ -620,7 +659,8 @@ package final class VoiceInputExperience: ObservableObject {
 
     private static func endsSilently(_ activity: VoiceInputActivity) -> Bool {
         switch activity {
-        case .failed(_, .providerReturnedNoText), .failed(_, .recordingTooShort):
+        case .failed(_, .providerReturnedNoText), .failed(_, .recordingTooShort),
+            .failed(_, .localSilenceDetected):
             true
         default:
             false

@@ -8,7 +8,7 @@ import SpeakerSpecSupport
 enum VoiceInputFeedbackSpecs {
     static func run(failures: inout [String]) async {
         await runAsync(
-            "voice feedback hides only too-short recording problems", failures: &failures
+            "voice feedback hides too-short and silent recording problems", failures: &failures
         ) {
             for error in [AudioCaptureError.tooShort, .silent] {
                 var announcements: [String] = []
@@ -39,21 +39,58 @@ enum VoiceInputFeedbackSpecs {
                 }
                 await experience.shutdown()
                 try expect(retainedFailure, "local rejection lost its terminal Session Record")
-                if error == .tooShort {
-                    try expect(
-                        hidden && !menuVisible && !consumesEscape,
-                        "too-short recording left a visible or Escape-owning prompt")
-                    try expect(
-                        !failureAnnouncement, "too-short recording still announced a problem")
-                } else {
-                    try expect(
-                        !hidden && menuVisible,
-                        "silence was incorrectly hidden with too-short input")
-                }
+                try expect(
+                    hidden && !menuVisible && !consumesEscape,
+                    "\(error) left a visible or Escape-owning prompt")
+                try expect(!failureAnnouncement, "\(error) still announced a problem")
             }
         }
 
-        for error in [AudioCaptureError?.none, .microphonePermissionDenied, .silent] {
+        await runAsync(
+            "voice feedback dismisses an informational problem on its own", failures: &failures
+        ) {
+            let sessions = makeSessions(error: .conversionFailed)
+            let experience = VoiceInputExperience(
+                sessions: sessions,
+                problemAutoDismissDelay: .milliseconds(200),
+                announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let shown = await eventually(before: .seconds(2)) {
+                if case .problem = experience.state.overlay { true } else { false }
+            }
+            let dismissed = await eventually(before: .seconds(2)) {
+                experience.state.diagnosticCode == "idle"
+            }
+            let releasesEscape = !experience.shortcutTarget.shouldConsumeEscape()
+            await experience.shutdown()
+            try expect(shown, "the problem never became visible")
+            try expect(dismissed && releasesEscape, "the problem stayed on screen")
+        }
+
+        for error in [AudioCaptureError?.none, .microphonePermissionDenied] {
+            await runAsync(
+                "voice feedback keeps \(String(describing: error)) until the user acts",
+                failures: &failures
+            ) {
+                let sessions = makeSessions(error: error)
+                let experience = VoiceInputExperience(
+                    sessions: sessions,
+                    problemAutoDismissDelay: .milliseconds(50),
+                    announce: { _ in })
+                experience.start()
+                try await finishRecording(experience)
+                let shown = await eventually(before: .seconds(2)) {
+                    experience.state.menu.dismissAction != nil
+                }
+                try await Task.sleep(for: .milliseconds(400))
+                let stillShown = experience.state.menu.dismissAction != nil
+                await experience.shutdown()
+                try expect(shown && stillShown, "an actionable prompt dismissed itself")
+            }
+        }
+
+        for error in [AudioCaptureError?.none, .microphonePermissionDenied, .conversionFailed] {
             await runAsync(
                 "voice feedback Escape dismisses \(String(describing: error))", failures: &failures
             ) {
