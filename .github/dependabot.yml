@@ -1,6 +1,6 @@
 # Dependency update policy for Speaker.
 #
-# Sparkle is pinned with `exact: "2.9.4"` in Package.swift on purpose: the
+# Sparkle is pinned with an `exact:` version in Package.swift on purpose: the
 # release channel binds a reviewed Sparkle build. Dependabot still opens a PR
 # for a newer Sparkle; a maintainer reviews it and moves the exact pin.
 version: 2
