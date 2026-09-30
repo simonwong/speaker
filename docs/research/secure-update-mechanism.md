@@ -2,6 +2,8 @@
 
 > 调研日期：2026-07-16
 >
+> 文中的 Sparkle 2.9.4 是调研当时的版本。当前 pin 以 `Package.swift` 和 [ADR 0005](../adr/0005-deliver-updates-through-sparkle.md) 为准（2026-09-30 为 2.10.0）。
+>
 > 范围：Sparkle 官方文档/仓库与 Apple 官方文档；不包含第三方教程。
 > 当前 Speaker 约束：SwiftPM、SwiftUI `MenuBarExtra`、`LSUIElement`、macOS 14+、非 App Sandbox、站外分发。
 
