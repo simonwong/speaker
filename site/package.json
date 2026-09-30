@@ -4,10 +4,9 @@
   "type": "module",
   "packageManager": "pnpm@10.33.4",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "vite build && wrangler deploy"
+    "dev": "cf dev",
+    "build": "cf build",
+    "deploy": "cf deploy"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.170.40",
@@ -20,6 +19,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "cf": "1.0.0-beta.5",
     "typescript": "^5.9.0",
     "vite": "^8.3.1",
     "wrangler": "^4.144.0"
