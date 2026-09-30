@@ -14,12 +14,87 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Sorts the changed paths into the landing page (site/) and everything else.
+  # A change confined to site/ skips the macOS lanes and builds only the page.
+  # Anything this job cannot classify counts as an app change.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      app: ${{ steps.detect.outputs.app }}
+      site: ${{ steps.detect.outputs.site }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed paths
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          FILES=""
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            # The checkout is the merge commit; its first parent is the base.
+            FILES="$(git diff --name-only HEAD^1 HEAD)"
+          elif [[ "$EVENT_NAME" == "push" ]] \
+            && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            FILES="$(git diff --name-only "$BEFORE_SHA" HEAD)"
+          fi
+
+          APP=false
+          SITE=false
+          if [[ -z "$FILES" ]]; then
+            APP=true
+            SITE=true
+          fi
+          while IFS= read -r FILE; do
+            [[ -n "$FILE" ]] || continue
+            if [[ "$FILE" == site/* ]]; then SITE=true; else APP=true; fi
+          done <<< "$FILES"
+
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+          echo "site=$SITE" >> "$GITHUB_OUTPUT"
+          echo "app=$APP site=$SITE"
+
+  site:
+    name: Build landing page
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: site
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
   # The fast lane a pull request waits on: deterministic specifications, the
   # shell contract tests, the warnings-as-errors builds, and the formatting
   # check. It gates the slow bundling lane below, so a broken specification is
   # reported in minutes instead of after a release build and an install.
   specifications:
     name: Specifications, warnings, and formatting
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 20
     env:
@@ -103,11 +178,13 @@ jobs:
   # required status check on main; keep this name. The job runs even when the
   # fast lane fails and reports that failure itself: branch protection treats
   # a skipped required check as passing, so skipping here would let a broken
-  # specification merge.
+  # specification merge. The one deliberate skip is a change confined to
+  # site/, which `changes` reports as app == 'false'; a failed `changes` job
+  # leaves that output empty, so this job still runs and fails below.
   verify:
     name: Test, build, and bundle
-    needs: specifications
-    if: ${{ !cancelled() }}
+    needs: [changes, specifications]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: macos-26
     timeout-minutes: 20
     env:
