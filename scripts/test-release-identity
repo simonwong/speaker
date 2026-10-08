@@ -30,6 +30,63 @@ if grep -F '/Applications/Xcode.app/Contents/Developer/test' <<< "$RPATH_LOAD_CO
 fi
 grep -F '@executable_path/../Frameworks' <<< "$RPATH_LOAD_COMMANDS" >/dev/null
 
+SPARKLE_APP="$TEST_ROOT/sparkle-layout/Speaker.app"
+SPARKLE_FRAMEWORK="$SPARKLE_APP/Contents/Frameworks/Sparkle.framework"
+mkdir -p "$SPARKLE_APP/Contents/MacOS" \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS"
+ln -s B "$SPARKLE_FRAMEWORK/Versions/Current"
+print -r -- 'int sparkle_fixture(void) { return 0; }' > "$TEST_ROOT/sparkle.c"
+print -r -- 'int sparkle_fixture(void); int main(void) { return sparkle_fixture(); }' \
+    > "$TEST_ROOT/sparkle-main.c"
+xcrun clang -arch arm64 -arch x86_64 -dynamiclib "$TEST_ROOT/sparkle.c" \
+    -install_name '@rpath/Sparkle.framework/Versions/B/Sparkle' \
+    -o "$SPARKLE_FRAMEWORK/Versions/B/Sparkle"
+for architecture in arm64 x86_64; do
+    xcrun clang -arch "$architecture" "$TEST_ROOT/sparkle-main.c" \
+        "$SPARKLE_FRAMEWORK/Versions/B/Sparkle" \
+        -Wl,-rpath,@executable_path/../Frameworks \
+        -o "$TEST_ROOT/sparkle-$architecture"
+done
+cp "$TEST_ROOT/sparkle-arm64" "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+cp "$TEST_ROOT/sparkle-arm64" \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
+plutil -create xml1 "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/Info.plist"
+plutil -insert CFBundleExecutable -string Updater \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/Info.plist"
+codesign --force --sign - "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+codesign --force --sign - "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
+plutil -create xml1 "$SPARKLE_FRAMEWORK/Versions/B/Info.plist"
+plutil -insert CFBundleExecutable -string Sparkle \
+    "$SPARKLE_FRAMEWORK/Versions/B/Info.plist"
+ln -s Versions/Current/Sparkle "$SPARKLE_FRAMEWORK/Sparkle"
+codesign --force --sign - "$SPARKLE_FRAMEWORK"
+lipo -create "$TEST_ROOT/sparkle-arm64" "$TEST_ROOT/sparkle-x86_64" \
+    -output "$SPARKLE_APP/Contents/MacOS/SpeakerApp"
+verify_sparkle_layout "$SPARKLE_APP"
+for invalid_slice in wrong-dependency missing-dependency missing-rpath; do
+    cp "$TEST_ROOT/sparkle-x86_64" "$TEST_ROOT/sparkle-invalid"
+    case "$invalid_slice" in
+        wrong-dependency)
+            install_name_tool -change '@rpath/Sparkle.framework/Versions/B/Sparkle' \
+                '/tmp/Sparkle.framework/Versions/B/Sparkle' "$TEST_ROOT/sparkle-invalid"
+            ;;
+        missing-dependency)
+            xcrun clang -arch x86_64 "$TEST_ROOT/rpath-fixture.c" \
+                -Wl,-rpath,@executable_path/../Frameworks -o "$TEST_ROOT/sparkle-invalid"
+            ;;
+        missing-rpath)
+            install_name_tool -delete_rpath '@executable_path/../Frameworks' \
+                "$TEST_ROOT/sparkle-invalid"
+            ;;
+    esac
+    lipo -create "$TEST_ROOT/sparkle-arm64" "$TEST_ROOT/sparkle-invalid" \
+        -output "$SPARKLE_APP/Contents/MacOS/SpeakerApp"
+    if verify_sparkle_layout "$SPARKLE_APP" >/dev/null 2>&1; then
+        print -u2 "Sparkle validation accepted a universal executable with $invalid_slice."
+        exit 1
+    fi
+done
+
 if matches_release_pattern \
     $'1.2.3\nSPEAKER_CODESIGN_IDENTITY=Injected' \
     '^[0-9]+\.[0-9]+\.[0-9]+$'; then

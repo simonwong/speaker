@@ -1467,30 +1467,35 @@ verify_sparkle_layout() {
         return 1
     fi
 
-    dependency="$(
-        otool -L "$executable" \
-            | sed -nE 's/^[[:space:]]+(@rpath\/Sparkle\.framework\/Versions\/B\/Sparkle) .*/\1/p'
-    )"
-    if [[ "$dependency" != "@rpath/Sparkle.framework/Versions/B/Sparkle" ]]; then
-        release_error "Speaker does not load the reviewed Sparkle framework path."
-        return 1
-    fi
-    rpaths="$(
-        otool -l "$executable" \
-            | awk '
-                $1 == "cmd" && $2 == "LC_RPATH" {
-                    getline
-                    getline
-                    sub(/^[[:space:]]*path[[:space:]]+/, "")
-                    sub(/[[:space:]]+\(offset.*$/, "")
-                    print
-                }
-            '
-    )"
-    if ! grep -Fqx -- '@executable_path/../Frameworks' <<< "$rpaths"; then
-        release_error "Speaker is missing its private Frameworks runtime search path."
-        return 1
-    fi
+    local architecture architectures
+    architectures="$(lipo -archs "$executable")" || return 1
+    [[ -n "$architectures" ]] || return 1
+    for architecture in ${=architectures}; do
+        dependency="$(
+            otool -arch "$architecture" -L "$executable" \
+                | awk '$1 ~ /(^|\/)Sparkle\.framework\// { print $1 }'
+        )" || return 1
+        if [[ "$dependency" != "@rpath/Sparkle.framework/Versions/B/Sparkle" ]]; then
+            release_error "Speaker does not load the reviewed Sparkle framework path for $architecture."
+            return 1
+        fi
+        rpaths="$(
+            otool -arch "$architecture" -l "$executable" \
+                | awk '
+                    $1 == "cmd" && $2 == "LC_RPATH" {
+                        getline
+                        getline
+                        sub(/^[[:space:]]*path[[:space:]]+/, "")
+                        sub(/[[:space:]]+\(offset.*$/, "")
+                        print
+                    }
+                '
+        )" || return 1
+        if ! grep -Fqx -- '@executable_path/../Frameworks' <<< "$rpaths"; then
+            release_error "Speaker is missing its private Frameworks runtime search path for $architecture."
+            return 1
+        fi
+    done
 
     codesign --verify --strict --verbose=2 "$framework" || {
         release_error "Sparkle framework signature verification failed."
