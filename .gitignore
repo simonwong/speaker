@@ -11,3 +11,20 @@ DerivedData/
 *.with-text.json
 
 .scratch/
+
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.provisionprofile
+*.xcdistributionlogs/
+credentials.json
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template

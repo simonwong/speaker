@@ -18,7 +18,7 @@ Speaker 已可作为本机开发版持续试用，但尚未通过正式生产发
 - [x] 少于 300 ms 的录音与确定性数字静音在 release-time 本地终止，取消活跃 provider 请求且禁止文字送达；模糊低电平音频不使用启发式误杀。
 - [x] 豆包 WebSocket 同时发送和接收；明确的服务端错误可提前终止录音。
 - [x] App 退出等待取消记录和其他已排队历史写入完成。
-- [ ] 确定正式 Bundle ID 与 Apple Developer Team。（仓库已增加不可由 CI 覆盖的 `Resources/ReleaseIdentity.plist` 门禁；当前保留占位值，正式分发会 fail-closed。）
+- [x] 确定正式 Bundle ID `cn.simonwong.speaker` 与 Apple Developer Team `D7QJXSW5GJ`，固定在不可由 CI 覆盖的 `Resources/ReleaseIdentity.plist`。
 - [ ] 使用 Developer ID Application 稳定签名并验证跨版本 TCC 权限保持。
 - [x] 开发构建显式标记 ad-hoc 身份、在产品内解释麦克风与辅助功能授权失效边界，并支持可选具名本地签名。
 - [x] 开启 Hardened Runtime，通过 `notarytool` 公证并 staple。`scripts/bundle` 以 `--options runtime` 加固签名并与受审查的 `Resources/Speaker.entitlements` 逐项比对，`scripts/distribute` 对 App 与 DMG 分别执行 `notarytool submit`、`notarytool log` 和 `stapler staple`，`scripts/release-common` 复核 CodeDirectory 的 `runtime` flag、公证 status 为 `Accepted` 并执行 `stapler validate`。

@@ -17,6 +17,76 @@ TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-identity.XXXXXX")"
 trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
 mkdir -p "$TEST_ROOT/Resources"
 
+RPATH_FIXTURE="$TEST_ROOT/rpath-fixture"
+print -r -- 'int main(void) { return 0; }' > "$TEST_ROOT/rpath-fixture.c"
+xcrun clang "$TEST_ROOT/rpath-fixture.c" -o "$RPATH_FIXTURE" \
+    -Wl,-rpath,/Applications/Xcode.app/Contents/Developer/test \
+    -Wl,-rpath,@executable_path/../Frameworks
+remove_build_machine_rpaths "$RPATH_FIXTURE"
+RPATH_LOAD_COMMANDS="$(otool -l "$RPATH_FIXTURE")"
+if grep -F '/Applications/Xcode.app/Contents/Developer/test' <<< "$RPATH_LOAD_COMMANDS"; then
+    print -u2 "The packaged executable retained a build-machine runtime path."
+    exit 1
+fi
+grep -F '@executable_path/../Frameworks' <<< "$RPATH_LOAD_COMMANDS" >/dev/null
+
+SPARKLE_APP="$TEST_ROOT/sparkle-layout/Speaker.app"
+SPARKLE_FRAMEWORK="$SPARKLE_APP/Contents/Frameworks/Sparkle.framework"
+mkdir -p "$SPARKLE_APP/Contents/MacOS" \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS"
+ln -s B "$SPARKLE_FRAMEWORK/Versions/Current"
+print -r -- 'int sparkle_fixture(void) { return 0; }' > "$TEST_ROOT/sparkle.c"
+print -r -- 'int sparkle_fixture(void); int main(void) { return sparkle_fixture(); }' \
+    > "$TEST_ROOT/sparkle-main.c"
+xcrun clang -arch arm64 -arch x86_64 -dynamiclib "$TEST_ROOT/sparkle.c" \
+    -install_name '@rpath/Sparkle.framework/Versions/B/Sparkle' \
+    -o "$SPARKLE_FRAMEWORK/Versions/B/Sparkle"
+for architecture in arm64 x86_64; do
+    xcrun clang -arch "$architecture" "$TEST_ROOT/sparkle-main.c" \
+        "$SPARKLE_FRAMEWORK/Versions/B/Sparkle" \
+        -Wl,-rpath,@executable_path/../Frameworks \
+        -o "$TEST_ROOT/sparkle-$architecture"
+done
+cp "$TEST_ROOT/sparkle-arm64" "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+cp "$TEST_ROOT/sparkle-arm64" \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/MacOS/Updater"
+plutil -create xml1 "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/Info.plist"
+plutil -insert CFBundleExecutable -string Updater \
+    "$SPARKLE_FRAMEWORK/Versions/B/Updater.app/Contents/Info.plist"
+codesign --force --sign - "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
+codesign --force --sign - "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
+plutil -create xml1 "$SPARKLE_FRAMEWORK/Versions/B/Info.plist"
+plutil -insert CFBundleExecutable -string Sparkle \
+    "$SPARKLE_FRAMEWORK/Versions/B/Info.plist"
+ln -s Versions/Current/Sparkle "$SPARKLE_FRAMEWORK/Sparkle"
+codesign --force --sign - "$SPARKLE_FRAMEWORK"
+lipo -create "$TEST_ROOT/sparkle-arm64" "$TEST_ROOT/sparkle-x86_64" \
+    -output "$SPARKLE_APP/Contents/MacOS/SpeakerApp"
+verify_sparkle_layout "$SPARKLE_APP"
+for invalid_slice in wrong-dependency missing-dependency missing-rpath; do
+    cp "$TEST_ROOT/sparkle-x86_64" "$TEST_ROOT/sparkle-invalid"
+    case "$invalid_slice" in
+        wrong-dependency)
+            install_name_tool -change '@rpath/Sparkle.framework/Versions/B/Sparkle' \
+                '/tmp/Sparkle.framework/Versions/B/Sparkle' "$TEST_ROOT/sparkle-invalid"
+            ;;
+        missing-dependency)
+            xcrun clang -arch x86_64 "$TEST_ROOT/rpath-fixture.c" \
+                -Wl,-rpath,@executable_path/../Frameworks -o "$TEST_ROOT/sparkle-invalid"
+            ;;
+        missing-rpath)
+            install_name_tool -delete_rpath '@executable_path/../Frameworks' \
+                "$TEST_ROOT/sparkle-invalid"
+            ;;
+    esac
+    lipo -create "$TEST_ROOT/sparkle-arm64" "$TEST_ROOT/sparkle-invalid" \
+        -output "$SPARKLE_APP/Contents/MacOS/SpeakerApp"
+    if verify_sparkle_layout "$SPARKLE_APP" >/dev/null 2>&1; then
+        print -u2 "Sparkle validation accepted a universal executable with $invalid_slice."
+        exit 1
+    fi
+done
+
 if matches_release_pattern \
     $'1.2.3\nSPEAKER_CODESIGN_IDENTITY=Injected' \
     '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -307,7 +377,7 @@ print -r -- \
     '{"id":"12345678-1234-1234-1234-123456789abc","status":"Accepted"}' \
     > "$NOTARY_RESULT"
 print -r -- \
-    '{"jobId":"12345678-1234-1234-1234-123456789abc","status":"Accepted","archiveFilename":"submission.zip","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issues":[]}' \
+    '{"jobId":"12345678-1234-1234-1234-123456789abc","status":"Accepted","archiveFilename":"submission.zip","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issues":null}' \
     > "$NOTARY_LOG"
 validate_notary_submission_result "$NOTARY_RESULT"
 [[ "$REVIEWED_NOTARY_SUBMISSION_ID" \
@@ -323,6 +393,15 @@ if validate_notary_log \
     "$(printf 'b%.0s' {1..64})" \
     "submission.zip" 2>/dev/null; then
     print -u2 "A notarization log for different submitted bytes was accepted."
+    exit 1
+fi
+print -r -- '{"status":"Accepted",' > "$NOTARY_LOG"
+if validate_notary_log \
+    "$NOTARY_LOG" \
+    "$REVIEWED_NOTARY_SUBMISSION_ID" \
+    "$(printf 'a%.0s' {1..64})" \
+    "submission.zip" 2>/dev/null; then
+    print -u2 "A malformed notarization log was accepted."
     exit 1
 fi
 print -r -- \
@@ -1133,5 +1212,117 @@ if recover_stale_release_pending_directories \
     exit 1
 fi
 [[ "$(<"$STALE_PENDING_ROOT/.pending.foreign/unknown")" == keep-me ]]
+
+for dmg_case in unsigned signed missing-ticket corrupt-image unknown-signature rejected-signed; do
+    if /bin/zsh -c '
+        set -euo pipefail
+        source "$1"
+        DMG_CASE="$2"
+        xcrun() { [[ "$DMG_CASE" != missing-ticket ]]; }
+        codesign() {
+            case "$DMG_CASE" in
+                signed|rejected-signed) print "Authority=Developer ID Application: Test" ;;
+                unknown-signature) print -u2 "unrecognized format"; return 1 ;;
+                *) print -u2 "fixture.dmg: code object is not signed at all"; return 1 ;;
+            esac
+        }
+        hdiutil() { [[ "$1" == verify && "$DMG_CASE" != corrupt-image ]]; }
+        spctl() {
+            [[ "$DMG_CASE" == signed ]] || return 1
+            print "source=Notarized Developer ID"
+        }
+        verify_notarized_dmg fixture.dmg
+    ' dmg-verification "$SCRIPT_DIR/release-common" "$dmg_case" \
+        > "$TEST_ROOT/dmg-$dmg_case.log" 2>&1; then
+        [[ "$dmg_case" == unsigned || "$dmg_case" == signed ]] || {
+            print -u2 "DMG validation accepted invalid case: $dmg_case"
+            exit 1
+        }
+    else
+        [[ "$dmg_case" != unsigned && "$dmg_case" != signed ]] || {
+            cat "$TEST_ROOT/dmg-$dmg_case.log" >&2
+            exit 1
+        }
+    fi
+done
+
+validate_production_signing_method local
+validate_production_signing_method cloud
+if SPEAKER_CODESIGN_METHOD=cloud SPEAKER_CODESIGN_IDENTITY=- \
+    SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Dev" \
+    /bin/zsh "$SCRIPT_DIR/bundle" > "$TEST_ROOT/cloud-missing-identity.log" 2>&1; then
+    print -u2 "Cloud signing silently fell back to a development bundle."
+    exit 1
+fi
+grep -F 'Cloud signing requires an Apple Development archive identity.' \
+    "$TEST_ROOT/cloud-missing-identity.log" >/dev/null
+if validate_production_signing_method automatic 2>/dev/null; then
+    print -u2 "An unknown production signing method was accepted."
+    exit 1
+fi
+
+for cloud_case in success wrong-team export-failure invalid-export changed-manifest; do
+    cloud_app="$TEST_ROOT/cloud-$cloud_case/Speaker.app"
+    mkdir -p "$cloud_app/Contents/Resources"
+    plutil -create xml1 "$cloud_app/Contents/Info.plist"
+    plutil -insert CFBundleIdentifier -string cn.example.speaker "$cloud_app/Contents/Info.plist"
+    plutil -insert CFBundleShortVersionString -string 1.0.0 "$cloud_app/Contents/Info.plist"
+    plutil -insert CFBundleVersion -string 200 "$cloud_app/Contents/Info.plist"
+    print -r -- original-manifest > "$cloud_app/Contents/Resources/BuildManifest.plist"
+    if /bin/zsh -c '
+        set -euo pipefail
+        source "$1"
+        CLOUD_CASE="$2"
+        sign_embedded_sparkle() { return 0; }
+        codesign() {
+            if [[ "$1" == -d ]]; then
+                print "Authority=Apple Development: Test"
+                if [[ "$CLOUD_CASE" == wrong-team ]]; then
+                    print "TeamIdentifier=WRONG12345"
+                else
+                    print "TeamIdentifier=ABCDE12345"
+                fi
+            fi
+            return 0
+        }
+        xcodebuild() {
+            local archive export_options output
+            while (( $# )); do
+                case "$1" in
+                    -archivePath) archive="$2"; shift ;;
+                    -exportOptionsPlist) export_options="$2"; shift ;;
+                    -exportPath) output="$2"; shift ;;
+                esac
+                shift
+            done
+            [[ "$(plutil -extract method raw "$export_options")" == developer-id ]] || return 1
+            [[ "$(plutil -extract destination raw "$export_options")" == export ]] || return 1
+            [[ "$(plutil -extract teamID raw "$export_options")" == ABCDE12345 ]] || return 1
+            [[ "$CLOUD_CASE" != export-failure ]] || return 1
+            mkdir -p "$output"
+            ditto "$archive/Products/Applications/Speaker.app" "$output/Speaker.app"
+            touch "$output/Speaker.app/cloud-exported"
+            if [[ "$CLOUD_CASE" == changed-manifest ]]; then
+                print tampered > "$output/Speaker.app/Contents/Resources/BuildManifest.plist"
+            fi
+        }
+        verify_production_app() { [[ "$CLOUD_CASE" != invalid-export ]]; }
+        verify_production_sparkle_signatures() { return 0; }
+        sign_production_app_with_xcode "$3" test-identity ABCDE12345 entitlements feed key
+    ' cloud-export "$SCRIPT_DIR/release-common" "$cloud_case" "$cloud_app" \
+        > "$TEST_ROOT/cloud-$cloud_case.log" 2>&1; then
+        [[ "$cloud_case" == success && -f "$cloud_app/cloud-exported" ]] || {
+            print -u2 "Cloud export accepted invalid case: $cloud_case"
+            exit 1
+        }
+    else
+        [[ "$cloud_case" != success && ! -e "$cloud_app/cloud-exported" ]] || {
+            cat "$TEST_ROOT/cloud-$cloud_case.log" >&2
+            print -u2 "Cloud export failed or replaced the original unexpectedly: $cloud_case"
+            exit 1
+        }
+    fi
+    [[ "$(<"$cloud_app/Contents/Resources/BuildManifest.plist")" == original-manifest ]]
+done
 
 print "PASS: reviewed release identity is fixed and override-resistant"
