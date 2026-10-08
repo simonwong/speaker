@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 本机开发试用 | 构建、规格、安装身份验证；说明未验证的权限和真实设备范围 | 本机安装只用于试用；带未提交改动的构建不能作为可复现发布候选 |
 | 开发公测 | 已审查并提交的候选、CI 全门禁、唯一版本、DMG 安装验证；满足现有公测前门槛，明确开发签名及适用范围 | 0.4.1 至 0.7.0 已发布；CI 自动发布已移除，此后不再发布开发签名的安装包 |
-| 正式公测 | 固定发布身份、Developer ID 签名、App 与 DMG 公证、付费 provider matrix、evidence archive；以 GitHub prerelease 发布，不进入 stable feed | 发布身份已固定；签名、公证与 provider matrix 已在正式候选上通过 |
+| 正式公测 | 固定发布身份、Developer ID 签名、App 与 DMG 公证、付费 provider matrix、evidence archive；先发 prerelease，通过人工门槛后提升为 GitHub Latest | 0.8.0 (206) 已发布为 Latest；签名、公证、provider matrix 与公开回读已通过 |
 | 稳定版 | 正式公测的全部证据，加上 Keychain 迁移、跨版本 TCC、真实兼容与升级、公开制品回读 | 实机证据未齐，不可提升为稳定版 |
 
 具体门禁继续以[生产就绪清单](../production-readiness.md)、[发布流程](../releasing.md)和[兼容验证](../compatibility.md)为准。自动规格通过、人工试用满意、完整生产验收是不同证据，不能互相替代。
