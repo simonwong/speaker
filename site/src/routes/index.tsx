@@ -59,7 +59,7 @@ function Home() {
               GitHub
             </a>
           </div>
-          <p className="meta">macOS 14 及以上 · Apple 芯片 · MIT 开源</p>
+          <p className="meta">macOS 14 及以上 · Apple 芯片与 Intel 芯片 · MIT 开源</p>
         </section>
 
         {points.map((point) => (
@@ -76,14 +76,9 @@ function Home() {
           <ol className="install">
             <li>
               在 <a href={RELEASES_URL}>GitHub Releases</a> 下载最新的{' '}
-              <code>Speaker-&lt;版本&gt;-arm64.dmg</code>，打开后把 Speaker 拖到“应用程序”。
+              <code>Speaker-&lt;版本&gt;-&lt;构建号&gt;.dmg</code>，打开后把 Speaker 拖到“应用程序”。
             </li>
-            <li>
-              公测版使用自签证书，未经 Apple 公证。首次启动前移除这个 App 的隔离属性：
-              <pre>
-                <code>xattr -dr com.apple.quarantine /Applications/Speaker.app</code>
-              </pre>
-            </li>
+            <li>从“应用程序”打开 Speaker。安装包使用 Apple Developer ID 签名，并经过 Apple 公证。</li>
             <li>启动后按引导授权麦克风和辅助功能，选择识别服务并保存 API Key。</li>
           </ol>
         </section>

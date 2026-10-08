@@ -7,7 +7,7 @@
 
   <p>
     <a href="https://github.com/simonwong/speaker/actions/workflows/ci.yml"><img src="https://github.com/simonwong/speaker/actions/workflows/ci.yml/badge.svg" alt="CI 状态"></a>
-    <a href="https://github.com/simonwong/speaker/releases"><img src="https://img.shields.io/badge/下载-开发版本-2F81F7?logo=github" alt="下载最新开发版本"></a>
+    <a href="https://github.com/simonwong/speaker/releases"><img src="https://img.shields.io/badge/下载-公测版-2F81F7?logo=github" alt="下载最新公测版"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="需要 macOS 14 或更高版本">
     <img src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT 许可证"></a>
@@ -18,8 +18,8 @@ Speaker 常驻菜单栏，默认使用 `Fn` 快捷键。你可以按住说话、
 
 如果 Speaker 无法确认原输入位置仍然安全有效，它会把结果保留在浮层中，等待你主动复制，而不会冒险把文字输入到错误的位置。
 
-> [!IMPORTANT]
-> Speaker 的开发版本使用自签开发证书签名，尚未经过 Apple 公证。macOS 会阻止首次启动，直到你明确移除所下载 `Speaker.app` 的隔离属性。请只从本仓库的官方 [Releases](https://github.com/simonwong/speaker/releases) 页面下载。
+> [!NOTE]
+> Speaker 目前是公测版。发布的安装包使用 Apple Developer ID 签名，并经过 Apple 公证。请只从本仓库的 [Releases](https://github.com/simonwong/speaker/releases) 页面下载。
 
 ## 主要功能
 
@@ -34,29 +34,17 @@ Speaker 常驻菜单栏，默认使用 `Fn` 快捷键。你可以按住说话、
 
 | 要求 | 说明 |
 | --- | --- |
-| 操作系统 | macOS 14 或更高版本 |
+| 操作系统 | macOS 14 或更高版本，Apple 芯片或 Intel 芯片 |
 | 语音识别 | 用户自己的豆包、OpenAI 或阿里千问 API Key；豆包还需开通对应流式资源 |
 | 文本整理 | DeepSeek、OpenAI、Kimi、GLM 或自定义 API Key，仅非默认整理模式需要 |
 
 ## 下载并运行
 
-1. 打开 [GitHub Releases](https://github.com/simonwong/speaker/releases)，下载最新的 `Speaker-<版本>-development.dmg` 及对应的 `.sha256` 文件。
-2. 校验下载文件，通过后打开 DMG，在窗口中把 **Speaker** 拖到右侧的 **Applications（应用程序）**。
-3. 只移除这个 App 的隔离属性，然后启动：
+1. 打开 [GitHub Releases](https://github.com/simonwong/speaker/releases)，下载最新的 `Speaker-<版本>-<构建号>.dmg`。
+2. 打开 DMG，在窗口中把 **Speaker** 拖到右侧的 **Applications（应用程序）**。
+3. 从“应用程序”打开 Speaker。
 
-```bash
-cd ~/Downloads
-shasum -a 256 -c Speaker-*-development.dmg.sha256
-```
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Speaker.app
-open /Applications/Speaker.app
-```
-
-请把下载的 DMG 和 checksum 文件放在同一目录。校验命令必须显示 `OK`，再继续安装。
-
-`xattr` 命令只移除 `/Applications/Speaker.app` 的 Gatekeeper 隔离标记，不会关闭系统全局的 Gatekeeper。开发版本使用同一张签名证书，更新后麦克风和辅助功能授权会保留。从 0.7.0 或更早版本更新时，需要再授权一次。
+之后的正式版本可以在 App 内更新：在“设置 → 关于”点 **检查更新…**，或在“通用”里打开自动检查更新。Speaker 安装更新前会校验其 Ed25519 签名。
 
 ### 首次使用
 
@@ -64,16 +52,6 @@ open /Applications/Speaker.app
 2. 当 macOS 打开设置页时，在 **系统设置 → 隐私与安全性 → 辅助功能** 中启用 `/Applications/Speaker.app`。
 3. 在 **语音识别** 中选择豆包、OpenAI 或阿里千问并保存对应 Key。OpenAI、千问可选择识别方式和对应模型。豆包需选择已开通资源并执行 **检查连接**；千问需选择与 Key 对应的区域。语音识别和文字整理分别保存 Key。
 4. 在任意 App 中聚焦输入框，按住 `Fn` 说话并松开结束；也可以短按一次开始，再短按一次结束。
-
-如果更新后出现旧权限条目，可以只重置 Speaker 的本地 Bundle 身份：
-
-```bash
-tccutil reset Accessibility com.local.speaker
-tccutil reset Microphone com.local.speaker
-open /Applications/Speaker.app
-```
-
-然后重新在系统设置中启用 Speaker。这些命令不会重置其他 App 的权限。
 
 ## 工作原理
 
@@ -88,7 +66,7 @@ open /Applications/Speaker.app
 
 ## 隐私
 
-Speaker 没有托管账号服务，也不提供共享的服务商凭据。你需要使用自己的 API Key。当前 ad-hoc 开发版本把凭据保存在仅当前用户可访问的应用数据文件中；正式 Developer ID 构建会使用 macOS Keychain。设置、个人词库和会话记录都通过仅当前用户可访问的本地持久化保存。
+Speaker 没有托管账号服务，也不提供共享的服务商凭据。你需要使用自己的 API Key。服务商 Key 保存在 macOS 钥匙串。设置、个人词库和会话记录都通过仅当前用户可访问的本地持久化保存。
 
 完整的数据处理约定、本地存储位置、服务商边界、保留策略和诊断脱敏规则请参阅 [隐私说明](PRIVACY.md)。
 
@@ -117,7 +95,7 @@ Speaker 没有托管账号服务，也不提供共享的服务商凭据。你需
 - [架构说明](docs/architecture.md) — 模块、接缝、适配器和系统不变量
 - [兼容性矩阵](docs/compatibility.md) — 不同真实应用的送达证据
 - [发布流程](docs/releasing.md) — 本地安装与正式分发
-- [生产就绪清单](docs/production-readiness.md) — 签名公开发布仍需完成的门槛
+- [生产就绪清单](docs/production-readiness.md) — 正式稳定版仍需完成的门槛
 
 ## 参与贡献
 

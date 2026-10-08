@@ -7,7 +7,7 @@
 
   <p>
     <a href="https://github.com/simonwong/speaker/actions/workflows/ci.yml"><img src="https://github.com/simonwong/speaker/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-    <a href="https://github.com/simonwong/speaker/releases"><img src="https://img.shields.io/badge/Download-development%20build-2F81F7?logo=github" alt="Download the latest development build"></a>
+    <a href="https://github.com/simonwong/speaker/releases"><img src="https://img.shields.io/badge/Download-beta-2F81F7?logo=github" alt="Download the latest beta"></a>
     <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14 or later">
     <img src="https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
@@ -18,8 +18,8 @@ Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the ke
 
 If Speaker cannot prove that the original input target is still safe and current, it keeps the result in a HUD for explicit copying instead of risking delivery to the wrong place.
 
-> [!IMPORTANT]
-> Speaker development builds are signed with a self-signed development certificate and are not Apple-notarized. macOS will block the first launch until you explicitly remove the quarantine attribute from the downloaded `Speaker.app`. Only download builds from this repository's official [Releases](https://github.com/simonwong/speaker/releases) page.
+> [!NOTE]
+> Speaker is in beta. Releases are signed with Apple Developer ID and notarized by Apple. Only download Speaker from this repository's [Releases](https://github.com/simonwong/speaker/releases) page.
 
 ## Highlights
 
@@ -34,29 +34,17 @@ If Speaker cannot prove that the original input target is still safe and current
 
 | Requirement | Details |
 | --- | --- |
-| Operating system | macOS 14 or later |
+| Operating system | macOS 14 or later, on Apple silicon or Intel |
 | Transcription | Your own Doubao, OpenAI, or Alibaba Qwen API key; Doubao also requires an activated streaming ASR resource |
 | Refinement | An optional DeepSeek, OpenAI, Kimi, GLM, or Custom API key enables non-default Refinement Modes |
 
 ## Download and run
 
-1. Open [GitHub Releases](https://github.com/simonwong/speaker/releases) and download the newest `Speaker-<version>-development.dmg` and its `.sha256` file.
-2. Verify the downloaded disk image against the published checksum, then open the DMG and drag **Speaker** onto **Applications** in its window.
-3. Remove the quarantine attribute from this app only, then launch it:
+1. Open [GitHub Releases](https://github.com/simonwong/speaker/releases) and download the newest `Speaker-<version>-<build>.dmg`.
+2. Open the DMG and drag **Speaker** onto **Applications** in its window.
+3. Open Speaker from **Applications**.
 
-```bash
-cd ~/Downloads
-shasum -a 256 -c Speaker-*-development.dmg.sha256
-```
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Speaker.app
-open /Applications/Speaker.app
-```
-
-Keep the downloaded DMG and checksum file in the same directory. The checksum command must report `OK` before you continue.
-
-The `xattr` command removes Gatekeeper's quarantine marker only from `/Applications/Speaker.app`; it does not disable Gatekeeper system-wide. Development builds share one signing certificate, so Microphone and Accessibility approvals carry over when you update. Updating from 0.7.0 or earlier asks for them once more.
+Later stable releases install from inside Speaker: use **Check for Updates** in Settings → About, or turn on automatic update checks in General settings. Speaker verifies each update's Ed25519 signature before installing it.
 
 ### First run
 
@@ -64,16 +52,6 @@ The `xattr` command removes Gatekeeper's quarantine marker only from `/Applicati
 2. Enable `/Applications/Speaker.app` in **System Settings → Privacy & Security → Accessibility** when macOS opens that page.
 3. In **Speech Recognition**, choose Doubao, OpenAI, or Alibaba Qwen and save its API key. OpenAI and Qwen let you select a recognition method and a compatible model. For Doubao, select an activated resource and run **Check Connection**. For Qwen, choose the region matching your key. Recognition and text-refinement keys are saved separately.
 4. Focus an input field in any app, then hold `Fn` while speaking and release it to finish. A short press followed by another short press also starts and stops recording.
-
-If an update leaves stale permission entries, reset only Speaker's local bundle identity:
-
-```bash
-tccutil reset Accessibility com.local.speaker
-tccutil reset Microphone com.local.speaker
-open /Applications/Speaker.app
-```
-
-Then enable Speaker again in System Settings. These commands do not reset permissions for other applications.
 
 ## How it works
 
@@ -88,7 +66,7 @@ Speaker allows up to five minutes per OpenAI recording and three minutes per Qwe
 
 ## Privacy
 
-Speaker has no hosted account service or shared provider credentials. You supply your own provider keys. Local ad-hoc builds store credentials in an owner-only application data file; a production Developer ID build uses macOS Keychain. Settings, Personal Dictionary entries, and Session Records are stored locally with owner-only persistence.
+Speaker has no hosted account service or shared provider credentials. You supply your own provider keys. Provider keys are stored in macOS Keychain. Settings, Personal Dictionary entries, and Session Records are stored locally with owner-only persistence.
 
 See [Privacy](PRIVACY.md) for the complete data-handling contract, local storage paths, provider boundaries, retention behavior, and diagnostic redaction rules.
 
@@ -119,7 +97,7 @@ Bare `swift build`, `swift run`, and `swift test` do not use the repository's pi
 - [Architecture](docs/architecture.md) — modules, seams, adapters, and system invariants
 - [Compatibility matrix](docs/compatibility.md) — real-application delivery evidence
 - [Release process](docs/releasing.md) — local installation and production distribution
-- [Production readiness](docs/production-readiness.md) — remaining gates for a signed public release
+- [Production readiness](docs/production-readiness.md) — remaining gates for a stable release
 
 ## Contributing
 

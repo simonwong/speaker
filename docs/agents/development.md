@@ -71,7 +71,7 @@ For installer, release, or workflow changes, also inspect `.github/workflows/ci.
 | `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
 | `verify` | `Test, build, and bundle` | `needs: specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, the retained release candidate, install rollback, and the reviewed release identity guard. |
 
-`Test, build, and bundle` is the required status check on `main`; renaming the `verify` job breaks branch protection until the required check is renamed to match. `development-prerelease` still `needs: verify`, so it runs only after both gating jobs pass.
+`Test, build, and bundle` is the required status check on `main`; renaming the `verify` job breaks branch protection until the required check is renamed to match.
 
 The `specifications` job caches `.build` through `actions/cache` under a key containing the `Package.resolved` hash, so a resolved dependency graph is compiled once and later runs restore it through the prefix restore key. The `verify` job does not restore that cache: `./scripts/bundle` builds the release into an isolated scratch path under `RUNNER_TEMP` on purpose. Every action in every workflow stays pinned to a full commit SHA, which `./scripts/test-workflow-security` enforces.
 
@@ -108,12 +108,12 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `generate-brand-assets` | Regenerates `Resources/AppIcon.png` and `AppIcon.icns` through `SpeakerBrandAssetGenerator`. | developer, `./scripts/test` |
 | `install` | Replaces `/Applications/Speaker.app` with a verified swap, identity checks, and rollback. | developer, `release`, `./scripts/test`, CI |
 | `launch` | Bundles the development App and opens it. | developer |
-| `package-dmg` | Packages a signed App into an APFS/lzfse drag-to-Applications DMG without rebuilding or resigning. | `distribute`, development prerelease CI, developer |
+| `package-dmg` | Packages a signed App into an APFS/lzfse drag-to-Applications DMG without rebuilding or resigning. | `distribute`, developer |
 | `provider-smoke` | Doubao/DeepSeek connection probes and the paid evidence matrix. | developer (explicit approval), release |
 | `release` | Development “try my change” loop: release build, bundle, install, launch under a stable local identity. | developer |
 | `release-common` | Sourced library of fail-closed release validation helpers; it is never run directly. | `bundle`, `install`, `distribute`, `verify-published-update`, `test-release-*`, CI |
 | `run` | Runs `SpeakerApp` straight from SwiftPM without bundling. | developer |
-| `sign-development` | Re-signs a validated ad-hoc bundle with the stable identity in `SPEAKER_LOCAL_CODESIGN_IDENTITY`. | development prerelease CI |
+| `sign-development` | Re-signs a validated ad-hoc bundle with the stable identity in `SPEAKER_LOCAL_CODESIGN_IDENTITY`. | developer |
 | `swiftw` | SwiftPM wrapper that pins the macOS 26 SDK, isolates module caches, and guards isolated scratch paths. | every other script, developer |
 | `target-capture-smoke` | Verifies Input Target freezing against a real machine. | developer |
 | `test` | Non-UI checks by default; `--ui-only` runs native UI checks and `--with-ui` runs the full deterministic gate. | developer, CI |
