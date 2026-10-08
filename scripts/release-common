@@ -2067,7 +2067,7 @@ validate_notary_submission_result() {
     local submission_id
 
     if [[ ! -f "$result_file" || -L "$result_file" ]] \
-          || ! plutil -convert xml1 -o /dev/null "$result_file" \
+          || ! plutil -convert json -o /dev/null "$result_file" \
               >/dev/null 2>&1; then
         release_error "Notary submission result is not valid JSON or plist."
         return 1
@@ -2103,7 +2103,7 @@ validate_notary_log() {
     local actual_filename
 
     if [[ ! -f "$log_file" || -L "$log_file" ]] \
-          || ! plutil -convert xml1 -o /dev/null "$log_file" \
+          || ! plutil -convert json -o /dev/null "$log_file" \
               >/dev/null 2>&1; then
         release_error "Apple notarization log is not valid JSON."
         return 1

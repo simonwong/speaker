@@ -377,7 +377,7 @@ print -r -- \
     '{"id":"12345678-1234-1234-1234-123456789abc","status":"Accepted"}' \
     > "$NOTARY_RESULT"
 print -r -- \
-    '{"jobId":"12345678-1234-1234-1234-123456789abc","status":"Accepted","archiveFilename":"submission.zip","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issues":[]}' \
+    '{"jobId":"12345678-1234-1234-1234-123456789abc","status":"Accepted","archiveFilename":"submission.zip","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issues":null}' \
     > "$NOTARY_LOG"
 validate_notary_submission_result "$NOTARY_RESULT"
 [[ "$REVIEWED_NOTARY_SUBMISSION_ID" \
@@ -393,6 +393,15 @@ if validate_notary_log \
     "$(printf 'b%.0s' {1..64})" \
     "submission.zip" 2>/dev/null; then
     print -u2 "A notarization log for different submitted bytes was accepted."
+    exit 1
+fi
+print -r -- '{"status":"Accepted",' > "$NOTARY_LOG"
+if validate_notary_log \
+    "$NOTARY_LOG" \
+    "$REVIEWED_NOTARY_SUBMISSION_ID" \
+    "$(printf 'a%.0s' {1..64})" \
+    "submission.zip" 2>/dev/null; then
+    print -u2 "A malformed notarization log was accepted."
     exit 1
 fi
 print -r -- \
