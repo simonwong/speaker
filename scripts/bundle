@@ -222,7 +222,7 @@ fi
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
     remove_build_machine_rpaths "$APP/Contents/MacOS/SpeakerApp"
 fi
-cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+/usr/bin/install -m 644 "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp "$ROOT/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md"
 [[ -s "$APP/Contents/Resources/PRIVACY.md" ]] || {

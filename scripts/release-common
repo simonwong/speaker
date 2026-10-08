@@ -2025,6 +2025,20 @@ verify_notarized_dmg() {
         release_error "The DMG notarization ticket is missing or invalid."
         return 1
     fi
+    local signature_info
+    if ! signature_info="$(codesign -d --verbose=4 "$dmg" 2>&1)"; then
+        if ! grep -Fq 'code object is not signed at all' <<< "$signature_info"; then
+            release_error "Unable to inspect the DMG signature."
+            return 1
+        fi
+        # Cloud signing supports the app, not its disk-image container. The
+        # ticket binds the image; callers also verify its mounted app and EdDSA.
+        if ! hdiutil verify "$dmg" >/dev/null; then
+            release_error "The notarized DMG failed disk-image integrity verification."
+            return 1
+        fi
+        return 0
+    fi
     if ! assessment="$(
         spctl \
             --assess \

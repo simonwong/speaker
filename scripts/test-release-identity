@@ -1147,6 +1147,39 @@ if recover_stale_release_pending_directories \
 fi
 [[ "$(<"$STALE_PENDING_ROOT/.pending.foreign/unknown")" == keep-me ]]
 
+for dmg_case in unsigned signed missing-ticket corrupt-image unknown-signature rejected-signed; do
+    if /bin/zsh -c '
+        set -euo pipefail
+        source "$1"
+        DMG_CASE="$2"
+        xcrun() { [[ "$DMG_CASE" != missing-ticket ]]; }
+        codesign() {
+            case "$DMG_CASE" in
+                signed|rejected-signed) print "Authority=Developer ID Application: Test" ;;
+                unknown-signature) print -u2 "unrecognized format"; return 1 ;;
+                *) print -u2 "fixture.dmg: code object is not signed at all"; return 1 ;;
+            esac
+        }
+        hdiutil() { [[ "$1" == verify && "$DMG_CASE" != corrupt-image ]]; }
+        spctl() {
+            [[ "$DMG_CASE" == signed ]] || return 1
+            print "source=Notarized Developer ID"
+        }
+        verify_notarized_dmg fixture.dmg
+    ' dmg-verification "$SCRIPT_DIR/release-common" "$dmg_case" \
+        > "$TEST_ROOT/dmg-$dmg_case.log" 2>&1; then
+        [[ "$dmg_case" == unsigned || "$dmg_case" == signed ]] || {
+            print -u2 "DMG validation accepted invalid case: $dmg_case"
+            exit 1
+        }
+    else
+        [[ "$dmg_case" != unsigned && "$dmg_case" != signed ]] || {
+            cat "$TEST_ROOT/dmg-$dmg_case.log" >&2
+            exit 1
+        }
+    fi
+done
+
 validate_production_signing_method local
 validate_production_signing_method cloud
 if SPEAKER_CODESIGN_METHOD=cloud SPEAKER_CODESIGN_IDENTITY=- \

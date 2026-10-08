@@ -145,7 +145,12 @@ App；只有导出 App 的正式签名、Team、嵌套代码及 BuildManifest �
 本地 Developer ID 私钥，GitHub 托管 runner 的 P12 流程不变。
 
 云签名只替代代码签名步骤。App 和最终 DMG 仍通过 `notarytool` 分别公证，并留存原有
-submission/log 证据。本机配置约定使用 `speaker-release` 公证 profile 与
+submission/log 证据。云端 Developer ID 不能供 `codesign` 签署 DMG 外壳；Apple
+[允许未签名 DMG 承载已签名 App](https://developer.apple.com/forums/thread/799215)。
+未签名 DMG 必须通过公证票据和磁盘映像完整性检查，随后只读挂载并严格验证其中 App 的
+Developer ID、Team、entitlements、来源清单、嵌套签名、公证票据及 Gatekeeper；最终 DMG
+与 appcast 还必须通过 Ed25519 校验。已签名 DMG 继续要求外壳 Gatekeeper 验证；损坏或
+无法识别的签名不会退回未签名路径。本机配置约定使用 `speaker-release` 公证 profile 与
 `cn.simonwong.speaker` Sparkle Keychain account。首次配置公证 profile 时在本机终端执行：
 
 ```sh
