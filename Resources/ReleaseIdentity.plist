@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>BundleIdentifier</key>
-    <string>REPLACE_WITH_REVIEWED_BUNDLE_ID</string>
+    <string>cn.simonwong.speaker</string>
     <key>TeamIdentifier</key>
-    <string>REPLACE_WITH_REVIEWED_TEAM_ID</string>
+    <string>D7QJXSW5GJ</string>
     <key>UpdateFeedURL</key>
     <string>https://github.com/simonwong/speaker/releases/latest/download/appcast.xml</string>
     <key>UpdateDownloadURLPrefix</key>
