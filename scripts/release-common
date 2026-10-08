@@ -1767,6 +1767,83 @@ verify_production_build_provenance_shape() {
         "$expected_build_number"
 }
 
+validate_production_signing_method() {
+    case "$1" in
+        local|cloud) ;;
+        *)
+            release_error "SPEAKER_CODESIGN_METHOD must be local or cloud."
+            return 1
+            ;;
+    esac
+}
+
+sign_production_app_with_xcode() (
+    set -euo pipefail
+    local app="$1"
+    local identity="$2"
+    local team="$3"
+    local entitlements="$4"
+    local feed="$5"
+    local public_key="$6"
+    local work archive staged metadata options signature bundle_id version build
+
+    [[ -d "$app" && ! -L "$app" ]] || return 1
+    work="$(mktemp -d "${app:h}/.cloud-signing.XXXXXX")"
+    trap 'rm -rf "$work"' EXIT
+    archive="$work/Speaker.xcarchive"
+    staged="$archive/Products/Applications/Speaker.app"
+    mkdir -p "${staged:h}"
+    ditto "$app" "$staged"
+    sign_embedded_sparkle "$staged/Contents/Frameworks/Sparkle.framework" \
+        "$identity" no-timestamp
+    codesign --force --options runtime --sign "$identity" \
+        --entitlements "$entitlements" "$staged"
+    codesign --verify --deep --strict "$staged"
+    signature="$(codesign -d --verbose=4 "$staged" 2>&1)"
+    if ! grep -Fqx "TeamIdentifier=$team" <<< "$signature" \
+        || ! grep -Eq '^Authority=Apple Development:' <<< "$signature"; then
+        release_error "Cloud export requires an Apple Development identity from the reviewed Team."
+        return 1
+    fi
+    bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$staged/Contents/Info.plist")"
+    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$staged/Contents/Info.plist")"
+    build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$staged/Contents/Info.plist")"
+    metadata="$archive/Info.plist"
+    plutil -create xml1 "$metadata"
+    plutil -insert ArchiveVersion -integer 2 "$metadata"
+    plutil -insert Name -string Speaker "$metadata"
+    plutil -insert SchemeName -string Speaker "$metadata"
+    plutil -insert CreationDate -date "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$metadata"
+    plutil -insert ApplicationProperties -json '{}' "$metadata"
+    plutil -insert ApplicationProperties.ApplicationPath -string Applications/Speaker.app "$metadata"
+    plutil -insert ApplicationProperties.CFBundleIdentifier -string "$bundle_id" "$metadata"
+    plutil -insert ApplicationProperties.CFBundleShortVersionString -string "$version" "$metadata"
+    plutil -insert ApplicationProperties.CFBundleVersion -string "$build" "$metadata"
+    plutil -insert ApplicationProperties.SigningIdentity -string "$identity" "$metadata"
+    plutil -insert ApplicationProperties.Team -string "$team" "$metadata"
+    plutil -insert ApplicationProperties.Architectures -json '["arm64","x86_64"]' "$metadata"
+    options="$work/ExportOptions.plist"
+    plutil -create xml1 "$options"
+    plutil -insert method -string developer-id "$options"
+    plutil -insert destination -string export "$options"
+    plutil -insert signingStyle -string automatic "$options"
+    plutil -insert teamID -string "$team" "$options"
+    plutil -insert manageAppVersionAndBuildNumber -bool false "$options"
+    xcodebuild -exportArchive -archivePath "$archive" \
+        -exportOptionsPlist "$options" -exportPath "$work/export" \
+        -allowProvisioningUpdates >&2
+    verify_production_app "$work/export/Speaker.app" "$bundle_id" "$team" \
+        "$entitlements" "$feed" "$public_key"
+    verify_production_sparkle_signatures "$work/export/Speaker.app" "$team"
+    cmp "$app/Contents/Resources/BuildManifest.plist" \
+        "$work/export/Speaker.app/Contents/Resources/BuildManifest.plist"
+    mv "$app" "$work/original.app"
+    if ! mv "$work/export/Speaker.app" "$app"; then
+        mv "$work/original.app" "$app"
+        return 1
+    fi
+)
+
 sign_embedded_sparkle() {
     local framework="$1"
     local identity="$2"

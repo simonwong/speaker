@@ -5,8 +5,8 @@
     <key>PreviousPublishedBuildNumber</key>
     <string>0</string>
     <key>Version</key>
-    <string>REPLACE_WITH_REVIEWED_VERSION</string>
+    <string>0.7.0</string>
     <key>BuildNumber</key>
-    <string>REPLACE_WITH_REVIEWED_BUILD_NUMBER</string>
+    <string>200</string>
 </dict>
 </plist>

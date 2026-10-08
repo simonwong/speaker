@@ -136,6 +136,26 @@ SPEAKER_RELEASE_NOTES_FILE=<仓库内已提交、已审查的 .md/.txt/.html>
 SPEAKER_UPGRADE_EVIDENCE_FILE=<仓库内已提交、由 compatibility-smoke 生成的完整报告>
 ```
 
+本机也支持 Xcode 云端 Developer ID 签名：设置 `SPEAKER_CODESIGN_METHOD=cloud`，
+并让 `SPEAKER_CODESIGN_IDENTITY` 指向同一 Team 的本地 Apple Development 身份。
+Xcode 必须已登录具有云端 Developer ID 权限的成员账号。`scripts/bundle` 在隔离目录内
+组装 universal2 Archive，先以 Apple Development 签名，再调用 Xcode 自动导出 Developer ID
+App；只有导出 App 的正式签名、Team、嵌套代码及 BuildManifest 均通过验证后才替换候选。
+失败会保留原候选并结束发布，不会使用开发签名作为正式制品。默认 `local` 模式继续使用
+本地 Developer ID 私钥，GitHub 托管 runner 的 P12 流程不变。
+
+云签名只替代代码签名步骤。App 和最终 DMG 仍通过 `notarytool` 分别公证，并留存原有
+submission/log 证据。本机配置约定使用 `speaker-release` 公证 profile 与
+`cn.simonwong.speaker` Sparkle Keychain account。首次配置公证 profile 时在本机终端执行：
+
+```sh
+xcrun notarytool store-credentials speaker-release --team-id D7QJXSW5GJ
+```
+
+按交互提示输入 Apple ID 与 App 专用密码；凭据保存在本机钥匙串，不写入 Git 或聊天。
+Sparkle 公钥已固定在 `ReleaseIdentity.plist`，私钥也只保存在本机钥匙串；迁移发布机器前
+须通过 `generate_keys -x` 将私钥备份到受控的加密存储，不能重新生成密钥替换现有身份。
+
 GitHub workflow 从 `ReleaseCandidate.plist` 读取 version/build；首次输入 release notes，
 promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 

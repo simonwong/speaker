@@ -18,6 +18,7 @@ REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
 REQUESTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
 BUNDLE_IDENTIFIER="${REQUESTED_BUNDLE_IDENTIFIER:-com.local.speaker}"
 SIGNING_IDENTITY="${SPEAKER_CODESIGN_IDENTITY:--}"
+SIGNING_METHOD="${SPEAKER_CODESIGN_METHOD:-local}"
 LOCAL_SIGNING_IDENTITY="${SPEAKER_LOCAL_CODESIGN_IDENTITY:-}"
 EXPECTED_TEAM_ID="$REQUESTED_TEAM_ID"
 UNIVERSAL_EXECUTABLE=""
@@ -106,7 +107,13 @@ remove_build_machine_rpaths() {
     done
 }
 
-if [[ "$SIGNING_IDENTITY" != "-" && -n "$LOCAL_SIGNING_IDENTITY" ]]; then
+validate_production_signing_method "$SIGNING_METHOD"
+if [[ "$SIGNING_METHOD" == cloud && ( -z "$SIGNING_IDENTITY" || "$SIGNING_IDENTITY" == - ) ]]; then
+    print -u2 "Cloud signing requires an Apple Development archive identity."
+    exit 1
+fi
+if [[ "$SIGNING_IDENTITY" != "-" && -n "$LOCAL_SIGNING_IDENTITY" \
+      && "$SIGNING_METHOD" != cloud ]]; then
     print -u2 "Use either SPEAKER_CODESIGN_IDENTITY or SPEAKER_LOCAL_CODESIGN_IDENTITY, not both."
     exit 1
 fi
@@ -273,17 +280,24 @@ if [[ "$SIGNING_IDENTITY" != "-" ]]; then
     /usr/libexec/PlistBuddy -c "Add :SUAutomaticallyUpdate bool false" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUEnableSystemProfiling bool false" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUEnableJavaScript bool false" "$APP/Contents/Info.plist"
-    sign_embedded_sparkle \
-        "$APP/Contents/Frameworks/Sparkle.framework" \
-        "$SIGNING_IDENTITY" \
-        timestamp
-    codesign \
-        --force \
-        --options runtime \
-        --timestamp \
-        --entitlements "$ROOT/Resources/Speaker.entitlements" \
-        --sign "$SIGNING_IDENTITY" \
-        "$APP"
+    if [[ "$SIGNING_METHOD" == cloud ]]; then
+        sign_production_app_with_xcode \
+            "$APP" "$SIGNING_IDENTITY" "$EXPECTED_TEAM_ID" \
+            "$ROOT/Resources/Speaker.entitlements" \
+            "$REVIEWED_UPDATE_FEED_URL" "$REVIEWED_UPDATE_PUBLIC_ED_KEY"
+    else
+        sign_embedded_sparkle \
+            "$APP/Contents/Frameworks/Sparkle.framework" \
+            "$SIGNING_IDENTITY" \
+            timestamp
+        codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --entitlements "$ROOT/Resources/Speaker.entitlements" \
+            --sign "$SIGNING_IDENTITY" \
+            "$APP"
+    fi
     verify_production_app \
         "$APP" \
         "$BUNDLE_IDENTIFIER" \

@@ -962,9 +962,12 @@ struct SpeakerAppUISpecs {
                 backing: .buffered,
                 defer: false
             )
-            window.contentView = NSHostingView(
+            let hostingView = NSHostingView(
                 rootView: MainWindowWindowConfigurator()
             )
+            // The empty fixture must not overwrite the bridge's minimum with its intrinsic zero size.
+            hostingView.sizingOptions = []
+            window.contentView = hostingView
             window.orderFrontRegardless()
             defer {
                 window.orderOut(nil)

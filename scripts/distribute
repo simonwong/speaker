@@ -15,6 +15,7 @@ fi
 recover_stale_release_pending_directories "$OUTPUT_DIR"
 recover_interrupted_release_promotion "$OUTPUT_DIR"
 IDENTITY="${SPEAKER_CODESIGN_IDENTITY:-}"
+SIGNING_METHOD="${SPEAKER_CODESIGN_METHOD:-local}"
 NOTARY_PROFILE="${SPEAKER_NOTARY_PROFILE:-}"
 NOTARY_KEYCHAIN="${SPEAKER_NOTARY_KEYCHAIN:-}"
 SPARKLE_KEY_ACCOUNT="${SPEAKER_SPARKLE_KEY_ACCOUNT:-}"
@@ -36,9 +37,10 @@ BUNDLE_IDENTIFIER="$REVIEWED_RELEASE_BUNDLE_IDENTIFIER"
 EXPECTED_TEAM_ID="$REVIEWED_RELEASE_TEAM_IDENTIFIER"
 
 if [[ -z "$IDENTITY" || "$IDENTITY" == "-" ]]; then
-    print -u2 "SPEAKER_CODESIGN_IDENTITY must be a Developer ID Application identity."
+    print -u2 "SPEAKER_CODESIGN_IDENTITY must name a signing identity."
     exit 1
 fi
+validate_production_signing_method "$SIGNING_METHOD"
 if [[ -z "$NOTARY_PROFILE" ]]; then
     print -u2 "SPEAKER_NOTARY_PROFILE must name a notarytool Keychain profile."
     exit 1

@@ -73,4 +73,4 @@ xcrun stapler validate .scratch/cloud-signing/notarized/Speaker.app
 spctl --assess --type execute --verbose=4 .scratch/cloud-signing/notarized/Speaker.app
 ```
 
-本次产物位于本地忽略目录 `.scratch/cloud-signing/`，仅用于验证云签名链路。它仍使用开发构建元数据；正式发布的 Sparkle 公钥、审核版本、CI 产物及验收证据尚未齐备。现有 `scripts/distribute` 仍采用本地私钥流程，尚未集成云端 Archive / Export。不能把此次导出作为正式生产发布门禁的替代。
+本次产物位于本地忽略目录 `.scratch/cloud-signing/`，仅用于验证云签名链路。它仍使用开发构建元数据，不能作为正式生产发布门禁的替代。正式流程通过 `SPEAKER_CODESIGN_METHOD=cloud` 使用 Archive / Export，保留 universal2、Keychain、Sparkle、公证及验收证据要求，具体参数见[发布流程](../releasing.md)。正式候选身份配置与旧实验包相互独立，改动配置不会更新已公证的实验包。

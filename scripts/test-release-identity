@@ -1134,4 +1134,83 @@ if recover_stale_release_pending_directories \
 fi
 [[ "$(<"$STALE_PENDING_ROOT/.pending.foreign/unknown")" == keep-me ]]
 
+validate_production_signing_method local
+validate_production_signing_method cloud
+if SPEAKER_CODESIGN_METHOD=cloud SPEAKER_CODESIGN_IDENTITY=- \
+    SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Dev" \
+    /bin/zsh "$SCRIPT_DIR/bundle" > "$TEST_ROOT/cloud-missing-identity.log" 2>&1; then
+    print -u2 "Cloud signing silently fell back to a development bundle."
+    exit 1
+fi
+grep -F 'Cloud signing requires an Apple Development archive identity.' \
+    "$TEST_ROOT/cloud-missing-identity.log" >/dev/null
+if validate_production_signing_method automatic 2>/dev/null; then
+    print -u2 "An unknown production signing method was accepted."
+    exit 1
+fi
+
+for cloud_case in success wrong-team export-failure invalid-export changed-manifest; do
+    cloud_app="$TEST_ROOT/cloud-$cloud_case/Speaker.app"
+    mkdir -p "$cloud_app/Contents/Resources"
+    plutil -create xml1 "$cloud_app/Contents/Info.plist"
+    plutil -insert CFBundleIdentifier -string cn.example.speaker "$cloud_app/Contents/Info.plist"
+    plutil -insert CFBundleShortVersionString -string 1.0.0 "$cloud_app/Contents/Info.plist"
+    plutil -insert CFBundleVersion -string 200 "$cloud_app/Contents/Info.plist"
+    print -r -- original-manifest > "$cloud_app/Contents/Resources/BuildManifest.plist"
+    if /bin/zsh -c '
+        set -euo pipefail
+        source "$1"
+        CLOUD_CASE="$2"
+        sign_embedded_sparkle() { return 0; }
+        codesign() {
+            if [[ "$1" == -d ]]; then
+                print "Authority=Apple Development: Test"
+                if [[ "$CLOUD_CASE" == wrong-team ]]; then
+                    print "TeamIdentifier=WRONG12345"
+                else
+                    print "TeamIdentifier=ABCDE12345"
+                fi
+            fi
+            return 0
+        }
+        xcodebuild() {
+            local archive options output
+            while (( $# )); do
+                case "$1" in
+                    -archivePath) archive="$2"; shift ;;
+                    -exportOptionsPlist) options="$2"; shift ;;
+                    -exportPath) output="$2"; shift ;;
+                esac
+                shift
+            done
+            [[ "$(plutil -extract method raw "$options")" == developer-id ]] || return 1
+            [[ "$(plutil -extract destination raw "$options")" == export ]] || return 1
+            [[ "$(plutil -extract teamID raw "$options")" == ABCDE12345 ]] || return 1
+            [[ "$CLOUD_CASE" != export-failure ]] || return 1
+            mkdir -p "$output"
+            ditto "$archive/Products/Applications/Speaker.app" "$output/Speaker.app"
+            touch "$output/Speaker.app/cloud-exported"
+            if [[ "$CLOUD_CASE" == changed-manifest ]]; then
+                print tampered > "$output/Speaker.app/Contents/Resources/BuildManifest.plist"
+            fi
+        }
+        verify_production_app() { [[ "$CLOUD_CASE" != invalid-export ]]; }
+        verify_production_sparkle_signatures() { return 0; }
+        sign_production_app_with_xcode "$3" test-identity ABCDE12345 entitlements feed key
+    ' cloud-export "$SCRIPT_DIR/release-common" "$cloud_case" "$cloud_app" \
+        > "$TEST_ROOT/cloud-$cloud_case.log" 2>&1; then
+        [[ "$cloud_case" == success && -f "$cloud_app/cloud-exported" ]] || {
+            print -u2 "Cloud export accepted invalid case: $cloud_case"
+            exit 1
+        }
+    else
+        [[ "$cloud_case" != success && ! -e "$cloud_app/cloud-exported" ]] || {
+            cat "$TEST_ROOT/cloud-$cloud_case.log" >&2
+            print -u2 "Cloud export failed or replaced the original unexpectedly: $cloud_case"
+            exit 1
+        }
+    fi
+    [[ "$(<"$cloud_app/Contents/Resources/BuildManifest.plist")" == original-manifest ]]
+done
+
 print "PASS: reviewed release identity is fixed and override-resistant"
