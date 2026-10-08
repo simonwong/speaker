@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Speaker 以正式身份 `cn.simonwong.speaker` 发布公测版：Developer ID 签名、Hardened Runtime、App 与 DMG 公证均已在真实候选上通过，付费 provider matrix 全部 PASS。公测版不进入 stable feed，尚未通过稳定版发布门槛。剩余阻断项是跨版本 TCC 与 Keychain 连续性、干净用户安装、真实跨 App 兼容性和旧版到新版的更新实测。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
+Speaker 以正式身份 `cn.simonwong.speaker` 发布公测版：Developer ID 签名、Hardened Runtime、App 与 DMG 公证均已在真实候选上通过，付费 provider matrix 全部 PASS。0.8.0 (206) 已发布为 GitHub Latest，App 内更新通道可用，公开回读通过。剩余阻断项是跨版本 TCC 与 Keychain 连续性、干净用户安装、真实跨 App 兼容性和旧版到新版的更新实测，从下一个版本起在提升为 Latest 前完成。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
 
 ## P0 发布阻断
 
@@ -52,7 +52,7 @@ Speaker 以正式身份 `cn.simonwong.speaker` 发布公测版：Developer ID �
 - [x] 正式发布脚本缺少或不匹配 Developer ID、受审查固定 Team/Bundle/更新身份、公证 profile、Sparkle 私钥 account、release notes、SemVer 或构建号时 fail closed；CI 环境变量不能替换 release identity。Workflow 在写入 `$GITHUB_ENV` 前复用同一生产元数据校验，所有导出值必须非空且为单行，避免 plist 换行污染后续 step。Release notes 必须来自仓库内已提交文件；正式 App 从固定 `HEAD` 的 owner-only 只读 source snapshot 构建，在独立 SwiftPM scratch 中仅按快照的 `Package.resolved` 获取公开依赖，分别构建 arm64/x86_64 并合成为 universal2，不覆盖开发 `.build/Speaker.app`。受签名保护的 BuildManifest 固定 source commit、依赖锁文件 hash 与 release-notes hash；同时清除构建机 RPATH，验证 timestamp、架构和允许的 RPATH，源码树与 SwiftPM checkout 只要存在本地改动就拒绝发布。脚本逐层验证 Sparkle helper，生成并公证 APFS+lzfse DMG、archive EdDSA、signed appcast 与 SHA-256；公开地址回读不接触私钥，只用受审查 EdDSA 公钥验证 archive，并逐字节核对公开 appcast。正式发布使用全局锁和持久 promotion journal，可在下一次运行恢复 `SIGKILL`/断电留下的 prepared 晋升，尚未建立 channel 前拒绝 prerelease 混入稳定 feed。
 - [x] 确定 SemVer 与单调递增 build number 策略；仓库内 `ReleaseCandidate.plist` 固定上一个公开 build 与当前受审查候选，正式构建和公开回读的环境值必须精确匹配，且候选必须严格递增。appcast 比较使用任意长度十进制字符串，避免整数溢出；正式参数和两阶段流程见 `docs/releasing.md`。
 - [ ] 建立可复现 CI 构建、自动测试、签名、公证、校验和及制品留存。（未签名的测试/严格编译/Release bundle CI 已落地；受 `production` Environment 保护的手动 workflow 已接通临时 Keychain、Developer ID P12、`notarytool` API Key、Sparkle 私钥与 `scripts/distribute`。正式流程生成 hash-bound evidence archive，包含 dSYM、BuildManifest、两次公证 submission/log 与 toolchain 信息；明文仅在 ephemeral runner，Actions 留存 ChaCha20-Poly1305 密文。当前正式候选在本机用 `scripts/distribute` 云签名构建；GitHub 托管 runner 无法用 App Store Connect API Key 做云端 Developer ID 签名，workflow 仍需本地 Developer ID 私钥的 P12 与 `production` secrets 才能运行。）
-- [ ] 接入安全更新机制，并验证降级、更新失败恢复和签名轮换策略。（Sparkle feature/live adapter、正式 DMG/appcast、公开 prerelease staging feed 和 stable feed 回读门禁已完成；production workflow 会核对由两份真实 Developer ID App 生成、绑定候选 source/Team/机器/时间窗、完整 executable SHA-256 和双架构 CodeDirectory CDHash 的旧版升级报告，再由不持有私钥的独立 `production-publication` Environment 把首次 run 的同一候选原地提升。仍缺真实 Developer ID 旧版→新版安装、篡改/断网/回滚及密钥轮换实机证据。）
+- [ ] 接入安全更新机制，并验证降级、更新失败恢复和签名轮换策略。（Sparkle feature/live adapter、正式 DMG/appcast、公开 prerelease staging feed 和 stable feed 回读门禁已完成；production workflow 会核对由两份真实 Developer ID App 生成、绑定候选 source/Team/机器/时间窗、完整 executable SHA-256 和双架构 CodeDirectory CDHash 的旧版升级报告，再由不持有私钥的独立 `production-publication` Environment 把首次 run 的同一候选原地提升。0.8.0 (206) 已作为 Latest 上线，`verify-published-update` 回读通过。仍缺真实 Developer ID 旧版→新版安装、篡改/断网/回滚及密钥轮换实机证据。）
 - [x] 编写对外隐私说明：`PRIVACY.md` 覆盖音频/文本去向、本地历史、Key 存储、诊断和删除边界。
 
 ## 当前自动证据

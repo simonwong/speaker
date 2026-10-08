@@ -44,7 +44,7 @@ If Speaker cannot prove that the original input target is still safe and current
 2. Open the DMG and drag **Speaker** onto **Applications** in its window.
 3. Open Speaker from **Applications**.
 
-Later stable releases install from inside Speaker: use **Check for Updates** in Settings → About, or turn on automatic update checks in General settings. Speaker verifies each update's Ed25519 signature before installing it.
+Later releases install from inside Speaker: use **Check for Updates** in Settings → About, or turn on automatic update checks in General settings. Speaker verifies each update's Ed25519 signature before installing it.
 
 ### First run
 

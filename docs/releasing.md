@@ -138,9 +138,9 @@ Sparkle 公钥已固定在 `ReleaseIdentity.plist`，私钥也只保存在本机
 GitHub workflow 从 `ReleaseCandidate.plist` 读取 version/build；首次输入 release notes，
 promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 
-## 本机发布公测版
+## 本机发布
 
-公测版使用正式身份，经过与正式发布相同的签名、公证、provider matrix 和 evidence 门禁，以 GitHub prerelease 发布，不进入 stable feed。当前正式候选在本机用云签名构建：
+公测版和后续版本都使用正式身份，经过签名、公证、provider matrix 和 evidence 门禁，最终发布为 GitHub Latest。App 从 `releases/latest/download/appcast.xml` 检查更新，所以只有 Latest 会推送给用户。当前正式候选在本机用云签名构建：
 
 1. 提交 `Resources/Info.plist` 与 `Resources/ReleaseCandidate.plist` 中的版本和 build，以及 `docs/releases/<version>.md`。工作区必须干净。
 2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `cn.simonwong.speaker.provider-api-keys` 中。记录当前 UTC 时间，再运行付费 matrix：
@@ -154,7 +154,6 @@ promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 ```bash
 SPEAKER_CODESIGN_METHOD=cloud \
 SPEAKER_CODESIGN_IDENTITY=<Apple Development 身份的 SHA-1> \
-SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Dev" \
 SPEAKER_NOTARY_PROFILE=speaker-release \
 SPEAKER_SPARKLE_KEY_ACCOUNT=cn.simonwong.speaker \
 SPEAKER_VERSION=<version> \
@@ -166,11 +165,29 @@ SPEAKER_PROVIDER_EVIDENCE_NOT_BEFORE=<第 2 步记录的 UTC 时间> \
 ./scripts/distribute
 ```
 
-4. 用 `.build/distribution/` 中的 DMG、checksum 与 `appcast.xml` 创建 prerelease。Evidence archive 不上传，保存在受控位置。
+4. 用 `.build/distribution/` 中的 DMG、checksum 与 `appcast.xml` 先创建 prerelease。Prerelease 不进入更新通道。Evidence archive 不上传，保存在受控位置。
 
 ```bash
 gh release create v<version> .build/distribution/Speaker-<version>-<build>.dmg .build/distribution/Speaker-<version>-<build>.dmg.sha256 .build/distribution/appcast.xml --repo simonwong/speaker --target <候选 commit> --title "Speaker <version> Beta" --notes-file docs/releases/<version>.md --prerelease
 ```
+
+5. 完成下文“提升为 Latest 前的人工门槛”。升级用例以上一个公开版本为旧版，通过 prerelease 的 appcast 更新：
+
+```bash
+./scripts/compatibility-smoke --app <候选 Speaker.app> --upgrade-from <上一公开版本 Speaker.app> --staging-feed https://github.com/simonwong/speaker/releases/download/v<version>/appcast.xml --output <证据目录>
+```
+
+6. 提升为 Latest，并从公开地址回读更新通道：
+
+```bash
+gh release edit v<version> --repo simonwong/speaker --prerelease=false --latest
+```
+
+```bash
+SPEAKER_VERSION=<version> SPEAKER_BUILD_NUMBER=<build> ./scripts/verify-published-update
+```
+
+7. 下一个候选把 `ReleaseCandidate.plist` 的 `PreviousPublishedBuildNumber` 改为本次 build。
 
 ## GitHub Actions 正式发布
 
@@ -291,9 +308,9 @@ arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或�
 首次发布的上一公开 build 为 `0`，但仍要求一个小于候选 build 的真实开发版作为升级
 源。`production-publication` reviewer 只在复核报告、candidate run 与 prerelease 后批准。
 
-## Stable promotion 前的人工门槛
+## 提升为 Latest 前的人工门槛
 
-公开 prerelease staging 后、stable promotion 前，需在干净 macOS 用户上完成并留存证据：
+公开 prerelease 后、提升为 Latest 前，需在干净 macOS 用户上完成并留存证据：
 
 - 首次安装、Gatekeeper、麦克风和辅助功能授权。
 - 从上一个公开版本覆盖升级，确认 Keychain API Key 与 TCC 权限保持。
@@ -306,4 +323,4 @@ arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或�
 - VoiceOver、Reduce Motion、Increase Contrast 和多显示器浮层定位。
 - 历史查看、保留策略、清空、损坏恢复与卸载后本地数据边界。
 
-仓库已接入更新 feature、Sparkle live adapter、GitHub Releases 发布和公开回读门禁；但在真实正式身份以及“旧版 → 新版”实机更新矩阵完成前，不应把当前开发制品描述为已经具备可用的生产更新通道。
+更新通道已上线：`releases/latest` 指向 v0.8.0 (206)，`verify-published-update` 回读通过。0.8.0 发布时没有更早的 Developer ID 版本，未做旧版 → 新版实机更新；从下一个版本起按上述门槛执行。
