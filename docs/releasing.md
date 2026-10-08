@@ -66,35 +66,9 @@ Apple Development identity 时必须显式指定，避免构建在不同证书�
 脚本会拒绝 ad-hoc 结果或仍然绑定单次 CDHash 的 identity。可用 identity 可通过
 `security find-identity -v -p codesigning` 查看。
 
-## GitHub development prereleases
+## 开发构建
 
-After CI succeeds for a push to `main`, it reads the explicit SemVer from
-`Resources/Info.plist`. If `v<SemVer>-dev` does not exist, CI creates a GitHub
-Prerelease containing one drag-to-Applications DMG, `Speaker-<SemVer>-arm64.dmg`.
-GitHub shows the asset's SHA-256 digest on the release page, so no separate
-checksum file is attached. The DMG is packaged from the already validated ad-hoc App after
-`./scripts/sign-development` re-signs it with the fixed development certificate; the internal CI ZIP remains
-a transport artifact. The installer presents Speaker and Applications side by
-side with installation instructions and embeds the Speaker logo as the mounted volume icon, without launching the App.
-Later commits using the same SemVer do not replace or republish that release;
-creating another development release requires a reviewed version change.
-
-Development prereleases use `com.local.speaker`, are not notarized, and are not
-part of the Sparkle update channel. Their designated requirement names the
-certificate (`certificate leaf = H"…"`) rather than one build's CDHash, so
-Microphone and Accessibility grants carry over between development builds; the
-first install after an ad-hoc build (0.7.0 or earlier) asks for them once more.
-This path remains separate from the protected production workflow below.
-
-The certificate is a self-signed code-signing identity stored as the
-`SPEAKER_DEVELOPMENT_SIGNING_P12_BASE64` and
-`SPEAKER_DEVELOPMENT_SIGNING_P12_PASSWORD` secrets of the
-`development-prerelease` environment, which only the prerelease job reads. A
-missing secret fails the publication instead of falling back to ad-hoc signing.
-Replacing the certificate changes the designated requirement and costs every
-user one more permission grant, so renew it before it expires rather than
-generating a new one. `./scripts/test-sign-development` exercises the same
-re-signing with a throwaway certificate on every CI run.
+CI 不发布开发构建。`com.local.speaker` 的开发构建只用于本机安装；对外的公测版和稳定版都使用正式身份，按下文流程发布。
 
 ## 正式候选构建
 
@@ -164,8 +138,44 @@ Sparkle 公钥已固定在 `ReleaseIdentity.plist`，私钥也只保存在本机
 GitHub workflow 从 `ReleaseCandidate.plist` 读取 version/build；首次输入 release notes，
 promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 
+## 本机发布公测版
+
+公测版使用正式身份，经过与正式发布相同的签名、公证、provider matrix 和 evidence 门禁，以 GitHub prerelease 发布，不进入 stable feed。当前正式候选在本机用云签名构建：
+
+1. 提交 `Resources/Info.plist` 与 `Resources/ReleaseCandidate.plist` 中的版本和 build，以及 `docs/releases/<version>.md`。工作区必须干净。
+2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `cn.simonwong.speaker.provider-api-keys` 中。记录当前 UTC 时间，再运行付费 matrix：
+
+```bash
+./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory <新的私有目录> --candidate-version <version> --candidate-build <build> --keychain-service cn.simonwong.speaker.provider-api-keys
+```
+
+3. 构建、签名、公证并生成 appcast 与 evidence：
+
+```bash
+SPEAKER_CODESIGN_METHOD=cloud \
+SPEAKER_CODESIGN_IDENTITY=<Apple Development 身份的 SHA-1> \
+SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Dev" \
+SPEAKER_NOTARY_PROFILE=speaker-release \
+SPEAKER_SPARKLE_KEY_ACCOUNT=cn.simonwong.speaker \
+SPEAKER_VERSION=<version> \
+SPEAKER_BUILD_NUMBER=<build> \
+SPEAKER_RELEASE_NOTES_FILE="$PWD/docs/releases/<version>.md" \
+SPEAKER_PREPARE_UPGRADE_CANDIDATE=1 \
+SPEAKER_PROVIDER_EVIDENCE_FILE=<新的私有目录>/speaker-provider-matrix.json \
+SPEAKER_PROVIDER_EVIDENCE_NOT_BEFORE=<第 2 步记录的 UTC 时间> \
+./scripts/distribute
+```
+
+4. 用 `.build/distribution/` 中的 DMG、checksum 与 `appcast.xml` 创建 prerelease。Evidence archive 不上传，保存在受控位置。
+
+```bash
+gh release create v<version> .build/distribution/Speaker-<version>-<build>.dmg .build/distribution/Speaker-<version>-<build>.dmg.sha256 .build/distribution/appcast.xml --repo simonwong/speaker --target <候选 commit> --title "Speaker <version> Beta" --notes-file docs/releases/<version>.md --prerelease
+```
+
+## GitHub Actions 正式发布
+
 仓库提供 `.github/workflows/release.yml` 作为唯一的 GitHub Actions 正式发布入口。
-它只允许从默认分支手动触发。签名 job 绑定 `production` Environment；建议开启
+它只允许从默认分支手动触发。GitHub 托管 runner 不能使用云端 Developer ID 签名：Apple 已确认，用 App Store Connect API Key 认证时无法云签 Developer ID（[Apple Developer Forums](https://developer.apple.com/forums/thread/776036)）。因此该 workflow 需要由 Account Holder 签发、私钥可导出为 P12 的本地 Developer ID Application 证书。签名 job 绑定 `production` Environment；建议开启
 required reviewers、禁止发起者自批，并只允许受保护的 `main` 部署。只在
 `production` 配置以下 Environment secrets：
 

@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>BuildNumber</key>
-	<string>205</string>
+	<string>206</string>
 	<key>PreviousPublishedBuildNumber</key>
 	<string>0</string>
 	<key>Version</key>
-	<string>0.7.0</string>
+	<string>0.8.0</string>
 </dict>
 </plist>

@@ -76,11 +76,11 @@ Speaker 是一个由用户自行配置服务凭据的 macOS 语音输入工具�
 ~/Library/Application Support/Speaker
 ~/Library/Application Support/com.local.speaker
 ~/Library/Caches/Speaker
-~/Library/Caches/<Speaker 的正式 Bundle ID>
+~/Library/Caches/cn.simonwong.speaker
 ~/Library/Caches/com.local.speaker
-~/Library/Saved Application State/<Speaker 的正式 Bundle ID>.savedState
+~/Library/Saved Application State/cn.simonwong.speaker.savedState
 ~/Library/Saved Application State/com.local.speaker.savedState
-~/Library/Preferences/<Speaker 的正式 Bundle ID>.plist
+~/Library/Preferences/cn.simonwong.speaker.plist
 ~/Library/Preferences/com.local.speaker.plist
 ```
 

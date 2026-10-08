@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Speaker 已可作为本机开发版持续试用，但尚未通过正式生产发布门槛。仓库另有明确标记的开发预发布通道；下一轮公测仍需满足本清单的公测前门槛并验证对应候选，不代表正式发布就绪。主要正式阻断项是稳定代码签名与公证、凭据迁移到 Keychain、真实跨 App 兼容性验证和完整更新机制。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
+Speaker 以正式身份 `cn.simonwong.speaker` 发布公测版：Developer ID 签名、Hardened Runtime、App 与 DMG 公证均已在真实候选上通过，付费 provider matrix 全部 PASS。公测版不进入 stable feed，尚未通过稳定版发布门槛。剩余阻断项是跨版本 TCC 与 Keychain 连续性、干净用户安装、真实跨 App 兼容性和旧版到新版的更新实测。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
 
 ## P0 发布阻断
 
@@ -19,12 +19,13 @@ Speaker 已可作为本机开发版持续试用，但尚未通过正式生产发
 - [x] 豆包 WebSocket 同时发送和接收；明确的服务端错误可提前终止录音。
 - [x] App 退出等待取消记录和其他已排队历史写入完成。
 - [x] 确定正式 Bundle ID `cn.simonwong.speaker` 与 Apple Developer Team `D7QJXSW5GJ`，固定在不可由 CI 覆盖的 `Resources/ReleaseIdentity.plist`。
-- [ ] 使用 Developer ID Application 稳定签名并验证跨版本 TCC 权限保持。
+- [x] 使用 Developer ID Application 签名。正式候选通过 Xcode 云端托管 Developer ID 签名（`SPEAKER_CODESIGN_METHOD=cloud`），签名身份为 `Developer ID Application: Ningbo Weixu Space Design Co., Ltd. (D7QJXSW5GJ)`。
+- [ ] 验证两个 Developer ID 版本之间麦克风与辅助功能 TCC 权限保持。
 - [x] 开发构建显式标记 ad-hoc 身份、在产品内解释麦克风与辅助功能授权失效边界，并支持可选具名本地签名。
 - [x] 开启 Hardened Runtime，通过 `notarytool` 公证并 staple。`scripts/bundle` 以 `--options runtime` 加固签名并与受审查的 `Resources/Speaker.entitlements` 逐项比对，`scripts/distribute` 对 App 与 DMG 分别执行 `notarytool submit`、`notarytool log` 和 `stapler staple`，`scripts/release-common` 复核 CodeDirectory 的 `runtime` flag、公证 status 为 `Accepted` 并执行 `stapler validate`。
-- [ ] 公布正式 Developer ID Application 证书证据：Team ID 与证书 SHA-1/SHA-256 指纹在仓库内固定为可复核值，签名产物的 `codesign -dv --verbose=4` 输出与之逐字匹配。
-- [ ] 留存一次真实公证与 staple 的证据：App 与 DMG 的 `notarytool` submission/log JSON、两次 `stapler validate` 输出，以及已 staple 制品的 SHA-256。
-- [ ] 将豆包与 DeepSeek Key 从 owner-only 本地文件迁移到稳定签名 App 的 Keychain；迁移会完整检查旧 Keychain/明文来源，只有全部可读且值一致才写入并回读 primary 后清理，冲突或部分不可读会保留所有来源并提示。代码门禁已完成，仍需 Developer ID 实机验证。
+- [ ] 公布正式 Developer ID Application 证书证据：Team ID 与证书 SHA-1/SHA-256 指纹在仓库内固定为可复核值，签名产物的 `codesign -dv --verbose=4` 输出与之逐字匹配。云端托管证书由 Apple 签发和轮换，固定指纹前需先确定证书轮换后的复核方式；Team ID 已由 `ReleaseIdentity.plist` 固定并由发布脚本校验。
+- [x] 留存一次真实公证与 staple 的证据：App 与 DMG 的 `notarytool` submission/log JSON、两次 `stapler validate` 输出，以及已 staple 制品的 SHA-256。`scripts/distribute` 生成的 evidence archive 包含这些文件，正式候选的 App 与 DMG 公证结果均为 `Accepted`。
+- [ ] 将豆包与 DeepSeek Key 从 owner-only 本地文件迁移到稳定签名 App 的 Keychain；迁移会完整检查旧 Keychain/明文来源，只有全部可读且值一致才写入并回读 primary 后清理，冲突或部分不可读会保留所有来源并提示。代码门禁已完成，Developer ID App 已能从 Keychain 读取凭据；从开发版文件迁移仍需实机验证。
 - [ ] 在干净 macOS 用户上走完首次安装、Gatekeeper、权限、升级和卸载/清理流程。
 
 ## P1 公测前
@@ -50,7 +51,7 @@ Speaker 已可作为本机开发版持续试用，但尚未通过正式生产发
 - [x] 本地安装采用干净 bundle、canonical Applications 路径、symlink/`..` 拒绝、候选先验证、旧包签名身份验证、标准 App termination 等待异步 shutdown，以及交换失败回滚；同 Bundle ID 但签名损坏的包不会被替换或进入回滚链，不会用强杀覆盖仍在写历史/设置的进程。
 - [x] 正式发布脚本缺少或不匹配 Developer ID、受审查固定 Team/Bundle/更新身份、公证 profile、Sparkle 私钥 account、release notes、SemVer 或构建号时 fail closed；CI 环境变量不能替换 release identity。Workflow 在写入 `$GITHUB_ENV` 前复用同一生产元数据校验，所有导出值必须非空且为单行，避免 plist 换行污染后续 step。Release notes 必须来自仓库内已提交文件；正式 App 从固定 `HEAD` 的 owner-only 只读 source snapshot 构建，在独立 SwiftPM scratch 中仅按快照的 `Package.resolved` 获取公开依赖，分别构建 arm64/x86_64 并合成为 universal2，不覆盖开发 `.build/Speaker.app`。受签名保护的 BuildManifest 固定 source commit、依赖锁文件 hash 与 release-notes hash；同时清除构建机 RPATH，验证 timestamp、架构和允许的 RPATH，源码树与 SwiftPM checkout 只要存在本地改动就拒绝发布。脚本逐层验证 Sparkle helper，生成并公证 APFS+lzfse DMG、archive EdDSA、signed appcast 与 SHA-256；公开地址回读不接触私钥，只用受审查 EdDSA 公钥验证 archive，并逐字节核对公开 appcast。正式发布使用全局锁和持久 promotion journal，可在下一次运行恢复 `SIGKILL`/断电留下的 prepared 晋升，尚未建立 channel 前拒绝 prerelease 混入稳定 feed。
 - [x] 确定 SemVer 与单调递增 build number 策略；仓库内 `ReleaseCandidate.plist` 固定上一个公开 build 与当前受审查候选，正式构建和公开回读的环境值必须精确匹配，且候选必须严格递增。appcast 比较使用任意长度十进制字符串，避免整数溢出；正式参数和两阶段流程见 `docs/releasing.md`。
-- [ ] 建立可复现 CI 构建、自动测试、签名、公证、校验和及制品留存。（未签名的测试/严格编译/Release bundle CI 已落地；受 `production` Environment 保护的手动 workflow 也已接通临时 Keychain、Developer ID、`notarytool` API Key、Sparkle 私钥与 `scripts/distribute`。正式流程生成 hash-bound evidence archive，包含 dSYM、BuildManifest、两次公证 submission/log 与 toolchain 信息；明文仅在 ephemeral runner，Actions 留存 ChaCha20-Poly1305 密文。仍需配置正式身份并取得一次真实成功运行证据。）
+- [ ] 建立可复现 CI 构建、自动测试、签名、公证、校验和及制品留存。（未签名的测试/严格编译/Release bundle CI 已落地；受 `production` Environment 保护的手动 workflow 已接通临时 Keychain、Developer ID P12、`notarytool` API Key、Sparkle 私钥与 `scripts/distribute`。正式流程生成 hash-bound evidence archive，包含 dSYM、BuildManifest、两次公证 submission/log 与 toolchain 信息；明文仅在 ephemeral runner，Actions 留存 ChaCha20-Poly1305 密文。当前正式候选在本机用 `scripts/distribute` 云签名构建；GitHub 托管 runner 无法用 App Store Connect API Key 做云端 Developer ID 签名，workflow 仍需本地 Developer ID 私钥的 P12 与 `production` secrets 才能运行。）
 - [ ] 接入安全更新机制，并验证降级、更新失败恢复和签名轮换策略。（Sparkle feature/live adapter、正式 DMG/appcast、公开 prerelease staging feed 和 stable feed 回读门禁已完成；production workflow 会核对由两份真实 Developer ID App 生成、绑定候选 source/Team/机器/时间窗、完整 executable SHA-256 和双架构 CodeDirectory CDHash 的旧版升级报告，再由不持有私钥的独立 `production-publication` Environment 把首次 run 的同一候选原地提升。仍缺真实 Developer ID 旧版→新版安装、篡改/断网/回滚及密钥轮换实机证据。）
 - [x] 编写对外隐私说明：`PRIVACY.md` 覆盖音频/文本去向、本地历史、Key 存储、诊断和删除边界。
 
@@ -58,8 +59,8 @@ Speaker 已可作为本机开发版持续试用，但尚未通过正式生产发
 
 - `./scripts/test --with-ui`：核心、App scenario、AppKit UI、provider evidence 与发布脚本规格通过；精确数量以该命令当前输出为准。
 - `./scripts/test-compatibility-smoke`：使用本地构建候选验证人工兼容报告契约；partial PASS 返回 3、报告权限为 `0600`、记录可执行文件 SHA-256 且不包含绝对 Bundle 路径。
-- `./scripts/provider-smoke doubao`：2026-07-17 使用当前 BYOK 再次完成 `volc.seedasr.sauc.duration` 静音连接探针，服务端请求 ID `20260717125537286AF74BAC3BF6B4ED6B`。该结果只证明连接，不证明模型矩阵；DeepSeek 仍未配置。当前 matrix 要求显式付费确认、全新 evidence 目录及候选 version/build；报告以固定 13-case schema 绑定 source commit/clean 状态、`Package.resolved` SHA-256、macOS/架构、凭据来源、资源与模型，逐级 no-follow 校验父目录后原子写入 `0700/0600`，且 verifier 对未知字段、缺失/重复、FAIL/SKIP、dirty source 与非正式 Keychain 凭据 fail closed。受保护 production workflow 已把 matrix 接成正式硬门禁：在同一 run 的临时 Keychain 中生成报告，并再次精确绑定 commit、依赖锁 hash、version、build 与不超过四小时的生成时间窗，报告及其 hash 进入 exact-allowlist release evidence ZIP，旧报告不能复用。完整 BYOK 与正式身份的真实成功运行证据仍待取得。工具与 verifier 由 `./scripts/test` 以 warnings-as-errors 编译，并有离线隐私/权限/原子写反例规格。
-- 2026-07-17 旧版开发 matrix（严格报告 schema 落地前）：使用 226 秒非敏感系统 TTS 的前 60 秒完成开发预检。豆包 1/5/15/60 秒实时 paced 转录、流式取消和错误 Key全部 PASS；request ID 分别为 `20260717130020408124A2C1B9F0D44A84`、`20260717130022E8FA7E55CDA7BBB97D7F`、`2026071713002723F393A0B537B2B4AF8B`、`20260717130043BFCC2F1416BF87BBE9C0`、取消 `7669280B-705D-4856-B275-12280D970DFC`、错误 Key `20260717130146B7236D4D34EEBDC471A4`。临时 AIFF/WAV 已删除。DeepSeek 未配置，连接、三模式和取消均 SKIP；错误 Key边界 PASS。因此这只是历史 PARTIAL 日志，不是当前 schema 报告、完整 provider 或正式 Keychain 候选证据。
+- 正式候选 provider matrix：豆包（`bigmodel`、`volc.seedasr.sauc.duration`）与 DeepSeek（`deepseek-v4-flash`）13 项全部 PASS，凭据来源为签名 App 的 Keychain，报告绑定候选 source commit、`Package.resolved` SHA-256、version 与 build，并进入 release evidence archive。Matrix 要求显式付费确认、全新 evidence 目录及候选 version/build；报告以固定 13-case schema 原子写入 `0700/0600`，verifier 对未知字段、缺失/重复、FAIL/SKIP、dirty source 与非正式 Keychain 凭据 fail closed。工具与 verifier 由 `./scripts/test` 以 warnings-as-errors 编译，并有离线隐私/权限/原子写反例规格。
+- 正式候选制品：universal2（arm64/x86_64）App 由 Developer ID 签名并启用 Hardened Runtime；App 与 DMG 均已公证并 staple，`spctl` 评估为 `accepted`、`source=Notarized Developer ID`。
 - `./scripts/test-release-identity`：受审查 Bundle/Team 身份不可由环境变量覆盖，占位身份无法进入正式发布；覆盖不可伪造的 FD 发布锁、自定义 bundle 输出防覆盖、源码快照与 BuildManifest、公证 JSON/log、evidence ZIP 完整性、handled rollback、包含 evidence 的 hash-bound prepared/committed journal、外来同名制品保留和 stale pending 清理。
 - `./scripts/test-release-evidence`：使用真实 Speaker executable 生成 dSYM，把它装入完整 evidence ZIP 后重新解包核对 UUID 和 DWARF 完整性；篡改嵌套 DWARF 必须失败。CI 对隔离 Release bundle 执行同一门禁。
 - `./scripts/test-install-rollback`：隔离安装中注入交换后失败，旧 bundle、签名完整性和运行状态均恢复。
