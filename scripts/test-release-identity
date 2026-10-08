@@ -17,6 +17,19 @@ TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/speaker-release-identity.XXXXXX")"
 trap 'chmod -R -P u+w "$TEST_ROOT" 2>/dev/null || true; rm -rf "$TEST_ROOT"' EXIT
 mkdir -p "$TEST_ROOT/Resources"
 
+RPATH_FIXTURE="$TEST_ROOT/rpath-fixture"
+print -r -- 'int main(void) { return 0; }' > "$TEST_ROOT/rpath-fixture.c"
+xcrun clang "$TEST_ROOT/rpath-fixture.c" -o "$RPATH_FIXTURE" \
+    -Wl,-rpath,/Applications/Xcode.app/Contents/Developer/test \
+    -Wl,-rpath,@executable_path/../Frameworks
+remove_build_machine_rpaths "$RPATH_FIXTURE"
+RPATH_LOAD_COMMANDS="$(otool -l "$RPATH_FIXTURE")"
+if grep -F '/Applications/Xcode.app/Contents/Developer/test' <<< "$RPATH_LOAD_COMMANDS"; then
+    print -u2 "The packaged executable retained a build-machine runtime path."
+    exit 1
+fi
+grep -F '@executable_path/../Frameworks' <<< "$RPATH_LOAD_COMMANDS" >/dev/null
+
 if matches_release_pattern \
     $'1.2.3\nSPEAKER_CODESIGN_IDENTITY=Injected' \
     '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -1174,18 +1187,18 @@ for cloud_case in success wrong-team export-failure invalid-export changed-manif
             return 0
         }
         xcodebuild() {
-            local archive options output
+            local archive export_options output
             while (( $# )); do
                 case "$1" in
                     -archivePath) archive="$2"; shift ;;
-                    -exportOptionsPlist) options="$2"; shift ;;
+                    -exportOptionsPlist) export_options="$2"; shift ;;
                     -exportPath) output="$2"; shift ;;
                 esac
                 shift
             done
-            [[ "$(plutil -extract method raw "$options")" == developer-id ]] || return 1
-            [[ "$(plutil -extract destination raw "$options")" == export ]] || return 1
-            [[ "$(plutil -extract teamID raw "$options")" == ABCDE12345 ]] || return 1
+            [[ "$(plutil -extract method raw "$export_options")" == developer-id ]] || return 1
+            [[ "$(plutil -extract destination raw "$export_options")" == export ]] || return 1
+            [[ "$(plutil -extract teamID raw "$export_options")" == ABCDE12345 ]] || return 1
             [[ "$CLOUD_CASE" != export-failure ]] || return 1
             mkdir -p "$output"
             ditto "$archive/Products/Applications/Speaker.app" "$output/Speaker.app"

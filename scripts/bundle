@@ -88,25 +88,6 @@ cleanup_bundle() {
 }
 trap cleanup_bundle EXIT
 
-remove_build_machine_rpaths() {
-    local executable="$1"
-    local path
-    local -a paths
-
-    paths=("${(@f)$(
-        otool -l "$executable" \
-            | awk '/cmd LC_RPATH/{getline; getline; print $2}'
-    )}")
-    typeset -U paths
-    for path in "${paths[@]}"; do
-        case "$path" in
-            /Library/Developer/*|/Applications/Xcode*.app/*|*.xctoolchain/*)
-                install_name_tool -delete_rpath "$path" "$executable"
-                ;;
-        esac
-    done
-}
-
 validate_production_signing_method "$SIGNING_METHOD"
 if [[ "$SIGNING_METHOD" == cloud && ( -z "$SIGNING_IDENTITY" || "$SIGNING_IDENTITY" == - ) ]]; then
     print -u2 "Cloud signing requires an Apple Development archive identity."
