@@ -468,11 +468,7 @@ final class SpeakerRuntime: ObservableObject {
                 latestRecord: latestRecord
             ))
         let copied = await SystemClipboardWriter().copy(report)
-        diagnostics.publish(
-            copied
-                ? SpeakerCopy.Diagnostics.copied
-                : SpeakerCopy.Diagnostics.copyFailed
-        )
+        diagnostics.publishCopyResult(copied ? .copied : .failed)
     }
 
     #if DEBUG

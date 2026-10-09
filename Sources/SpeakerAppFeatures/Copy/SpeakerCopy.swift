@@ -101,7 +101,7 @@ package enum SpeakerCopy {
             case .readFailed(let detail):
                 "无法安全读取设置文件，已停止加载：\(detail)"
             case .preservationFailed(let detail):
-                "Settings could not be recovered: \(detail)"
+                "设置文件已损坏且无法备份，本次使用默认设置，原文件未改动：\(detail)"
             }
         }
 
