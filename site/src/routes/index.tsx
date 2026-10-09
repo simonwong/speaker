@@ -1,13 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
-// Update CURRENT_VERSION when a new release is promoted to GitHub Latest.
-const CURRENT_VERSION = '0.8.0'
-
 const SITE_URL = 'https://speaker.simonwong.cn/'
 const GITHUB_URL = 'https://github.com/simonwong/speaker'
 const DOWNLOAD_URL = `${GITHUB_URL}/releases/latest`
-const RELEASE_NOTES_URL = `${GITHUB_URL}/releases/tag/v${CURRENT_VERSION}`
+const RELEASE_NOTES_URL = `${GITHUB_URL}/releases`
 const PRIVACY_URL = `${GITHUB_URL}/blob/main/PRIVACY.md`
 const OG_IMAGE_URL = `${SITE_URL}og.png`
 
@@ -36,7 +33,7 @@ const faqs: Faq[] = [
   {
     question: '下载后能直接打开吗？',
     answer:
-      '可以。从 0.8.0 开始，安装包使用 Apple Developer ID 签名并经过 Apple 公证。macOS 首次打开时会提示这是从互联网下载的 App，确认即可，不需要右键打开，也不需要在终端移除隔离属性。',
+      '可以。安装包使用 Apple Developer ID 签名并经过 Apple 公证。macOS 首次打开时会提示这是从互联网下载的 App，确认即可，不需要右键打开，也不需要在终端移除隔离属性。',
   },
   {
     question: '为什么要授予辅助功能权限？',
@@ -64,7 +61,6 @@ const structuredData = {
       image: OG_IMAGE_URL,
       applicationCategory: 'UtilitiesApplication',
       operatingSystem: 'macOS 14 或更高版本',
-      softwareVersion: CURRENT_VERSION,
       downloadUrl: DOWNLOAD_URL,
       releaseNotes: RELEASE_NOTES_URL,
       softwareRequirements: 'macOS 14 或更高版本，Apple 芯片或 Intel 芯片',
@@ -101,14 +97,14 @@ export const Route = createFileRoute('/')({
       { property: 'og:description', content: description },
       { property: 'og:image', content: OG_IMAGE_URL },
       { property: 'og:image:type', content: 'image/png' },
-      { property: 'og:image:width', content: '512' },
-      { property: 'og:image:height', content: '512' },
-      { property: 'og:image:alt', content: 'Speaker 应用图标' },
-      { name: 'twitter:card', content: 'summary' },
+      { property: 'og:image:width', content: '1200' },
+      { property: 'og:image:height', content: '630' },
+      { property: 'og:image:alt', content: 'Speaker：Mac 语音输入，说话代替打字' },
+      { name: 'twitter:card', content: 'summary_large_image' },
       { name: 'twitter:title', content: title },
       { name: 'twitter:description', content: description },
       { name: 'twitter:image', content: OG_IMAGE_URL },
-      { name: 'twitter:image:alt', content: 'Speaker 应用图标' },
+      { name: 'twitter:image:alt', content: 'Speaker：Mac 语音输入，说话代替打字' },
     ],
     links: [{ rel: 'canonical', href: SITE_URL }],
     scripts: [{ type: 'application/ld+json', children: JSON.stringify(structuredData) }],
@@ -155,7 +151,7 @@ function Home() {
             </a>
           </div>
           <p className="meta">
-            {CURRENT_VERSION} 公测版 · macOS 14 及以上 · Apple 芯片与 Intel 芯片 · 免费，MIT 开源
+            macOS 14 及以上 · Apple 芯片与 Intel 芯片 · 免费，MIT 开源
           </p>
         </section>
 
@@ -210,12 +206,12 @@ function Home() {
 
         <Section id="updates" title="签名、公证与自动更新">
           <p>
-            从 0.8.0 开始，Speaker 使用 Apple Developer ID 签名，并经过 Apple 公证。同一个安装包支持 Apple 芯片和
+            Speaker 使用 Apple Developer ID 签名，并经过 Apple 公证。同一个安装包支持 Apple 芯片和
             Intel 芯片的 Mac。
           </p>
           <p>
-            之后的版本在 App 内更新：在“设置 → 关于”点“检查更新…”，或在“通用”里打开“自动检查更新”。安装更新前，Speaker
-            会校验更新包的 Ed25519 签名。各版本的变更见 <a href={`${GITHUB_URL}/releases`}>Speaker 更新记录</a>。
+            新版本在 App 内更新：在“设置 → 关于”点“检查更新…”，或在“通用”里打开“自动检查更新”。安装更新前，Speaker
+            会校验更新包的 Ed25519 签名。各版本的变更见 <a href={RELEASE_NOTES_URL}>Speaker 更新记录</a>。
           </p>
         </Section>
 
