@@ -324,3 +324,19 @@ arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或�
 - 历史查看、保留策略、清空、损坏恢复与卸载后本地数据边界。
 
 更新通道已上线：`releases/latest` 指向 v0.8.0 (206)，`verify-published-update` 回读通过。0.8.0 发布时没有更早的 Developer ID 版本，未做旧版 → 新版实机更新；从下一个版本起按上述门槛执行。
+
+## 官网部署
+
+官网 <https://speaker.simonwong.cn/> 的源码在 `site/`，没有自动部署。`site/` 的改动合入 `main` 后，在最新的 `main` 上手动部署：
+
+```bash
+cd site
+pnpm install --frozen-lockfile
+pnpm run deploy
+```
+
+- 用 `pnpm run deploy`，不要用 `pnpm deploy`：后者是 pnpm 自带的另一个命令。
+- 需要已登录的 Cloudflare CLI（`cf`），部署到 `site/cloudflare.config.ts` 里的 Worker 和域名。
+- 页面不写版本号，下载按钮固定指向 `releases/latest`，所以发布新版本时不需要重新部署官网。
+- 修改分享图时编辑 `site/og/og.html`，运行 `pnpm og` 重新生成 `site/public/og.png`（需要本机安装 Chrome）。
+- 部署后读取线上首页，确认标题、`og:image`、JSON-LD 和正文已是新版本；新版本可能需要几十秒才在边缘节点生效。
