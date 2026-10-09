@@ -10,7 +10,6 @@ package enum LoginItemRegistrationState: Equatable, Sendable {
     case enabled
     case awaitingApproval
     case registrationMissing
-    case unavailable
 }
 
 package struct LoginItemPresentation: Equatable, Sendable {
@@ -20,7 +19,6 @@ package struct LoginItemPresentation: Equatable, Sendable {
         "已请求登录时启动，需要在系统设置的“登录项”中批准。"
     package static let registrationMissingNotice =
         "登录时启动已在系统中关闭；打开开关可以重新启用。"
-    package static let unavailableNotice = "无法设置登录时自动启动。"
 
     package let registrationState: LoginItemRegistrationState
     package let isEnabled: Bool
@@ -50,15 +48,13 @@ package struct LoginItemPresentation: Equatable, Sendable {
             isEnabled = false
             notice = Self.registrationMissingNotice
             showsSystemSettingsButton = false
-        case .notRegistered:
+        // `SMAppService.mainApp` reports `notFound` until this app first
+        // registers, even if a stored preference says enabled. Treat it as
+        // not registered; a real failure surfaces through the toggle's error.
+        case .notRegistered, .notFound:
             registrationState = .disabled
             isEnabled = false
             notice = nil
-            showsSystemSettingsButton = false
-        case .notFound:
-            registrationState = .unavailable
-            isEnabled = false
-            notice = Self.unavailableNotice
             showsSystemSettingsButton = false
         }
     }

@@ -3,14 +3,32 @@ import AppKit
 import Combine
 import SpeakerCore
 
+/// Startup and recovery warnings shown on the About page, plus the result of
+/// the last diagnostics copy. Warnings accumulate so a later one never hides
+/// an earlier one, and a copy result never replaces a warning.
 @MainActor
 package final class DiagnosticNoticeModel: ObservableObject {
-    @Published private(set) var notice: String?
+    package enum CopyResult: Equatable, Sendable {
+        case copied
+        case failed
+    }
+
+    @Published package private(set) var warnings: [String] = []
+    @Published package private(set) var copyResult: CopyResult?
 
     package init() {}
 
-    package func publish(_ notice: String?) {
-        self.notice = notice
+    package func publish(_ warning: String) {
+        guard !warnings.contains(warning) else { return }
+        warnings.append(warning)
+    }
+
+    package func publishCopyResult(_ result: CopyResult) {
+        copyResult = result
+    }
+
+    package func dismissWarnings() {
+        warnings = []
     }
 }
 

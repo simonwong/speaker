@@ -164,7 +164,23 @@ enum AudioCaptureSpecs: CoreSpecDomain {
                 SystemPermissionAccess.requestPlan(
                     for: .accessibility,
                     state: .denied
+                )
+                    == .registerAccessibilityThenOpenSystemSettings(
+                        anchor: "Privacy_Accessibility"
+                    )
+            )
+            try expect(
+                SystemPermissionAccess.requestPlan(
+                    for: .accessibility,
+                    state: .denied,
+                    hasRegisteredAccessibility: true
                 ) == .openSystemSettings(anchor: "Privacy_Accessibility")
+            )
+            try expect(
+                SystemPermissionAccess.requestPlan(
+                    for: .accessibility,
+                    state: .granted
+                ) == .none
             )
             try expect(
                 SystemPermissionAccess.requestPlan(

@@ -12,7 +12,9 @@ package struct AboutView: View {
         SpeakerPage {
             AboutSettingsPage(
                 softwareUpdate: workspace.softwareUpdate,
-                routeEffects: workspace.routeEffects
+                diagnostics: workspace.diagnostics,
+                routeEffects: workspace.routeEffects,
+                copyDiagnostics: workspace.copyDiagnostics
             )
         }
         .task { await workspace.refresh() }
@@ -21,7 +23,9 @@ package struct AboutView: View {
 
 private struct AboutSettingsPage: View {
     @ObservedObject var softwareUpdate: SoftwareUpdateFeature
+    @ObservedObject var diagnostics: DiagnosticNoticeModel
     let routeEffects: SettingsRouteEffects
+    let copyDiagnostics: () async -> Void
 
     private var versionText: String {
         SpeakerBuildIdentity.current.displayText
@@ -35,6 +39,9 @@ private struct AboutSettingsPage: View {
                 .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
 
             versionCard
+                .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
+
+            diagnosticsCard
                 .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
         }
     }
@@ -135,6 +142,46 @@ private struct AboutSettingsPage: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityLabel("在 GitHub 查看 Speaker")
             .help("在 GitHub 查看 Speaker")
+        }
+    }
+
+    /// Startup and recovery warnings land here, next to the redacted
+    /// diagnostics copy that failure guidance elsewhere points to.
+    private var diagnosticsCard: some View {
+        SettingsCard(
+            AboutSection.diagnostics.title,
+            icon: AboutSection.diagnostics.icon
+        ) {
+            ForEach(diagnostics.warnings, id: \.self) { warning in
+                SettingsNotice(text: warning, color: .orange)
+            }
+            if !diagnostics.warnings.isEmpty {
+                HStack {
+                    Spacer()
+                    Button("清除提示") {
+                        diagnostics.dismissWarnings()
+                    }
+                }
+                SettingsRowDivider()
+            }
+
+            SpeakerRow(
+                "诊断信息",
+                detail: "复制版本、权限和服务状态，便于反馈问题；不包含文字、音频或 API Key。"
+            ) {
+                Button("复制诊断信息") {
+                    Task { await copyDiagnostics() }
+                }
+            }
+
+            switch diagnostics.copyResult {
+            case .copied:
+                SettingsNotice(text: SpeakerCopy.Diagnostics.copied, color: .green)
+            case .failed:
+                SettingsNotice(text: SpeakerCopy.Diagnostics.copyFailed, color: .orange)
+            case nil:
+                EmptyView()
+            }
         }
     }
 }

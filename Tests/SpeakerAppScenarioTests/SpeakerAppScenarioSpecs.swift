@@ -2174,16 +2174,36 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
-        run("unavailable login item never presents an effective enabled state", failures: &failures)
-        {
+        run("diagnostic warnings accumulate and survive a copy result", failures: &failures) {
+            let diagnostics = DiagnosticNoticeModel()
+            diagnostics.publish(SpeakerCopy.Startup.historyPrivacyScrubIncomplete)
+            diagnostics.publish(SpeakerCopy.Startup.interruptedSessionsNotReconciled)
+            diagnostics.publish(SpeakerCopy.Startup.historyPrivacyScrubIncomplete)
+            diagnostics.publishCopyResult(.copied)
+
+            try expect(
+                diagnostics.warnings == [
+                    SpeakerCopy.Startup.historyPrivacyScrubIncomplete,
+                    SpeakerCopy.Startup.interruptedSessionsNotReconciled,
+                ]
+            )
+            try expect(diagnostics.copyResult == .copied)
+
+            diagnostics.dismissWarnings()
+            try expect(diagnostics.warnings.isEmpty)
+            try expect(diagnostics.copyResult == .copied)
+        }
+
+        run("never-registered login item stays off without a failure notice", failures: &failures) {
             let presentation = LoginItemPresentation(
                 desiredEnabled: true,
                 serviceState: .notFound
             )
 
             try expect(!presentation.isEnabled)
-            try expect(presentation.registrationState == .unavailable)
-            try expect(presentation.notice != nil)
+            try expect(presentation.registrationState == .disabled)
+            try expect(presentation.notice == nil)
+            try expect(!presentation.showsSystemSettingsButton)
         }
 
         await runAsync(
@@ -3075,6 +3095,7 @@ struct SpeakerAppScenarioSpecs {
                 AboutSection.allCases.map(\.title) == [
                     AboutSection.privacyBoundaryTitle,
                     AboutSection.versionTitle,
+                    AboutSection.diagnosticsTitle,
                 ]
             )
             try expect(HistoryRetentionPolicy.disabled.maximumAgeDays == nil)
