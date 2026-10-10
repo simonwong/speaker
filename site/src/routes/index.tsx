@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
-const SITE_URL = 'https://speaker.simonwong.cn/'
+const SITE_URL = 'https://speaker.moonunder.app/'
 const GITHUB_URL = 'https://github.com/simonwong/speaker'
 const DOWNLOAD_URL = `${GITHUB_URL}/releases/latest`
 const RELEASE_NOTES_URL = `${GITHUB_URL}/releases`

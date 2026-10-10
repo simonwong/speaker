@@ -327,7 +327,7 @@ arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或�
 
 ## 官网部署
 
-官网 <https://speaker.simonwong.cn/> 的源码在 `site/`，没有自动部署。`site/` 的改动合入 `main` 后，在最新的 `main` 上手动部署：
+官网 <https://speaker.moonunder.app/> 的源码在 `site/`，没有自动部署。`site/` 的改动合入 `main` 后，在最新的 `main` 上手动部署：
 
 ```bash
 cd site
@@ -337,6 +337,8 @@ pnpm run deploy
 
 - 用 `pnpm run deploy`，不要用 `pnpm deploy`：后者是 pnpm 自带的另一个命令。
 - 需要已登录的 Cloudflare CLI（`cf`），部署到 `site/cloudflare.config.ts` 里的 Worker 和域名。
+- 旧域名 `speaker.simonwong.cn` 仍绑定在同一个 Worker 上，由 `site/src/server.ts` 301 跳转到 `speaker.moonunder.app`，保留路径和查询参数。旧链接还在外面流通，不要从 `domains` 里删掉它。`assets.runWorkerFirst` 让静态文件也先经过 Worker，新域名的静态文件由 Worker 通过 `ASSETS` 绑定返回；去掉它会让旧域名下的 `og.png` 等文件不再跳转。
+- 部署后同时检查旧域名：`curl -sI https://speaker.simonwong.cn/og.png` 应返回 301，`location` 指向新域名同一路径。
 - 页面不写版本号，下载按钮固定指向 `releases/latest`，所以发布新版本时不需要重新部署官网。
 - 修改分享图时编辑 `site/og/og.html`，运行 `pnpm og` 重新生成 `site/public/og.png`（需要本机安装 Chrome）。
 - 部署后读取线上首页，确认标题、`og:image`、JSON-LD 和正文已是新版本；新版本可能需要几十秒才在边缘节点生效。
