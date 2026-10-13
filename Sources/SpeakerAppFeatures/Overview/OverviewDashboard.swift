@@ -27,6 +27,13 @@ package struct OverviewDashboardState: Equatable, Sendable {
         self.referenceDate = referenceDate
         self.isLoaded = isLoaded
     }
+
+    /// Whether the hero invites a first sentence. An empty summary before the
+    /// first read is not a first use, and a setup banner already says what
+    /// to do first.
+    package func showsFirstUseHint(setupGap: VoiceInputSetupGap?) -> Bool {
+        isLoaded && summary.totalSessionCount == 0 && setupGap == nil
+    }
 }
 
 /// The complete overview presentation surface. App composition supplies one
@@ -60,7 +67,7 @@ package struct OverviewDashboard: View {
                 summary: summary,
                 now: now,
                 isLoaded: state.isLoaded,
-                showsFirstUseHint: setupGap == nil,
+                showsFirstUseHint: state.showsFirstUseHint(setupGap: setupGap),
                 reduceMotion: reduceMotion
             )
             OverviewMetrics(summary: summary, now: now)
@@ -80,7 +87,6 @@ private struct OverviewHero: View {
     let summary: VoiceInputUsageSummary
     let now: Date
     let isLoaded: Bool
-    /// The banner already says what to do first; the hint would contradict it.
     let showsFirstUseHint: Bool
     let reduceMotion: Bool
     @ScaledMetric(relativeTo: .largeTitle)
@@ -139,7 +145,7 @@ private struct OverviewHero: View {
             }
             .padding(.top, 14)
 
-            if summary.totalSessionCount == 0, showsFirstUseHint {
+            if showsFirstUseHint {
                 Text("按住快捷键，说出第一句话。")
                     .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
@@ -338,7 +344,6 @@ private enum HeatmapMetrics {
     static let gap = ContributionHeatmapLayout.gap
     static let corner: CGFloat = 3
     static let monthAxisHeight: CGFloat = 12
-    static let legendSwatch: CGFloat = 10
 }
 
 private struct ContributionHeatmapGrid: View {

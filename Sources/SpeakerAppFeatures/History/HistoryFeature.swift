@@ -68,11 +68,25 @@ package final class HistoryModel: ObservableObject {
         notice = status.notice.map(SpeakerCopy.History.pageNotice)
     }
 
+    /// Which of a record's texts to copy.
+    package enum CopiedText: Sendable {
+        /// The text Speaker delivered or kept.
+        case result
+        /// The recognition result before refinement.
+        case recognition
+    }
+
     @discardableResult
-    package func copy(_ record: VoiceInputHistoryRecord) async -> Bool {
-        guard activeOperation == nil,
-            let text = HistoryPresentation.retainedText(for: record)
-        else { return false }
+    package func copy(
+        _ record: VoiceInputHistoryRecord,
+        _ part: CopiedText = .result
+    ) async -> Bool {
+        let text =
+            switch part {
+            case .result: HistoryPresentation.retainedText(for: record)
+            case .recognition: HistoryPresentation.recognitionText(for: record)
+            }
+        guard activeOperation == nil, let text else { return false }
         activeOperation = .copying(record.sessionID)
         defer { activeOperation = nil }
         guard await clipboard.copy(text) else {
@@ -170,6 +184,9 @@ package struct HistoryView: View {
                 clear: { Task { _ = await model.clear() } },
                 copy: { record in
                     Task { _ = await model.copy(record) }
+                },
+                copyRecognition: { record in
+                    Task { _ = await model.copy(record, .recognition) }
                 },
                 delete: { id in
                     Task { _ = await model.delete(id) }

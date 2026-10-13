@@ -88,17 +88,20 @@ package struct HistoryDashboardActions {
     package let refresh: () -> Void
     package let clear: () -> Void
     package let copy: (VoiceInputHistoryRecord) -> Void
+    package let copyRecognition: (VoiceInputHistoryRecord) -> Void
     package let delete: (VoiceInputSessionID) -> Void
 
     package init(
         refresh: @escaping () -> Void,
         clear: @escaping () -> Void,
         copy: @escaping (VoiceInputHistoryRecord) -> Void,
+        copyRecognition: @escaping (VoiceInputHistoryRecord) -> Void = { _ in },
         delete: @escaping (VoiceInputSessionID) -> Void
     ) {
         self.refresh = refresh
         self.clear = clear
         self.copy = copy
+        self.copyRecognition = copyRecognition
         self.delete = delete
     }
 }
@@ -303,6 +306,7 @@ package struct HistoryDashboard: View {
             isBusy: state.isBusy,
             reduceMotion: reduceMotion,
             copy: { actions.copy(record) },
+            copyRecognition: { actions.copyRecognition(record) },
             toggleDetails: {
                 withAnimation(reduceMotion ? nil : SpeakerMotion.change) {
                     expandedRecordID =
@@ -372,6 +376,7 @@ private struct HistoryRecordRow: View {
     let isBusy: Bool
     let reduceMotion: Bool
     let copy: () -> Void
+    let copyRecognition: () -> Void
     let toggleDetails: () -> Void
     let delete: () -> Void
     @State private var pointerIsInside = false
@@ -485,6 +490,9 @@ private struct HistoryRecordRow: View {
         .contextMenu {
             if presentation.canCopy {
                 Button("复制", action: copy).disabled(isBusy)
+            }
+            if HistoryPresentation.recognitionText(for: record) != nil {
+                Button("复制整理前的识别结果", action: copyRecognition).disabled(isBusy)
             }
             Button("删除…", role: .destructive) { confirmsDelete = true }
                 .disabled(isBusy)
