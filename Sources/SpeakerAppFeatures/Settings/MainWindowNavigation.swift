@@ -12,7 +12,7 @@ package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
     package static let overviewTitle = "概览"
     package static let historyTitle = "历史"
     package static let settingsTitle = "设置"
-    package static let dictionaryTitle = "词典"
+    package static let dictionaryTitle = "词库"
     package static let aboutTitle = "关于"
 
     package var title: String {
