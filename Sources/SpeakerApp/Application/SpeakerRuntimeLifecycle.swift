@@ -151,6 +151,9 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
 
     func loadRefinement() async {
         await recognition.load()
+        // Reads only whether a Doubao Key exists, so the menu bar and
+        // Overview can report a missing one before Settings is opened.
+        await doubao.refresh()
         await refinement.load()
     }
 

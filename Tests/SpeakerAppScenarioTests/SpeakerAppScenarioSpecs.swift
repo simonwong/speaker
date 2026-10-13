@@ -2965,22 +2965,18 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.notice != nil)
         }
 
-        run("recording takes priority over the menu bar permission warning", failures: &failures) {
+        run("recording takes priority over the menu bar setup warning", failures: &failures) {
             let activity = VoiceInputActivity.recording(VoiceInputSessionID())
-            let permissions = PermissionSnapshot(
-                accessibility: .denied,
-                microphone: .denied
-            )
 
             try expect(
                 MenuBarPresentation.iconState(
                     isRecording: activity.isRecording,
-                    permissions: permissions
+                    setupGap: .permissions
                 ) == .recording
             )
         }
 
-        run("menu bar reflects permission state outside recording", failures: &failures) {
+        run("menu bar reflects setup gaps outside recording", failures: &failures) {
             let granted = PermissionSnapshot(
                 accessibility: .granted,
                 microphone: .granted
@@ -2993,15 +2989,98 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 MenuBarPresentation.iconState(
                     isRecording: false,
-                    permissions: granted
+                    setupGap: VoiceInputSetupGap.resolve(
+                        permissions: granted, recognitionProvider: .doubao,
+                        hasRecognitionKey: true)
                 ) == .ready
             )
             try expect(
                 MenuBarPresentation.iconState(
                     isRecording: false,
-                    permissions: missing
-                ) == .needsPermission
+                    setupGap: VoiceInputSetupGap.resolve(
+                        permissions: missing, recognitionProvider: .doubao,
+                        hasRecognitionKey: true)
+                ) == .needsSetup
             )
+            try expect(
+                MenuBarPresentation.iconState(
+                    isRecording: false,
+                    setupGap: VoiceInputSetupGap.resolve(
+                        permissions: granted, recognitionProvider: .openAI,
+                        hasRecognitionKey: false)
+                ) == .needsSetup
+            )
+        }
+
+        run(
+            "setup gap puts permissions first and waits until the Key has been read",
+            failures: &failures
+        ) {
+            let granted = PermissionSnapshot(accessibility: .granted, microphone: .granted)
+            let missing = PermissionSnapshot(accessibility: .denied, microphone: .granted)
+
+            try expect(
+                VoiceInputSetupGap.resolve(
+                    permissions: granted, recognitionProvider: .qwen, hasRecognitionKey: nil)
+                    == nil,
+                "an unread Key was reported missing")
+            try expect(
+                VoiceInputSetupGap.resolve(
+                    permissions: granted, recognitionProvider: .qwen, hasRecognitionKey: false)
+                    == .speechRecognitionKey(.qwen))
+            try expect(
+                VoiceInputSetupGap.resolve(
+                    permissions: missing, recognitionProvider: .qwen, hasRecognitionKey: false)
+                    == .permissions)
+            try expect(
+                VoiceInputSetupGap.resolve(
+                    permissions: granted, recognitionProvider: .qwen, hasRecognitionKey: true)
+                    == nil)
+            try expect(VoiceInputSetupGap.permissions.settingsGroup == .permissions)
+            try expect(
+                VoiceInputSetupGap.speechRecognitionKey(.doubao).settingsGroup
+                    == .speechRecognition)
+            try expect(
+                VoiceInputSetupGap.speechRecognitionKey(.doubao).message.contains("豆包语音"))
+        }
+
+        await runAsync(
+            "setup gap follows the selected provider's Key from launch to save",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "setup-gap-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settings = VersionedLocalAppSettingsStore(
+                fileURL: directory.appendingPathComponent("settings.json"))
+            let credentials = ScenarioProviderCredentialStore()
+            let doubao = DoubaoSettingsModel(
+                service: ScenarioDoubaoSettingsService(hasKey: false), settingsStore: settings)
+            let recognition = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: settings)
+            let granted = PermissionSnapshot(accessibility: .granted, microphone: .granted)
+            @MainActor func gap() -> VoiceInputSetupGap? {
+                VoiceInputSetupGap.current(
+                    permissions: granted, doubao: doubao, recognition: recognition)
+            }
+
+            try expect(gap() == nil, "a gap was reported before anything was read")
+            await recognition.load()
+            try expect(gap() == nil, "Doubao's Key was reported missing before it was read")
+            await doubao.refresh()
+            try expect(gap() == .speechRecognitionKey(.doubao))
+            doubao.apiKeyDraft = "synthetic-doubao-key"
+            await doubao.save()
+            try expect(gap() == nil, "a saved but unchecked Doubao Key still reported a gap")
+
+            await recognition.selectProvider(.openAI)
+            try expect(gap() == .speechRecognitionKey(.openAI))
+            recognition.apiKeyDraft = "synthetic-openai-key"
+            await recognition.saveAPIKey()
+            try expect(gap() == nil)
+            await recognition.shutdown()
+            await doubao.shutdown()
         }
 
         run("processing is not presented as active recording in the menu bar", failures: &failures)
@@ -3019,7 +3098,9 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 MenuBarPresentation.iconState(
                     isRecording: activity.isRecording,
-                    permissions: granted
+                    setupGap: VoiceInputSetupGap.resolve(
+                        permissions: granted, recognitionProvider: .doubao,
+                        hasRecognitionKey: true)
                 ) == .ready
             )
         }
@@ -3393,6 +3474,24 @@ struct SpeakerAppScenarioSpecs {
                     .quit,
                 ]
             )
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: idle,
+                    setupGap: .speechRecognitionKey(.doubao),
+                    workspaceRoute: .normal
+                ) == [
+                    .completeSetup,
+                    .divider,
+                    .openSpeaker,
+                    .refinementMode,
+                    .microphone,
+                    .divider,
+                    .settings,
+                    .onboarding,
+                    .divider,
+                    .quit,
+                ]
+            )
             let dataErasureRows: [MenuBarRow] = [
                 .dataErasureStatus,
                 .dataErasureRecovery,
@@ -3402,6 +3501,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 MenuBarPresentation.rows(
                     voice: idle,
+                    setupGap: .permissions,
                     workspaceRoute: .erasing
                 ) == dataErasureRows
             )

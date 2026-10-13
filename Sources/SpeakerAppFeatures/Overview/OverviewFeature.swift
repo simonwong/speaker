@@ -49,18 +49,44 @@ package final class OverviewModel: ObservableObject {
 
 package struct OverviewView: View {
     @ObservedObject var model: OverviewModel
+    @ObservedObject private var permissions: PermissionModel
+    @ObservedObject private var doubao: DoubaoSettingsModel
+    @ObservedObject private var recognition: SpeechRecognitionSettingsModel
+    private let openSetup: (VoiceInputSetupGap) -> Void
 
-    package init(model: OverviewModel) {
+    /// `openSettingsTab` switches the main window to Settings; the Settings
+    /// page then scrolls to the group the gap names.
+    package init(
+        model: OverviewModel,
+        workspace: SettingsWorkspace,
+        openSettingsTab: @escaping () -> Void
+    ) {
         self.model = model
+        permissions = workspace.permissions
+        doubao = workspace.doubao
+        recognition = workspace.recognition
+        let navigation = workspace.navigation
+        openSetup = { gap in
+            navigation.open(gap.settingsGroup)
+            openSettingsTab()
+        }
     }
 
     package var body: some View {
-        OverviewDashboard(state: model.dashboardState)
-            .task { await model.refresh() }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .speakerHistoryDidChange)
-            ) { _ in
-                Task { await model.refresh() }
-            }
+        OverviewDashboard(
+            state: model.dashboardState,
+            setupGap: VoiceInputSetupGap.current(
+                permissions: permissions.snapshot,
+                doubao: doubao,
+                recognition: recognition
+            ),
+            openSetup: openSetup
+        )
+        .task { await model.refresh() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .speakerHistoryDidChange)
+        ) { _ in
+            Task { await model.refresh() }
+        }
     }
 }

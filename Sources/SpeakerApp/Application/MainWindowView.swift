@@ -15,7 +15,12 @@ struct MainWindowView: View {
             case .normal:
                 MainWindowTabs(selection: $mainWindow.selection) { tab in
                     switch tab {
-                    case .overview: OverviewView(model: overview)
+                    case .overview:
+                        OverviewView(
+                            model: overview,
+                            workspace: settingsWorkspace,
+                            openSettingsTab: { mainWindow.select(.settings) }
+                        )
                     case .history: HistoryView(model: history)
                     case .dictionary: DictionaryTabView(model: dictionary)
                     case .settings: SettingsView(workspace: settingsWorkspace)

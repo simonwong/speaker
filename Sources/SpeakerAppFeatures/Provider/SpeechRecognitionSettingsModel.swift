@@ -35,6 +35,9 @@ extension SpeechRecognitionMethod {
 package final class SpeechRecognitionSettingsModel: ObservableObject {
     @Published package private(set) var providers = SpeechRecognitionProviderSettings()
     @Published package private(set) var hasStoredKey = false
+    /// Whether the selected profile and its credential have been read once,
+    /// so `hasStoredKey == false` means a missing Key rather than "unread".
+    @Published package private(set) var hasLoaded = false
     @Published package private(set) var isUpdatingProvider = false
     @Published package private(set) var isUpdatingKey = false
     @Published package private(set) var notice: String?
@@ -88,9 +91,12 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
         } catch {
             guard token == generation, !isShutdown else { return }
             notice = SpeakerCopy.Failure.message(for: error)
+            hasLoaded = true
             return
         }
         await readCredential(token: token, profile: selectedProfile)
+        guard token == generation, !isShutdown else { return }
+        hasLoaded = true
     }
 
     package func refresh() async {
