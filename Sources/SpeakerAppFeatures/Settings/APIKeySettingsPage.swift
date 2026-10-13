@@ -30,7 +30,7 @@ struct DoubaoRecognitionSettings: View {
                     action: model.checkConnection
                 ) : nil,
             links: [.doubaoGuide, .console(for: .doubao, region: .beijing)],
-            deletionMessage: "删除后将无法进行新的语音转录，历史记录不会受影响。",
+            deletionMessage: "删除后将无法进行新的语音识别，历史记录不会受影响。",
             save: { await model.save() },
             delete: { await model.delete() }
         )
@@ -184,7 +184,7 @@ package struct RefinementProviderSettingsCard: View {
                 SettingsNotice(text: connectionFailure, color: .red)
             }
 
-            Text("默认顺滑不使用整理服务")
+            Text("默认顺滑不使用文字整理服务")
                 .font(SpeakerTypography.footnote)
                 .foregroundStyle(.secondary)
         }

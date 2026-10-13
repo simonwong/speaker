@@ -24,7 +24,7 @@ package enum HistoryRecordProblem: Equatable, Sendable {
 
     package var label: String {
         switch self {
-        case .refinementFailed: "整理失败，已保留转录"
+        case .refinementFailed: "整理失败，已使用识别结果"
         case .failed(let failure): failure.userTitle
         }
     }
