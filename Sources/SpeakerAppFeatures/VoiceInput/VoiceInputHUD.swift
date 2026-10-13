@@ -85,6 +85,8 @@ package struct VoiceInputHUD: View {
                 dismiss: { _ = performAction(dismissAction) },
                 hold: holdProblem
             )
+        case .notice(let title):
+            NoticeStrip(title: title, palette: palette)
         case .hidden, .recording, .processing:
             Color.clear
         }
@@ -99,7 +101,9 @@ package struct VoiceInputHUD: View {
 private struct ActivityPillModel: Equatable {
     enum Phase: Equatable {
         case recording(peakPower: Float?, remainingSeconds: Int?)
-        case processing
+        /// Refinement waits on a second provider after recognition; the
+        /// waveform takes the gold tone so the two waits read apart.
+        case processing(refining: Bool)
     }
 
     /// The hover-revealed control on the right: ending recording, or
@@ -136,7 +140,7 @@ private struct ActivityPillModel: Equatable {
                 accessibilityHint: "保留本次录音并开始转成文字"
             )
         case .processing(let title, let cancelAction, let useRecognitionAction):
-            phase = .processing
+            phase = .processing(refining: useRecognitionAction != nil)
             layout = .processing
             accessibilityTitle = title
             cancelHint = "停止当前处理并忽略迟到结果"
@@ -150,13 +154,13 @@ private struct ActivityPillModel: Equatable {
                     accessibilityHint: "跳过文字整理，把已识别的文字输入到原来的位置"
                 )
             }
-        case .hidden, .pendingCopy, .problem:
+        case .hidden, .pendingCopy, .problem, .notice:
             return nil
         }
     }
 
     var isProcessing: Bool {
-        phase == .processing
+        if case .processing = phase { true } else { false }
     }
 
     /// Seconds left before the recording limit ends recording, during the
@@ -353,7 +357,7 @@ private struct ActivityWaveform: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        if phase == .processing, !reduceMotion {
+        if case .processing = phase, !reduceMotion {
             TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
                 bars(at: timeline.date.timeIntervalSinceReferenceDate)
             }
@@ -388,7 +392,16 @@ private struct ActivityWaveform: View {
                 startPoint: .bottom,
                 endPoint: .top
             )
-        case .processing:
+        case .processing(refining: true):
+            LinearGradient(
+                colors: [
+                    refiningGold.opacity(0.45),
+                    refiningGold.opacity(0.95),
+                ],
+                startPoint: .bottom,
+                endPoint: .top
+            )
+        case .processing(refining: false):
             LinearGradient(
                 colors: [
                     Color.primary.opacity(0.32),
@@ -398,6 +411,11 @@ private struct ActivityWaveform: View {
                 endPoint: .top
             )
         }
+    }
+
+    /// The deeper gold keeps contrast on the light HUD glass.
+    private var refiningGold: Color {
+        colorScheme == .dark ? SpeakerVisualIdentity.warmGold : SpeakerVisualIdentity.warmGoldDeep
     }
 
     private func barHeight(index: Int, time: TimeInterval) -> Double {
@@ -651,6 +669,44 @@ private struct PendingCopyStrip: View {
                 isHovered = hovered
             }
         }
+    }
+}
+
+/// The short note after a delivery, such as refinement falling back to the
+/// recognition result. It has no controls: the experience closes it after a
+/// moment, and the next press replaces it.
+private struct NoticeStrip: View {
+    let title: String
+    let palette: VoiceInputHUDContrastPalette
+
+    private var contentSize: CGSize {
+        VoiceInputPanelLayout.notice(
+            width: VoiceInputPanelLayout.noticeWidth(title: title)
+        ).contentSize
+    }
+
+    var body: some View {
+        ActivityHUDSurface(
+            width: contentSize.width,
+            height: contentSize.height,
+            palette: palette
+        ) {
+            HStack(spacing: 9) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.callout)
+                    .foregroundStyle(.primary.opacity(0.9))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 14)
+        }
+        .hudShadow()
+        .padding(VoiceInputPanelLayout.contentInset)
     }
 }
 

@@ -4246,6 +4246,47 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
+            "refinement fallback shows a short HUD notice after delivery", failures: &failures
+        ) {
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                ),
+                textProcessor: refinementFallbackProcessor(),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let experience = VoiceInputExperience(
+                sessions: sessions,
+                noticeDuration: .milliseconds(200),
+                announce: { _ in }
+            )
+            experience.start()
+
+            experience.shortcutTarget.receive(.pressed)
+            _ = await waitUntil { experience.state.isRecording }
+            experience.shortcutTarget.receive(.released)
+            experience.shortcutTarget.receive(.pressed)
+            experience.shortcutTarget.receive(.released)
+            let noticed = await waitUntil {
+                experience.state.overlay
+                    == .notice(title: VoiceInputNotice.refinementFallbackHUDTitle)
+            }
+            let closed = await waitUntil { experience.state.overlay == .hidden }
+            let menuNotice = experience.state.menu.notice
+            await experience.shutdown()
+
+            try expect(noticed, "the fallback was delivered without a HUD notice")
+            try expect(closed, "the notice stayed on screen")
+            try expect(
+                menuNotice == VoiceInputNotice.refinementNetworkFallbackMessage,
+                "the menu lost the full fallback sentence"
+            )
+        }
+
+        await runAsync(
             "history failure announces only the newly reported problem", failures: &failures
         ) {
             let announcements = AnnouncementRecorder()

@@ -32,7 +32,7 @@ private struct VoiceInputPanelTransitionState: Sendable {
             switch presentedLayout {
             case .recording, .processing:
                 !reduceMotion
-            case .pendingCopy, .problem, .none:
+            case .pendingCopy, .problem, .notice, .none:
                 false
             }
         presentedLayout = nil

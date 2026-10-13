@@ -13,6 +13,7 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
     /// which the text truncates.
     case pendingCopy(width: CGFloat)
     case problem(width: CGFloat)
+    case notice(width: CGFloat)
 
     /// Transparent room the panel keeps around the strip so the drop shadow
     /// and the reveal animation are never clipped by the window edge.
@@ -35,6 +36,8 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
             )
         case .problem(_, let title, _, _, _):
             self = .problem(width: Self.problemWidth(title: title))
+        case .notice(let title):
+            self = .notice(width: Self.noticeWidth(title: title))
         }
     }
 
@@ -45,7 +48,7 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
         switch self {
         case .processing, .recording:
             CGSize(width: 104, height: Self.stripHeight)
-        case .pendingCopy(let width), .problem(let width):
+        case .pendingCopy(let width), .problem(let width), .notice(let width):
             CGSize(width: width, height: Self.stripHeight)
         }
     }
@@ -53,6 +56,16 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
     /// Icon, title and close control, with the strip's own padding.
     package static func problemWidth(title: String) -> CGFloat {
         let chrome: CGFloat = 14 + 18 + 9 + 9 + 26 + 4
+        return fitted(
+            textWidth(title, style: .callout) + chrome,
+            minimum: 140,
+            maximum: 320
+        )
+    }
+
+    /// Icon and title, with the strip's own padding.
+    package static func noticeWidth(title: String) -> CGFloat {
+        let chrome: CGFloat = 14 + 18 + 9 + 14
         return fitted(
             textWidth(title, style: .callout) + chrome,
             minimum: 140,
