@@ -142,6 +142,19 @@ package enum HistoryPresentation {
         SessionHistoryRecordPolicy.retainedText(record)
     }
 
+    /// The recognition result before refinement, offered only when the record
+    /// may keep text and refinement actually changed it.
+    package static func recognitionText(
+        for record: VoiceInputHistoryRecord
+    ) -> String? {
+        guard let retained = retainedText(for: record),
+            let transcription = record.transcription,
+            !transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            transcription != retained
+        else { return nil }
+        return transcription
+    }
+
     package static func problem(
         for record: VoiceInputHistoryRecord
     ) -> HistoryRecordProblem? {

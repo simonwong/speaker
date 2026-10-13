@@ -35,6 +35,7 @@ If Speaker cannot prove that the original input target is still safe and current
 | Requirement | Details |
 | --- | --- |
 | Operating system | macOS 14 or later, on Apple silicon or Intel |
+| Interface language | Simplified Chinese only |
 | Transcription | Your own Doubao, OpenAI, or Alibaba Qwen API key; Doubao also requires an activated streaming ASR resource |
 | Refinement | An optional DeepSeek, OpenAI, Kimi, GLM, or Custom API key enables non-default Refinement Modes |
 

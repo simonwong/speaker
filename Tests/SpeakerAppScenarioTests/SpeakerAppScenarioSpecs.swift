@@ -2686,6 +2686,20 @@ struct SpeakerAppScenarioSpecs {
             try expect(ProviderKeyLink.doubaoGuide.url.host == ExternalLinks.speakerWebsite.host)
         }
 
+        run(
+            "overview invites a first sentence only after reading an empty history",
+            failures: &failures
+        ) {
+            let empty = OverviewDashboardState(
+                summary: .empty, referenceDate: Date(), isLoaded: false)
+            try expect(
+                !empty.showsFirstUseHint(setupGap: nil), "the hint flashed before history was read")
+            let loaded = OverviewDashboardState(
+                summary: .empty, referenceDate: Date(), isLoaded: true)
+            try expect(loaded.showsFirstUseHint(setupGap: nil))
+            try expect(!loaded.showsFirstUseHint(setupGap: .permissions))
+        }
+
         run("only the default Doubao resource is marked recommended", failures: &failures) {
             let recommended = DoubaoStreamingResource.allCases.filter {
                 DoubaoResourcePresentation.title(for: $0).hasSuffix("（推荐）")
@@ -3527,6 +3541,60 @@ struct SpeakerAppScenarioSpecs {
             let copiedAfterDelete = await clipboard.copiedTexts
             try expect(!copiedDeleted && copiedAfterDelete == [longText])
             try expect(model.items.map(\.id) == [todayID])
+        }
+
+        await runAsync(
+            "history copies the recognition result only when refinement changed it",
+            failures: &failures
+        ) {
+            let refinedID = VoiceInputSessionID()
+            let refined = VoiceInputHistoryRecord(
+                sessionID: refinedID,
+                startedAt: Date(),
+                applicationName: "备忘录",
+                transcription: "嗯那个明天开会",
+                finalText: "明天开会。",
+                outcome: .delivered(refinedID, applicationName: "备忘录", text: "明天开会。")
+            )
+            let unchangedID = VoiceInputSessionID()
+            let unchanged = VoiceInputHistoryRecord(
+                sessionID: unchangedID,
+                startedAt: Date(),
+                applicationName: "备忘录",
+                transcription: "明天开会。",
+                finalText: "明天开会。",
+                outcome: .delivered(unchangedID, applicationName: "备忘录", text: "明天开会。")
+            )
+            let secureID = VoiceInputSessionID()
+            let secure = VoiceInputHistoryRecord(
+                sessionID: secureID,
+                startedAt: Date(),
+                applicationName: nil,
+                transcription: nil,
+                finalText: nil,
+                outcome: .pendingCopy(secureID, text: "", reason: .secureTarget)
+            )
+            try expect(HistoryPresentation.recognitionText(for: refined) == "嗯那个明天开会")
+            try expect(HistoryPresentation.recognitionText(for: unchanged) == nil)
+            try expect(HistoryPresentation.recognitionText(for: secure) == nil)
+
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-history-copy-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let clipboard = ClipboardFake()
+            let model = HistoryModel(
+                store: SQLiteSessionHistory(
+                    fileURL: directory.appendingPathComponent("history.sqlite3")),
+                clipboard: clipboard,
+                announce: { _ in }
+            )
+            let copiedRecognition = await model.copy(refined, .recognition)
+            let copiedResult = await model.copy(refined)
+            let copiedUnchanged = await model.copy(unchanged, .recognition)
+            let copied = await clipboard.copiedTexts
+            try expect(copiedRecognition && copiedResult && !copiedUnchanged)
+            try expect(copied == ["嗯那个明天开会", "明天开会。"], "\(copied.count) copies")
         }
 
         run(
