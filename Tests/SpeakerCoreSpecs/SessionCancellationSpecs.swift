@@ -383,13 +383,14 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let audio = StreamingAudioCaptureFake()
+            let history = SessionHistoryFake()
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
                 textProcessor: EarlyFailingStreamingProcessor(),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
-                history: SessionHistoryFake()
+                history: history
             )
             let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
             let presentations = await sessions.observe()
@@ -400,6 +401,15 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 from: presentations,
                 before: .seconds(2)
             )
+            // The failure is published before recorder cleanup and the history
+            // write, and a press during that cleanup is rejected by design. The
+            // record is queued in the same actor turn that returns to idle, so
+            // one more call into the session actor waits out the rest of it.
+            let settled = await eventually(before: .seconds(2)) {
+                await history.records.count == 1
+            }
+            try expect(settled, "the failed recording never settled")
+            _ = await sessions.isActive(triggerSequence: 0)
 
             // The first press after the failure must start a new session; it
             // must not be consumed as the stale latch's stop gesture.
