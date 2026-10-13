@@ -12,6 +12,10 @@ struct ShortcutSettingsPage: View {
         SettingsCard {
             recorderRow
 
+            if shortcut.preference == .functionKey {
+                FunctionKeyConflictHint()
+            }
+
             if shortcutRecorder.isRecording,
                 let notice = shortcutRecorder.notice
             {

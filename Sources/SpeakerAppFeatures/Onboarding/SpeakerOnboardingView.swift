@@ -8,6 +8,8 @@ package struct SpeakerOnboardingView: View {
     @ObservedObject var recognition: SpeechRecognitionSettingsModel
     @State private var step: OnboardingStep = .permissions
     @State private var movesForward = true
+    /// Practice text typed by a first dictation; it lives only in this view.
+    @State private var practiceText = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let completion: () -> Void
     let requestPermission: (PermissionKind) async -> Void
@@ -197,6 +199,9 @@ package struct SpeakerOnboardingView: View {
                     Spacer()
                     ShortcutKeycap(name: shortcutName())
                 }
+                if shortcutName() == VoiceShortcutPreference.functionKey.displayName {
+                    FunctionKeyConflictHint()
+                }
                 tutorialRow(
                     icon: "hand.tap", title: "短按键盘快捷键", detail: "按一下 \(shortcutName()) 开始录音，再按一下结束。"
                 )
@@ -204,10 +209,7 @@ package struct SpeakerOnboardingView: View {
                     icon: "hand.point.up.left", title: "长按键盘快捷键",
                     detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
                 tutorialRow(icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
-                Text("打开输入框后使用快捷键，文字将输入到结束录音时所在的输入框。")
-                    .font(SpeakerTypography.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                practiceField
             }
             .speakerCard()
         }
@@ -248,6 +250,27 @@ package struct SpeakerOnboardingView: View {
             }
         }
         .speakerCard()
+    }
+
+    /// A real Input Target inside onboarding, so the first dictation shows
+    /// text arriving without leaving setup. Nothing typed here is kept.
+    private var practiceField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("试一试")
+                .font(SpeakerTypography.bodyEmphasis)
+            TextField(
+                "点这里，再用 \(shortcutName()) 说一句话",
+                text: $practiceText,
+                axis: .vertical
+            )
+            .lineLimit(1...3)
+            .textFieldStyle(SettingsTextFieldStyle())
+            .accessibilityLabel("练习输入框")
+            Text("文字会输入到结束录音时所在的输入框。看到文字出现在这里，就可以在任何 App 里这样用了。")
+                .font(SpeakerTypography.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func tutorialRow(icon: String, title: String, detail: String) -> some View {
