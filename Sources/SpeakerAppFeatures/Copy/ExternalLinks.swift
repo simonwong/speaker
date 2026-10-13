@@ -20,6 +20,17 @@ package enum ExternalLinks {
         "https://github.com/simonwong/speaker/issues"
     )
 
+    /// The GitHub release page for a version; releases are tagged `v<version>`.
+    /// A version outside the tag alphabet has no page.
+    package static func releaseNotes(for version: String) -> URL? {
+        let allowed = CharacterSet(
+            charactersIn: "0123456789.-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        guard !version.isEmpty,
+            version.unicodeScalars.allSatisfy(allowed.contains)
+        else { return nil }
+        return URL(string: "https://github.com/simonwong/speaker/releases/tag/v\(version)")
+    }
+
     /// The author's GitHub profile shown by the About page.
     package static let authorProfile = absolute(
         "https://github.com/simonwong"

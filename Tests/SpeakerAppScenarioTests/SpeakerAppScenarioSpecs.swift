@@ -2700,6 +2700,55 @@ struct SpeakerAppScenarioSpecs {
             try expect(!loaded.showsFirstUseHint(setupGap: .permissions))
         }
 
+        run(
+            "overview offers release notes once after an update, never after a fresh install",
+            failures: &failures
+        ) {
+            try expect(
+                WhatsNewModel.pendingVersion(
+                    current: "0.9.0", lastSeen: nil, hasCompletedSetup: false) == nil)
+            try expect(
+                WhatsNewModel.pendingVersion(
+                    current: "0.9.0", lastSeen: nil, hasCompletedSetup: true) == "0.9.0")
+            try expect(
+                WhatsNewModel.pendingVersion(
+                    current: "0.10.0", lastSeen: "0.9.0", hasCompletedSetup: true) == "0.10.0")
+            try expect(
+                WhatsNewModel.pendingVersion(
+                    current: "0.9.0", lastSeen: "0.9.0", hasCompletedSetup: true) == nil)
+            try expect(
+                WhatsNewModel.pendingVersion(
+                    current: "0.8.0", lastSeen: "0.9.0", hasCompletedSetup: true) == nil)
+            try expect(
+                ExternalLinks.releaseNotes(for: "0.9.0")?.absoluteString
+                    == "https://github.com/simonwong/speaker/releases/tag/v0.9.0")
+            try expect(ExternalLinks.releaseNotes(for: "0.9 /x") == nil)
+
+            let suiteName = "speaker-whats-new-spec-\(UUID().uuidString)"
+            guard let defaults = UserDefaults(suiteName: suiteName) else {
+                throw SpecFailure(message: "could not create isolated defaults")
+            }
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            var opened: [URL] = []
+            let fresh = WhatsNewModel(
+                preferences: defaults, currentVersion: "0.9.0", hasCompletedSetup: false,
+                openURL: { opened.append($0) })
+            try expect(fresh.version == nil)
+            try expect(defaults.string(forKey: WhatsNewModel.lastSeenVersionKey) == "0.9.0")
+
+            let updated = WhatsNewModel(
+                preferences: defaults, currentVersion: "0.10.0", hasCompletedSetup: true,
+                openURL: { opened.append($0) })
+            try expect(updated.version == "0.10.0")
+            updated.open()
+            try expect(updated.version == nil)
+            try expect(opened.map(\.lastPathComponent) == ["v0.10.0"])
+            let relaunched = WhatsNewModel(
+                preferences: defaults, currentVersion: "0.10.0", hasCompletedSetup: true,
+                openURL: { opened.append($0) })
+            try expect(relaunched.version == nil, "seen notes were offered again")
+        }
+
         run("only the default Doubao resource is marked recommended", failures: &failures) {
             let recommended = DoubaoStreamingResource.allCases.filter {
                 DoubaoResourcePresentation.title(for: $0).hasSuffix("（推荐）")

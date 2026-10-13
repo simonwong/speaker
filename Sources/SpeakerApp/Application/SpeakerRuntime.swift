@@ -17,6 +17,7 @@ final class SpeakerRuntime: ObservableObject {
     let recentResults: MenuBarRecentResultsModel
     let historyRetention: HistoryRetentionSettingsModel
     let overviewModel: OverviewModel
+    let whatsNew: WhatsNewModel
     let mainWindow = MainWindowModel()
     let loginItemSettings: LoginItemSettingsModel
     let settingsNavigation: SettingsNavigationModel
@@ -193,6 +194,14 @@ final class SpeakerRuntime: ObservableObject {
             announce: announce
         )
         overviewModel = OverviewModel(store: history)
+        whatsNew = WhatsNewModel(
+            preferences: dependencies.preferences,
+            currentVersion: bundle.buildInfo.shortVersion,
+            hasCompletedSetup: dependencies.preferences.bool(
+                forKey: OnboardingPresenter.completionKey
+            ),
+            openURL: dependencies.workspace.openURL
+        )
         let loginItemSettings = LoginItemSettingsModel(
             service: dependencies.loginItemService,
             settingsStore: settingsStore

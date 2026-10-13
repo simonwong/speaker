@@ -142,7 +142,7 @@ promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 
 公测版和后续版本都使用正式身份，经过签名、公证、provider matrix 和 evidence 门禁，最终发布为 GitHub Latest。App 从 `releases/latest/download/appcast.xml` 检查更新，所以只有 Latest 会推送给用户。当前正式候选在本机用云签名构建：
 
-1. 提交 `Resources/Info.plist` 与 `Resources/ReleaseCandidate.plist` 中的版本和 build，以及 `docs/releases/<version>.md`。工作区必须干净。
+1. 提交 `Resources/Info.plist` 与 `Resources/ReleaseCandidate.plist` 中的版本和 build，以及 `docs/releases/<version>.md`。工作区必须干净。更新后的 App 会在概览顶部提示一次「已更新到 <version>」，按钮打开 `releases/tag/v<version>`，所以 GitHub Release 的 tag 必须是 `v` 加 `CFBundleShortVersionString`，正文写用户能看懂的新功能。
 2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `cn.simonwong.speaker.provider-api-keys` 中。记录当前 UTC 时间，再运行付费 matrix：
 
 ```bash
