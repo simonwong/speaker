@@ -112,12 +112,19 @@ public struct FailingVoiceTextProcessor: VoiceTextProcessing {
 
 /// A text-processing double that reports one stage and then stays in Waiting For Result
 /// until it is cancelled, counting the cancellations it observed.
+/// Reporting `.refining` with `confirmedText` models refinement pending after
+/// recognition was confirmed.
 public actor HangingVoiceTextProcessor: VoiceTextProcessing {
     public let reportedStage: VoiceInputProcessingStage
+    public let confirmedText: String?
     public private(set) var cancellationCount = 0
 
-    public init(reportedStage: VoiceInputProcessingStage = .transcribing) {
+    public init(
+        reportedStage: VoiceInputProcessingStage = .transcribing,
+        confirmedText: String? = nil
+    ) {
         self.reportedStage = reportedStage
+        self.confirmedText = confirmedText
     }
 
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
@@ -127,7 +134,13 @@ public actor HangingVoiceTextProcessor: VoiceTextProcessing {
         snapshot: VoiceTextProcessingSnapshot,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
-        await progress(.init(stage: reportedStage))
+        await progress(
+            .init(
+                stage: reportedStage,
+                confirmedDoubaoResult: confirmedText.map {
+                    TranscriptionResult(text: $0, providerRequestID: nil)
+                }
+            ))
         do {
             try await Task.sleep(for: .seconds(3_600))
         } catch is CancellationError {

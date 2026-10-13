@@ -214,6 +214,8 @@ public enum TextRefinementStatus: String, Equatable, Sendable {
     case notRequested
     case succeeded
     case fellBack
+    /// The user took the confirmed recognition Stage Result before refinement finished.
+    case skipped
 }
 
 public struct TextRefinementOutcome: Equatable, Sendable {

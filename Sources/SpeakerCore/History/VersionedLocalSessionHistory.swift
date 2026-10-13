@@ -19,6 +19,7 @@ public protocol LocalSessionHistoryStoring: SessionHistoryRecording {
         now: Date
     ) async -> Bool
     func usageStatistics() async -> VoiceInputUsageSummary
+    func recentRecordsWithText(limit: Int) async -> [VoiceInputHistoryRecord]
 }
 
 extension LocalSessionHistoryStoring {
@@ -33,6 +34,18 @@ extension LocalSessionHistoryStoring {
     /// table into memory.
     public func usageStatistics() async -> VoiceInputUsageSummary {
         VoiceInputUsageStatistics.summarize(await allRecords())
+    }
+
+    /// The newest records that still hold retained text, newest first.
+    ///
+    /// The default implementation filters `allRecords()`; a database-backed
+    /// store should stop reading once it has `limit` records.
+    public func recentRecordsWithText(limit: Int) async -> [VoiceInputHistoryRecord] {
+        Array(
+            await allRecords()
+                .filter(SessionHistoryRecordPolicy.hasRetainedContent)
+                .prefix(max(0, limit))
+        )
     }
 }
 

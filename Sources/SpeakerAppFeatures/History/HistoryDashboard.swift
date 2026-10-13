@@ -423,6 +423,13 @@ private struct HistoryRecordRow: View {
                                 .padding(.top, 2)
                                 .help(problem.label)
                                 .accessibilityLabel(problem.label)
+                        } else if let note = presentation.note {
+                            Image(systemName: note.icon)
+                                .font(SpeakerTypography.body)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 2)
+                                .help(note.label)
+                                .accessibilityLabel(note.label)
                         }
                     }
                     .contentShape(Rectangle())
@@ -630,6 +637,10 @@ package struct HistoryExpandedRecord: View {
                     Label(problem.label, systemImage: problem.icon)
                         .font(SpeakerTypography.footnote.weight(.medium))
                         .foregroundStyle(problem.color)
+                } else if let note = presentation.note {
+                    Label(note.label, systemImage: note.icon)
+                        .font(SpeakerTypography.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
                 Text(metadataLine)
                     .font(SpeakerTypography.caption)

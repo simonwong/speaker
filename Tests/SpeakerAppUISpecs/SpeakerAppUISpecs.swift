@@ -782,6 +782,10 @@ struct SpeakerAppUISpecs {
                 expectedLabels: ["取消语音输入"]
             )
             try verifyHUDControls(
+                fixture: .refining,
+                expectedLabels: ["取消语音输入", "直接用识别结果"]
+            )
+            try verifyHUDControls(
                 fixture: .recording,
                 expectedLabels: ["取消语音输入", "结束录音"]
             )
@@ -818,14 +822,18 @@ struct SpeakerAppUISpecs {
                             !buttons[0].frame.intersects(buttons[1].frame),
                             "HUD controls overlap"
                         )
-                        let leftLabel = fixture == .recording ? "取消语音输入" : "关闭待复制文字"
-                        let rightLabel = fixture == .recording ? "结束录音" : "复制"
+                        let (leftLabel, rightLabel) =
+                            switch fixture {
+                            case .recording: ("取消语音输入", "结束录音")
+                            case .refining: ("取消语音输入", "直接用识别结果")
+                            default: ("关闭待复制文字", "复制")
+                            }
                         let left = buttons.first { $0.label == leftLabel }
                         let right = buttons.first { $0.label == rightLabel }
                         try expect(
                             left != nil && right != nil
                                 && left!.frame.maxX <= right!.frame.minX,
-                            "HUD dismissal must be left of completion or copy"
+                            "HUD dismissal must be left of completion, skipping refinement, or copy"
                         )
                     }
                     try expect(!presenter.evidence.isKeyWindow)
@@ -1858,7 +1866,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "history list keeps explicit errors and hides cancelled and empty results",
+            "history list keeps explicit errors and recognized text cancelled late, and hides empty results",
             failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
@@ -1869,6 +1877,7 @@ struct SpeakerAppUISpecs {
                 ))!
             let textID = VoiceInputSessionID()
             let cancelledID = VoiceInputSessionID()
+            let earlyCancelledID = VoiceInputSessionID()
             let secureID = VoiceInputSessionID()
             let recordingLimitID = VoiceInputSessionID()
             let textRecord = makeHistoryRecord(
@@ -1884,8 +1893,17 @@ struct SpeakerAppUISpecs {
                 applicationName: nil,
                 transcription: "取消前已确认的转录",
                 finalText: nil,
-                cancelledAtStage: "transcribing",
+                cancelledAtStage: "deepseek",
                 outcome: .cancelled(cancelledID)
+            )
+            let earlyCancelledRecord = VoiceInputHistoryRecord(
+                sessionID: earlyCancelledID,
+                startedAt: startedAt,
+                applicationName: nil,
+                transcription: nil,
+                finalText: nil,
+                cancelledAtStage: "recording",
+                outcome: .cancelled(earlyCancelledID)
             )
             let secureRecord = VoiceInputHistoryRecord(
                 sessionID: secureID,
@@ -1914,11 +1932,33 @@ struct SpeakerAppUISpecs {
             )
 
             let filtered = HistoryPresentation.filteredRecords(
-                [textRecord, cancelledRecord, secureRecord, recordingLimitRecord],
+                [
+                    textRecord, cancelledRecord, earlyCancelledRecord, secureRecord,
+                    recordingLimitRecord,
+                ],
                 query: ""
             )
 
-            try expect(filtered.map(\.sessionID) == [textID, recordingLimitID])
+            try expect(filtered.map(\.sessionID) == [textID, cancelledID, recordingLimitID])
+            let cancelledRow = HistoryPresentation.row(for: cancelledRecord)
+            try expect(cancelledRow.text == "取消前已确认的转录")
+            try expect(cancelledRow.canCopy)
+            try expect(cancelledRow.problem == nil, "cancellation is not a Session Problem")
+            try expect(cancelledRow.note == .cancelled)
+            try expect(HistoryPresentation.row(for: textRecord).note == nil)
+            let skippedID = VoiceInputSessionID()
+            let skippedRecord = VoiceInputHistoryRecord(
+                sessionID: skippedID,
+                startedAt: startedAt,
+                applicationName: nil,
+                transcription: "识别结果",
+                finalText: "识别结果",
+                refinementStatus: TextRefinementStatus.skipped.rawValue,
+                outcome: .delivered(skippedID, applicationName: "备忘录", text: "识别结果")
+            )
+            let skippedRow = HistoryPresentation.row(for: skippedRecord)
+            try expect(skippedRow.note == .refinementSkipped)
+            try expect(skippedRow.problem == nil)
 
             for failure in [VoiceInputFailure.recordingFailed, .providerAuthenticationFailed] {
                 let id = VoiceInputSessionID()

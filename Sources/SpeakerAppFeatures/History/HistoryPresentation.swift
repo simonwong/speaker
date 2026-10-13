@@ -44,18 +44,42 @@ package enum HistoryRecordProblem: Equatable, Sendable {
     }
 }
 
+/// A quiet fact about how a session ended that is not a Session Problem.
+package enum HistoryRecordNote: Equatable, Sendable {
+    /// Cancelled after recognition was confirmed: the text is kept, never delivered.
+    case cancelled
+    /// The user took the recognition result before refinement finished.
+    case refinementSkipped
+
+    package var label: String {
+        switch self {
+        case .cancelled: "已取消，未输入"
+        case .refinementSkipped: "已跳过整理，用的是识别结果"
+        }
+    }
+
+    package var icon: String {
+        switch self {
+        case .cancelled: "xmark.circle"
+        case .refinementSkipped: "forward.end"
+        }
+    }
+}
+
 package struct HistoryRecordRowPresentation: Equatable, Sendable {
     package let time: String
     package let text: String
     package let previewText: String
     package let canCopy: Bool
     package let problem: HistoryRecordProblem?
+    package let note: HistoryRecordNote?
 
     package init(
         time: String,
         text: String,
         canCopy: Bool,
-        problem: HistoryRecordProblem?
+        problem: HistoryRecordProblem?,
+        note: HistoryRecordNote? = nil
     ) {
         self.time = time
         self.text = text
@@ -69,6 +93,7 @@ package struct HistoryRecordRowPresentation: Equatable, Sendable {
         }
         self.canCopy = canCopy
         self.problem = problem
+        self.note = note
     }
 }
 
@@ -102,11 +127,12 @@ package enum HistoryPresentation {
         }
     }
 
+    /// A cancelled session stays visible only when it kept recognized text;
+    /// cancellation before recognition leaves nothing worth recovering.
     package static func isVisible(
         _ record: VoiceInputHistoryRecord
     ) -> Bool {
-        if case .cancelled = record.outcome { return false }
-        return retainedText(for: record) != nil
+        retainedText(for: record) != nil
             || SessionHistoryRecordPolicy.retainedFailure(record) != nil
     }
 
@@ -145,8 +171,19 @@ package enum HistoryPresentation {
             time: record.startedAt.formatted(timeStyle),
             text: retainedText ?? rowText(for: record),
             canCopy: retainedText != nil,
-            problem: problem(for: record)
+            problem: problem(for: record),
+            note: note(for: record)
         )
+    }
+
+    package static func note(
+        for record: VoiceInputHistoryRecord
+    ) -> HistoryRecordNote? {
+        if case .cancelled = record.outcome { return .cancelled }
+        if record.refinementStatus == TextRefinementStatus.skipped.rawValue {
+            return .refinementSkipped
+        }
+        return nil
     }
 
     private static func rowText(for record: VoiceInputHistoryRecord) -> String {

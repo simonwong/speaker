@@ -30,6 +30,7 @@ struct SpeakerApp: App {
                 permissions: runtime.permissions,
                 doubao: runtime.doubaoSettings,
                 recognition: runtime.recognitionSettings,
+                recentResults: runtime.recentResults,
                 startRuntime: runtime.start,
                 refreshPermissions: runtime.refreshPermissions,
                 openOnboarding: runtime.showOnboarding

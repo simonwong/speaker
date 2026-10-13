@@ -188,6 +188,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         }
     }
 
+    /// Reads rows newest first and stops at `limit` records with retained text,
+    /// so the menu bar never loads the whole table.
+    public func recentRecordsWithText(limit: Int) async -> [VoiceInputHistoryRecord] {
+        guard limit > 0 else { return [] }
+        return loadRecords(
+            whereClause: nil,
+            binding: nil,
+            limit: limit,
+            isIncluded: SessionHistoryRecordPolicy.hasRetainedContent
+        )
+    }
+
     public func record(sessionID: VoiceInputSessionID) async -> VoiceInputHistoryRecord? {
         loadRecords(
             whereClause: "WHERE session_id = ?",
@@ -526,7 +538,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     private func loadRecords(
         whereClause: String?,
-        binding: String?
+        binding: String?,
+        limit: Int? = nil,
+        isIncluded: (VoiceInputHistoryRecord) -> Bool = { _ in true }
     ) -> [VoiceInputHistoryRecord] {
         guard let connection = openConnection else { return [] }
         do {
@@ -546,12 +560,13 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     throw SQLiteHistoryError.encoding
                 }
                 do {
-                    records.append(
-                        try SQLiteHistorySchema.payloadDecoder.decode(
-                            HistoryRecordV1.self,
-                            from: payload
-                        ).domainRecord
-                    )
+                    let record = try SQLiteHistorySchema.payloadDecoder.decode(
+                        HistoryRecordV1.self,
+                        from: payload
+                    ).domainRecord
+                    guard isIncluded(record) else { continue }
+                    records.append(record)
+                    if let limit, records.count >= limit { break }
                 } catch {
                     // One malformed payload must not hide every healthy session.
                     // Keep the row untouched for diagnosis and surface an exact

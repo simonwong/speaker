@@ -14,6 +14,7 @@ final class SpeakerRuntime: ObservableObject {
     let refinementSettings: RefinementSettingsModel
     let dictionarySettings: DictionarySettingsModel
     let historyModel: HistoryModel
+    let recentResults: MenuBarRecentResultsModel
     let historyRetention: HistoryRetentionSettingsModel
     let overviewModel: OverviewModel
     let mainWindow = MainWindowModel()
@@ -186,6 +187,11 @@ final class SpeakerRuntime: ObservableObject {
             announce: announce
         )
         self.historyModel = historyModel
+        recentResults = MenuBarRecentResultsModel(
+            store: history,
+            clipboard: SystemClipboardWriter(),
+            announce: announce
+        )
         overviewModel = OverviewModel(store: history)
         let loginItemSettings = LoginItemSettingsModel(
             service: dependencies.loginItemService,

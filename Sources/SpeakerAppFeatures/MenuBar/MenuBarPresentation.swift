@@ -11,6 +11,7 @@ package enum MenuBarRow: Equatable, Sendable {
     case openSpeaker
     case refinementMode
     case microphone
+    case recentResults
     case voiceStatus
     case cancelVoiceInput
     case voiceNotice
@@ -75,6 +76,7 @@ package enum MenuBarPresentation {
     package static func rows(
         voice: MenuBarVoiceCapabilities,
         setupGap: VoiceInputSetupGap? = nil,
+        hasRecentResults: Bool = false,
         workspaceRoute: DataErasureWorkspaceRoute
     ) -> [MenuBarRow] {
         guard workspaceRoute == .normal else {
@@ -94,7 +96,8 @@ package enum MenuBarPresentation {
 
         return rows(in: [
             setupGap == nil ? [] : [.completeSetup],
-            [.openSpeaker, .refinementMode, .microphone],
+            [.openSpeaker, .refinementMode, .microphone]
+                + (hasRecentResults ? [.recentResults] : []),
             voiceRows,
             [.settings, .onboarding],
             [.quit],
