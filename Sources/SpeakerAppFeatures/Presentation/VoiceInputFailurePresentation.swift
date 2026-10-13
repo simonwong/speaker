@@ -68,7 +68,7 @@ package struct VoiceInputFailurePresentation {
     )
     package static let providerResourceUnavailable = Self(
         title: "豆包语音服务尚未开通",
-        guidance: "请在火山引擎控制台开通对应资源。",
+        guidance: "这个 Key 没有开通所选的流式资源。请在豆包控制台开通，或在设置里改选已开通的资源。",
         icon: "exclamationmark.triangle.fill",
         settingsDestination: .speechRecognition
     )

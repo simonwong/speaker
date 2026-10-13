@@ -30,9 +30,40 @@ package enum ExternalLinks {
         "https://console.volcengine.com/speech/new/setting/apikeys?projectName=default"
     )
 
+    /// Speaker's walkthrough for getting a Doubao speech API Key and
+    /// activating the matching streaming resource.
+    package static let doubaoSetupGuide = absolute(
+        "https://speaker.moonunder.app/doubao"
+    )
+
     /// The DeepSeek platform page that issues refinement API keys.
     package static let deepSeekAPIKeys = absolute(
         "https://platform.deepseek.com/api_keys"
+    )
+
+    /// The OpenAI platform page that issues API keys for transcription and
+    /// refinement.
+    package static let openAIAPIKeys = absolute(
+        "https://platform.openai.com/api-keys"
+    )
+
+    /// The Alibaba Cloud Model Studio pages that issue Qwen API keys. A Key
+    /// works only in the region whose console issued it.
+    package static let qwenBeijingAPIKeys = absolute(
+        "https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key"
+    )
+    package static let qwenSingaporeAPIKeys = absolute(
+        "https://modelstudio.console.alibabacloud.com/ap-southeast-1/settings/api-key"
+    )
+
+    /// The Moonshot platform page that issues Kimi API keys.
+    package static let kimiAPIKeys = absolute(
+        "https://platform.kimi.com/console/api-keys"
+    )
+
+    /// The Zhipu platform page that issues GLM API keys.
+    package static let glmAPIKeys = absolute(
+        "https://bigmodel.cn/usercenter/proj-mgmt/apikeys"
     )
 
     /// The privacy statement shipped inside the app bundle, absent in builds
