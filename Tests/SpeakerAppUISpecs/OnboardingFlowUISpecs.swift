@@ -86,7 +86,24 @@ enum OnboardingFlowUISpecs {
             try expect(
                 checksBeforeAction == 0,
                 "onboarding checked the provider without an explicit action")
-            model.checkConnection()
+            let checkShown = await eventually(before: .seconds(1)) {
+                pump(hosting)
+                return button("检查连接", in: hosting)?.isAccessibilityEnabled() == true
+            }
+            try expect(checkShown, "onboarding offers no 检查连接 after saving a Doubao key")
+            model.apiKeyDraft = "synthetic-unsaved-key"
+            let blockedByDraft = await eventually(before: .seconds(1)) {
+                pump(hosting)
+                return button("检查连接", in: hosting)?.isAccessibilityEnabled() == false
+            }
+            try expect(blockedByDraft, "检查连接 would test the stored key while a new one is typed")
+            model.apiKeyDraft = ""
+            let unblocked = await eventually(before: .seconds(1)) {
+                pump(hosting)
+                return button("检查连接", in: hosting)?.isAccessibilityEnabled() == true
+            }
+            try expect(unblocked)
+            try expect(button("检查连接", in: hosting)?.accessibilityPerformPress() == true)
             let verified = await eventually(before: .seconds(1)) {
                 pump(hosting)
                 return button("下一步", in: hosting)?.isAccessibilityEnabled() == true
