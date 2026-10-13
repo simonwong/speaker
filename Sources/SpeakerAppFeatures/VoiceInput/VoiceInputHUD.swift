@@ -37,7 +37,7 @@ package struct VoiceInputHUD: View {
                     dismissal: activityDismissal,
                     cancel: { _ = performAction(activity.cancelAction) },
                     finish: {
-                        if let action = activity.finishAction {
+                        if let action = activity.finishAction?.action {
                             _ = performAction(action)
                         }
                     }
@@ -98,12 +98,22 @@ private struct ActivityPillModel: Equatable {
         case processing
     }
 
+    /// The hover-revealed control on the right: ending recording, or
+    /// skipping pending refinement.
+    struct FinishAction: Equatable {
+        let action: VoiceInputExperienceAction
+        let symbol: String
+        let accessibilityLabel: String
+        let help: String
+        let accessibilityHint: String
+    }
+
     let phase: Phase
     let layout: VoiceInputPanelLayout
     let accessibilityTitle: String
     let cancelHint: String
     let cancelAction: VoiceInputExperienceAction
-    let finishAction: VoiceInputExperienceAction?
+    let finishAction: FinishAction?
 
     init?(_ presentation: VoiceInputOverlayPresentation) {
         switch presentation {
@@ -114,14 +124,28 @@ private struct ActivityPillModel: Equatable {
                 remainingSeconds.map { "正在录音，\(Self.countdownText($0))" } ?? "正在录音"
             cancelHint = "停止录音并忽略本次内容"
             self.cancelAction = cancelAction
-            self.finishAction = finishAction
-        case .processing(let title, let cancelAction):
+            self.finishAction = FinishAction(
+                action: finishAction,
+                symbol: "checkmark",
+                accessibilityLabel: "结束录音",
+                help: "结束录音并处理",
+                accessibilityHint: "保留本次录音并开始转成文字"
+            )
+        case .processing(let title, let cancelAction, let useRecognitionAction):
             phase = .processing
             layout = .processing
             accessibilityTitle = title
             cancelHint = "停止当前处理并忽略迟到结果"
             self.cancelAction = cancelAction
-            finishAction = nil
+            finishAction = useRecognitionAction.map {
+                FinishAction(
+                    action: $0,
+                    symbol: "forward.end.fill",
+                    accessibilityLabel: "直接用识别结果",
+                    help: "不等整理，直接输入识别出的文字",
+                    accessibilityHint: "跳过文字整理，把已识别的文字输入到原来的位置"
+                )
+            }
         case .hidden, .pendingCopy, .problem:
             return nil
         }
@@ -225,15 +249,15 @@ private struct ActivityPill: View {
                         action: cancel
                     )
                     Spacer()
-                    if model.finishAction != nil {
+                    if let finishAction = model.finishAction {
                         HUDIconButton(
-                            symbol: "checkmark",
+                            symbol: finishAction.symbol,
                             palette: palette,
                             isVisible: controlsVisible,
                             prominent: true,
-                            accessibilityLabel: "结束录音",
-                            help: "结束录音并处理",
-                            accessibilityHint: "保留本次录音并开始转成文字",
+                            accessibilityLabel: finishAction.accessibilityLabel,
+                            help: finishAction.help,
+                            accessibilityHint: finishAction.accessibilityHint,
                             action: finish
                         )
                     }

@@ -39,6 +39,7 @@ package struct VoiceInputExperienceAction: Equatable, Sendable {
     fileprivate enum Operation: Equatable, Sendable {
         case cancel
         case finishRecording
+        case useRecognitionResult
         case copyRetainedText
         case dismissResult
         case requestRecovery
@@ -75,9 +76,11 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
         finishAction: VoiceInputExperienceAction,
         remainingSeconds: Int? = nil
     )
+    /// `useRecognitionAction` is present only while refinement is pending.
     case processing(
         title: String,
-        cancelAction: VoiceInputExperienceAction
+        cancelAction: VoiceInputExperienceAction,
+        useRecognitionAction: VoiceInputExperienceAction? = nil
     )
     case pendingCopy(
         title: String,
@@ -102,6 +105,7 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
 /// controls without widening the capability initializer used by the App.
 package enum VoiceInputHUDContractFixture: CaseIterable, Sendable {
     case processing
+    case refining
     case recording
     case pendingCopy
     case problem
@@ -128,6 +132,12 @@ package enum VoiceInputHUDContractFixture: CaseIterable, Sendable {
         return switch self {
         case .processing:
             .processing(title: "正在转成文字", cancelAction: cancel)
+        case .refining:
+            .processing(
+                title: "正在整理文字",
+                cancelAction: cancel,
+                useRecognitionAction: .init(sessionID: sessionID, operation: .useRecognitionResult)
+            )
         case .recording:
             .recording(
                 peakPower: -18,
@@ -393,6 +403,11 @@ package final class VoiceInputExperience: ObservableObject {
                 await sessions.cancel(expectedSessionID: action.sessionID)
             }
             return nil
+        case .useRecognitionResult:
+            enqueue { [sessions] in
+                await sessions.useRecognitionResult(expectedSessionID: action.sessionID)
+            }
+            return nil
         case .copyRetainedText:
             enqueue { [sessions] in
                 await sessions.copyPendingResult(
@@ -470,6 +485,7 @@ package final class VoiceInputExperience: ObservableObject {
             (.finishRecording, .recording),
             (.cancel, .recording),
             (.cancel, .processing),
+            (.useRecognitionResult, .processing(_, .refining, _)),
             (.copyRetainedText, .pendingCopy),
             (.dismissResult, .pendingCopy),
             (.dismissResult, .failed):
@@ -483,6 +499,7 @@ package final class VoiceInputExperience: ObservableObject {
             (.cancel, .failed),
             (.copyRetainedText, _),
             (.finishRecording, _),
+            (.useRecognitionResult, _),
             (.dismissResult, _),
             (.requestRecovery, _):
             false
@@ -701,10 +718,12 @@ package final class VoiceInputExperience: ObservableObject {
                     remainingMilliseconds: telemetry?.remainingMilliseconds
                 )
             )
-        case .processing(let id, _, _):
+        case .processing(let id, let stage, _):
             .processing(
                 title: activity.compactTitle,
-                cancelAction: .init(sessionID: id, operation: .cancel)
+                cancelAction: .init(sessionID: id, operation: .cancel),
+                useRecognitionAction: stage == .refining
+                    ? .init(sessionID: id, operation: .useRecognitionResult) : nil
             )
         case .pendingCopy(let id, let text, let reason):
             .pendingCopy(

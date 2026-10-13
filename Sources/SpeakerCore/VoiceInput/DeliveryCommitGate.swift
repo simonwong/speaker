@@ -38,3 +38,28 @@ actor DeliveryResolution {
         continuation = nil
     }
 }
+
+/// Settles a session's text processing exactly once. The processing task and
+/// the user's request to skip refinement race; the first result wins and the
+/// later one is discarded.
+actor TextProcessingResolution {
+    private var result: Result<VoiceTextProcessingResult, any Error>?
+    private var continuation: CheckedContinuation<VoiceTextProcessingResult, any Error>?
+
+    func wait() async throws -> VoiceTextProcessingResult {
+        if let result { return try result.get() }
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    /// Returns true only for the result that settles processing.
+    @discardableResult
+    func resolve(_ result: Result<VoiceTextProcessingResult, any Error>) -> Bool {
+        guard self.result == nil else { return false }
+        self.result = result
+        continuation?.resume(with: result)
+        continuation = nil
+        return true
+    }
+}

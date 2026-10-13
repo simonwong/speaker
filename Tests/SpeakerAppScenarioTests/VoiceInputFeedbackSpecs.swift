@@ -174,6 +174,58 @@ enum VoiceInputFeedbackSpecs {
         }
 
         await runAsync(
+            "voice feedback offers the recognition result only while refinement is pending",
+            failures: &failures
+        ) {
+            for stage in [VoiceInputProcessingStage.transcribing, .refining] {
+                let processor = HangingVoiceTextProcessor(
+                    reportedStage: stage,
+                    confirmedText: stage == .refining ? "已识别的文字" : nil
+                )
+                let delivery = TextDeliveryFake(result: .delivered)
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                    ),
+                    textProcessor: processor,
+                    delivery: delivery,
+                    clipboard: ClipboardFake(),
+                    history: SessionHistoryFake()
+                )
+                let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+                experience.start()
+                try await finishRecording(experience)
+                let reachedStage = await eventually(before: .seconds(2)) {
+                    experience.state.diagnosticCode == "processing.\(stage)"
+                }
+                try expect(reachedStage, "processing never reached \(stage)")
+                guard
+                    case .processing(_, let cancel, let useRecognition) = experience.state.overlay
+                else {
+                    throw SpecFailure(message: "processing overlay missing")
+                }
+                guard let useRecognition else {
+                    try expect(stage != .refining, "pending refinement offered no shortcut")
+                    experience.perform(cancel)
+                    await experience.shutdown()
+                    continue
+                }
+                try expect(stage == .refining, "\(stage) offered the recognition result")
+                experience.perform(useRecognition)
+                let delivered = await eventually(before: .seconds(2)) {
+                    await delivery.deliveredTexts == ["已识别的文字"]
+                }
+                let cancelled = await eventually(before: .seconds(2)) {
+                    await processor.cancellationCount == 1
+                }
+                await experience.shutdown()
+                try expect(delivered, "the recognition result was not delivered")
+                try expect(cancelled, "pending refinement kept running")
+            }
+        }
+
+        await runAsync(
             "voice feedback late Escape cannot cancel or dismiss a newer session",
             failures: &failures
         ) {

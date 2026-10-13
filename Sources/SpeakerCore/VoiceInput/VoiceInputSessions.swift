@@ -47,6 +47,7 @@ public actor VoiceInputSessions {
     private var releasePending = false
     private var pendingReleaseCaptureHint: InputTargetCaptureHint?
     private var transcriptionTask: Task<VoiceTextProcessingResult, Error>?
+    private var processingResolution: TextProcessingResolution?
     private var audioCaptureCompletion: AudioCaptureCompletionGate?
     private var streamingCompletionTask: Task<Void, Never>?
     private var telemetryTask: Task<Void, Never>?
@@ -230,6 +231,35 @@ public actor VoiceInputSessions {
     package func cancel(expectedSessionID: VoiceInputSessionID) async {
         guard currentActiveSessionID == expectedSessionID else { return }
         await cancelSession()
+    }
+
+    /// Settles processing with the confirmed recognition Stage Result instead
+    /// of waiting for refinement, then delivers it through the normal path.
+    /// Only a session whose refinement is still pending accepts it.
+    package func useRecognitionResult(expectedSessionID: VoiceInputSessionID) async {
+        guard case .processing(let id, _, _) = phase,
+            id == expectedSessionID,
+            case .processing(let presentedID, .refining, _) = presentation.activity,
+            presentedID == id,
+            let confirmed = confirmedDoubaoResult,
+            let processingResolution
+        else { return }
+        let refinement = transcriptionTask
+        let settled = await processingResolution.resolve(
+            .success(
+                VoiceTextProcessingResult(
+                    doubaoText: confirmed.text,
+                    normalizedText: confirmed.text,
+                    deepSeekText: nil,
+                    finalText: confirmed.text,
+                    doubaoRequestID: confirmed.providerRequestID,
+                    deepSeekRequestID: nil,
+                    refinementStatus: .skipped,
+                    refinementFailure: nil
+                )
+            )
+        )
+        if settled { refinement?.cancel() }
     }
 
     package func copyPendingResult(expectedSessionID: VoiceInputSessionID) async {
@@ -530,6 +560,8 @@ public actor VoiceInputSessions {
                 matching: captureHint
             )
         }
+        let resolution = TextProcessingResolution()
+        processingResolution = resolution
         let completion = audioCaptureCompletion
         let audioTask = Task<CapturedAudio, Error> {
             do {
@@ -547,7 +579,8 @@ public actor VoiceInputSessions {
                 startedAt: startedAt,
                 snapshot: snapshot,
                 targetTask: targetTask,
-                audioTask: audioTask
+                audioTask: audioTask,
+                resolution: resolution
             )
         }
     }
@@ -557,7 +590,8 @@ public actor VoiceInputSessions {
         startedAt: Date,
         snapshot: VoiceTextProcessingSnapshot,
         targetTask: Task<(InputTargetCaptureResult, Int), Never>,
-        audioTask: Task<CapturedAudio, Error>
+        audioTask: Task<CapturedAudio, Error>,
+        resolution: TextProcessingResolution
     ) async {
         let (target, targetCaptureMilliseconds) = await targetTask.value
         guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
@@ -645,7 +679,7 @@ public actor VoiceInputSessions {
         }
         let processedText: VoiceTextProcessingResult
         do {
-            processedText = try await task.value
+            processedText = try await Self.settle(task, through: resolution)
         } catch let failure as VoiceTextProcessingFailure {
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
                 await discard(target)
@@ -684,6 +718,7 @@ public actor VoiceInputSessions {
             return
         }
         transcriptionTask = nil
+        processingResolution = nil
         streamingCompletionTask?.cancel()
         streamingCompletionTask = nil
 
@@ -889,6 +924,7 @@ public actor VoiceInputSessions {
         _ = cancelRecordingLimit()
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        processingResolution = nil
         streamingCompletionTask?.cancel()
         streamingCompletionTask = nil
         deliveryTask?.cancel()
@@ -943,6 +979,23 @@ public actor VoiceInputSessions {
         phase = .idle
     }
 
+    /// Waits for whichever settles processing first: the processing task or
+    /// a request to use the confirmed recognition Stage Result.
+    private static func settle(
+        _ task: Task<VoiceTextProcessingResult, Error>,
+        through resolution: TextProcessingResolution
+    ) async throws -> VoiceTextProcessingResult {
+        Task {
+            do {
+                let result = try await task.value
+                await resolution.resolve(.success(result))
+            } catch {
+                await resolution.resolve(.failure(error))
+            }
+        }
+        return try await resolution.wait()
+    }
+
     private func finishWithFailure(
         id: VoiceInputSessionID,
         startedAt: Date,
@@ -986,6 +1039,7 @@ public actor VoiceInputSessions {
         captureFailureTask = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        processingResolution = nil
         streamingCompletionTask?.cancel()
         streamingCompletionTask = nil
         deliveryTask?.cancel()

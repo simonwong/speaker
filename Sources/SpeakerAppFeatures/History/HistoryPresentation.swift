@@ -48,16 +48,20 @@ package enum HistoryRecordProblem: Equatable, Sendable {
 package enum HistoryRecordNote: Equatable, Sendable {
     /// Cancelled after recognition was confirmed: the text is kept, never delivered.
     case cancelled
+    /// The user took the recognition result before refinement finished.
+    case refinementSkipped
 
     package var label: String {
         switch self {
         case .cancelled: "已取消，未输入"
+        case .refinementSkipped: "已跳过整理，用的是识别结果"
         }
     }
 
     package var icon: String {
         switch self {
         case .cancelled: "xmark.circle"
+        case .refinementSkipped: "forward.end"
         }
     }
 }
@@ -176,6 +180,9 @@ package enum HistoryPresentation {
         for record: VoiceInputHistoryRecord
     ) -> HistoryRecordNote? {
         if case .cancelled = record.outcome { return .cancelled }
+        if record.refinementStatus == TextRefinementStatus.skipped.rawValue {
+            return .refinementSkipped
+        }
         return nil
     }
 
