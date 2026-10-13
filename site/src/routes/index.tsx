@@ -12,6 +12,48 @@ const description =
 
 type Faq = { question: string; answer: string }
 
+type Comparison = { aspect: string; speaker: string; inputMethod: string; dictation: string }
+
+// Categories, not named products: each cell must stay true across vendors.
+const comparisons: Comparison[] = [
+  {
+    aspect: '怎么用',
+    speaker: '任意输入框按快捷键，不换输入法',
+    inputMethod: '先切换到这个输入法',
+    dictation: '按系统听写快捷键',
+  },
+  {
+    aspect: '语音交给谁',
+    speaker: '你选的服务商：豆包、OpenAI 或千问',
+    inputMethod: '输入法厂商',
+    dictation: 'Apple',
+  },
+  {
+    aspect: '费用',
+    speaker: '软件免费；识别按用量付给服务商，豆包约 1 元/小时',
+    inputMethod: '免费',
+    dictation: '免费',
+  },
+  {
+    aspect: '整理文字',
+    speaker: '可选服务商，可写自己的指令',
+    inputMethod: '取决于产品',
+    dictation: '不支持',
+  },
+  {
+    aspect: '准备工作',
+    speaker: '要自己申请 API Key',
+    inputMethod: '安装输入法',
+    dictation: '系统自带',
+  },
+  {
+    aspect: '开源',
+    speaker: 'MIT',
+    inputMethod: '否',
+    dictation: '否',
+  },
+]
+
 const faqs: Faq[] = [
   {
     question: 'Speaker 收费吗？',
@@ -184,6 +226,33 @@ function Home() {
               选择识别服务，填入 API Key。没有 Key 的话，先看<a href="/doubao">申请豆包 API Key</a>。之后的新版本可以在 App 内更新。
             </li>
           </ol>
+        </Section>
+
+        <Section id="compare" title="和其他语音输入方式比较">
+          <div className="compare">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">
+                    <span className="visually-hidden">方面</span>
+                  </th>
+                  <th scope="col">Speaker</th>
+                  <th scope="col">输入法自带的语音输入</th>
+                  <th scope="col">macOS 听写</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparisons.map((row) => (
+                  <tr key={row.aspect}>
+                    <th scope="row">{row.aspect}</th>
+                    <td>{row.speaker}</td>
+                    <td>{row.inputMethod}</td>
+                    <td>{row.dictation}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Section>
 
         <Section id="faq" title="常见问题">

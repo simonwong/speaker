@@ -220,6 +220,49 @@ h1 {
   color: var(--coral);
 }
 
+.compare {
+  overflow-x: auto;
+}
+
+.compare table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.compare th,
+.compare td {
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.compare thead th {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.compare tbody th {
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.compare td:nth-child(2) {
+  color: var(--text);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .faq-item + .faq-item {
   margin-top: 20px;
 }
