@@ -49,6 +49,8 @@ package struct SpeechRecognitionSettingsCard: View {
             .disabled(model.isMutating)
         }
 
+        SettingsRowDivider()
+
         if model.selectedProvider == .doubao {
             DoubaoRecognitionSettings(model: doubao)
                 .disabled(model.isMutating)
@@ -99,6 +101,7 @@ package struct SpeechRecognitionSettingsCard: View {
                 .settingsTrailingMenu()
                 .accessibilityLabel("语音识别方式")
             }
+            SettingsRowDivider()
             if model.selectedProvider == .qwen {
                 SpeakerRow("地域") {
                     Picker(
@@ -115,6 +118,7 @@ package struct SpeechRecognitionSettingsCard: View {
                     .settingsTrailingMenu()
                     .accessibilityLabel("语音识别地域")
                 }
+                SettingsRowDivider()
             }
             SpeakerRow("模型") {
                 Picker(

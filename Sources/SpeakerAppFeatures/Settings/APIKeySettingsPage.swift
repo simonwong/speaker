@@ -72,10 +72,8 @@ package struct RefinementProviderSettingsCard: View {
     package init(model: RefinementSettingsModel) { self.model = model }
 
     package var body: some View {
-        SettingsCard(
-            "文字整理 · 可选",
-            icon: "sparkles"
-        ) {
+        // Sits under the mode card in the 整理 section, which already names it.
+        SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
                 SpeakerRow("服务商") {
                     Picker(
@@ -92,6 +90,8 @@ package struct RefinementProviderSettingsCard: View {
                     .settingsTrailingMenu()
                     .accessibilityLabel("文字整理服务商")
                 }
+
+                SettingsRowDivider()
 
                 if model.selectedProvider != .custom {
                     SpeakerRow("模型") {
@@ -181,6 +181,10 @@ package struct RefinementProviderSettingsCard: View {
             if let connectionFailure = model.connectionFailure {
                 SettingsNotice(text: connectionFailure, color: .red)
             }
+
+            Text("默认顺滑不使用整理服务")
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 

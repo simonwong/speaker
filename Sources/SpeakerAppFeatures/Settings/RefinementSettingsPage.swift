@@ -10,11 +10,8 @@ package struct RefinementSettingsPage: View {
     package init(model: RefinementSettingsModel) { self.model = model }
 
     package var body: some View {
-        SettingsCard(
-            "整理模式",
-            subtitle: model.hasStoredKey ? nil : "配置文字整理 Key 后解锁其他模式",
-            icon: "text.alignleft"
-        ) {
+        // The 整理 section already names this card, so it carries no header.
+        SettingsCard {
             modeGrid
 
             if let promptEditor = model.promptEditorState,
@@ -52,6 +49,13 @@ package struct RefinementSettingsPage: View {
                     Task { await model.select(choice) }
                 }
             }
+        }
+
+        // A pending notice already says what the key unlocks.
+        if !model.hasStoredKey, model.notice == nil {
+            Text("在下方配置整理服务后解锁其他模式")
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.secondary)
         }
 
         if let notice = model.notice {
