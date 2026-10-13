@@ -21,11 +21,15 @@ final class VoiceInputPanelController {
             [weak experience] action in
             experience?.perform(action)
         }
+        let holdProblem: (Bool) -> Void = { [weak experience] held in
+            experience?.holdProblem(held)
+        }
         presenter = VoiceInputPanelPresenter { presentation in
             VoiceInputOverlay(
                 presentation: presentation,
                 performAction: performAction,
-                routeEffect: routeEffect
+                routeEffect: routeEffect,
+                holdProblem: holdProblem
             )
         }
     }
@@ -57,6 +61,7 @@ private struct VoiceInputOverlay: View {
     let presentation: VoiceInputOverlayPresentation
     let performAction: (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
+    let holdProblem: (Bool) -> Void
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
@@ -67,7 +72,8 @@ private struct VoiceInputOverlay: View {
                 routeEffect(effect)
                 openSettings()
                 NSApp.activate(ignoringOtherApps: true)
-            }
+            },
+            holdProblem: holdProblem
         )
         #if DEBUG
             .environment(

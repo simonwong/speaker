@@ -235,6 +235,7 @@ package final class VoiceInputExperience: ObservableObject {
     private let problemAutoDismissDelay: Duration
     private var problemAutoDismissSessionID: VoiceInputSessionID?
     private var problemAutoDismissTask: Task<Void, Never>?
+    private var problemHeld = false
 
     /// How long a Session Problem without a settings recovery stays on screen
     /// before it dismisses itself.
@@ -539,16 +540,32 @@ package final class VoiceInputExperience: ObservableObject {
             !failure.needsSettings
         else {
             cancelProblemAutoDismiss()
+            problemHeld = false
             return
         }
         guard problemAutoDismissSessionID != id else { return }
         cancelProblemAutoDismiss()
         problemAutoDismissSessionID = id
+        guard !problemHeld else { return }
         let delay = problemAutoDismissDelay
         problemAutoDismissTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.perform(.init(sessionID: id, operation: .dismissResult))
+        }
+    }
+
+    /// The pointer resting on a problem pauses its dismissal, so the guidance
+    /// tooltip can be read; leaving restarts the full delay.
+    package func holdProblem(_ held: Bool) {
+        guard problemHeld != held else { return }
+        problemHeld = held
+        guard case .failed = currentPresentation.activity else { return }
+        problemAutoDismissTask?.cancel()
+        problemAutoDismissTask = nil
+        if !held {
+            problemAutoDismissSessionID = nil
+            scheduleProblemAutoDismissIfNeeded(currentPresentation.activity)
         }
     }
 

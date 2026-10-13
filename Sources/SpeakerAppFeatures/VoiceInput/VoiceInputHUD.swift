@@ -5,6 +5,7 @@ package struct VoiceInputHUD: View {
     let presentation: VoiceInputOverlayPresentation
     let performAction: (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?
     let routeEffect: (VoiceInputExperienceEffect) -> Void
+    let holdProblem: (Bool) -> Void
     @Environment(\.voiceInputPanelDismissal) private var activityDismissal
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.voiceInputHUDIncreasedContrastOverride)
@@ -14,11 +15,13 @@ package struct VoiceInputHUD: View {
         presentation: VoiceInputOverlayPresentation,
         performAction:
             @escaping (VoiceInputExperienceAction) -> VoiceInputExperienceEffect?,
-        routeEffect: @escaping (VoiceInputExperienceEffect) -> Void
+        routeEffect: @escaping (VoiceInputExperienceEffect) -> Void,
+        holdProblem: @escaping (Bool) -> Void = { _ in }
     ) {
         self.presentation = presentation
         self.performAction = performAction
         self.routeEffect = routeEffect
+        self.holdProblem = holdProblem
     }
 
     private var palette: VoiceInputHUDContrastPalette {
@@ -79,7 +82,8 @@ package struct VoiceInputHUD: View {
                 title: title,
                 guidance: guidance,
                 palette: palette,
-                dismiss: { _ = performAction(dismissAction) }
+                dismiss: { _ = performAction(dismissAction) },
+                hold: holdProblem
             )
         case .hidden, .recording, .processing:
             Color.clear
@@ -660,6 +664,7 @@ private struct ProblemStrip: View {
     let guidance: String
     let palette: VoiceInputHUDContrastPalette
     let dismiss: () -> Void
+    let hold: (Bool) -> Void
 
     private var contentSize: CGSize {
         VoiceInputPanelLayout.problem(
@@ -703,6 +708,7 @@ private struct ProblemStrip: View {
             .padding(.leading, 14)
             .padding(.trailing, 4)
         }
+        .onHover(perform: hold)
         .hudShadow()
         .padding(VoiceInputPanelLayout.contentInset)
     }
