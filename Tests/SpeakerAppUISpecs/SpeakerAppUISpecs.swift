@@ -1858,7 +1858,7 @@ struct SpeakerAppUISpecs {
         }
 
         run(
-            "history list keeps explicit errors and hides cancelled and empty results",
+            "history list keeps explicit errors and recognized text cancelled late, and hides empty results",
             failures: &failures
         ) {
             var calendar = Calendar(identifier: .gregorian)
@@ -1869,6 +1869,7 @@ struct SpeakerAppUISpecs {
                 ))!
             let textID = VoiceInputSessionID()
             let cancelledID = VoiceInputSessionID()
+            let earlyCancelledID = VoiceInputSessionID()
             let secureID = VoiceInputSessionID()
             let recordingLimitID = VoiceInputSessionID()
             let textRecord = makeHistoryRecord(
@@ -1884,8 +1885,17 @@ struct SpeakerAppUISpecs {
                 applicationName: nil,
                 transcription: "取消前已确认的转录",
                 finalText: nil,
-                cancelledAtStage: "transcribing",
+                cancelledAtStage: "deepseek",
                 outcome: .cancelled(cancelledID)
+            )
+            let earlyCancelledRecord = VoiceInputHistoryRecord(
+                sessionID: earlyCancelledID,
+                startedAt: startedAt,
+                applicationName: nil,
+                transcription: nil,
+                finalText: nil,
+                cancelledAtStage: "recording",
+                outcome: .cancelled(earlyCancelledID)
             )
             let secureRecord = VoiceInputHistoryRecord(
                 sessionID: secureID,
@@ -1914,11 +1924,20 @@ struct SpeakerAppUISpecs {
             )
 
             let filtered = HistoryPresentation.filteredRecords(
-                [textRecord, cancelledRecord, secureRecord, recordingLimitRecord],
+                [
+                    textRecord, cancelledRecord, earlyCancelledRecord, secureRecord,
+                    recordingLimitRecord,
+                ],
                 query: ""
             )
 
-            try expect(filtered.map(\.sessionID) == [textID, recordingLimitID])
+            try expect(filtered.map(\.sessionID) == [textID, cancelledID, recordingLimitID])
+            let cancelledRow = HistoryPresentation.row(for: cancelledRecord)
+            try expect(cancelledRow.text == "取消前已确认的转录")
+            try expect(cancelledRow.canCopy)
+            try expect(cancelledRow.problem == nil, "cancellation is not a Session Problem")
+            try expect(cancelledRow.note == .cancelled)
+            try expect(HistoryPresentation.row(for: textRecord).note == nil)
 
             for failure in [VoiceInputFailure.recordingFailed, .providerAuthenticationFailed] {
                 let id = VoiceInputSessionID()

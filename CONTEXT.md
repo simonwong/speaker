@@ -102,6 +102,6 @@ _Avoid_: guessed cause, fallback error, generic failure
 
 **User Cancellation**
 
-The user's explicit termination of an unfinished Voice Input Session. User Cancellation is not a Session Problem. Late Stage Results are discarded, while the Session Record retains the stage at which cancellation occurred.
+The user's explicit termination of an unfinished Voice Input Session. User Cancellation is not a Session Problem. Late Stage Results are discarded, while the Session Record retains the stage at which cancellation occurred and any recognition Stage Result already confirmed for a nonsecure Input Target.
 
 _Avoid_: processing failure, network interruption
