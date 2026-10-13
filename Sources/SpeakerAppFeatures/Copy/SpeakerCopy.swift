@@ -277,9 +277,9 @@ package enum SpeakerCopy {
             case .customNameTooLong:
                 "规则名称不能超过 \(TextRefinementMode.maximumCustomNameLength) 个字符。"
             case .emptyCustomPrompt:
-                "整理规则不能为空。"
+                "提示词不能为空。"
             case .customPromptTooLong:
-                "整理规则不能超过 \(TextRefinementMode.maximumCustomPromptLength) 个字符。"
+                "提示词不能超过 \(TextRefinementMode.maximumCustomPromptLength) 个字符。"
             }
         }
     }

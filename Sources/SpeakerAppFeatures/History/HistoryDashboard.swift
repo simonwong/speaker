@@ -686,7 +686,7 @@ package struct HistoryExpandedRecord: View {
             if let transcription = record.transcription,
                 !transcription.isEmpty, transcription != presentation.text
             {
-                stageResult(title: "\(record.transcriptionProviderLabel) 转录", text: transcription)
+                stageResult(title: "\(record.transcriptionProviderLabel) 识别", text: transcription)
             }
 
             if let refinement = record.deepSeekText,
