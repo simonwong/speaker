@@ -170,9 +170,17 @@ package final class HistoryModel: ObservableObject {
 
 package struct HistoryView: View {
     @ObservedObject var model: HistoryModel
+    private let focusesSearch: Bool
+    private let searchFocused: () -> Void
 
-    package init(model: HistoryModel) {
+    package init(
+        model: HistoryModel,
+        focusesSearch: Bool = false,
+        searchFocused: @escaping () -> Void = {}
+    ) {
         self.model = model
+        self.focusesSearch = focusesSearch
+        self.searchFocused = searchFocused
     }
 
     package var body: some View {
@@ -191,7 +199,9 @@ package struct HistoryView: View {
                 delete: { id in
                     Task { _ = await model.delete(id) }
                 }
-            )
+            ),
+            focusesSearch: focusesSearch,
+            searchFocused: searchFocused
         )
         .task { await model.refresh() }
         .onReceive(

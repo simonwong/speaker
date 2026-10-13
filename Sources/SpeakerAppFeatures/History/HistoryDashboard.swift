@@ -114,6 +114,8 @@ package struct HistoryDashboard: View {
     private let sections: [HistoryDaySection]
     @Binding private var query: String
     let actions: HistoryDashboardActions
+    private let focusesSearch: Bool
+    private let searchFocused: () -> Void
     @State private var expandedRecordID: VoiceInputSessionID?
     @State private var confirmsClear = false
     @State private var searchRefresh: Task<Void, Never>?
@@ -124,12 +126,16 @@ package struct HistoryDashboard: View {
     package init(
         state: HistoryDashboardState,
         query: Binding<String>,
-        actions: HistoryDashboardActions
+        actions: HistoryDashboardActions,
+        focusesSearch: Bool = false,
+        searchFocused: @escaping () -> Void = {}
     ) {
         self.state = state
         self.sections = state.sections()
         _query = query
         self.actions = actions
+        self.focusesSearch = focusesSearch
+        self.searchFocused = searchFocused
     }
 
     package var body: some View {
@@ -141,6 +147,13 @@ package struct HistoryDashboard: View {
             .safeAreaInset(edge: .top, spacing: 0) { historyToolbar }
             .safeAreaInset(edge: .bottom, spacing: 0) { statusFooter }
             .background(Color.historyGround)
+            // ⌘F may arrive from another page; the field exists only once
+            // this page is shown, so the request waits here until then.
+            .task(id: focusesSearch) {
+                guard focusesSearch else { return }
+                searchIsFocused = true
+                searchFocused()
+            }
             .onChange(of: state.records.map(\.sessionID)) { _, ids in
                 if let expandedRecordID, !ids.contains(expandedRecordID) {
                     self.expandedRecordID = nil

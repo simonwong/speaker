@@ -21,7 +21,12 @@ struct MainWindowView: View {
                             workspace: settingsWorkspace,
                             openSettingsTab: { mainWindow.select(.settings) }
                         )
-                    case .history: HistoryView(model: history)
+                    case .history:
+                        HistoryView(
+                            model: history,
+                            focusesSearch: mainWindow.historySearchRequested,
+                            searchFocused: { mainWindow.historySearchFocused() }
+                        )
                     case .dictionary: DictionaryTabView(model: dictionary)
                     case .settings: SettingsView(workspace: settingsWorkspace)
                     case .about: AboutView(workspace: settingsWorkspace)

@@ -24,6 +24,11 @@ package enum MainWindowTab: String, CaseIterable, Identifiable, Sendable {
         case .about: Self.aboutTitle
         }
     }
+
+    /// ⌘1 to ⌘5 follow the tab bar's order.
+    package var commandNumber: Int {
+        Self.allCases.firstIndex(of: self)! + 1
+    }
 }
 
 /// The main window's five destinations. A tab bar in the title bar picks one,
