@@ -68,6 +68,33 @@ enum VoiceInputFeedbackSpecs {
             try expect(dismissed && releasesEscape, "the problem stayed on screen")
         }
 
+        await runAsync(
+            "voice feedback holds an informational problem while the pointer rests on it",
+            failures: &failures
+        ) {
+            let sessions = makeSessions(error: .conversionFailed)
+            let experience = VoiceInputExperience(
+                sessions: sessions,
+                problemAutoDismissDelay: .milliseconds(200),
+                announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let shown = await eventually(before: .seconds(2)) {
+                if case .problem = experience.state.overlay { true } else { false }
+            }
+            experience.holdProblem(true)
+            try await Task.sleep(for: .milliseconds(500))
+            let held = if case .problem = experience.state.overlay { true } else { false }
+            experience.holdProblem(false)
+            let dismissed = await eventually(before: .seconds(2)) {
+                experience.state.diagnosticCode == "idle"
+            }
+            await experience.shutdown()
+            try expect(shown, "the problem never became visible")
+            try expect(held, "the problem dismissed under the pointer")
+            try expect(dismissed, "the problem stayed after the pointer left")
+        }
+
         for error in [AudioCaptureError?.none, .microphonePermissionDenied] {
             await runAsync(
                 "voice feedback keeps \(String(describing: error)) until the user acts",
