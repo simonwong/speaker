@@ -307,17 +307,24 @@ struct ProviderKeyEditor: View {
 
     @ViewBuilder
     private var collapsedActions: some View {
+        connectionCheckAction()
+        textAction("更换 Key") { setReplacing(true) }
+    }
+
+    /// Checks the stored key. An unsaved draft disables it, because the
+    /// check would test the stored key rather than the one being typed.
+    @ViewBuilder
+    private func connectionCheckAction(blockedByDraft: Bool = false) -> some View {
         if let connectionCheck {
             if connectionCheck.isChecking {
                 ProgressView().controlSize(.small)
             }
             textAction(
                 connectionCheck.isChecking ? "检查中…" : "检查连接",
-                isEnabled: connectionCheck.isEnabled,
+                isEnabled: connectionCheck.isEnabled && !blockedByDraft,
                 action: connectionCheck.action
             )
         }
-        textAction("更换 Key") { setReplacing(true) }
     }
 
     @ViewBuilder
@@ -334,6 +341,11 @@ struct ProviderKeyEditor: View {
             .foregroundStyle(.secondary)
             .font(SpeakerTypography.caption)
             .speakerPointingHandCursor()
+        }
+        // With the field never folding away, collapsedActions never
+        // shows, so the stored key's check has to live here.
+        if hasStoredKey && !collapsesStoredKey {
+            connectionCheckAction(blockedByDraft: hasDraft)
         }
         if hasStoredKey && collapsesStoredKey {
             textAction("取消") {
