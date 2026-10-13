@@ -33,10 +33,18 @@ package struct OverviewDashboardState: Equatable, Sendable {
 /// usage snapshot; product copy, visual hierarchy, and motion policy stay here.
 package struct OverviewDashboard: View {
     let state: OverviewDashboardState
+    let setupGap: VoiceInputSetupGap?
+    let openSetup: (VoiceInputSetupGap) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    package init(state: OverviewDashboardState) {
+    package init(
+        state: OverviewDashboardState,
+        setupGap: VoiceInputSetupGap? = nil,
+        openSetup: @escaping (VoiceInputSetupGap) -> Void = { _ in }
+    ) {
         self.state = state
+        self.setupGap = setupGap
+        self.openSetup = openSetup
     }
 
     package var body: some View {
@@ -44,10 +52,15 @@ package struct OverviewDashboard: View {
         let now = state.referenceDate
 
         SpeakerPage {
+            if let setupGap {
+                VoiceInputSetupBanner(gap: setupGap) { openSetup(setupGap) }
+                    .padding(.bottom, SpeakerSurfaceMetrics.sectionSpacing)
+            }
             OverviewHero(
                 summary: summary,
                 now: now,
                 isLoaded: state.isLoaded,
+                showsFirstUseHint: setupGap == nil,
                 reduceMotion: reduceMotion
             )
             OverviewMetrics(summary: summary, now: now)
@@ -67,6 +80,8 @@ private struct OverviewHero: View {
     let summary: VoiceInputUsageSummary
     let now: Date
     let isLoaded: Bool
+    /// The banner already says what to do first; the hint would contradict it.
+    let showsFirstUseHint: Bool
     let reduceMotion: Bool
     @ScaledMetric(relativeTo: .largeTitle)
     private var heroNumberSize = SpeakerTypography.heroNumberBaseSize
@@ -124,7 +139,7 @@ private struct OverviewHero: View {
             }
             .padding(.top, 14)
 
-            if summary.totalSessionCount == 0 {
+            if summary.totalSessionCount == 0, showsFirstUseHint {
                 Text("按住快捷键，说出第一句话。")
                     .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)

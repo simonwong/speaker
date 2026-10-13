@@ -3,10 +3,11 @@ import SpeakerCore
 package enum MenuBarIconState: Equatable, Sendable {
     case ready
     case recording
-    case needsPermission
+    case needsSetup
 }
 
 package enum MenuBarRow: Equatable, Sendable {
+    case completeSetup
     case openSpeaker
     case refinementMode
     case microphone
@@ -63,18 +64,17 @@ package struct MenuBarVoiceCapabilities: Equatable, Sendable {
 package enum MenuBarPresentation {
     package static func iconState(
         isRecording: Bool,
-        permissions: PermissionSnapshot
+        setupGap: VoiceInputSetupGap?
     ) -> MenuBarIconState {
         if isRecording {
             return .recording
         }
-        return permissions.allGranted
-            ? .ready
-            : .needsPermission
+        return setupGap == nil ? .ready : .needsSetup
     }
 
     package static func rows(
         voice: MenuBarVoiceCapabilities,
+        setupGap: VoiceInputSetupGap? = nil,
         workspaceRoute: DataErasureWorkspaceRoute
     ) -> [MenuBarRow] {
         guard workspaceRoute == .normal else {
@@ -93,6 +93,7 @@ package enum MenuBarPresentation {
         if voice.canDismiss { voiceRows.append(.dismissVoiceInput) }
 
         return rows(in: [
+            setupGap == nil ? [] : [.completeSetup],
             [.openSpeaker, .refinementMode, .microphone],
             voiceRows,
             [.settings, .onboarding],

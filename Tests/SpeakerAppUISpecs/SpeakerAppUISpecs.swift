@@ -145,6 +145,52 @@ struct SpeakerAppUISpecs {
                 try expect(model.hasStoredKey)
                 await model.shutdown()
             }
+            await runAsync(
+                "overview names a setup gap and opens the Settings group that fixes it",
+                failures: &failures
+            ) {
+                var opened: [VoiceInputSetupGap] = []
+                let state = OverviewDashboardState(summary: .empty, referenceDate: Date())
+                let hostingView = NSHostingView(
+                    rootView: AnyView(
+                        OverviewDashboard(
+                            state: state,
+                            setupGap: .speechRecognitionKey(.doubao),
+                            openSetup: { opened.append($0) }
+                        )
+                        .transaction { $0.disablesAnimations = true })
+                )
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+                    styleMask: [.titled],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.isReleasedWhenClosed = false
+                window.contentView = hostingView
+                window.orderFrontRegardless()
+                defer {
+                    window.orderOut(nil)
+                    window.close()
+                }
+                let shown = await eventually(before: .seconds(2)) {
+                    pumpUIRunLoop()
+                    return accessibilityButtons(in: hostingView).contains { $0.label == "去设置" }
+                }
+                try expect(shown, "Overview offered no 去设置 for a missing recognition Key")
+                let press = accessibilityButtons(in: hostingView).first { $0.label == "去设置" }
+                try expect(press?.press() == true)
+                try expect(opened == [.speechRecognitionKey(.doubao)])
+
+                hostingView.rootView = AnyView(
+                    OverviewDashboard(state: state)
+                        .transaction { $0.disablesAnimations = true })
+                let cleared = await eventually(before: .seconds(2)) {
+                    pumpUIRunLoop()
+                    return !accessibilityButtons(in: hostingView).contains { $0.label == "去设置" }
+                }
+                try expect(cleared, "the setup banner stayed after the gap closed")
+            }
             await MicrophoneSelectionUISpecs.run(failures: &failures)
             await APIKeySettingsUISpecs.run(failures: &failures)
             await RefinementProviderUISpecs.run(failures: &failures)
@@ -354,7 +400,7 @@ struct SpeakerAppUISpecs {
             for state in [
                 MenuBarIconState.ready,
                 .recording,
-                .needsPermission,
+                .needsSetup,
             ] {
                 let image = SpeakerMenuBarIconArtwork.image(for: state)
                 try expect(
@@ -376,7 +422,7 @@ struct SpeakerAppUISpecs {
             for (state, expectedLabel) in [
                 (MenuBarIconState.ready, "Speaker"),
                 (.recording, "Speaker，正在录音"),
-                (.needsPermission, "Speaker，需要完成权限设置"),
+                (.needsSetup, "Speaker，需要完成设置"),
             ] {
                 let hostingView = NSHostingView(
                     rootView:

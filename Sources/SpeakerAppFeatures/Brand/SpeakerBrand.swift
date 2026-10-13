@@ -282,7 +282,7 @@ private struct SpeakerMenuBarGlyph: View {
             Circle()
                 .fill(Color.black)
                 .frame(width: 3.5, height: 3.5)
-        case .needsPermission:
+        case .needsSetup:
             VStack(spacing: 0.5) {
                 Capsule()
                     .fill(Color.black)
@@ -299,7 +299,7 @@ private struct SpeakerMenuBarGlyph: View {
 package enum SpeakerMenuBarIconArtwork {
     @MainActor private static let readyImage = render(.ready)
     @MainActor private static let recordingImage = render(.recording)
-    @MainActor private static let needsPermissionImage = render(.needsPermission)
+    @MainActor private static let needsSetupImage = render(.needsSetup)
 
     @MainActor
     package static func image(for state: MenuBarIconState) -> NSImage {
@@ -308,8 +308,8 @@ package enum SpeakerMenuBarIconArtwork {
             readyImage
         case .recording:
             recordingImage
-        case .needsPermission:
-            needsPermissionImage
+        case .needsSetup:
+            needsSetupImage
         }
     }
 
@@ -365,8 +365,8 @@ package struct SpeakerMenuBarLabel: View {
             "Speaker"
         case .recording:
             "Speaker，正在录音"
-        case .needsPermission:
-            "Speaker，需要完成权限设置"
+        case .needsSetup:
+            "Speaker，需要完成设置"
         }
     }
 }

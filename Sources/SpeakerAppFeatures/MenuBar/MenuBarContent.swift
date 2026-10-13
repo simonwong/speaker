@@ -1,4 +1,5 @@
 import AppKit
+import SpeakerCore
 import SwiftUI
 
 /// The menu bar extra's rows. Order comes from `MenuBarPresentation`; the
@@ -11,6 +12,9 @@ package struct MenuBarContent: View {
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @ObservedObject var settingsNavigation: SettingsNavigationModel
     @ObservedObject var mainWindow: MainWindowModel
+    @ObservedObject var permissions: PermissionModel
+    @ObservedObject var doubao: DoubaoSettingsModel
+    @ObservedObject var recognition: SpeechRecognitionSettingsModel
     let startRuntime: () -> Void
     let refreshPermissions: () -> Void
     let openOnboarding: () -> Void
@@ -23,6 +27,9 @@ package struct MenuBarContent: View {
         dataErasure: SpeakerDataErasureCoordinator,
         settingsNavigation: SettingsNavigationModel,
         mainWindow: MainWindowModel,
+        permissions: PermissionModel,
+        doubao: DoubaoSettingsModel,
+        recognition: SpeechRecognitionSettingsModel,
         startRuntime: @escaping () -> Void,
         refreshPermissions: @escaping () -> Void,
         openOnboarding: @escaping () -> Void
@@ -33,6 +40,9 @@ package struct MenuBarContent: View {
         self.dataErasure = dataErasure
         self.settingsNavigation = settingsNavigation
         self.mainWindow = mainWindow
+        self.permissions = permissions
+        self.doubao = doubao
+        self.recognition = recognition
         self.startRuntime = startRuntime
         self.refreshPermissions = refreshPermissions
         self.openOnboarding = openOnboarding
@@ -52,9 +62,18 @@ package struct MenuBarContent: View {
         )
     }
 
+    private var setupGap: VoiceInputSetupGap? {
+        VoiceInputSetupGap.current(
+            permissions: permissions.snapshot,
+            doubao: doubao,
+            recognition: recognition
+        )
+    }
+
     private var rows: [MenuBarRow] {
         MenuBarPresentation.rows(
             voice: MenuBarVoiceCapabilities(menu: voiceInput.state.menu),
+            setupGap: setupGap,
             workspaceRoute: dataErasure.state.workspaceRoute
         )
     }
@@ -81,6 +100,14 @@ package struct MenuBarContent: View {
     @ViewBuilder
     private func row(_ row: MenuBarRow) -> some View {
         switch row {
+        case .completeSetup:
+            if let setupGap {
+                Button {
+                    commandRouter.perform(.settingsSection(setupGap.settingsGroup))
+                } label: {
+                    Label(setupGap.menuTitle, systemImage: "exclamationmark.circle")
+                }
+            }
         case .openSpeaker:
             Button("打开 Speaker") {
                 commandRouter.perform(.overview)
