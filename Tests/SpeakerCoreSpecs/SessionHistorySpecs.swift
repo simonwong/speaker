@@ -1198,5 +1198,44 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 throw SpecFailure(message: "history protection failure was hidden")
             }
         }
+
+        await runAsync(
+            "recent records with text read newest first and skip text-free sessions",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-recent-records-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = SQLiteSessionHistory(
+                fileURL: directory.appendingPathComponent("history.sqlite3"))
+            var expected: [VoiceInputSessionID] = []
+            for index in 0..<8 {
+                let id = VoiceInputSessionID()
+                let hasText = index % 3 != 0
+                let text = hasText ? "第 \(index) 条" : nil
+                await store.save(
+                    .init(
+                        sessionID: id,
+                        startedAt: Date(timeIntervalSince1970: TimeInterval(1_000 + index)),
+                        applicationName: nil,
+                        transcription: text,
+                        finalText: text,
+                        outcome: hasText
+                            ? .delivered(id, applicationName: "备忘录", text: text ?? "")
+                            : .failed(id, .providerAuthenticationFailed)
+                    ))
+                if hasText { expected.insert(id, at: 0) }
+            }
+
+            let recent = await store.recentRecordsWithText(limit: 3)
+            try expect(recent.map(\.sessionID) == Array(expected.prefix(3)))
+            let fallback = await VersionedLocalSessionHistory(
+                fileURL: directory.appendingPathComponent("legacy.json")
+            ).recentRecordsWithText(limit: 3)
+            try expect(fallback.isEmpty)
+            let none = await store.recentRecordsWithText(limit: 0)
+            try expect(none.isEmpty)
+        }
     }
 }

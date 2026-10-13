@@ -3383,6 +3383,81 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        await runAsync(
+            "menu bar recent results copy retained text read again from history",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-menu-recent-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = SQLiteSessionHistory(
+                fileURL: directory.appendingPathComponent("history.sqlite3"))
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+            let now = calendar.date(
+                from: DateComponents(year: 2026, month: 10, day: 13, hour: 15, minute: 0))!
+            let todayID = VoiceInputSessionID()
+            let olderID = VoiceInputSessionID()
+            let secureID = VoiceInputSessionID()
+            let longText = "这是一段很长的识别文字，\n用来确认菜单只显示一行，并且超出部分会被省略号截断。"
+            await store.save(
+                .init(
+                    sessionID: olderID,
+                    startedAt: calendar.date(byAdding: .day, value: -2, to: now)!,
+                    applicationName: nil,
+                    transcription: "前天的文字",
+                    finalText: nil,
+                    outcome: .cancelled(olderID)
+                ))
+            await store.save(
+                .init(
+                    sessionID: secureID,
+                    startedAt: now.addingTimeInterval(-120),
+                    applicationName: nil,
+                    transcription: nil,
+                    finalText: nil,
+                    outcome: .pendingCopy(secureID, text: "", reason: .secureTarget)
+                ))
+            await store.save(
+                .init(
+                    sessionID: todayID,
+                    startedAt: now.addingTimeInterval(-60),
+                    applicationName: nil,
+                    transcription: "初稿",
+                    finalText: longText,
+                    outcome: .delivered(todayID, applicationName: "备忘录", text: longText)
+                ))
+            let clipboard = ClipboardFake()
+            var announcements: [String] = []
+            let model = MenuBarRecentResultsModel(
+                store: store,
+                clipboard: clipboard,
+                announce: { announcements.append($0) },
+                calendar: calendar,
+                now: { now }
+            )
+            await model.refresh()
+
+            try expect(model.items.map(\.id) == [todayID, olderID])
+            let todayTitle = model.items.first?.title ?? ""
+            try expect(todayTitle.hasPrefix("14:59  这是一段很长的识别文字， 用来"), todayTitle)
+            try expect(todayTitle.hasSuffix("…") && !todayTitle.contains("\n"), todayTitle)
+            try expect(model.items.last?.title == "10月11日  前天的文字")
+
+            let copiedToday = await model.copy(todayID)
+            try expect(copiedToday)
+            let copied = await clipboard.copiedTexts
+            try expect(copied == [longText], "the menu must copy the complete text")
+            try expect(announcements.last == SpeakerCopy.Clipboard.textCopied)
+
+            _ = await store.delete(sessionID: olderID)
+            let copiedDeleted = await model.copy(olderID)
+            let copiedAfterDelete = await clipboard.copiedTexts
+            try expect(!copiedDeleted && copiedAfterDelete == [longText])
+            try expect(model.items.map(\.id) == [todayID])
+        }
+
         run(
             "menu bar presents only compact contextual shortcuts in exact order",
             failures: &failures
@@ -3478,6 +3553,7 @@ struct SpeakerAppScenarioSpecs {
                 MenuBarPresentation.rows(
                     voice: idle,
                     setupGap: .speechRecognitionKey(.doubao),
+                    hasRecentResults: true,
                     workspaceRoute: .normal
                 ) == [
                     .completeSetup,
@@ -3485,12 +3561,21 @@ struct SpeakerAppScenarioSpecs {
                     .openSpeaker,
                     .refinementMode,
                     .microphone,
+                    .recentResults,
                     .divider,
                     .settings,
                     .onboarding,
                     .divider,
                     .quit,
                 ]
+            )
+            try expect(
+                MenuBarPresentation.rows(
+                    voice: idle,
+                    hasRecentResults: true,
+                    workspaceRoute: .erasing
+                ).contains(.recentResults) == false,
+                "erasure recovery must not offer history text"
             )
             let dataErasureRows: [MenuBarRow] = [
                 .dataErasureStatus,
@@ -3519,6 +3604,7 @@ struct SpeakerAppScenarioSpecs {
             let router = MenuBarCommandRouter(
                 navigation: navigation,
                 openOverview: { events.append("overview") },
+                openHistory: { events.append("history") },
                 openOnboarding: { events.append("onboarding") },
                 openSettings: { events.append("settings") },
                 openDataErasureRecovery: {
@@ -3530,6 +3616,8 @@ struct SpeakerAppScenarioSpecs {
 
             router.perform(.overview)
             try expect(events == ["overview", "activate"])
+            router.perform(.history)
+            try expect(events.suffix(2) == ["history", "activate"])
             let navigationBeforeGuide = navigation.presentationRequest
             router.perform(.onboarding)
             try expect(events.suffix(2) == ["onboarding", "activate"])
@@ -4431,6 +4519,7 @@ struct SpeakerAppScenarioSpecs {
                 let router = MenuBarCommandRouter(
                     navigation: navigation,
                     openOverview: {},
+                    openHistory: {},
                     openOnboarding: {},
                     openSettings: {
                         if let target = navigation.presentationRequest?.target {

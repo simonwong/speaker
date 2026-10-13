@@ -15,6 +15,7 @@ package struct MenuBarContent: View {
     @ObservedObject var permissions: PermissionModel
     @ObservedObject var doubao: DoubaoSettingsModel
     @ObservedObject var recognition: SpeechRecognitionSettingsModel
+    @ObservedObject var recentResults: MenuBarRecentResultsModel
     let startRuntime: () -> Void
     let refreshPermissions: () -> Void
     let openOnboarding: () -> Void
@@ -30,6 +31,7 @@ package struct MenuBarContent: View {
         permissions: PermissionModel,
         doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
+        recentResults: MenuBarRecentResultsModel,
         startRuntime: @escaping () -> Void,
         refreshPermissions: @escaping () -> Void,
         openOnboarding: @escaping () -> Void
@@ -43,6 +45,7 @@ package struct MenuBarContent: View {
         self.permissions = permissions
         self.doubao = doubao
         self.recognition = recognition
+        self.recentResults = recentResults
         self.startRuntime = startRuntime
         self.refreshPermissions = refreshPermissions
         self.openOnboarding = openOnboarding
@@ -52,6 +55,7 @@ package struct MenuBarContent: View {
         MenuBarCommandRouter(
             navigation: settingsNavigation,
             openOverview: { openMainWindow(.overview) },
+            openHistory: { openMainWindow(.history) },
             openOnboarding: openOnboarding,
             openSettings: { openMainWindow(.settings) },
             openDataErasureRecovery: { openMainWindow(.about) },
@@ -74,6 +78,7 @@ package struct MenuBarContent: View {
         MenuBarPresentation.rows(
             voice: MenuBarVoiceCapabilities(menu: voiceInput.state.menu),
             setupGap: setupGap,
+            hasRecentResults: !recentResults.items.isEmpty,
             workspaceRoute: dataErasure.state.workspaceRoute
         )
     }
@@ -94,6 +99,7 @@ package struct MenuBarContent: View {
             if dataErasure.state == .idle {
                 refreshPermissions()
             }
+            await recentResults.refresh()
         }
     }
 
@@ -125,6 +131,18 @@ package struct MenuBarContent: View {
             }
         case .microphone:
             MicrophoneSelectionMenu(model: microphones)
+        case .recentResults:
+            Menu {
+                ForEach(recentResults.items) { item in
+                    Button(item.title) {
+                        Task { await recentResults.copy(item.id) }
+                    }
+                }
+                Divider()
+                Button("查看全部历史…") { commandRouter.perform(.history) }
+            } label: {
+                Label("最近结果", systemImage: "clock.arrow.circlepath")
+            }
         case .voiceStatus:
             if let status = voiceInput.state.menu.status {
                 Label(
