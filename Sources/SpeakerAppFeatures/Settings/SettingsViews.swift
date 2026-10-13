@@ -174,10 +174,11 @@ private struct SettingsOverviewView: View {
                 showsHeader: false
             )
         case .refinement:
-            // The provider and its key sit above the modes they unlock.
+            // The modes come first; the provider and its key, which unlock
+            // every mode but 默认顺滑, sit below them.
             VStack(spacing: SpeakerSurfaceMetrics.cardSpacing) {
-                RefinementProviderSettingsCard(model: workspace.refinement)
                 RefinementSettingsPage(model: workspace.refinement)
+                RefinementProviderSettingsCard(model: workspace.refinement)
             }
         case .general:
             GeneralSettingsPage(

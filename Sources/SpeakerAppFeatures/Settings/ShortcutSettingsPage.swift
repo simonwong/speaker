@@ -31,30 +31,35 @@ struct ShortcutSettingsPage: View {
     }
 
     private var recorderRow: some View {
-        HStack(spacing: 14) {
-            ShortcutKeycap(name: shortcut.preference.displayName)
+        SpeakerRow("录音快捷键") {
+            HStack(spacing: 14) {
+                ShortcutKeycap(name: shortcut.preference.displayName)
 
-            // The keycap already names a working shortcut; only a shortcut
-            // that is not listening needs words beside it.
-            if let status = shortcutStatus {
-                StatusBadge(text: status.text, icon: status.icon, color: status.color)
+                // The keycap already names a working shortcut; only a shortcut
+                // that is not listening needs words beside it.
+                if let status = shortcutStatus {
+                    StatusBadge(text: status.text, icon: status.icon, color: status.color)
+                }
+
+                recorderButtons
             }
+        }
+    }
 
-            Spacer()
+    @ViewBuilder
+    private var recorderButtons: some View {
+        Button("使用 Fn") {
+            shortcutRecorder.stop()
+            shortcut.select(.functionKey)
+        }
+        .disabled(shortcut.activation.activePreference == .functionKey)
 
-            Button("使用 Fn") {
+        Button(shortcutRecorder.isRecording ? "取消" : "更改快捷键") {
+            if shortcutRecorder.isRecording {
                 shortcutRecorder.stop()
-                shortcut.select(.functionKey)
-            }
-            .disabled(shortcut.activation.activePreference == .functionKey)
-
-            Button(shortcutRecorder.isRecording ? "取消" : "更改快捷键") {
-                if shortcutRecorder.isRecording {
-                    shortcutRecorder.stop()
-                } else {
-                    shortcutRecorder.start { hotKey in
-                        shortcut.select(.init(customHotKey: hotKey))
-                    }
+            } else {
+                shortcutRecorder.start { hotKey in
+                    shortcut.select(.init(customHotKey: hotKey))
                 }
             }
         }

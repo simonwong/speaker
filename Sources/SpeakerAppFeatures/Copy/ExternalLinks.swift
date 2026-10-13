@@ -5,9 +5,24 @@ import Foundation
 /// A link literal appears here once, so a moved console page or repository is
 /// corrected in one place, and no caller force-unwraps a URL.
 package enum ExternalLinks {
+    /// The Speaker website shown by the About page.
+    package static let speakerWebsite = absolute(
+        "https://speaker.moonunder.app"
+    )
+
     /// The Speaker source repository shown by the About page.
     package static let speakerRepository = absolute(
         "https://github.com/simonwong/speaker"
+    )
+
+    /// Where users report problems and suggestions.
+    package static let speakerIssues = absolute(
+        "https://github.com/simonwong/speaker/issues"
+    )
+
+    /// The author's GitHub profile shown by the About page.
+    package static let authorProfile = absolute(
+        "https://github.com/simonwong"
     )
 
     /// The Volcengine console page that issues Doubao speech API keys.
