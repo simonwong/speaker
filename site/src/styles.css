@@ -263,3 +263,26 @@ pre code {
   background: none;
   white-space: pre;
 }
+
+/* Guide pages */
+
+.hero.compact {
+  padding-block: 48px 40px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--text);
+}
+
+.note {
+  margin-top: 16px;
+  font-size: 13px;
+}

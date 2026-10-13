@@ -1,11 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { Footer, GITHUB_URL, PRIVACY_URL, RELEASE_NOTES_URL, Section } from '../components'
 
 const SITE_URL = 'https://speaker.moonunder.app/'
-const GITHUB_URL = 'https://github.com/simonwong/speaker'
-const DOWNLOAD_URL = `${GITHUB_URL}/releases/latest`
-const RELEASE_NOTES_URL = `${GITHUB_URL}/releases`
-const PRIVACY_URL = `${GITHUB_URL}/blob/main/PRIVACY.md`
+// Redirects to the newest DMG; see src/server.ts.
+const DOWNLOAD_URL = `${SITE_URL}download`
 const OG_IMAGE_URL = `${SITE_URL}og.png`
 
 const title = 'Speaker：Mac 语音输入工具，说话转文字，自带 API Key'
@@ -18,6 +16,16 @@ const faqs: Faq[] = [
   {
     question: 'Speaker 收费吗？',
     answer: '免费，MIT 开源。语音识别和文字整理的费用由你选择的服务商按用量收取。',
+  },
+  {
+    question: '和豆包输入法、微信输入法有什么不同？',
+    answer:
+      'Speaker 不是输入法，不用切换输入法，按快捷键就能在任意输入框说话。它没有账号，也不经过 Speaker 的服务器。识别和整理可以分别选服务商，还能写自己的整理指令。代价是要自己申请 API Key，按用量付费。',
+  },
+  {
+    question: '用豆包识别，一个月大概多少钱？',
+    answer:
+      '豆包流式语音识别模型 2.0 小时版按音频时长计费，标价 1 元/小时，按秒累计。每天说 30 分钟，一个月约 15 小时，约 15 元。在控制台点「试用」可领 20 小时额度，半年内有效。价格以火山引擎计费说明为准。',
   },
   {
     question: '和 macOS 自带的听写有什么不同？',
@@ -104,15 +112,6 @@ export const Route = createFileRoute('/')({
   component: Home,
 })
 
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
-  return (
-    <section className="block" id={id} aria-labelledby={`${id}-title`}>
-      <h2 id={`${id}-title`}>{title}</h2>
-      {children}
-    </section>
-  )
-}
-
 function Home() {
   return (
     <div className="page">
@@ -154,7 +153,8 @@ function Home() {
 
         <Section id="api-key" title="自带 API Key">
           <p>
-            语音识别可选豆包、OpenAI、阿里千问；OpenAI 和千问可以边录边传，也可以录完再传。豆包需要先在火山引擎开通流式识别资源。
+            语音识别可选豆包、OpenAI、阿里千问；OpenAI 和千问可以边录边传，也可以录完再传。豆包需要先在火山引擎开通流式识别资源，
+            步骤见<a href="/doubao">申请豆包 API Key</a>。
           </p>
           <p>文字整理可选 DeepSeek、OpenAI、Kimi、GLM 或自定义接口。</p>
           <p>Key 存在 macOS 钥匙串里，请求从你的 Mac 直接发给服务商。</p>
@@ -165,9 +165,10 @@ function Home() {
           <p>整理只发送文字，不发送音频；整理失败时保留识别结果。</p>
         </Section>
 
-        <Section id="privacy" title="数据留在本机">
+        <Section id="privacy" title="不经过我们的服务器">
+          <p>Speaker 没有服务端。音频和文字只发给你选择的服务商。</p>
           <p>
-            设置、个人词库和历史记录只存在这台 Mac 上。音频只在内存中处理，不写入磁盘。详见{' '}
+            设置、个人词库和历史记录只存在这台 Mac 上，密码框里的内容不进历史。音频只在内存中处理，不写入磁盘。详见{' '}
             <a href={PRIVACY_URL}>隐私说明</a>。
           </p>
         </Section>
@@ -175,11 +176,13 @@ function Home() {
         <Section id="install" title="下载与安装">
           <ol className="install">
             <li>
-              从 <a href={DOWNLOAD_URL}>GitHub Releases</a> 下载最新的 DMG。
+              <a href={DOWNLOAD_URL}>下载最新的 DMG</a>，历史版本在 <a href={RELEASE_NOTES_URL}>GitHub Releases</a>。
             </li>
             <li>把 Speaker 拖到“应用程序”，然后打开。</li>
             <li>按引导授权麦克风和辅助功能。</li>
-            <li>选择识别服务，填入 API Key。之后的新版本可以在 App 内更新。</li>
+            <li>
+              选择识别服务，填入 API Key。没有 Key 的话，先看<a href="/doubao">申请豆包 API Key</a>。之后的新版本可以在 App 内更新。
+            </li>
           </ol>
         </Section>
 
@@ -195,14 +198,7 @@ function Home() {
         </Section>
       </main>
 
-      <footer className="footer">
-        <span>© {new Date().getFullYear()} Simon Wong · MIT</span>
-        <nav className="links" aria-label="项目链接">
-          <a href={GITHUB_URL}>GitHub</a>
-          <a href={RELEASE_NOTES_URL}>更新记录</a>
-          <a href={PRIVACY_URL}>隐私说明</a>
-        </nav>
-      </footer>
+      <Footer />
     </div>
   )
 }

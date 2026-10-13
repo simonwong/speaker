@@ -26,9 +26,10 @@ struct DoubaoRecognitionSettings: View {
                 ? ProviderConnectionCheck(
                     isChecking: isChecking,
                     isEnabled: !isChecking && !model.isUpdatingKey,
+                    help: "发送 0.4 秒静音，检查 Key 和所选资源；可能计入极少量用量。",
                     action: model.checkConnection
                 ) : nil,
-            console: ("豆包控制台", ExternalLinks.doubaoConsoleAPIKeys),
+            links: [.doubaoGuide, .console(for: .doubao, region: .beijing)],
             deletionMessage: "删除后将无法进行新的语音转录，历史记录不会受影响。",
             save: { await model.save() },
             delete: { await model.delete() }
@@ -49,7 +50,7 @@ struct DoubaoRecognitionSettings: View {
                 )
             ) {
                 ForEach(DoubaoStreamingResource.allCases, id: \.rawValue) { resource in
-                    Text(resource.displayName).tag(resource)
+                    Text(DoubaoResourcePresentation.title(for: resource)).tag(resource)
                 }
             }
             .settingsTrailingMenu()
@@ -166,6 +167,7 @@ package struct RefinementProviderSettingsCard: View {
                             && !model.hasProfileChanges,
                         action: model.checkConnection
                     ) : nil,
+                links: ProviderKeyLink.console(for: model.selectedProvider).map { [$0] } ?? [],
                 deletionMessage: "只删除当前服务商的 Key，并切回默认顺滑；其他服务商与历史记录不受影响。",
                 save: { await model.saveAPIKey() },
                 delete: { await model.deleteAPIKey() }
@@ -230,6 +232,8 @@ struct ProviderKeyStatus {
 struct ProviderConnectionCheck {
     let isChecking: Bool
     let isEnabled: Bool
+    /// What the check sends, shown on hover.
+    var help: String?
     let action: @MainActor () -> Void
 }
 
@@ -246,7 +250,8 @@ struct ProviderKeyEditor: View {
     var allowsSave = true
     let status: ProviderKeyStatus
     var connectionCheck: ProviderConnectionCheck?
-    var console: (title: String, url: URL)?
+    /// Where to get the Key, shown while the field is open.
+    var links: [ProviderKeyLink] = []
     let deletionMessage: String
     let save: @MainActor () async -> Void
     let delete: @MainActor () async -> Void
@@ -324,14 +329,15 @@ struct ProviderKeyEditor: View {
                 isEnabled: connectionCheck.isEnabled && !blockedByDraft,
                 action: connectionCheck.action
             )
+            .help(connectionCheck.help ?? "")
         }
     }
 
     @ViewBuilder
     private var editingActions: some View {
-        if let console {
-            Link(destination: console.url) {
-                Label(console.title, systemImage: "arrow.up.right")
+        ForEach(links, id: \.url) { link in
+            Link(destination: link.url) {
+                Label(link.title, systemImage: "arrow.up.right")
                     .labelStyle(TrailingIconLabelStyle())
             }
             // The card's capsule style would otherwise dress the link as

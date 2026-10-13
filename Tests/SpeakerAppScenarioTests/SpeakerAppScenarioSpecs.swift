@@ -2623,6 +2623,77 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
+            "Doubao connection failure names the checked resource and its fix",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-doubao-failure-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let service = ScenarioDoubaoSettingsService(hasKey: true)
+            let model = DoubaoSettingsModel(
+                service: service,
+                settingsStore: VersionedLocalAppSettingsStore(
+                    fileURL: directory.appendingPathComponent("settings.json")
+                )
+            )
+            await model.refresh()
+            await model.selectResource(.model1Duration)
+
+            for (kind, expected) in [
+                (DoubaoASRFailureKind.resourceNotActivated, "「流式模型 1.0 · 小时版」"),
+                (.invalidCredential, "不要填 APP ID 或 Access Token"),
+            ] {
+                model.checkConnection()
+                for _ in 0..<50 {
+                    if await service.isCheckPending { break }
+                    try? await Task.sleep(for: .milliseconds(2))
+                }
+                await service.finishCheck(.failure(DoubaoASRFailure(kind: kind)))
+                let reported = await eventually(before: .seconds(1)) {
+                    if case .failure(let message) = model.status {
+                        return message.contains(expected)
+                    }
+                    return false
+                }
+                try expect(reported, "\(kind) failure did not explain its fix")
+            }
+        }
+
+        run("provider key links point to each provider's own console", failures: &failures) {
+            try expect(
+                ProviderKeyLink.console(for: .doubao, region: .beijing).url
+                    == ExternalLinks.doubaoConsoleAPIKeys)
+            try expect(
+                ProviderKeyLink.console(for: .openAI, region: .beijing).url
+                    == ExternalLinks.openAIAPIKeys)
+            try expect(
+                ProviderKeyLink.console(for: .qwen, region: .beijing).url
+                    == ExternalLinks.qwenBeijingAPIKeys)
+            try expect(
+                ProviderKeyLink.console(for: .qwen, region: .singapore).url
+                    == ExternalLinks.qwenSingaporeAPIKeys,
+                "a Qwen Key only works in the region whose console issued it")
+            for provider in RefinementProviderID.allCases {
+                let link = ProviderKeyLink.console(for: provider)
+                try expect(
+                    (link == nil) == (provider == .custom),
+                    "\(provider) console link presence is wrong")
+                try expect(link.map { $0.url.scheme == "https" } ?? true)
+            }
+            try expect(ProviderKeyLink.doubaoGuide.url.host == ExternalLinks.speakerWebsite.host)
+        }
+
+        run("only the default Doubao resource is marked recommended", failures: &failures) {
+            let recommended = DoubaoStreamingResource.allCases.filter {
+                DoubaoResourcePresentation.title(for: $0).hasSuffix("（推荐）")
+            }
+            try expect(recommended == [.default])
+        }
+
+        await runAsync(
             "refinement providers preserve independent models keys and desired mode",
             failures: &failures
         ) {

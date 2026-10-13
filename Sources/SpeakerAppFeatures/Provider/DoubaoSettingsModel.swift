@@ -118,7 +118,9 @@ package final class DoubaoSettingsModel: ObservableObject {
             case .success(let requestID):
                 status = .success(requestID)
             case .failure(let failure as DoubaoASRFailure):
-                status = .failure(Self.message(for: failure))
+                status = .failure(
+                    DoubaoResourcePresentation.connectionFailure(failure, resource: checkedResource)
+                )
             case .failure(let error):
                 status = .failure(SpeakerCopy.Failure.message(for: error))
             }
@@ -178,10 +180,5 @@ package final class DoubaoSettingsModel: ObservableObject {
         checkTask?.cancel()
         checkTask = nil
         return generation
-    }
-
-    private static func message(for failure: DoubaoASRFailure) -> String {
-        if failure.kind == .cancelled { return "连接检查已取消" }
-        return VoiceInputProblem(doubaoFailure: failure).failure.userTitle
     }
 }
