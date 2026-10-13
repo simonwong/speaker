@@ -70,7 +70,6 @@ extension View {
         labelsHidden()
             .pickerStyle(.menu)
             .controlSize(.large)
-            .speakerPointingHandCursor()
             .frame(maxWidth: SpeakerSurfaceMetrics.trailingControlWidth, alignment: .trailing)
     }
 }

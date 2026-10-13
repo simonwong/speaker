@@ -99,7 +99,6 @@ package struct MainWindowTabBar: View {
                     label(for: tab)
                 }
                 .buttonStyle(.plain)
-                .speakerPointingHandCursor()
             }
         }
         // Only the indicator slides; the page itself swaps at once.
