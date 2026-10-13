@@ -313,6 +313,10 @@ final class SQLiteStatement {
         sqlite3_column_int64(statement, index)
     }
 
+    func double(at index: Int32) -> Double {
+        sqlite3_column_double(statement, index)
+    }
+
     func text(at index: Int32) -> String? {
         sqlite3_column_text(statement, index).map(String.init(cString:))
     }

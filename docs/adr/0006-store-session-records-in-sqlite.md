@@ -26,6 +26,8 @@ Privacy scrub is a migration with the same shape. `scrubUntrustedProviderMessage
 
 Corruption is preserved, not repaired. An open that fails `quick_check` or reports a recoverable corruption class moves the whole file set into an owner-only `history.corrupt-<timestamp>-<uuid>` directory, opens a fresh database, and surfaces `corruptedDataPreserved` with the backup location. If any file cannot be moved, the partial move is restored and the recovery directory is kept, because deleting it could destroy the user's only remaining copy. Rows whose payload schema is unknown or undecodable are counted and skipped rather than rewritten.
 
+Usage totals outlive the Session Records they came from. Before any deletion — a single record, a user clear, age eviction, or the record cap — the same transaction folds the deleted rows' per-day character count, speaking time, and session count into `usage_archive`, and `usageStatistics()` adds that table back. The archive holds no text, session identifiers, or timestamps finer than a day, so clearing history keeps the overview's lifetime totals while full data erasure, which removes the database, resets them. A record that stops counting as a session (for example a later version that recorded too little) is removed without archiving.
+
 Transcript text is persisted only after the Input Target's security class is confirmed. A secure target's Session Record holds no Stage Result text and no provider request identifiers in any state, including non-terminal and cancelled ones.
 
 ## Consequences

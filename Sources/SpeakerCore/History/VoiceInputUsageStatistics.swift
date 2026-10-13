@@ -93,6 +93,33 @@ package struct VoiceInputUsageAccumulator {
         totalSessions += 1
     }
 
+    /// Adds counts already folded into one day, for example totals archived
+    /// when their Session Records were deleted.
+    package mutating func addArchived(
+        day: Date,
+        recognizedCharacterCount: Int,
+        speakingMilliseconds: Int,
+        sessionCount: Int
+    ) {
+        let characters = max(0, recognizedCharacterCount)
+        let milliseconds = max(0, speakingMilliseconds)
+        let sessions = max(0, sessionCount)
+        let day = calendar.startOfDay(for: day)
+        var bucket = buckets[day] ?? Bucket()
+        bucket.characters += characters
+        bucket.milliseconds += milliseconds
+        bucket.sessions += sessions
+        buckets[day] = bucket
+        totalCharacters += characters
+        totalMilliseconds += milliseconds
+        totalSessions += sessions
+    }
+
+    /// The per-day buckets gathered so far, for a store that archives them.
+    package var dailyBuckets: [VoiceInputDailyUsage] {
+        summary().daily
+    }
+
     package mutating func add(_ record: VoiceInputHistoryRecord) {
         add(
             startedAt: record.startedAt,
