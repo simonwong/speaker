@@ -3222,6 +3222,22 @@ struct SpeakerAppScenarioSpecs {
         }
 
         run(
+            "main window shortcuts follow the tab order and ⌘F waits for History search",
+            failures: &failures
+        ) {
+            try expect(MainWindowTab.allCases.map(\.commandNumber) == [1, 2, 3, 4, 5])
+
+            let window = MainWindowModel()
+            window.select(.settings)
+            window.requestHistorySearch()
+            try expect(window.selection == .history)
+            try expect(window.historySearchRequested)
+            window.historySearchFocused()
+            try expect(!window.historySearchRequested)
+            try expect(window.selection == .history)
+        }
+
+        run(
             "settings and main window expose the approved information architecture",
             failures: &failures
         ) {

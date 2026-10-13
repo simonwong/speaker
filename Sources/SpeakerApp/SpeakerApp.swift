@@ -66,6 +66,7 @@ struct SpeakerApp: App {
                 mainWindow: runtime.mainWindow,
                 navigation: runtime.settingsNavigation
             )
+            MainWindowTabCommands(mainWindow: runtime.mainWindow)
         }
     }
 }
