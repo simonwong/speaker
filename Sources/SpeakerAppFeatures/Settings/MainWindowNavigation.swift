@@ -126,28 +126,32 @@ package struct MainWindowTabBar: View {
 }
 
 package enum AboutSection: String, CaseIterable, Identifiable, Sendable {
+    case project
+    case author
     case privacyBoundary
-    case version
     case diagnostics
 
     package var id: String { rawValue }
 
+    package static let projectTitle = "项目"
+    package static let authorTitle = "作者"
     package static let privacyBoundaryTitle = "隐私边界"
-    package static let versionTitle = "版本"
     package static let diagnosticsTitle = "诊断"
 
     package var title: String {
         switch self {
+        case .project: Self.projectTitle
+        case .author: Self.authorTitle
         case .privacyBoundary: Self.privacyBoundaryTitle
-        case .version: Self.versionTitle
         case .diagnostics: Self.diagnosticsTitle
         }
     }
 
     package var icon: String {
         switch self {
+        case .project: "link"
+        case .author: "person.crop.circle"
         case .privacyBoundary: "hand.raised.fill"
-        case .version: "info.circle"
         case .diagnostics: "stethoscope"
         }
     }

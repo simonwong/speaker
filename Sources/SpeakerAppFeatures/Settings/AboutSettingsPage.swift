@@ -35,10 +35,18 @@ private struct AboutSettingsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             identity
 
-            privacyBoundaryCard
+            if let message = softwareUpdate.state.unavailableMessage {
+                SettingsNotice(text: message, color: .secondary)
+                    .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
+            }
+
+            projectCard
                 .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
 
-            versionCard
+            authorCard
+                .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
+
+            privacyBoundaryCard
                 .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
 
             diagnosticsCard
@@ -46,8 +54,9 @@ private struct AboutSettingsPage: View {
         }
     }
 
-    /// The identity block names the product; the version card owns updates and
-    /// the repository so neither fact appears twice on this page.
+    /// The identity block names the product and owns its version and update
+    /// check; the project card owns every outside link, so no fact appears
+    /// twice on this page.
     private var identity: some View {
         HStack(spacing: 16) {
             SpeakerIdentityTile(size: 64)
@@ -59,9 +68,80 @@ private struct AboutSettingsPage: View {
                     .font(SpeakerTypography.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Text(versionText)
+                    .font(SpeakerTypography.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("当前版本 \(versionText)")
             }
 
             Spacer(minLength: 12)
+
+            Button("检查更新…") {
+                softwareUpdate.checkForUpdates()
+            }
+            .buttonStyle(SettingsButtonStyle())
+            .disabled(!softwareUpdate.state.canCheckForUpdates)
+        }
+    }
+
+    private var projectCard: some View {
+        SettingsCard(
+            AboutSection.project.title,
+            icon: AboutSection.project.icon
+        ) {
+            SpeakerRow("官网", detail: "speaker.moonunder.app", icon: "globe") {
+                Button("打开官网") {
+                    routeEffects.openURL(ExternalLinks.speakerWebsite)
+                }
+            }
+            SettingsRowDivider()
+            SpeakerRow(
+                "源代码",
+                detail: "MIT 许可证开源，托管在 GitHub。",
+                icon: "chevron.left.forwardslash.chevron.right"
+            ) {
+                Button {
+                    routeEffects.openURL(ExternalLinks.speakerRepository)
+                } label: {
+                    Label {
+                        Text("在 GitHub 查看")
+                    } icon: {
+                        GitHubMark()
+                            .fill(Color.primary)
+                            .frame(width: 14, height: 14)
+                    }
+                }
+                .accessibilityLabel("在 GitHub 查看 Speaker")
+            }
+            SettingsRowDivider()
+            SpeakerRow(
+                "反馈问题",
+                detail: "在 GitHub Issues 报告问题或提建议；附上诊断信息便于排查。",
+                icon: "exclamationmark.bubble"
+            ) {
+                Button("提交反馈") {
+                    routeEffects.openURL(ExternalLinks.speakerIssues)
+                }
+            }
+        }
+    }
+
+    private var authorCard: some View {
+        SettingsCard(
+            AboutSection.author.title,
+            icon: AboutSection.author.icon
+        ) {
+            SpeakerRow(
+                "simonwong",
+                detail: "Speaker 的作者与维护者。",
+                icon: "person.fill"
+            ) {
+                Button("GitHub 主页") {
+                    routeEffects.openURL(ExternalLinks.authorProfile)
+                }
+                .accessibilityLabel("在 GitHub 查看作者主页")
+            }
         }
     }
 
@@ -100,48 +180,6 @@ private struct AboutSettingsPage: View {
                     routeEffects.openURL(speakerApplicationSupportDirectory)
                 }
             }
-        }
-    }
-
-    private var versionCard: some View {
-        SettingsCard(
-            AboutSection.version.title,
-            icon: AboutSection.version.icon
-        ) {
-            SpeakerRow("当前版本") {
-                HStack(spacing: 10) {
-                    Text(versionText)
-                        .font(SpeakerTypography.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-
-                    Button("检查更新…") {
-                        softwareUpdate.checkForUpdates()
-                    }
-                    .disabled(!softwareUpdate.state.canCheckForUpdates)
-                }
-            }
-
-            if let message = softwareUpdate.state.unavailableMessage {
-                SettingsNotice(text: message, color: .secondary)
-            }
-
-            SettingsRowDivider()
-
-            Link(destination: ExternalLinks.speakerRepository) {
-                Label {
-                    Text("在 GitHub 查看")
-                        .font(SpeakerTypography.caption)
-                } icon: {
-                    GitHubMark()
-                        .fill(Color.primary)
-                        .frame(width: 14, height: 14)
-                }
-            }
-            .buttonStyle(SettingsButtonStyle())
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .accessibilityLabel("在 GitHub 查看 Speaker")
-            .help("在 GitHub 查看 Speaker")
         }
     }
 

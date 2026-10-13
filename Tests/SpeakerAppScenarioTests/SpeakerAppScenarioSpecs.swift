@@ -3093,8 +3093,9 @@ struct SpeakerAppScenarioSpecs {
             try expect(MainWindowTab.about.title == MainWindowTab.aboutTitle)
             try expect(
                 AboutSection.allCases.map(\.title) == [
+                    AboutSection.projectTitle,
+                    AboutSection.authorTitle,
                     AboutSection.privacyBoundaryTitle,
-                    AboutSection.versionTitle,
                     AboutSection.diagnosticsTitle,
                 ]
             )
