@@ -2411,6 +2411,29 @@ struct SpeakerAppScenarioSpecs {
             try expect(persisted.entries.last?.word == "1234567890")
         }
 
+        run(
+            "the Fn hint appears only while macOS also acts on the key",
+            failures: &failures
+        ) {
+            try expect(FunctionKeySystemAction(storedValue: 0).conflictMessage == nil)
+            for stored in [1, 2, 3, nil, 9] {
+                let message = FunctionKeySystemAction(storedValue: stored).conflictMessage
+                try expect(
+                    message?.contains("「不执行任何操作」") == true,
+                    "stored value \(String(describing: stored)) gave no fix: \(String(describing: message))"
+                )
+            }
+            try expect(
+                FunctionKeySystemAction(storedValue: 1).conflictMessage?.contains("更改输入法") == true
+            )
+            try expect(
+                FunctionKeySystemAction(storedValue: 2).conflictMessage?.contains("表情与符号") == true
+            )
+            try expect(
+                FunctionKeySystemAction.keyboardSettingsURL.scheme == "x-apple.systempreferences"
+            )
+        }
+
         await runAsync(
             "a deleted dictionary entry can be put back where it was",
             failures: &failures

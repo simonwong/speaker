@@ -118,6 +118,10 @@ enum OnboardingFlowUISpecs {
                 return button("开始使用 Speaker", in: hosting) != nil
             }
             try expect(tutorialShown)
+            try expect(
+                !practiceFields(in: hosting).isEmpty,
+                "the keyboard tutorial offers no practice text field"
+            )
             try capture(hosting, name: "onboarding-3-shortcut")
             window.contentMinSize = CGSize(width: 360, height: 360)
             window.minSize = CGSize(width: 360, height: 360)
@@ -307,6 +311,15 @@ enum OnboardingFlowUISpecs {
     @MainActor
     private static func secureFields(in view: NSView) -> [NSSecureTextField] {
         (view as? NSSecureTextField).map { [$0] } ?? view.subviews.flatMap { secureFields(in: $0) }
+    }
+
+    /// Editable plain text fields; the API key step uses secure fields instead.
+    @MainActor
+    private static func practiceFields(in view: NSView) -> [NSTextField] {
+        if let field = view as? NSTextField, !(field is NSSecureTextField), field.isEditable {
+            return [field]
+        }
+        return view.subviews.flatMap { practiceFields(in: $0) }
     }
 
     @MainActor
