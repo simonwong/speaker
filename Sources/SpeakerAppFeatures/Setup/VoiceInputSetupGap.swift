@@ -2,7 +2,8 @@ import SpeakerCore
 
 /// What still stops the next Voice Input Session before the user presses
 /// the shortcut: a missing runtime permission, or a selected Speech
-/// Recognition Provider with no saved Key.
+/// Recognition Provider with no saved Key, or on-device recognition whose
+/// language model is not installed.
 ///
 /// The menu bar icon, the menu's first row, and the Overview banner all read
 /// this one value, so an unconfigured Speaker never looks ready on any of
@@ -40,6 +41,8 @@ package enum VoiceInputSetupGap: Equatable, Sendable {
             hasKey = nil
         } else if provider == .doubao {
             hasKey = doubao.status == .loading ? nil : doubao.hasConfiguredKey
+        } else if provider.isOnDevice {
+            hasKey = recognition.onDeviceModelStatus.map { $0 == .installed }
         } else {
             hasKey = recognition.hasStoredKey
         }
@@ -68,6 +71,8 @@ package enum VoiceInputSetupGap: Equatable, Sendable {
         switch self {
         case .permissions:
             "Speaker 还没有麦克风或辅助功能权限，暂时不能录音。"
+        case .speechRecognitionKey(let provider) where provider.isOnDevice:
+            "\(provider.displayName)的语言模型还没下载，暂时不能识别。"
         case .speechRecognitionKey(let provider):
             "还没有保存\(provider.displayName)的 API Key，暂时不能识别。"
         }

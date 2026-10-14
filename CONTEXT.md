@@ -30,7 +30,7 @@ _Avoid_: transcription provider, model router
 
 **Speech Recognition Provider**
 
-The user-selected service and model that turns a Voice Input Session's audio into a Stage Result. Its destination and credential ownership are fixed for that session, independently of the Refinement Provider.
+The user-selected service and model that turns a Voice Input Session's audio into a Stage Result. Its destination and credential ownership are fixed for that session, independently of the Refinement Provider. Apple on-device recognition is a Speech Recognition Provider that runs on the Mac and has no credential.
 
 _Avoid_: audio refinement provider, automatic model router
 

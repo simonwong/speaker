@@ -10,13 +10,15 @@ package struct ProviderKeyLink: Equatable, Sendable {
     /// Doubao's Key and streaming resource are set up in two places on the
     /// Volcengine console, so it also links to Speaker's walkthrough.
     package static let doubaoGuide = Self(title: "怎么申请？", url: ExternalLinks.doubaoSetupGuide)
+    package static let doubaoConsole = Self(
+        title: "豆包控制台", url: ExternalLinks.doubaoConsoleAPIKeys)
 
+    /// On-device recognition has no Key and no console.
     package static func console(for provider: SpeechRecognitionProviderID, region: QwenASRRegion)
-        -> Self
+        -> Self?
     {
         switch provider {
-        case .doubao:
-            Self(title: "豆包控制台", url: ExternalLinks.doubaoConsoleAPIKeys)
+        case .doubao: doubaoConsole
         case .openAI:
             Self(title: "OpenAI 控制台", url: ExternalLinks.openAIAPIKeys)
         case .qwen:
@@ -25,6 +27,7 @@ package struct ProviderKeyLink: Equatable, Sendable {
             case .singapore:
                 Self(title: "Model Studio 控制台", url: ExternalLinks.qwenSingaporeAPIKeys)
             }
+        case .apple: nil
         }
     }
 

@@ -14,7 +14,7 @@
   </p>
 </div>
 
-Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the key while speaking and release it to finish, or short-press once to start and again to stop. Speaker transcribes with your choice of Doubao, OpenAI, or Alibaba Qwen, optionally refines the confirmed text with a separately selected text provider, and delivers the result to the input position that was focused when recording ended.
+Speaker lives in the menu bar and uses `Fn` as its default shortcut. Hold the key while speaking and release it to finish, or short-press once to start and again to stop. Speaker transcribes with your choice of Doubao, OpenAI, Alibaba Qwen, or, on macOS 26 and later, Apple on-device recognition, optionally refines the confirmed text with a separately selected text provider, and delivers the result to the input position that was focused when recording ended.
 
 If Speaker cannot prove that the original input target is still safe and current, it keeps the result in a HUD for explicit copying instead of risking delivery to the wrong place.
 
@@ -25,7 +25,7 @@ If Speaker cannot prove that the original input target is still safe and current
 
 - **Natural voice shortcut** — hold or short-press `Fn`, choose a custom shortcut, and press `Esc` to cancel at any time.
 - **Target-safe delivery** — the input target is frozen when recording ends; later window or focus changes never retarget the result.
-- **Your choice of speech recognition** — Choose Doubao, OpenAI, or Qwen. OpenAI and Qwen offer streaming while you speak or complete-recording recognition after you finish.
+- **Your choice of speech recognition** — Choose Doubao, OpenAI, or Qwen. OpenAI and Qwen offer streaming while you speak or complete-recording recognition after you finish. On macOS 26 and later you can also choose Apple on-device recognition, which needs no key and keeps audio on your Mac.
 - **Optional text refinement** — Default Smoothing uses the selected recognition result directly. Concise Cleanup, Full Rewrite, and Custom Modes use your selected text provider and model and send text only, never audio.
 - **Local controls** — Personal Dictionary, searchable Session Records, retention settings, and redacted diagnostics remain under the current macOS user account.
 - **Conservative privacy boundaries** — raw audio is never written to disk, secure input text is never stored in history, and Speaker changes the clipboard only after an explicit Copy action.
@@ -36,7 +36,7 @@ If Speaker cannot prove that the original input target is still safe and current
 | --- | --- |
 | Operating system | macOS 14 or later, on Apple silicon or Intel |
 | Interface language | Simplified Chinese only |
-| Transcription | Your own Doubao, OpenAI, or Alibaba Qwen API key; Doubao also requires an activated streaming ASR resource |
+| Transcription | Your own Doubao, OpenAI, or Alibaba Qwen API key; Doubao also requires an activated streaming ASR resource. Apple on-device recognition (macOS 26 and later) needs no key. |
 | Refinement | An optional DeepSeek, OpenAI, Kimi, GLM, or Custom API key enables non-default Refinement Modes |
 
 ## Download and run
@@ -51,7 +51,7 @@ Later releases install from inside Speaker: use **Check for Updates** in Setting
 
 1. Follow Speaker's onboarding to request Microphone and Accessibility access.
 2. Enable `/Applications/Speaker.app` in **System Settings → Privacy & Security → Accessibility** when macOS opens that page.
-3. In **Speech Recognition**, choose Doubao, OpenAI, or Alibaba Qwen and save its API key. OpenAI and Qwen let you select a recognition method and a compatible model. For Doubao, select an activated resource and run **Check Connection**. For Qwen, choose the region matching your key. Recognition and text-refinement keys are saved separately.
+3. In **Speech Recognition**, choose Doubao, OpenAI, or Alibaba Qwen and save its API key. OpenAI and Qwen let you select a recognition method and a compatible model. For Doubao, select an activated resource and run **Check Connection**. For Qwen, choose the region matching your key. For Apple on-device recognition, download the language model when prompted. Recognition and text-refinement keys are saved separately.
 4. Focus an input field in any app, then hold `Fn` while speaking and release it to finish. A short press followed by another short press also starts and stops recording.
 
 ## How it works

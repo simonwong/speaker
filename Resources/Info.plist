@@ -32,5 +32,7 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Speaker 需要在你使用语音快捷键时录制语音并将其转换为文字。</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>选择 Apple 语音识别时，Speaker 在这台 Mac 上把录音转换为文字，录音不会上传。</string>
 </dict>
 </plist>

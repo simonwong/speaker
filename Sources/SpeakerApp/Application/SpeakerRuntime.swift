@@ -472,7 +472,8 @@ final class SpeakerRuntime: ObservableObject {
                 doubaoResource: doubaoSettings.resource.rawValue,
                 recognitionProfile: recognitionSettings.selectedProfile,
                 recognitionConfigured: recognitionSettings.selectedProvider == .doubao
-                    ? doubaoSettings.hasConfiguredKey : recognitionSettings.hasStoredKey,
+                    ? doubaoSettings.hasConfiguredKey
+                    : recognitionSettings.isSelectedProviderReady,
                 refinementConfigured: refinementSettings.hasStoredKey,
                 refinementVerified: refinementSettings.isConnectionVerified,
                 refinementProfile: refinementSettings.selectedProfile,

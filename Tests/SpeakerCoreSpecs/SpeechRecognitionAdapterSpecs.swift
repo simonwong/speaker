@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 enum SpeechRecognitionAdapterSpecs: CoreSpecDomain {
@@ -134,6 +135,78 @@ enum SpeechRecognitionAdapterSpecs: CoreSpecDomain {
             try expect(requests.isEmpty)
             let calls = await doubao.contextCalls
             try expect(calls.count == 1)
+        }
+
+        await runAsync(
+            "on-device recognition needs no Key and finishes only after capture completes",
+            failures: &failures
+        ) {
+            let transport = SpeechRecognitionTransportFake()
+            let onDevice = OnDeviceSpeechRecognizerFake(text: "本机结果")
+            let client = CredentialedSpeechTranscriber(
+                credentials: ProviderCredentialStoreFake(),
+                doubao: StreamingContextualTranscriberFake(text: "doubao"), transport: transport,
+                onDevice: onDevice)
+            let gate = AudioCaptureCompletionGate()
+            let task = Task {
+                try await client.transcribe(
+                    stream(Data([1, 0, 2, 0])), context: context(.apple, completion: gate))
+            }
+            try await Task.sleep(for: .milliseconds(50))
+            let receivedBeforeCompletion = await onDevice.receivedBytes
+            try expect(receivedBeforeCompletion == 4, "audio was not streamed while recording")
+            await gate.accept()
+            let result = try await task.value
+            try expect(result.text == "本机结果")
+            try expect(result.providerRequestID == nil)
+            let requests = await transport.requests
+            try expect(requests.isEmpty, "on-device recognition sent a network request")
+
+            let captured = try await client.transcribe(
+                CapturedAudio(
+                    data: SpeechRecognitionWAV.encode(Data([1, 0])), duration: .milliseconds(100),
+                    peakPower: 0),
+                context: context(.apple))
+            try expect(captured.text == "本机结果")
+        }
+
+        await runAsync(
+            "on-device recognition reports a missing model and empty text as Session Problems",
+            failures: &failures
+        ) {
+            for (onDevice, expected) in [
+                (
+                    OnDeviceSpeechRecognizerFake(
+                        failure: SpeechRecognitionFailure(
+                            provider: .apple, kind: .onDeviceModelUnavailable)),
+                    VoiceInputFailure.onDeviceModelUnavailable
+                ),
+                (OnDeviceSpeechRecognizerFake(text: "  "), .providerReturnedNoText),
+                (OnDeviceSpeechRecognizerFake(failure: URLError(.unknown)), .transcriptionFailed),
+            ] {
+                let client = CredentialedSpeechTranscriber(
+                    credentials: ProviderCredentialStoreFake(),
+                    doubao: StreamingContextualTranscriberFake(text: "doubao"),
+                    transport: SpeechRecognitionTransportFake(), onDevice: onDevice)
+                do {
+                    _ = try await client.transcribe(stream(Data([1, 0])), context: context(.apple))
+                    throw SpecFailure(message: "on-device failure was delivered as text")
+                } catch let failure as SpeechRecognitionFailure {
+                    try expect(failure.userFailure == expected, "\(failure.kind) mapped wrongly")
+                    try expect(failure.providerDiagnostic.provider == "apple")
+                }
+            }
+        }
+
+        run(
+            "on-device transcripts drop the spaces SpeechTranscriber puts around Chinese",
+            failures: &failures
+        ) {
+            try expect(
+                AppleSpeechRecognizer.normalizedSpacing(
+                    "我们今天下午 3点讨论 Swift和 GitHub Actions的配置 ，然后合并。")
+                    == "我们今天下午3点讨论Swift和GitHub Actions的配置，然后合并。")
+            try expect(AppleSpeechRecognizer.normalizedSpacing(" open the PR ") == "open the PR")
         }
 
         await runAsync(

@@ -8,6 +8,7 @@ extension SpeechRecognitionProviderID {
         case .doubao: "豆包语音"
         case .openAI: "OpenAI 语音识别"
         case .qwen: "阿里千问语音识别"
+        case .apple: "Apple 语音识别"
         }
     }
 }
@@ -42,10 +43,18 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
     @Published package private(set) var isUpdatingKey = false
     @Published package private(set) var notice: String?
     @Published package var apiKeyDraft = ""
+    /// The on-device language model's state; nil until read, or while a cloud
+    /// provider is selected.
+    @Published package private(set) var onDeviceModelStatus: OnDeviceSpeechModelStatus?
+    /// Download progress from 0 to 1 while the on-device model installs.
+    @Published package private(set) var modelInstallProgress: Double?
 
     private let credentials: any ProviderCredentialStoring
     private let configuration: VoiceInputConfigurationController
     private let settingsStore: any AppSettingsStoring
+    private let onDevice: any OnDeviceSpeechRecognizing
+    /// Apple's on-device recognition needs macOS 26; earlier releases never list it.
+    package let isOnDeviceSupported: Bool
     private var generation: UInt64 = 0
     private var isShutdown = false
     private var activeOperations = 0
@@ -54,17 +63,33 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
     package init(
         credentials: any ProviderCredentialStoring,
         configuration: VoiceInputConfigurationController,
-        settingsStore: any AppSettingsStoring
+        settingsStore: any AppSettingsStoring,
+        onDevice: any OnDeviceSpeechRecognizing = AppleSpeechRecognizer(),
+        isOnDeviceSupported: Bool = AppleSpeechRecognizer.isSupported
     ) {
         self.credentials = credentials
         self.configuration = configuration
         self.settingsStore = settingsStore
+        self.onDevice = onDevice
+        self.isOnDeviceSupported = isOnDeviceSupported
+    }
+
+    package var availableProviders: [SpeechRecognitionProviderID] {
+        SpeechRecognitionProviderID.allCases.filter { !$0.isOnDevice || isOnDeviceSupported }
+    }
+
+    /// Whether the selected provider can transcribe now: a saved Key for a cloud
+    /// provider, an installed language model for on-device recognition.
+    package var isSelectedProviderReady: Bool {
+        selectedProvider.isOnDevice ? onDeviceModelStatus == .installed : hasStoredKey
     }
 
     package var selectedProvider: SpeechRecognitionProviderID { providers.selectedProvider }
     package var selectedProfile: SpeechRecognitionProfile { providers.selectedProfile }
     package var providerName: String { selectedProvider.displayName }
-    package var isMutating: Bool { isUpdatingKey || isUpdatingProvider }
+    package var isMutating: Bool {
+        isUpdatingKey || isUpdatingProvider || modelInstallProgress != nil
+    }
     package var hasValidProfile: Bool { (try? selectedProfile.validated()) != nil }
     package var modelIDs: [String] {
         let listed = SpeechRecognitionProviderCatalog.modelIDs(
@@ -82,6 +107,7 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
         let token = generation
         defer { isUpdatingProvider = false }
         let loaded = await settingsStore.load().settings.speechRecognitionProviders
+            .resolved(onDeviceAvailable: isOnDeviceSupported)
         guard token == generation, !isShutdown else { return }
         providers = loaded
         await configuration.restoreRecognitionProvider(loaded.selectedProfile)
@@ -108,9 +134,18 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
     }
 
     private func readCredential(token: UInt64, profile: SpeechRecognitionProfile) async {
+        guard let credentialID = profile.credentialProviderID else {
+            let status = await onDevice.modelStatus()
+            guard token == generation, !isShutdown else { return }
+            hasStoredKey = false
+            onDeviceModelStatus = status
+            notice = nil
+            return
+        }
+        onDeviceModelStatus = nil
         do {
             _ = try profile.validated()
-            let value = try await credentials.apiKey(for: profile.credentialProviderID)
+            let value = try await credentials.apiKey(for: credentialID)
             guard token == generation, !isShutdown else { return }
             hasStoredKey = value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             notice = nil
@@ -182,18 +217,47 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
         }
     }
 
+    /// Downloads Apple's language model for the selected on-device provider.
+    package func installOnDeviceModel() async {
+        guard !isMutating, !isShutdown, selectedProvider.isOnDevice, modelInstallProgress == nil
+        else { return }
+        activeOperations += 1
+        defer { finishOperation() }
+        generation &+= 1
+        let token = generation
+        modelInstallProgress = 0
+        defer { modelInstallProgress = nil }
+        do {
+            try await onDevice.installModel { [weak self] fraction in
+                Task { @MainActor in
+                    guard let self, self.modelInstallProgress != nil else { return }
+                    self.modelInstallProgress = min(max(fraction, 0), 1)
+                }
+            }
+            guard token == generation, !isShutdown else { return }
+            notice = nil
+        } catch {
+            guard token == generation, !isShutdown else { return }
+            notice = SpeakerCopy.Failure.message(for: error)
+        }
+        let status = await onDevice.modelStatus()
+        guard token == generation, !isShutdown else { return }
+        onDeviceModelStatus = status
+    }
+
     package func saveAPIKey() async {
-        guard !isMutating, !isShutdown, hasValidProfile, selectedProvider != .doubao else { return }
+        guard !isMutating, !isShutdown, hasValidProfile, selectedProvider != .doubao,
+            let credentialID = selectedProfile.credentialProviderID
+        else { return }
         activeOperations += 1
         defer { finishOperation() }
         isUpdatingKey = true
         generation &+= 1
         let token = generation
-        let profile = selectedProfile
         let draft = apiKeyDraft
         defer { isUpdatingKey = false }
         do {
-            try await credentials.save(apiKey: draft, for: profile.credentialProviderID)
+            try await credentials.save(apiKey: draft, for: credentialID)
             guard token == generation, !isShutdown else { return }
             hasStoredKey = true
             if apiKeyDraft == draft { apiKeyDraft = "" }
@@ -205,17 +269,18 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
     }
 
     package func deleteAPIKey() async {
-        guard !isMutating, !isShutdown, selectedProvider != .doubao else { return }
+        guard !isMutating, !isShutdown, selectedProvider != .doubao,
+            let credentialID = selectedProfile.credentialProviderID
+        else { return }
         activeOperations += 1
         defer { finishOperation() }
         isUpdatingKey = true
         generation &+= 1
         let token = generation
-        let profile = selectedProfile
         let draft = apiKeyDraft
         defer { isUpdatingKey = false }
         do {
-            try await credentials.deleteAPIKey(for: profile.credentialProviderID)
+            try await credentials.deleteAPIKey(for: credentialID)
             guard token == generation, !isShutdown else { return }
             hasStoredKey = false
             if apiKeyDraft == draft { apiKeyDraft = "" }

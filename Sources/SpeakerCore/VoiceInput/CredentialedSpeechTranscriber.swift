@@ -4,6 +4,8 @@ public enum SpeechRecognitionFailureKind: String, Sendable {
     case missingCredential, credentialUnavailable, invalidConfiguration, audioTooLarge, invalidAudio
     case responseTooLarge, invalidResponse, emptyResponse, authentication, rateLimited, rejected
     case transport
+    /// This Mac cannot run on-device recognition, or its language model is not installed.
+    case onDeviceModelUnavailable
 }
 
 public struct SpeechRecognitionFailure: Error, Equatable, Sendable {
@@ -34,6 +36,7 @@ public struct SpeechRecognitionFailure: Error, Equatable, Sendable {
         case .invalidAudio: .audioProcessingFailed
         case .emptyResponse: .providerReturnedNoText
         case .transport: .networkUnavailable
+        case .onDeviceModelUnavailable: .onDeviceModelUnavailable
         default: .transcriptionFailed
         }
     }
@@ -114,17 +117,20 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
     private let doubao: any ContextualSpeechTranscribing & StreamingContextualSpeechTranscribing
     private let transport: any SpeechRecognitionTransport
     private let realtimeConnector: any RealtimeSpeechConnecting
+    private let onDevice: any OnDeviceSpeechRecognizing
 
     public init(
         credentials: any ProviderCredentialStoring,
         doubao: any ContextualSpeechTranscribing & StreamingContextualSpeechTranscribing,
         transport: any SpeechRecognitionTransport = URLSessionSpeechRecognitionTransport(),
-        realtimeConnector: any RealtimeSpeechConnecting = URLSessionRealtimeSpeechConnector()
+        realtimeConnector: any RealtimeSpeechConnecting = URLSessionRealtimeSpeechConnector(),
+        onDevice: any OnDeviceSpeechRecognizing = AppleSpeechRecognizer()
     ) {
         self.credentials = credentials
         self.doubao = doubao
         self.transport = transport
         self.realtimeConnector = realtimeConnector
+        self.onDevice = onDevice
     }
 
     public static func maximumAudioSeconds(for provider: SpeechRecognitionProviderID) -> Int? {
@@ -132,6 +138,7 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         case .doubao: nil
         case .openAI: 300
         case .qwen: 180
+        case .apple: nil
         }
     }
 
@@ -146,6 +153,17 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         let profile = try context.recognitionProvider.validated()
         if profile.provider == .doubao {
             return try await doubao.transcribe(audio, context: context)
+        }
+        if profile.provider.isOnDevice {
+            let pcm: Data
+            do { pcm = try SpeechRecognitionWAV.pcm(from: audio.data) } catch {
+                throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidAudio)
+            }
+            let stream = AsyncStream<Data> { continuation in
+                continuation.yield(pcm)
+                continuation.finish()
+            }
+            return try await recognizeOnDevice(stream, profile: profile, context: context)
         }
         guard audio.data.count <= Self.maximumPCMBytes(for: profile.provider) + 65_536 else {
             throw SpeechRecognitionFailure(provider: profile.provider, kind: .audioTooLarge)
@@ -177,6 +195,9 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         let profile = try context.recognitionProvider.validated()
         if profile.provider == .doubao {
             return try await doubao.transcribe(audioChunks, context: context)
+        }
+        if profile.provider.isOnDevice {
+            return try await recognizeOnDevice(audioChunks, profile: profile, context: context)
         }
         if profile.method == .streaming {
             return try await recognizeLive(audioChunks, profile: profile, context: context)
@@ -240,11 +261,35 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
             chunks, profile: profile, apiKey: apiKey, context: context)
     }
 
+    private func recognizeOnDevice(
+        _ chunks: AsyncStream<Data>, profile: SpeechRecognitionProfile,
+        context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        let text: String
+        do {
+            text = try await onDevice.transcribe(
+                chunks, completion: context.audioCaptureCompletion)
+        } catch let failure as SpeechRecognitionFailure {
+            try Task.checkCancellation()
+            throw failure
+        } catch {
+            try Task.checkCancellation()
+            if error is CancellationError { throw CancellationError() }
+            throw SpeechRecognitionFailure(provider: profile.provider, kind: .rejected)
+        }
+        try Task.checkCancellation()
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw SpeechRecognitionFailure(provider: profile.provider, kind: .emptyResponse)
+        }
+        return .init(text: text, providerRequestID: nil)
+    }
+
     private func apiKey(for profile: SpeechRecognitionProfile) async throws -> String {
         let provider = profile.provider
         let apiKey: String
         do {
-            guard let stored = try await credentials.apiKey(for: profile.credentialProviderID),
+            guard let credentialID = profile.credentialProviderID,
+                let stored = try await credentials.apiKey(for: credentialID),
                 !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { throw SpeechRecognitionFailure(provider: provider, kind: .missingCredential) }
             guard stored.utf8.count <= 64 * 1_024,
@@ -271,7 +316,10 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
             throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidConfiguration)
         }
         let wav = SpeechRecognitionWAV.encode(pcm)
-        var request = URLRequest(url: profile.endpoint)
+        guard let endpoint = profile.endpoint else {
+            throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidConfiguration)
+        }
+        var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

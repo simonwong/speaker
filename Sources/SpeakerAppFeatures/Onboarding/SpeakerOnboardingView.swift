@@ -48,7 +48,8 @@ package struct SpeakerOnboardingView: View {
             mode: mode,
             isUpdatingDoubaoKey: doubao.isUpdatingKey,
             recognitionProvider: recognition.selectedProvider,
-            hasStoredRecognitionKey: recognition.hasStoredKey && recognition.hasValidProfile,
+            hasStoredRecognitionKey: recognition.isSelectedProviderReady
+                && recognition.hasValidProfile,
             isUpdatingRecognition: recognition.isMutating
         )
     }
@@ -92,8 +93,14 @@ package struct SpeakerOnboardingView: View {
             }
         }
         .onChange(of: recognition.hasStoredKey) { _, stored in
-            guard recognition.selectedProvider != .doubao else { return }
+            guard recognition.selectedProvider != .doubao,
+                !recognition.selectedProvider.isOnDevice
+            else { return }
             announce(stored ? "语音识别 Key 已保存，首次录音时验证账号与模型" : "请保存当前语音识别服务的 Key")
+        }
+        .onChange(of: recognition.onDeviceModelStatus) { _, status in
+            guard recognition.selectedProvider.isOnDevice, status == .installed else { return }
+            announce("语言模型已就绪，可以进入下一步")
         }
         .onChange(of: step) { _, current in
             announce("第 \(current.rawValue + 1) 步，共 3 步：\(current.title)")
@@ -361,6 +368,9 @@ package struct SpeakerOnboardingView: View {
             return step == .permissions
                 ? "两项权限都开启后，点击「下一步」。也可以稍后在设置中完成。"
                 : "权限尚未全部开启，请返回第一步检查。"
+        }
+        if recognition.selectedProvider.isOnDevice {
+            return "下载 Apple 语音识别的语言模型后继续。"
         }
         if recognition.selectedProvider != .doubao {
             return "保存所选语音识别服务的 Key 后继续。"
