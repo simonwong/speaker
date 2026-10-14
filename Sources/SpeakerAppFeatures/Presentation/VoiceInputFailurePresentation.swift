@@ -74,7 +74,7 @@ package struct VoiceInputFailurePresentation {
     )
     package static let onDeviceModelUnavailable = Self(
         title: "本机识别模型还没准备好",
-        guidance: "在语音识别设置里下载 Apple 本机识别的语言模型，或改用其他识别服务。",
+        guidance: "在语音识别设置里下载 Apple 语音识别的语言模型，或改用其他识别服务。",
         icon: "arrow.down.circle",
         settingsDestination: .speechRecognition
     )

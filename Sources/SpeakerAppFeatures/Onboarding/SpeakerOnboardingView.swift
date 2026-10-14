@@ -370,7 +370,7 @@ package struct SpeakerOnboardingView: View {
                 : "权限尚未全部开启，请返回第一步检查。"
         }
         if recognition.selectedProvider.isOnDevice {
-            return "下载 Apple 本机识别的语言模型后继续。"
+            return "下载 Apple 语音识别的语言模型后继续。"
         }
         if recognition.selectedProvider != .doubao {
             return "保存所选语音识别服务的 Key 后继续。"

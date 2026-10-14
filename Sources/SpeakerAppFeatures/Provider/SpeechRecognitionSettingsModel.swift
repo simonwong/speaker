@@ -8,7 +8,7 @@ extension SpeechRecognitionProviderID {
         case .doubao: "豆包语音"
         case .openAI: "OpenAI 语音识别"
         case .qwen: "阿里千问语音识别"
-        case .apple: "Apple 本机识别"
+        case .apple: "Apple 语音识别"
         }
     }
 }
