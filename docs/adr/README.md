@@ -16,5 +16,6 @@ ADRs preserve decisions whose rationale future architecture work must understand
 | [0010](0010-select-speech-recognition-providers.md) | Accepted | Select the Speech Recognition Provider independently and freeze its model, region, and credential ownership |
 | [0011](0011-select-the-speech-recognition-method.md) | Accepted | Select streaming or complete-recording recognition while preserving final-only delivery |
 | [0012](0012-offer-on-device-recognition-on-macos-26.md) | Accepted | Offer Apple on-device recognition only on macOS 26 and later, keyless and readable by older builds |
+| [0013](0013-separate-development-and-release-builds.md) | Accepted | Keep development builds separate from the release: own Bundle ID, name, icon, data directory, and install path |
 
 Create a new ADR when a load-bearing decision changes. Keep superseded ADRs as history and link the replacement rather than rewriting the old decision.

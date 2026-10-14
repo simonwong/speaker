@@ -5,7 +5,7 @@ setopt NO_BG_NICE
 
 SCRIPT_DIR="${0:A:h}"
 REPOSITORY_ROOT="${SCRIPT_DIR:h}"
-APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
+APP="${SPEAKER_INSTALL_APP:-$HOME/Applications/Speaker Dev.app}"
 EXPECTED_TEXT="Speaker smoke"
 REPORT_DIRECTORY=""
 SPEAKER_REPORT=""

@@ -60,4 +60,20 @@ cmp \
     "$ROOT/Resources/AppIcon.png" \
     "$TEST_ROOT/CheckedIn.iconset/icon_512x512@2x.png"
 
+iconutil -c iconset \
+    "$TEST_ROOT/AppIcon-Dev.icns" \
+    -o "$TEST_ROOT/GeneratedDev.iconset"
+iconutil -c iconset \
+    "$ROOT/Resources/AppIcon-Dev.icns" \
+    -o "$TEST_ROOT/CheckedInDev.iconset"
+verify_pixels \
+    "$TEST_ROOT/CheckedInDev.iconset/icon_512x512@2x.png" \
+    "$TEST_ROOT/GeneratedDev.iconset/icon_512x512@2x.png"
+if verify_pixels \
+    "$TEST_ROOT/CheckedInDev.iconset/icon_512x512@2x.png" \
+    "$ROOT/Resources/AppIcon.png" >/dev/null 2>&1; then
+    print -u2 "The development icon is indistinguishable from the release icon."
+    exit 1
+fi
+
 print "PASS: checked-in Speaker brand assets match the canonical vector"

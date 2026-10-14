@@ -16,7 +16,7 @@ BUILD_NUMBER="${SPEAKER_BUILD_NUMBER:-}"
 SOURCE_REVISION="${SPEAKER_SOURCE_REVISION:-}"
 REQUESTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-}"
 REQUESTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
-BUNDLE_IDENTIFIER="${REQUESTED_BUNDLE_IDENTIFIER:-com.local.speaker}"
+BUNDLE_IDENTIFIER="${REQUESTED_BUNDLE_IDENTIFIER:-app.local.speaker}"
 SIGNING_IDENTITY="${SPEAKER_CODESIGN_IDENTITY:--}"
 SIGNING_METHOD="${SPEAKER_CODESIGN_METHOD:-local}"
 LOCAL_SIGNING_IDENTITY="${SPEAKER_LOCAL_CODESIGN_IDENTITY:-}"
@@ -233,6 +233,14 @@ cp "$ROOT/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :SpeakerSourceRevision string $SOURCE_REVISION" "$APP/Contents/Info.plist"
+if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+    # Development builds get their own name, icon, and data directory so they
+    # can sit next to the release without sharing settings, history, or Keys.
+    cp "$ROOT/Resources/AppIcon-Dev.icns" "$APP/Contents/Resources/AppIcon.icns"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName $DEVELOPMENT_DISPLAY_NAME" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $DEVELOPMENT_DISPLAY_NAME" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :SpeakerDataDirectoryName string $DEVELOPMENT_DATA_DIRECTORY" "$APP/Contents/Info.plist"
+fi
 
 if [[ "$SIGNING_IDENTITY" != "-" ]]; then
     BUILD_MANIFEST="$APP/Contents/Resources/BuildManifest.plist"

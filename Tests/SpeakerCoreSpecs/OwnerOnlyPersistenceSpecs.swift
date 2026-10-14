@@ -5,6 +5,24 @@ import SpeakerSpecSupport
 enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
+        run(
+            "a development bundle's data directory never resolves to the release's",
+            failures: &failures
+        ) {
+            try expect(SpeakerDataDirectory.name(declared: nil) == "Speaker")
+            try expect(SpeakerDataDirectory.name(declared: "Speaker Dev") == "Speaker Dev")
+            for unsafe in ["", ".", "..", "Speaker/../Speaker", "a:b"] {
+                try expect(
+                    SpeakerDataDirectory.name(declared: unsafe) == "Speaker",
+                    "\(unsafe) was accepted as a directory name"
+                )
+            }
+            let settings = VersionedLocalAppSettingsStore.defaultFileURL(
+                applicationDirectoryName: "Speaker Dev"
+            )
+            try expect(settings.deletingLastPathComponent().lastPathComponent == "Speaker Dev")
+        }
+
         await runAsync("owner-only settings never follow a symbolic-link file", failures: &failures)
         {
             let directory = FileManager.default.temporaryDirectory

@@ -75,10 +75,12 @@ package final class SpeakerDataErasureIntentStore {
     }
 
     package static func defaultIntentFileURL(
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        dataDirectoryName: String = SpeakerDataDirectory.name
     ) -> URL {
         fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Speaker", isDirectory: true)
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent(dataDirectoryName, isDirectory: true)
             .appendingPathComponent("erase-all.pending", isDirectory: false)
     }
 }

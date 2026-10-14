@@ -235,7 +235,8 @@ jobs:
         env:
           SPEAKER_BUNDLE_OUTPUT_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
         run: |
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "com.local.speaker"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "app.local.speaker"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :SpeakerDataDirectoryName' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "Speaker Dev"
           test "$(/usr/libexec/PlistBuddy -c 'Print :SpeakerCredentialStorage' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "local-file"
           test "$(/usr/libexec/PlistBuddy -c 'Print :SpeakerSigningMode' "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Info.plist")" = "development-ad-hoc"
           cmp PRIVACY.md "$SPEAKER_BUNDLE_OUTPUT_APP/Contents/Resources/PRIVACY.md"

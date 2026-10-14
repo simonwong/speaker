@@ -108,7 +108,7 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
 
     public static func defaultFileURL(
         fileManager: FileManager = .default,
-        applicationDirectoryName: String = "Speaker"
+        applicationDirectoryName: String = SpeakerDataDirectory.name
     ) -> URL {
         let root =
             fileManager.urls(

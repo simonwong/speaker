@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
+APP="${SPEAKER_INSTALL_APP:-$HOME/Applications/Speaker Dev.app}"
 REPORT_DIRECTORY=""
 REPORT=""
 
