@@ -56,3 +56,20 @@ package struct SettingsTextFieldStyle: TextFieldStyle {
             .speakerField(focused: focused)
     }
 }
+
+/// A text field that grows to several lines. It keeps the single-line field's
+/// height while empty, but wraps its lines in a rounded rectangle with
+/// vertical padding, so a second line never touches a capsule's curve.
+package struct SettingsMultilineTextFieldStyle: TextFieldStyle {
+    @FocusState private var focused: Bool
+
+    package func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .textFieldStyle(.plain)
+            .focused($focused)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minHeight: SpeakerSurfaceMetrics.fieldHeight)
+            .speakerEditorField(focused: focused)
+    }
+}
