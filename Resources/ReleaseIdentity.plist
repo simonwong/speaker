@@ -3,6 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>BundleIdentifier</key>
+    <string>app.moonunder.speaker</string>
+    <key>RetiredBundleIdentifier</key>
     <string>cn.simonwong.speaker</string>
     <key>TeamIdentifier</key>
     <string>D7QJXSW5GJ</string>

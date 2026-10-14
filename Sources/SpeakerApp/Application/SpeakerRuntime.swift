@@ -96,10 +96,8 @@ final class SpeakerRuntime: ObservableObject {
         let dataErasureIntentStore = SpeakerDataErasureIntentStore(
             intentFileURL: dependencies.dataErasureIntentFileURL,
             preferences: dependencies.preferences,
-            preferenceDomainNames: [
-                bundle.bundleIdentifier,
-                SpeakerBundleInfo.legacyDevelopmentBundleIdentifier,
-            ]
+            preferenceDomainNames: [bundle.bundleIdentifier]
+                + SpeakerRetiredBundleIdentifiers.owned()
         )
         self.dataErasureIntentStore = dataErasureIntentStore
         let permissions = PermissionModel(access: dependencies.permissionAccess)

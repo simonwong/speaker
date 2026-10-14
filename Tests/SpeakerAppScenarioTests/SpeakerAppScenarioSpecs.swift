@@ -1163,10 +1163,46 @@ struct SpeakerAppScenarioSpecs {
                 [locations.applicationSupport] + locations.caches
                 + locations.savedApplicationState
             try expect(!owned.contains { $0.lastPathComponent == "Speaker" })
+            try expect(
+                !owned.contains {
+                    $0.lastPathComponent.hasPrefix(SpeakerRetiredBundleIdentifiers.release)
+                }
+            )
+            try expect(
+                !SpeakerRetiredBundleIdentifiers.keychainServices(byDataDirectory: "Speaker Dev")
+                    .contains { $0.hasPrefix(SpeakerRetiredBundleIdentifiers.release) }
+            )
             let intent = SpeakerDataErasureIntentStore.defaultIntentFileURL(
                 dataDirectoryName: "Speaker Dev"
             )
             try expect(intent.deletingLastPathComponent().lastPathComponent == "Speaker Dev")
+        }
+
+        run(
+            "the release erases what it left under its retired Bundle ID",
+            failures: &failures
+        ) {
+            let retired = SpeakerRetiredBundleIdentifiers.release
+            let locations = SpeakerOwnedDataLocations.current(
+                bundleIdentifier: "app.moonunder.speaker",
+                dataDirectoryName: SpeakerDataDirectory.releaseName
+            )
+            try expect(locations.caches.contains { $0.lastPathComponent == retired })
+            try expect(
+                locations.savedApplicationState.contains {
+                    $0.lastPathComponent == "\(retired).savedState"
+                }
+            )
+            try expect(
+                SpeakerRetiredBundleIdentifiers.owned(
+                    byDataDirectory: SpeakerDataDirectory.releaseName
+                ).contains(retired)
+            )
+            try expect(
+                SpeakerRetiredBundleIdentifiers.keychainServices(
+                    byDataDirectory: SpeakerDataDirectory.releaseName
+                ).contains("\(retired).provider-api-keys")
+            )
         }
 
         run(

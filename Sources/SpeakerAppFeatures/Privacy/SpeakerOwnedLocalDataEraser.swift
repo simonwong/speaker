@@ -47,6 +47,9 @@ package struct SpeakerOwnedDataLocations {
             "Library/Saved Application State",
             isDirectory: true
         )
+        let retired = SpeakerRetiredBundleIdentifiers.owned(
+            byDataDirectory: dataDirectoryName
+        )
         return SpeakerOwnedDataLocations(
             applicationSupport: applicationSupportBase.appendingPathComponent(
                 dataDirectoryName,
@@ -55,33 +58,18 @@ package struct SpeakerOwnedDataLocations {
             legacyApplicationSupport:
                 applicationSupportBase
                 .appendingPathComponent(
-                    "com.local.speaker",
+                    SpeakerRetiredBundleIdentifiers.development,
                     isDirectory: true
                 ),
-            caches: [
-                cachesBase.appendingPathComponent(
-                    bundleIdentifier,
-                    isDirectory: true
-                ),
-                cachesBase.appendingPathComponent(
-                    dataDirectoryName,
-                    isDirectory: true
-                ),
-                cachesBase.appendingPathComponent(
-                    "com.local.speaker",
-                    isDirectory: true
-                ),
-            ],
-            savedApplicationState: [
+            caches: ([bundleIdentifier, dataDirectoryName] + retired).map {
+                cachesBase.appendingPathComponent($0, isDirectory: true)
+            },
+            savedApplicationState: ([bundleIdentifier] + retired).map {
                 savedStateBase.appendingPathComponent(
-                    "\(bundleIdentifier).savedState",
+                    "\($0).savedState",
                     isDirectory: true
-                ),
-                savedStateBase.appendingPathComponent(
-                    "com.local.speaker.savedState",
-                    isDirectory: true
-                ),
-            ]
+                )
+            }
         )
     }
 }

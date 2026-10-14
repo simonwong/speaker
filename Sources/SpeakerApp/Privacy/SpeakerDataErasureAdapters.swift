@@ -13,7 +13,7 @@ actor SpeakerProviderCredentialEraser {
         currentKeychainService: String?
     ) {
         self.localFileURL = localFileURL
-        var services = [KeychainProviderCredentialStore.defaultService]
+        var services = SpeakerRetiredBundleIdentifiers.keychainServices()
         if let currentKeychainService,
             !currentKeychainService.isEmpty,
             !services.contains(currentKeychainService)

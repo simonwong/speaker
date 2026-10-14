@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Speaker 以正式身份 `cn.simonwong.speaker` 发布公测版：Developer ID 签名、Hardened Runtime、App 与 DMG 公证均已在真实候选上通过，付费 provider matrix 全部 PASS。0.8.0 (206) 已发布为 GitHub Latest，App 内更新通道可用，公开回读通过。剩余阻断项是跨版本 TCC 与 Keychain 连续性、干净用户安装、真实跨 App 兼容性和旧版到新版的更新实测，从下一个版本起在提升为 Latest 前完成。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
+Speaker 以正式身份发布公测版（0.8.0 及以前为 `cn.simonwong.speaker`，下一个版本起为 `app.moonunder.speaker`，见 [ADR-0014](adr/0014-move-the-release-to-app-moonunder-speaker.md)）：Developer ID 签名、Hardened Runtime、App 与 DMG 公证均已在真实候选上通过，付费 provider matrix 全部 PASS。0.8.0 (206) 已发布为 GitHub Latest，App 内更新通道可用，公开回读通过。剩余阻断项是跨版本 TCC 与 Keychain 连续性、干净用户安装、真实跨 App 兼容性和旧版到新版的更新实测，从下一个版本起在提升为 Latest 前完成。质量指标、证据口径及本轮收尾范围见[语音输入发布验收](research/voice-input-release-acceptance.md)；音频处理维持现有默认，见[音频处理策略](research/audio-processing-policy.md)。
 
 ## P0 发布阻断
 
@@ -18,7 +18,7 @@ Speaker 以正式身份 `cn.simonwong.speaker` 发布公测版：Developer ID �
 - [x] 少于 300 ms 的录音与确定性数字静音在 release-time 本地终止，取消活跃 provider 请求且禁止文字送达；模糊低电平音频不使用启发式误杀。
 - [x] 豆包 WebSocket 同时发送和接收；明确的服务端错误可提前终止录音。
 - [x] App 退出等待取消记录和其他已排队历史写入完成。
-- [x] 确定正式 Bundle ID `cn.simonwong.speaker` 与 Apple Developer Team `D7QJXSW5GJ`，固定在不可由 CI 覆盖的 `Resources/ReleaseIdentity.plist`。
+- [x] 确定正式 Bundle ID `app.moonunder.speaker`（0.8.0 及以前为 `cn.simonwong.speaker`）与 Apple Developer Team `D7QJXSW5GJ`，固定在不可由 CI 覆盖的 `Resources/ReleaseIdentity.plist`。
 - [x] 使用 Developer ID Application 签名。正式候选通过 Xcode 云端托管 Developer ID 签名（`SPEAKER_CODESIGN_METHOD=cloud`），签名身份为 `Developer ID Application: Ningbo Weixu Space Design Co., Ltd. (D7QJXSW5GJ)`。
 - [ ] 验证两个 Developer ID 版本之间麦克风与辅助功能 TCC 权限保持。
 - [x] 开发构建显式标记 ad-hoc 身份、在产品内解释麦克风与辅助功能授权失效边界，并支持可选具名本地签名。

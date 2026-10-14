@@ -12,7 +12,7 @@ entitlements。仅 Bundle ID 相同但签名损坏或身份不同的包会被 fa
 - `SPEAKER_VERSION` 使用稳定 SemVer，例如 `1.2.0`，对应 `CFBundleShortVersionString`。当前正式 feed 尚未建立 prerelease channel，因此 `beta`、`rc` 等先行版本会 fail closed。
 - `SPEAKER_BUILD_NUMBER` 是 CI 为每次正式候选构建注入的、全局单调递增的正整数，对应 `CFBundleVersion`。同一版本重新构建时也不得复用。
 - Git tag 使用 `v<SemVer>`。候选签名、公证和制品复验通过后，staging 可创建该 tag 及 prerelease；只有人工验收通过，才能把同一 tag 提升为 stable latest。
-- 正式 Bundle ID 和 Apple Team ID 一经发布不得随版本改变，否则 macOS 会把新版本视作不同 App，Keychain 与 TCC 权限也无法稳定延续。
+- 正式 Bundle ID 和 Apple Team ID 不随版本改变，否则 macOS 会把新版本视作不同 App，Keychain 与 TCC 权限无法延续。唯一一次例外是 0.8.0 之后从 `cn.simonwong.speaker` 换到 `app.moonunder.speaker`，见 [ADR-0014](adr/0014-move-the-release-to-app-moonunder-speaker.md)；旧 ID 记录在 `ReleaseIdentity.plist` 的 `RetiredBundleIdentifier`。
 
 Formal releases never derive a build number from dates, Git history, or the local environment. CI must provide the unique value; a missing or malformed value fails closed.
 
@@ -128,7 +128,7 @@ submission/log 证据。云端 Developer ID 不能供 `codesign` 签署 DMG 外�
 Developer ID、Team、entitlements、来源清单、嵌套签名、公证票据及 Gatekeeper；最终 DMG
 与 appcast 还必须通过 Ed25519 校验。已签名 DMG 继续要求外壳 Gatekeeper 验证；损坏或
 无法识别的签名不会退回未签名路径。本机配置约定使用 `speaker-release` 公证 profile 与
-`cn.simonwong.speaker` Sparkle Keychain account。首次配置公证 profile 时在本机终端执行：
+`cn.simonwong.speaker` Sparkle Keychain account（这是签名私钥的名字，不随 Bundle ID 改变）。首次配置公证 profile 时在本机终端执行：
 
 ```sh
 xcrun notarytool store-credentials speaker-release --team-id D7QJXSW5GJ
@@ -146,10 +146,10 @@ promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 公测版和后续版本都使用正式身份，经过签名、公证、provider matrix 和 evidence 门禁，最终发布为 GitHub Latest。App 从 `releases/latest/download/appcast.xml` 检查更新，所以只有 Latest 会推送给用户。当前正式候选在本机用云签名构建：
 
 1. 提交 `Resources/Info.plist` 与 `Resources/ReleaseCandidate.plist` 中的版本和 build，以及 `docs/releases/<version>.md`。工作区必须干净。更新后的 App 会在概览顶部提示一次「已更新到 <version>」，按钮打开 `releases/tag/v<version>`，所以 GitHub Release 的 tag 必须是 `v` 加 `CFBundleShortVersionString`，正文写用户能看懂的新功能。
-2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `cn.simonwong.speaker.provider-api-keys` 中。记录当前 UTC 时间，再运行付费 matrix：
+2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `app.moonunder.speaker.provider-api-keys` 中。记录当前 UTC 时间，再运行付费 matrix：
 
 ```bash
-./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory <新的私有目录> --candidate-version <version> --candidate-build <build> --keychain-service cn.simonwong.speaker.provider-api-keys
+./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory <新的私有目录> --candidate-version <version> --candidate-build <build> --keychain-service app.moonunder.speaker.provider-api-keys
 ```
 
 3. 构建、签名、公证并生成 appcast 与 evidence：
@@ -327,6 +327,8 @@ arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或�
 - 历史查看、保留策略、清空、损坏恢复与卸载后本地数据边界。
 
 更新通道已上线：`releases/latest` 指向 v0.8.0 (206)，`verify-published-update` 回读通过。0.8.0 发布时没有更早的 Developer ID 版本，未做旧版 → 新版实机更新；从下一个版本起按上述门槛执行。
+
+下一个版本是第一个 `app.moonunder.speaker` 版本（[ADR-0014](adr/0014-move-the-release-to-app-moonunder-speaker.md)）。它的升级用例以 0.8.0（`cn.simonwong.speaker`）为旧版：`compatibility-smoke` 识别 `RetiredBundleIdentifier`，在报告中写入 `Identity Transition`，TCC 与 Keychain 两项改为检查“不弹钥匙串密码框、自动打开引导、重新授权和输入 Key 后可用、数据保留”。Release notes 必须告诉用户更新后要重新授权和输入 Key，并可以在“隐私与安全性”里删除旧的 Speaker 条目。
 
 ## 官网部署
 

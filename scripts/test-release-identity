@@ -139,6 +139,7 @@ write_identity() {
     local update_download_url_prefix="$4"
     local product_url="$5"
     local update_public_ed_key="$6"
+    local retired_bundle_identifier="${7:-}"
     /usr/libexec/PlistBuddy \
         -c 'Clear dict' \
         -c "Add :BundleIdentifier string $bundle_identifier" \
@@ -148,6 +149,11 @@ write_identity() {
         -c "Add :ProductURL string $product_url" \
         -c "Add :UpdatePublicEDKey string $update_public_ed_key" \
         "$TEST_ROOT/Resources/ReleaseIdentity.plist" >/dev/null
+    if [[ -n "$retired_bundle_identifier" ]]; then
+        /usr/libexec/PlistBuddy \
+            -c "Add :RetiredBundleIdentifier string $retired_bundle_identifier" \
+            "$TEST_ROOT/Resources/ReleaseIdentity.plist" >/dev/null
+    fi
 }
 
 write_bundle_short_version() {
@@ -207,6 +213,29 @@ load_reviewed_release_identity "$TEST_ROOT"
     == $'Speaker-1.2.3-42.dmg\nSpeaker-1.2.3-42.dmg.sha256\nappcast.xml' ]]
 [[ "$REVIEWED_UPDATE_PUBLIC_ED_KEY" \
     == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" ]]
+[[ -z "$REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER" ]]
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" \
+    "com.example.old-speaker"
+load_reviewed_release_identity "$TEST_ROOT"
+[[ "$REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER" == "com.example.old-speaker" ]]
+write_identity \
+    "com.example.speaker" \
+    "A1B2C3D4E5" \
+    "https://github.com/simonwong/speaker/releases/latest/download/appcast.xml" \
+    "https://github.com/simonwong/speaker/releases/download/" \
+    "https://github.com/simonwong/speaker" \
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" \
+    "com.example.speaker"
+if load_reviewed_release_identity "$TEST_ROOT" 2>/dev/null; then
+    print -u2 "A retired Bundle ID equal to the release Bundle ID was accepted."
+    exit 1
+fi
 write_identity \
     "com.example.speaker" \
     "A1B2C3D4E5" \
@@ -858,6 +887,11 @@ write_upgrade_report() {
     local source_commit="$5"
     local tcc_result="$6"
     local destination="$7"
+    local source_identifier="${8:-com.example.speaker}"
+    local transition_line=""
+    if [[ "$source_identifier" != com.example.speaker ]]; then
+        transition_line=$'\n'"- Identity Transition: $source_identifier -> com.example.speaker"
+    fi
 
     print -r -- "# Speaker compatibility smoke
 
@@ -875,7 +909,7 @@ write_upgrade_report() {
 - Staging Feed URL: https://github.com/example/speaker/releases/download/v$candidate_version/appcast.xml
 - CodeDirectory CDHash arm64: $(printf 'a%.0s' {1..40})
 - CodeDirectory CDHash x86_64: $(printf 'c%.0s' {1..40})
-- Upgrade Source: com.example.speaker $source_version ($source_build)
+- Upgrade Source: $source_identifier $source_version ($source_build)$transition_line
 - Upgrade Source Team ID: A1B2C3D4E5
 - Upgrade Source Authority: Developer ID Application: Speaker Test (A1B2C3D4E5)
 - Upgrade Source CodeDirectory CDHash arm64: $(printf 'b%.0s' {1..40})
@@ -967,6 +1001,60 @@ resolve_reviewed_upgrade_evidence \
     com.example.speaker \
     A1B2C3D4E5 \
     example/speaker
+UPGRADE_SOURCE_COMMIT="$(git -C "$LEDGER_ROOT" rev-parse HEAD)"
+write_upgrade_report \
+    1.2.4 45 1.2.3 42 "$UPGRADE_SOURCE_COMMIT" PASS \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    com.example.old-speaker
+git -C "$LEDGER_ROOT" add docs/upgrade-1.2.4.md
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'record identity transition upgrade evidence'
+REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER=""
+if resolve_reviewed_upgrade_evidence \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    1.2.4 \
+    45 \
+    42 \
+    com.example.speaker \
+    A1B2C3D4E5 \
+    example/speaker 2>/dev/null; then
+    print -u2 "An upgrade source with an unreviewed Bundle ID was accepted."
+    exit 1
+fi
+REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER="com.example.old-speaker"
+resolve_reviewed_upgrade_evidence \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    1.2.4 \
+    45 \
+    42 \
+    com.example.speaker \
+    A1B2C3D4E5 \
+    example/speaker
+grep -v '^- Identity Transition:' "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    > "$TEST_ROOT/upgrade-without-transition.md"
+mv "$TEST_ROOT/upgrade-without-transition.md" "$LEDGER_ROOT/docs/upgrade-1.2.4.md"
+git -C "$LEDGER_ROOT" add docs/upgrade-1.2.4.md
+git -C "$LEDGER_ROOT" \
+    -c user.name=Speaker \
+    -c user.email=speaker@example.invalid \
+    commit -q -m 'drop identity transition line'
+if resolve_reviewed_upgrade_evidence \
+    "$LEDGER_ROOT" \
+    "$LEDGER_ROOT/docs/upgrade-1.2.4.md" \
+    1.2.4 \
+    45 \
+    42 \
+    com.example.speaker \
+    A1B2C3D4E5 \
+    example/speaker 2>/dev/null; then
+    print -u2 "An identity change without a recorded transition was accepted."
+    exit 1
+fi
+REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER=""
 print -r -- 'external notes' > "$TEST_ROOT/external-notes.md"
 if resolve_tracked_release_notes \
     "$LEDGER_ROOT" \

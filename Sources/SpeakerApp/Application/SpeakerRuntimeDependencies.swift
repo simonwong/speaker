@@ -16,9 +16,6 @@ struct SpeakerBundleInfo {
     let credentialStorage: String?
 
     static let fallbackBundleIdentifier = "app.local.speaker"
-    /// Development builds used this identifier before they moved to
-    /// `app.local.speaker`; erasure still clears its preference domain.
-    static let legacyDevelopmentBundleIdentifier = "com.local.speaker"
 
     static func main() -> SpeakerBundleInfo {
         let bundle = Bundle.main
