@@ -67,7 +67,10 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
                     SpeechRecognitionProfile.self,
                     from: JSONSerialization.data(withJSONObject: document))
                 try expect(legacy == original)
-                try expect(legacy.method == (provider == .doubao ? .streaming : .completeRecording))
+                try expect(
+                    legacy.method
+                        == (provider == .doubao || provider.isOnDevice
+                            ? .streaming : .completeRecording))
                 for method in SpeechRecognitionProviderCatalog.methods(for: provider) {
                     let profile = try SpeechRecognitionProfile(provider: provider, method: method)
                         .validated()
@@ -95,6 +98,7 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
                     provider: .openAI, model: "gpt-transcribe", method: .streaming),
                 SpeechRecognitionProfile(
                     provider: .qwen, model: "qwen3-asr-flash-realtime", method: .completeRecording),
+                SpeechRecognitionProfile(provider: .apple, method: .completeRecording),
             ] {
                 do {
                     _ = try profile.validated()
@@ -126,6 +130,51 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             try expect(restored.speechRecognitionProviders.selectedProfile == qwen)
             try expect(restored.speechRecognitionProviders.profile(for: .openAI) == openAI)
             try expect(restored.refinementProviders == RefinementProviderSettings())
+        }
+
+        await runAsync(
+            "on-device recognition selection stays readable by builds that predate it",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-on-device-settings-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            var providers = SpeechRecognitionProviderSettings()
+            let qwen = SpeechRecognitionProfile(provider: .qwen, region: .singapore)
+            try providers.select(qwen)
+            try providers.select(.defaultProfile(for: .apple))
+            try await store.updateSpeechRecognitionProviders(providers)
+
+            // A build that predates on-device recognition decodes `selectedProvider`
+            // with a closed enum and every stored profile; it must still find a
+            // cloud provider it knows, or it would reset all settings as corrupted.
+            let document =
+                try JSONSerialization.jsonObject(with: Data(contentsOf: fileURL))
+                as! [String: Any]
+            let settings = document["settings"] as! [String: Any]
+            let stored = settings["speechRecognitionProviders"] as! [String: Any]
+            try expect(stored["selectedProvider"] as? String == "qwen")
+            try expect(stored["onDeviceProvider"] as? String == "apple")
+            let profiles = stored["profiles"] as! [String: [String: Any]]
+            try expect(
+                profiles.values.allSatisfy {
+                    ["doubao", "openai", "qwen"].contains($0["provider"] as? String)
+                },
+                "an on-device profile reached the shared profile map")
+
+            let restored = await VersionedLocalAppSettingsStore(fileURL: fileURL).load().settings
+                .speechRecognitionProviders
+            try expect(restored.selectedProvider == .apple)
+            try expect(restored.selectedProfile.credentialProviderID == nil)
+            try expect(restored.profile(for: .qwen) == qwen)
+
+            let fallback = restored.resolved(onDeviceAvailable: false)
+            try expect(
+                fallback.selectedProfile == qwen,
+                "a Mac without on-device recognition fell back to the wrong provider")
+            try expect(restored.resolved(onDeviceAvailable: true) == restored)
         }
 
         await runAsync(

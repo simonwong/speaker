@@ -29,7 +29,7 @@ struct DoubaoRecognitionSettings: View {
                     help: "发送 0.4 秒静音，检查 Key 和所选资源；可能计入极少量用量。",
                     action: model.checkConnection
                 ) : nil,
-            links: [.doubaoGuide, .console(for: .doubao, region: .beijing)],
+            links: [.doubaoGuide, .doubaoConsole],
             deletionMessage: "删除后将无法进行新的语音识别，历史记录不会受影响。",
             save: { await model.save() },
             delete: { await model.delete() }

@@ -289,6 +289,7 @@ extension VoiceInputHistoryRecord {
         case "doubao": "豆包语音"
         case "openai": "OpenAI"
         case "qwen": "阿里千问"
+        case "apple": "Apple 本机识别"
         case "local": "本机录音"
         default: "语音识别"
         }

@@ -15,5 +15,6 @@ ADRs preserve decisions whose rationale future architecture work must understand
 | [0009](0009-select-text-refinement-providers.md) | Accepted | Freeze the selected text-only Refinement Provider and isolate its credentials |
 | [0010](0010-select-speech-recognition-providers.md) | Accepted | Select the Speech Recognition Provider independently and freeze its model, region, and credential ownership |
 | [0011](0011-select-the-speech-recognition-method.md) | Accepted | Select streaming or complete-recording recognition while preserving final-only delivery |
+| [0012](0012-offer-on-device-recognition-on-macos-26.md) | Accepted | Offer Apple on-device recognition only on macOS 26 and later, keyless and readable by older builds |
 
 Create a new ADR when a load-bearing decision changes. Keep superseded ADRs as history and link the replacement rather than rewriting the old decision.

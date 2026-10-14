@@ -72,6 +72,12 @@ package struct VoiceInputFailurePresentation {
         icon: "exclamationmark.triangle.fill",
         settingsDestination: .speechRecognition
     )
+    package static let onDeviceModelUnavailable = Self(
+        title: "本机识别模型还没准备好",
+        guidance: "在语音识别设置里下载 Apple 本机识别的语言模型，或改用其他识别服务。",
+        icon: "arrow.down.circle",
+        settingsDestination: .speechRecognition
+    )
     package static let providerRateLimited = Self(
         title: "操作太频繁",
         guidance: "稍等片刻后再试。",
@@ -164,6 +170,7 @@ extension VoiceInputFailure {
         case .providerReturnedNoText: .providerReturnedNoText
         case .audioProcessingFailed: .audioProcessingFailed
         case .audioDeviceChanged: .audioDeviceChanged
+        case .onDeviceModelUnavailable: .onDeviceModelUnavailable
         }
     }
 }

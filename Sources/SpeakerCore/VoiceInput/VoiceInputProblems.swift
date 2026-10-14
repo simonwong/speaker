@@ -22,6 +22,7 @@ public enum VoiceInputFailure: String, Equatable, Sendable {
     case providerReturnedNoText
     case audioProcessingFailed
     case audioDeviceChanged
+    case onDeviceModelUnavailable
 }
 
 public enum VoiceProviderOperation: String, Equatable, Sendable {

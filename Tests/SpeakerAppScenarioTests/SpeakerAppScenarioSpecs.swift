@@ -74,6 +74,64 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
+            "on-device recognition is offered only where macOS supports it and needs a model, not a Key",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "asr-on-device-\(UUID())")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let credentials = ScenarioProviderCredentialStore()
+            try await credentials.save(apiKey: "audio-openai", for: .openAITranscription)
+            let onDevice = OnDeviceSpeechRecognizerFake(status: .notInstalled)
+            let configuration = VoiceInputConfigurationController()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: configuration,
+                settingsStore: VersionedLocalAppSettingsStore(fileURL: fileURL),
+                onDevice: onDevice, isOnDeviceSupported: true)
+            await model.load()
+            try expect(model.availableProviders.contains(.apple))
+            await model.selectProvider(.openAI)
+            await model.selectProvider(.apple)
+            try expect(model.selectedProfile.provider == .apple && model.notice == nil)
+            try expect(model.onDeviceModelStatus == .notInstalled)
+            try expect(!model.isSelectedProviderReady, "a missing model counted as ready")
+            let snapshot = await configuration.captureSnapshot()
+            try expect(snapshot.recognitionProvider.provider == .apple)
+            let gap = VoiceInputSetupGap.resolve(
+                permissions: PermissionSnapshot(accessibility: .granted, microphone: .granted),
+                recognitionProvider: .apple, hasRecognitionKey: false)
+            try expect(gap == .speechRecognitionKey(.apple))
+            try expect(
+                gap?.message.contains("语言模型") == true && gap?.message.contains("Key") == false)
+
+            await model.installOnDeviceModel()
+            try expect(model.onDeviceModelStatus == .installed && model.isSelectedProviderReady)
+            try expect(model.modelInstallProgress == nil)
+            let installs = await onDevice.installCount
+            try expect(installs == 1)
+
+            // The same settings file on a Mac without on-device recognition hides the
+            // option and falls back to the cloud provider used before it.
+            let unsupported = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(fileURL: fileURL),
+                onDevice: onDevice, isOnDeviceSupported: false)
+            await unsupported.load()
+            try expect(!unsupported.availableProviders.contains(.apple))
+            try expect(unsupported.selectedProvider == .openAI && unsupported.hasStoredKey)
+
+            let ready = OnboardingPresentation(
+                permissions: PermissionSnapshot(accessibility: .granted, microphone: .granted),
+                doubaoStatus: .unconfigured, hasStoredDoubaoKey: false,
+                recognitionProvider: .apple, hasStoredRecognitionKey: true)
+            try expect(
+                ready.isReady, "onboarding blocked on-device recognition behind a Doubao Key")
+            await model.shutdown()
+            await unsupported.shutdown()
+        }
+
+        await runAsync(
             "recognition unknown persisted method stays selected and refuses readiness until corrected",
             failures: &failures
         ) {
@@ -2730,18 +2788,21 @@ struct SpeakerAppScenarioSpecs {
 
         run("provider key links point to each provider's own console", failures: &failures) {
             try expect(
-                ProviderKeyLink.console(for: .doubao, region: .beijing).url
+                ProviderKeyLink.console(for: .doubao, region: .beijing)?.url
                     == ExternalLinks.doubaoConsoleAPIKeys)
             try expect(
-                ProviderKeyLink.console(for: .openAI, region: .beijing).url
+                ProviderKeyLink.console(for: .openAI, region: .beijing)?.url
                     == ExternalLinks.openAIAPIKeys)
             try expect(
-                ProviderKeyLink.console(for: .qwen, region: .beijing).url
+                ProviderKeyLink.console(for: .qwen, region: .beijing)?.url
                     == ExternalLinks.qwenBeijingAPIKeys)
             try expect(
-                ProviderKeyLink.console(for: .qwen, region: .singapore).url
+                ProviderKeyLink.console(for: .qwen, region: .singapore)?.url
                     == ExternalLinks.qwenSingaporeAPIKeys,
                 "a Qwen Key only works in the region whose console issued it")
+            try expect(
+                ProviderKeyLink.console(for: .apple, region: .beijing) == nil,
+                "on-device recognition has no Key to issue")
             for provider in RefinementProviderID.allCases {
                 let link = ProviderKeyLink.console(for: provider)
                 try expect(

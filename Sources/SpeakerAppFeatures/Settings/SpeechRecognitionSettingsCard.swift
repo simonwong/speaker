@@ -40,7 +40,7 @@ package struct SpeechRecognitionSettingsCard: View {
                     set: { provider in Task { await model.selectProvider(provider) } }
                 )
             ) {
-                ForEach(SpeechRecognitionProviderID.allCases, id: \.self) { provider in
+                ForEach(model.availableProviders, id: \.self) { provider in
                     Text(provider.displayName).tag(provider)
                 }
             }
@@ -54,6 +54,8 @@ package struct SpeechRecognitionSettingsCard: View {
         if model.selectedProvider == .doubao {
             DoubaoRecognitionSettings(model: doubao)
                 .disabled(model.isMutating)
+        } else if model.selectedProvider.isOnDevice {
+            OnDeviceRecognitionSettings(model: model)
         } else {
             profileControls
             SettingsRowDivider()
@@ -69,7 +71,7 @@ package struct SpeechRecognitionSettingsCard: View {
                     color: model.hasStoredKey ? SpeakerVisualIdentity.settledGreen : .secondary),
                 links: [
                     .console(for: model.selectedProvider, region: model.selectedProfile.region)
-                ],
+                ].compactMap { $0 },
                 deletionMessage: "只删除当前语音识别服务与地域的 Key；文字整理 Key 不受影响。",
                 save: { await model.saveAPIKey() },
                 delete: { await model.deleteAPIKey() })
@@ -140,5 +142,49 @@ package struct SpeechRecognitionSettingsCard: View {
             }
         }
         .disabled(model.isMutating)
+    }
+}
+
+/// Apple's on-device recognition has no Key. The only thing to set up is the
+/// system language model, which Speaker can ask macOS to download.
+private struct OnDeviceRecognitionSettings: View {
+    @ObservedObject var model: SpeechRecognitionSettingsModel
+
+    var body: some View {
+        SpeakerRow("语言模型") { modelStatus }
+        SettingsRowDivider()
+        SettingsNotice(
+            text: "在这台 Mac 上识别，录音不上传，也不需要 API Key。识别语言跟随系统首选语言。"
+                + "中英混说和标点不如云端服务，建议同时开启文字整理。")
+    }
+
+    @ViewBuilder
+    private var modelStatus: some View {
+        if let progress = model.modelInstallProgress {
+            HStack(spacing: 8) {
+                ProgressView(value: progress)
+                    .frame(width: 120)
+                Text(progress.formatted(.percent.precision(.fractionLength(0))))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("正在下载语言模型")
+        } else {
+            switch model.onDeviceModelStatus {
+            case nil:
+                ProgressView().controlSize(.small)
+            case .installed:
+                Label("已下载", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(SpeakerVisualIdentity.settledGreen)
+            case .notInstalled:
+                Button("下载模型") { Task { await model.installOnDeviceModel() } }
+                    .help("由 macOS 从 Apple 下载这门语言的识别模型")
+                    .disabled(model.isMutating)
+            case .unsupported:
+                Text("这台 Mac 不支持当前语言")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

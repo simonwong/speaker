@@ -64,6 +64,8 @@ package struct OnboardingPresentation: Equatable, Sendable {
 
     package var isReady: Bool {
         guard permissions.allGranted, !isUpdatingRecognition else { return false }
+        // For on-device recognition, `hasStoredRecognitionKey` means the language
+        // model is installed; there is no Key.
         if recognitionProvider != .doubao { return hasStoredRecognitionKey }
         return hasStoredDoubaoKey && connectionSucceeded && !isUpdatingDoubaoKey
     }

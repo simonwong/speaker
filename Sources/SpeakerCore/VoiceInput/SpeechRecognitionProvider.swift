@@ -4,6 +4,10 @@ public enum SpeechRecognitionProviderID: String, Codable, CaseIterable, Sendable
     case doubao
     case openAI = "openai"
     case qwen
+    case apple
+
+    /// On-device providers transcribe on this Mac and need no API key.
+    public var isOnDevice: Bool { self == .apple }
 }
 
 public enum QwenASRRegion: String, Codable, CaseIterable, Sendable {
@@ -19,7 +23,7 @@ public enum SpeechRecognitionMethod: String, Codable, CaseIterable, Sendable {
     public static let allCases: [Self] = [.streaming, .completeRecording]
 
     public static func defaultMethod(for provider: SpeechRecognitionProviderID) -> Self {
-        provider == .doubao ? .streaming : .completeRecording
+        provider == .doubao || provider.isOnDevice ? .streaming : .completeRecording
     }
 }
 
@@ -27,7 +31,8 @@ public enum SpeechRecognitionProviderCatalog {
     public static func methods(for provider: SpeechRecognitionProviderID)
         -> [SpeechRecognitionMethod]
     {
-        provider == .doubao ? [.streaming] : [.streaming, .completeRecording]
+        provider == .doubao || provider.isOnDevice
+            ? [.streaming] : [.streaming, .completeRecording]
     }
 
     public static func modelIDs(
@@ -41,6 +46,8 @@ public enum SpeechRecognitionProviderCatalog {
             ["gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"]
         case (.qwen, .streaming): ["qwen3-asr-flash-realtime"]
         case (.qwen, .completeRecording): ["qwen3-asr-flash"]
+        case (.apple, .streaming): ["speech-transcriber"]
+        case (.apple, .completeRecording): []
         case (_, .unsupported): []
         }
     }
@@ -88,11 +95,13 @@ public struct SpeechRecognitionProfile: Codable, Equatable, Sendable {
         Self(provider: provider)
     }
 
-    public var credentialProviderID: ProviderID {
+    /// The keychain entry holding this profile's API key; nil for on-device providers.
+    public var credentialProviderID: ProviderID? {
         switch provider {
         case .doubao: .doubao
         case .openAI: .openAITranscription
         case .qwen: region == .beijing ? .qwenASRBeijing : .qwenASRSingapore
+        case .apple: nil
         }
     }
 
@@ -107,7 +116,7 @@ public struct SpeechRecognitionProfile: Codable, Equatable, Sendable {
         return Self(provider: provider, model: normalized, region: region, method: method)
     }
 
-    package var endpoint: URL {
+    package var endpoint: URL? {
         switch provider {
         case .doubao:
             URL(string: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async")!
@@ -119,20 +128,55 @@ public struct SpeechRecognitionProfile: Codable, Equatable, Sendable {
                     ? "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
                     : "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
             )!
+        case .apple: nil
         }
     }
 }
 
+/// Older builds decode `selectedProvider` with a closed enum and treat an unknown
+/// value as corrupted settings. On-device selection therefore lives in its own
+/// key, `selectedProvider` always holds the last cloud provider, and on-device
+/// profiles are never written to `profiles`.
 public struct SpeechRecognitionProviderSettings: Codable, Equatable, Sendable {
-    public var selectedProvider: SpeechRecognitionProviderID
+    public var selectedProvider: SpeechRecognitionProviderID {
+        didSet { if !selectedProvider.isOnDevice { cloudProvider = selectedProvider } }
+    }
     public var profiles: [String: SpeechRecognitionProfile]
+    /// The cloud provider to fall back to when on-device recognition is unavailable.
+    public private(set) var cloudProvider: SpeechRecognitionProviderID
 
     public init(
         selectedProvider: SpeechRecognitionProviderID = .doubao,
         profiles: [String: SpeechRecognitionProfile] = [:]
     ) {
         self.selectedProvider = selectedProvider
-        self.profiles = profiles
+        self.profiles = profiles.filter { !$0.value.provider.isOnDevice }
+        cloudProvider = selectedProvider.isOnDevice ? .doubao : selectedProvider
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case selectedProvider, profiles, onDeviceProvider
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let stored = try values.decode(SpeechRecognitionProviderID.self, forKey: .selectedProvider)
+        let profiles = try values.decode(
+            [String: SpeechRecognitionProfile].self, forKey: .profiles)
+        let onDevice = (try? values.decodeIfPresent(String.self, forKey: .onDeviceProvider))
+            .flatMap { $0 }.flatMap(SpeechRecognitionProviderID.init(rawValue:))
+            .flatMap { $0.isOnDevice ? $0 : nil }
+        self.init(selectedProvider: stored, profiles: profiles)
+        if let onDevice { selectedProvider = onDevice }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(cloudProvider, forKey: .selectedProvider)
+        try values.encode(profiles.filter { !$0.value.provider.isOnDevice }, forKey: .profiles)
+        if selectedProvider.isOnDevice {
+            try values.encode(selectedProvider.rawValue, forKey: .onDeviceProvider)
+        }
     }
 
     public func profile(for provider: SpeechRecognitionProviderID) -> SpeechRecognitionProfile {
@@ -144,16 +188,25 @@ public struct SpeechRecognitionProviderSettings: Codable, Equatable, Sendable {
 
     public var selectedProfile: SpeechRecognitionProfile { profile(for: selectedProvider) }
 
+    /// Falls back to the last cloud provider when on-device recognition is selected
+    /// but this Mac cannot run it.
+    public func resolved(onDeviceAvailable: Bool) -> Self {
+        guard selectedProvider.isOnDevice, !onDeviceAvailable else { return self }
+        var result = self
+        result.selectedProvider = cloudProvider
+        return result
+    }
+
     public mutating func select(_ profile: SpeechRecognitionProfile) throws {
         let profile = try profile.validated()
-        profiles[profile.provider.rawValue] = profile
+        if !profile.provider.isOnDevice { profiles[profile.provider.rawValue] = profile }
         selectedProvider = profile.provider
     }
 
     public func validated() throws -> Self {
         var result = self
         for (key, profile) in profiles {
-            guard key == profile.provider.rawValue else {
+            guard key == profile.provider.rawValue, !profile.provider.isOnDevice else {
                 throw SpeechRecognitionFailure(
                     provider: selectedProvider, kind: .invalidConfiguration)
             }
