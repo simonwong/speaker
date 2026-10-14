@@ -82,5 +82,94 @@ enum UsageStatisticsSpecs: CoreSpecDomain {
             try expect(streamed.totalSpeakingMilliseconds == 3_500)
             try expect(streamed.totalSessionCount == 2)
         }
+
+        await runAsync(
+            "deleting, clearing, or evicting history never lowers usage totals",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-usage-archive-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("history.sqlite3")
+            let history = SQLiteSessionHistory(fileURL: fileURL, maximumRecordCount: 2)
+
+            let now = Date()
+            let old = usageRecord(
+                startedAt: now.addingTimeInterval(-40 * 86_400),
+                text: "很久以前",
+                recordingMs: 4_000
+            )
+            let earlier = usageRecord(
+                startedAt: now.addingTimeInterval(-3_600),
+                text: "键盘",
+                recordingMs: 1_100
+            )
+            let latest = usageRecord(startedAt: now, text: "语音输入", recordingMs: 2_400)
+            await history.save(old)
+            await history.save(earlier)
+            await history.save(latest)
+            let afterCap = await history.usageStatistics()
+
+            await history.save(
+                usageRecord(
+                    startedAt: now.addingTimeInterval(-60),
+                    text: "四十天",
+                    recordingMs: 900
+                ))
+            _ = await history.applyRetentionPolicy(.thirtyDays, now: now)
+            _ = await history.delete(sessionID: latest.sessionID)
+            let afterDelete = await history.usageStatistics()
+            _ = await history.clear()
+            let afterClear = await history.usageStatistics()
+            let remaining = await history.allRecords()
+            let fileBytes = (try? Data(contentsOf: fileURL)) ?? Data()
+
+            try expect(afterCap.totalSessionCount == 3, "the record cap lowered the totals")
+            try expect(afterCap.totalRecognizedCharacterCount == 10)
+            try expect(afterCap.totalSpeakingMilliseconds == 7_500)
+            try expect(afterDelete.totalSessionCount == 4, "deleting lowered the totals")
+            try expect(afterClear == afterDelete, "clearing history lowered the totals")
+            try expect(
+                afterClear.daily.map(\.sessionCount).reduce(0, +) == 4,
+                "archived usage lost its days"
+            )
+            try expect(remaining.isEmpty)
+            try expect(
+                fileBytes.range(of: Data("语音输入".utf8)) == nil,
+                "the usage archive kept transcript text"
+            )
+        }
+
+        await runAsync(
+            "a session that stops counting leaves no archived usage",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-usage-uncounted-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let history = SQLiteSessionHistory(
+                fileURL: directory.appendingPathComponent("history.sqlite3")
+            )
+            let counted = usageRecord(startedAt: Date(), text: "暂时", recordingMs: 800)
+            await history.save(counted)
+            await history.save(
+                VoiceInputHistoryRecord(
+                    sessionID: counted.sessionID,
+                    startedAt: counted.startedAt,
+                    applicationName: nil,
+                    transcription: nil,
+                    finalText: nil,
+                    outcome: .failed(counted.sessionID, .recordingTooShort)
+                ))
+
+            let summary = await history.usageStatistics()
+            try expect(summary == .empty, "an uncounted session was archived")
+        }
     }
 }

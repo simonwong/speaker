@@ -115,7 +115,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 whereClause: "WHERE session_id = ?",
                 binding: record.sessionID.rawValue.uuidString
             ).isEmpty {
-                _ = await delete(sessionID: record.sessionID)
+                // The record no longer counts as a session, so its earlier
+                // version leaves no usage behind.
+                _ = await delete(sessionID: record.sessionID, archivingUsage: false)
             }
             return
         }
@@ -159,7 +161,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     /// Streams every row through a `VoiceInputUsageAccumulator` so the overview's
     /// totals and per-day buckets never require the whole table in memory. Rows
     /// with an unknown schema or an undecodable payload are skipped, matching how
-    /// `loadRecords` treats them.
+    /// `loadRecords` treats them. Counts archived from deleted Session Records
+    /// are added back, so deleting, clearing, or evicting history never lowers
+    /// the totals.
     public func usageStatistics() async -> VoiceInputUsageSummary {
         guard let connection = openConnection else { return .empty }
         var accumulator = VoiceInputUsageAccumulator()
@@ -181,6 +185,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 guard SessionHistoryRecordPolicy.shouldRetain(record)
                 else { continue }
                 accumulator.add(record)
+            }
+            let archive = try connection.prepare(
+                "SELECT day, characters, milliseconds, sessions FROM usage_archive"
+            )
+            defer { archive.finalize() }
+            while try archive.step() {
+                accumulator.addArchived(
+                    day: Date(timeIntervalSince1970: archive.double(at: 0)),
+                    recognizedCharacterCount: Int(archive.int64(at: 1)),
+                    speakingMilliseconds: Int(archive.int64(at: 2)),
+                    sessionCount: Int(archive.int64(at: 3))
+                )
             }
             return accumulator.summary()
         } catch {
@@ -208,11 +224,24 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     }
 
     public func delete(sessionID: VoiceInputSessionID) async -> Bool {
+        await delete(sessionID: sessionID, archivingUsage: true)
+    }
+
+    private func delete(
+        sessionID: VoiceInputSessionID,
+        archivingUsage: Bool
+    ) async -> Bool {
         guard let connection = openConnection else { return false }
         do {
             try connection.beginImmediateTransaction()
             let deleted: Bool
             do {
+                if archivingUsage {
+                    try archiveUsage(
+                        of: "WHERE session_id = ?",
+                        on: connection
+                    ) { try $0.bind(sessionID.rawValue.uuidString, at: 1) }
+                }
                 let statement = try connection.prepare(
                     "DELETE FROM history_records WHERE session_id = ?"
                 )
@@ -241,7 +270,15 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     public func clear() async -> Bool {
         guard let connection = openConnection else { return false }
         do {
-            try connection.execute("DELETE FROM history_records")
+            try connection.beginImmediateTransaction()
+            do {
+                try archiveUsage(of: nil, on: connection) { _ in }
+                try connection.execute("DELETE FROM history_records")
+                try connection.commitTransaction()
+            } catch {
+                connection.rollbackTransaction()
+                throw error
+            }
             destructiveCheckpointPending = true
             try checkpoint(connection)
             try connection.execute("VACUUM")
@@ -518,6 +555,18 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             )
             """
         )
+        // Per-day counts from deleted Session Records keep lifetime usage
+        // totals from shrinking. Full data erasure removes the file with them.
+        try connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS usage_archive (
+                day REAL PRIMARY KEY NOT NULL,
+                characters INTEGER NOT NULL,
+                milliseconds INTEGER NOT NULL,
+                sessions INTEGER NOT NULL
+            )
+            """
+        )
         if try !connection.table("history_records", containsColumn: "payload_schema") {
             try connection.execute(
                 "ALTER TABLE history_records ADD COLUMN payload_schema INTEGER NOT NULL DEFAULT 1"
@@ -688,6 +737,9 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 to: now
             )
         {
+            try archiveUsage(of: "WHERE started_at < ?", on: connection) {
+                $0.bind(cutoff.timeIntervalSince1970, at: 1)
+            }
             let statement = try connection.prepare(
                 "DELETE FROM history_records WHERE started_at < ?"
             )
@@ -695,6 +747,16 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             defer { statement.finalize() }
             try statement.stepDone()
             deletedRecord = connection.changeCount > 0
+        }
+        let overflow = """
+            WHERE session_id IN (
+                SELECT session_id FROM history_records
+                ORDER BY started_at DESC, session_id DESC
+                LIMIT -1 OFFSET ?
+            )
+            """
+        try archiveUsage(of: overflow, on: connection) {
+            $0.bind(Int64(maximumRecordCount), at: 1)
         }
         let capStatement = try connection.prepare(
             """
@@ -710,6 +772,55 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         defer { capStatement.finalize() }
         try capStatement.stepDone()
         return deletedRecord || connection.changeCount > 0
+    }
+
+    /// Folds the usage of the rows about to be deleted into `usage_archive`.
+    ///
+    /// The archive keeps only per-day counts: no text, session identifiers, or
+    /// timestamps finer than a day. Rows that never counted toward usage, or
+    /// cannot be decoded, add nothing. Callers run it inside the transaction
+    /// that deletes the same rows.
+    private func archiveUsage(
+        of whereClause: String?,
+        on connection: SQLiteConnection,
+        bind: (SQLiteStatement) throws -> Void
+    ) throws {
+        let statement = try connection.prepare(
+            "SELECT payload, payload_schema FROM history_records \(whereClause ?? "")"
+        )
+        defer { statement.finalize() }
+        try bind(statement)
+        var accumulator = VoiceInputUsageAccumulator()
+        while try statement.step() {
+            guard statement.int32(at: 1) == SQLiteHistorySchema.version,
+                let payload = statement.blob(at: 0),
+                let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
+                    HistoryRecordV1.self,
+                    from: payload
+                ),
+                let record = try? stored.domainRecord,
+                SessionHistoryRecordPolicy.shouldRetain(record)
+            else { continue }
+            accumulator.add(record)
+        }
+        for usage in accumulator.dailyBuckets {
+            let upsert = try connection.prepare(
+                """
+                INSERT INTO usage_archive(day, characters, milliseconds, sessions)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(day) DO UPDATE SET
+                    characters = characters + excluded.characters,
+                    milliseconds = milliseconds + excluded.milliseconds,
+                    sessions = sessions + excluded.sessions
+                """
+            )
+            defer { upsert.finalize() }
+            upsert.bind(usage.day.timeIntervalSince1970, at: 1)
+            upsert.bind(Int64(usage.recognizedCharacterCount), at: 2)
+            upsert.bind(Int64(usage.speakingMilliseconds), at: 3)
+            upsert.bind(Int64(usage.sessionCount), at: 4)
+            try upsert.stepDone()
+        }
     }
 
     private func checkpoint(_ connection: SQLiteConnection) throws {

@@ -167,7 +167,7 @@ package struct HistoryDashboard: View {
                 Button("清空历史", role: .destructive, action: actions.clear)
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("文字记录会从本机永久删除，此操作无法撤销。")
+                Text("文字记录会从本机永久删除，此操作无法撤销。概览里的累计数字会保留。")
             }
     }
 
