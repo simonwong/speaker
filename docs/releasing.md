@@ -146,10 +146,28 @@ promotion 再输入 upgrade evidence 路径与首次 candidate run ID。
 公测版和后续版本都使用正式身份，经过签名、公证、provider matrix 和 evidence 门禁，最终发布为 GitHub Latest。App 从 `releases/latest/download/appcast.xml` 检查更新，所以只有 Latest 会推送给用户。当前正式候选在本机用云签名构建：
 
 1. 提交 `Resources/Info.plist` 与 `Resources/ReleaseCandidate.plist` 中的版本和 build，以及 `docs/releases/<version>.md`。工作区必须干净。更新后的 App 会在概览顶部提示一次「已更新到 <version>」，按钮打开 `releases/tag/v<version>`，所以 GitHub Release 的 tag 必须是 `v` 加 `CFBundleShortVersionString`，正文写用户能看懂的新功能。
-2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `app.moonunder.speaker.provider-api-keys` 中。记录当前 UTC 时间，再运行付费 matrix：
+2. 把豆包与 DeepSeek Key 保存在签名 App 的 Keychain 服务 `app.moonunder.speaker.provider-api-keys` 中，account 分别是 `doubao` 和 `deepseek`：
 
 ```bash
-./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory <新的私有目录> --candidate-version <version> --candidate-build <build> --keychain-service app.moonunder.speaker.provider-api-keys
+security add-generic-password -U -s app.moonunder.speaker.provider-api-keys -a doubao -w
+```
+
+```bash
+security add-generic-password -U -s app.moonunder.speaker.provider-api-keys -a deepseek -w
+```
+
+生成与 GitHub workflow 相同的 60 秒非敏感 TTS 样本。不传 `--doubao-sample` 时，豆包的五个音频用例都是 SKIP，`scripts/distribute` 会拒绝该报告：
+
+```bash
+for _ in {1..120}; do print -r -- "Speaker verifies this non-sensitive release sample before distribution."; done > <样本目录>/sample.txt
+say -f <样本目录>/sample.txt -o <样本目录>/sample.aiff
+afconvert -f WAVE -d LEI16@16000 -c 1 <样本目录>/sample.aiff <样本目录>/sample.wav
+```
+
+记录当前 UTC 时间，再运行付费 matrix：
+
+```bash
+./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory <新的私有目录> --candidate-version <version> --candidate-build <build> --doubao-sample <样本目录>/sample.wav --keychain-service app.moonunder.speaker.provider-api-keys
 ```
 
 3. 构建、签名、公证并生成 appcast 与 evidence：
@@ -326,9 +344,9 @@ arm64/x86_64 CodeDirectory CDHash 都等于实测候选；不会重新构建或�
 - VoiceOver、Reduce Motion、Increase Contrast 和多显示器浮层定位。
 - 历史查看、保留策略、清空、损坏恢复与卸载后本地数据边界。
 
-更新通道已上线：`releases/latest` 指向 v0.8.0 (206)，`verify-published-update` 回读通过。0.8.0 发布时没有更早的 Developer ID 版本，未做旧版 → 新版实机更新；从下一个版本起按上述门槛执行。
+更新通道已上线：`releases/latest` 指向 v0.9.0 (207)，`verify-published-update` 回读通过。
 
-下一个版本是第一个 `app.moonunder.speaker` 版本（[ADR-0014](adr/0014-move-the-release-to-app-moonunder-speaker.md)）。它的升级用例以 0.8.0（`cn.simonwong.speaker`）为旧版：`compatibility-smoke` 识别 `RetiredBundleIdentifier`，在报告中写入 `Identity Transition`，TCC 与 Keychain 两项改为检查“不弹钥匙串密码框、自动打开引导、重新授权和输入 Key 后可用、数据保留”。Release notes 必须告诉用户更新后要重新授权和输入 Key，并可以在“隐私与安全性”里删除旧的 Speaker 条目。
+0.9.0 是第一个 `app.moonunder.speaker` 版本（[ADR-0014](adr/0014-move-the-release-to-app-moonunder-speaker.md)）。0.8.0（`cn.simonwong.speaker`）通过 prerelease appcast 经 Sparkle 原地更新到 0.9.0，安装后的可执行文件与候选逐字节一致。`compatibility-smoke` 在第 17 个用例中断，没有生成报告；维护者决定不留报告直接提升为 Latest。脚本的可用性问题记录在 Linear IND-80。下一个版本的升级用例以 0.9.0 (207) 为旧版，Bundle ID 相同，按常规的 TCC 与 Keychain 连续性检查。
 
 ## 官网部署
 
