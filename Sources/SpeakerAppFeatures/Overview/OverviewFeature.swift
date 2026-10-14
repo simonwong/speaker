@@ -52,6 +52,7 @@ package struct OverviewView: View {
     @ObservedObject private var permissions: PermissionModel
     @ObservedObject private var doubao: DoubaoSettingsModel
     @ObservedObject private var recognition: SpeechRecognitionSettingsModel
+    @ObservedObject private var whatsNew: WhatsNewModel
     private let openSetup: (VoiceInputSetupGap) -> Void
 
     /// `openSettingsTab` switches the main window to Settings; the Settings
@@ -59,9 +60,11 @@ package struct OverviewView: View {
     package init(
         model: OverviewModel,
         workspace: SettingsWorkspace,
+        whatsNew: WhatsNewModel,
         openSettingsTab: @escaping () -> Void
     ) {
         self.model = model
+        self.whatsNew = whatsNew
         permissions = workspace.permissions
         doubao = workspace.doubao
         recognition = workspace.recognition
@@ -80,7 +83,10 @@ package struct OverviewView: View {
                 doubao: doubao,
                 recognition: recognition
             ),
-            openSetup: openSetup
+            openSetup: openSetup,
+            whatsNewVersion: whatsNew.version,
+            openWhatsNew: whatsNew.open,
+            dismissWhatsNew: whatsNew.dismiss
         )
         .task { await model.refresh() }
         .onReceive(

@@ -50,6 +50,7 @@ struct SpeakerApp: App {
                 mainWindow: runtime.mainWindow,
                 dataErasure: runtime.dataErasure,
                 overview: runtime.overviewModel,
+                whatsNew: runtime.whatsNew,
                 history: runtime.historyModel,
                 settingsWorkspace: runtime.settingsWorkspace,
                 dictionary: runtime.dictionarySettings

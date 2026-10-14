@@ -56,6 +56,11 @@ package struct SpeakerBuildInfoReader: Sendable {
         )
     }
 
+    /// The raw marketing version, without the display placeholder.
+    package var shortVersion: String? {
+        infoValue("CFBundleShortVersionString")
+    }
+
     package var signingMode: SpeakerSigningMode {
         SpeakerSigningMode(infoValue: infoValue("SpeakerSigningMode"))
     }

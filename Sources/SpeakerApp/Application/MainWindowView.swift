@@ -5,6 +5,7 @@ struct MainWindowView: View {
     @ObservedObject var mainWindow: MainWindowModel
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     let overview: OverviewModel
+    let whatsNew: WhatsNewModel
     let history: HistoryModel
     let settingsWorkspace: SettingsWorkspace
     let dictionary: DictionarySettingsModel
@@ -19,6 +20,7 @@ struct MainWindowView: View {
                         OverviewView(
                             model: overview,
                             workspace: settingsWorkspace,
+                            whatsNew: whatsNew,
                             openSettingsTab: { mainWindow.select(.settings) }
                         )
                     case .history:

@@ -42,16 +42,25 @@ package struct OverviewDashboard: View {
     let state: OverviewDashboardState
     let setupGap: VoiceInputSetupGap?
     let openSetup: (VoiceInputSetupGap) -> Void
+    let whatsNewVersion: String?
+    let openWhatsNew: () -> Void
+    let dismissWhatsNew: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     package init(
         state: OverviewDashboardState,
         setupGap: VoiceInputSetupGap? = nil,
-        openSetup: @escaping (VoiceInputSetupGap) -> Void = { _ in }
+        openSetup: @escaping (VoiceInputSetupGap) -> Void = { _ in },
+        whatsNewVersion: String? = nil,
+        openWhatsNew: @escaping () -> Void = {},
+        dismissWhatsNew: @escaping () -> Void = {}
     ) {
         self.state = state
         self.setupGap = setupGap
         self.openSetup = openSetup
+        self.whatsNewVersion = whatsNewVersion
+        self.openWhatsNew = openWhatsNew
+        self.dismissWhatsNew = dismissWhatsNew
     }
 
     package var body: some View {
@@ -62,6 +71,14 @@ package struct OverviewDashboard: View {
             if let setupGap {
                 VoiceInputSetupBanner(gap: setupGap) { openSetup(setupGap) }
                     .padding(.bottom, SpeakerSurfaceMetrics.sectionSpacing)
+            }
+            if let whatsNewVersion {
+                WhatsNewBanner(
+                    version: whatsNewVersion,
+                    open: openWhatsNew,
+                    dismiss: dismissWhatsNew
+                )
+                .padding(.bottom, SpeakerSurfaceMetrics.sectionSpacing)
             }
             OverviewHero(
                 summary: summary,
