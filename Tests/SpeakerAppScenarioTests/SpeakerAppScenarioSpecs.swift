@@ -2707,6 +2707,13 @@ struct SpeakerAppScenarioSpecs {
             try expect(recommended == [.default])
         }
 
+        run("only the recommended Doubao resource estimates a monthly cost", failures: &failures) {
+            let estimated = DoubaoStreamingResource.allCases.filter {
+                DoubaoResourcePresentation.costNote(for: $0).contains("一个月约")
+            }
+            try expect(estimated == [.default])
+        }
+
         await runAsync(
             "refinement providers preserve independent models keys and desired mode",
             failures: &failures

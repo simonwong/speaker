@@ -334,6 +334,11 @@ private struct OverviewHeatmapCard: View {
             .accessibilityValue(
                 VoiceInputUsagePresentation.heatmapAccessibilitySummary(heatmap)
             )
+
+            HStack {
+                Spacer(minLength: 0)
+                HeatmapLegend()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .speakerCard()
@@ -344,6 +349,7 @@ private enum HeatmapMetrics {
     static let gap = ContributionHeatmapLayout.gap
     static let corner: CGFloat = 3
     static let monthAxisHeight: CGFloat = 12
+    static let legendSwatch: CGFloat = 9
 }
 
 private struct ContributionHeatmapGrid: View {
@@ -458,6 +464,32 @@ private struct HeatmapCellView: View {
                         recognizedCharacterCount: cell.recognizedCharacterCount
                     )
             )
+    }
+}
+
+/// Reads the shades below the grid; the help on each cell gives the exact
+/// count, and VoiceOver hears the summary instead.
+private struct HeatmapLegend: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text("少")
+                .padding(.trailing, 2)
+            ForEach(0...4, id: \.self) { level in
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(HeatmapPalette.color(forLevel: level, colorScheme: colorScheme))
+                    .frame(
+                        width: HeatmapMetrics.legendSwatch,
+                        height: HeatmapMetrics.legendSwatch
+                    )
+            }
+            Text("多")
+                .padding(.leading, 2)
+        }
+        .font(SpeakerTypography.footnote)
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
     }
 }
 

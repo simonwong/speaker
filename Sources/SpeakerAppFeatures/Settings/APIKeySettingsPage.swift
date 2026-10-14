@@ -40,6 +40,7 @@ struct DoubaoRecognitionSettings: View {
         }
     }
 
+    @ViewBuilder
     private var resourceRow: some View {
         SpeakerRow("流式资源") {
             Picker(
@@ -56,6 +57,10 @@ struct DoubaoRecognitionSettings: View {
             .settingsTrailingMenu()
             .disabled(model.isUpdatingKey)
         }
+        Text(DoubaoResourcePresentation.costNote(for: model.resource))
+            .font(SpeakerTypography.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var isChecking: Bool {
