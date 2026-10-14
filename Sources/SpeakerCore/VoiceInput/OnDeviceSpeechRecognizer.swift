@@ -191,6 +191,8 @@ public struct AppleSpeechRecognizer: OnDeviceSpeechRecognizing {
             let output = AVAudioPCMBuffer(
                 pcmFormat: converter.outputFormat, frameCapacity: capacity)
         else { throw SpeechRecognitionFailure(provider: .apple, kind: .invalidAudio) }
+        // The converter calls this block synchronously, before `convert` returns.
+        nonisolated(unsafe) let input = buffer
         nonisolated(unsafe) var supplied = false
         var error: NSError?
         converter.convert(to: output, error: &error) { _, status in
@@ -200,7 +202,7 @@ public struct AppleSpeechRecognizer: OnDeviceSpeechRecognizing {
             }
             supplied = true
             status.pointee = .haveData
-            return buffer
+            return input
         }
         if error != nil {
             throw SpeechRecognitionFailure(provider: .apple, kind: .invalidAudio)
