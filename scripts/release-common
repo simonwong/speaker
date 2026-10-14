@@ -9,6 +9,47 @@ release_error() {
     return 1
 }
 
+# Development builds sit next to the release under their own identity, name,
+# and data directory. See docs/adr/0013-separate-development-and-release-builds.md.
+DEVELOPMENT_BUNDLE_IDENTIFIER="app.local.speaker"
+DEVELOPMENT_DISPLAY_NAME="Speaker Dev"
+DEVELOPMENT_DATA_DIRECTORY="Speaker Dev"
+DEVELOPMENT_INSTALL_APP="$HOME/Applications/Speaker Dev.app"
+
+# The release and a development build listen for the same global shortcut, so
+# only one may run. Asks a running release to quit through the normal
+# terminate path before a development build opens.
+quit_running_release() {
+    local root="$1"
+    local release_identifier
+
+    release_identifier="$(
+        /usr/libexec/PlistBuddy \
+            -c 'Print :BundleIdentifier' \
+            "$root/Resources/ReleaseIdentity.plist" 2>/dev/null
+    )" || return 0
+    [[ -n "$release_identifier" ]] || return 0
+    release_is_running "$release_identifier" || return 0
+    print -u2 "Quitting the release Speaker so only one copy listens for the shortcut..."
+    /usr/bin/osascript \
+        -e "tell application id \"$release_identifier\" to quit" >/dev/null || {
+        release_error "macOS could not ask the release Speaker to quit; quit it before opening the development build."
+        return 1
+    }
+    for _ in {1..100}; do
+        release_is_running "$release_identifier" || return 0
+        sleep 0.1
+    done
+    release_error "The release Speaker did not quit; quit it before opening the development build."
+}
+
+release_is_running() {
+    [[ "$(
+        /usr/bin/osascript \
+            -e "application id \"$1\" is running" 2>/dev/null
+    )" == true ]]
+}
+
 release_value_is_single_line() {
     local value="$1"
 
@@ -349,38 +390,72 @@ verify_swiftpm_dependency_checkouts_clean() {
     done
 }
 
+# Exports SPEAKER_LOCAL_CODESIGN_IDENTITY for ./scripts/launch and
+# ./scripts/release, or fails. Development builds never fall back to ad-hoc
+# signing there, because ad-hoc rebuilds lose Microphone and Accessibility.
+require_development_signing_identity() {
+    local identity_output
+    local selected
+    local selection_status
+
+    identity_output="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+    if [[ -n "${SPEAKER_LOCAL_CODESIGN_IDENTITY:-}" ]]; then
+        if print -r -- "$identity_output" \
+              | grep -F "\"$SPEAKER_LOCAL_CODESIGN_IDENTITY\"" \
+              | grep -q 'CSSMERR_'; then
+            release_error "$SPEAKER_LOCAL_CODESIGN_IDENTITY is revoked or untrusted; macOS would block the app as malware."
+            return 1
+        fi
+        return 0
+    fi
+    selected="$(select_local_signing_identity "$identity_output")"
+    selection_status=$?
+    if (( selection_status != 0 )); then
+        (( selection_status == 2 )) && return 1
+        release_error "No valid Apple Development identity. Create one in Xcode > Settings > Accounts > Manage Certificates, or set SPEAKER_LOCAL_CODESIGN_IDENTITY."
+        return 1
+    fi
+    export SPEAKER_LOCAL_CODESIGN_IDENTITY="$selected"
+    print -u2 "Using stable local signing identity: $selected"
+}
+
 select_local_signing_identity() {
     local identity_output="$1"
     local name
     local -a names preferred apple_development
 
+    # A revoked or untrusted certificate is listed with a trailing
+    # "(CSSMERR_...)" marker even under -v. Gatekeeper rejects apps signed
+    # with a revoked certificate as malware, so only unmarked names qualify.
     names=("${(@f)$(
         print -r -- "$identity_output" \
-            | sed -nE 's/^[[:space:]]*[0-9]+\) [0-9A-Fa-f]+ "([^"]+)".*$/\1/p'
+            | sed -nE 's/^[[:space:]]*[0-9]+\) [0-9A-Fa-f]+ "([^"]+)"[[:space:]]*$/\1/p'
     )}")
     for name in "${names[@]}"; do
         [[ -n "$name" ]] || continue
-        if [[ "$name" == "Speaker Local Development" ]]; then
-            preferred+=("$name")
-        elif [[ "$name" == "Apple Development: "* ]]; then
+        if [[ "$name" == "Apple Development: "* ]]; then
             apple_development+=("$name")
+        elif [[ "$name" == "Speaker Local Development" ]]; then
+            preferred+=("$name")
         fi
     done
 
-    if (( ${#preferred} == 1 )); then
-        print -r -- "$preferred[1]"
-        return 0
-    fi
-    if (( ${#preferred} > 1 )); then
-        release_error "Multiple Speaker Local Development identities are available; set SPEAKER_LOCAL_CODESIGN_IDENTITY explicitly."
-        return 2
-    fi
+    # The Xcode team's Apple Development certificate comes first; a
+    # self-signed "Speaker Local Development" covers Macs without one.
     if (( ${#apple_development} == 1 )); then
         print -r -- "$apple_development[1]"
         return 0
     fi
     if (( ${#apple_development} > 1 )); then
         release_error "Multiple Apple Development identities are available; set SPEAKER_LOCAL_CODESIGN_IDENTITY explicitly."
+        return 2
+    fi
+    if (( ${#preferred} == 1 )); then
+        print -r -- "$preferred[1]"
+        return 0
+    fi
+    if (( ${#preferred} > 1 )); then
+        release_error "Multiple Speaker Local Development identities are available; set SPEAKER_LOCAL_CODESIGN_IDENTITY explicitly."
         return 2
     fi
     return 1

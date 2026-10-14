@@ -228,14 +228,41 @@ package struct SpeakerIdentityTile: View {
 }
 
 package struct SpeakerAppIconArtwork: View {
-    package let size: CGFloat
+    package enum Variant: Sendable {
+        case release
+        /// Carries a "DEV" band so a development build is never mistaken for
+        /// the release in Finder, the Dock, or Privacy & Security.
+        case development
+    }
 
-    package init(size: CGFloat) {
+    package let size: CGFloat
+    package let variant: Variant
+
+    package init(size: CGFloat, variant: Variant = .release) {
         self.size = size
+        self.variant = variant
     }
 
     package var body: some View {
         SpeakerIdentityTile(size: size, accessibility: .hidden)
+            .overlay(alignment: .bottom) {
+                if variant == .development {
+                    developmentBadge
+                }
+            }
+    }
+
+    private var developmentBadge: some View {
+        Text("DEV")
+            .font(.system(size: size * 0.13, weight: .heavy, design: .rounded))
+            .tracking(size * 0.012)
+            .foregroundStyle(.white)
+            .frame(width: size * 0.46, height: size * 0.19)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color(red: 0.16, green: 0.16, blue: 0.18))
+            )
+            .padding(.bottom, size * 0.09)
     }
 }
 

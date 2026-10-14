@@ -35,14 +35,32 @@ struct SpeakerBrandAssetGenerator {
             at: outputDirectory,
             withIntermediateDirectories: true
         )
+        for (name, variant) in [
+            ("AppIcon", SpeakerAppIconArtwork.Variant.release),
+            ("AppIcon-Dev", .development),
+        ] {
+            try writeIcon(named: name, variant: variant, to: outputDirectory)
+        }
+    }
+
+    @MainActor
+    private static func writeIcon(
+        named name: String,
+        variant: SpeakerAppIconArtwork.Variant,
+        to outputDirectory: URL
+    ) throws {
+        let fileManager = FileManager.default
         let iconset = outputDirectory.appendingPathComponent(
-            "AppIcon.iconset",
+            "\(name).iconset",
             isDirectory: true
         )
         try fileManager.createDirectory(
             at: iconset,
             withIntermediateDirectories: true
         )
+        func render(pixels: Int) throws -> Data {
+            try SpeakerBrandAssetGenerator.render(pixels: pixels, variant: variant)
+        }
 
         let iconFiles: [(name: String, pixels: Int)] = [
             ("icon_16x16.png", 16),
@@ -64,7 +82,7 @@ struct SpeakerBrandAssetGenerator {
         }
         let appIcon = try render(pixels: 1024)
         try appIcon.write(
-            to: outputDirectory.appendingPathComponent("AppIcon.png"),
+            to: outputDirectory.appendingPathComponent("\(name).png"),
             options: .atomic
         )
         let icnsChunks: [(type: String, data: Data)] = try [
@@ -80,7 +98,7 @@ struct SpeakerBrandAssetGenerator {
             ("ic14", render(pixels: 512)),
         ]
         try encodeICNS(chunks: icnsChunks).write(
-            to: outputDirectory.appendingPathComponent("AppIcon.icns"),
+            to: outputDirectory.appendingPathComponent("\(name).icns"),
             options: .atomic
         )
     }
@@ -189,10 +207,13 @@ struct SpeakerBrandAssetGenerator {
     }
 
     @MainActor
-    private static func render(pixels: Int) throws -> Data {
+    private static func render(
+        pixels: Int,
+        variant: SpeakerAppIconArtwork.Variant
+    ) throws -> Data {
         let size = CGFloat(pixels)
         let renderer = ImageRenderer(content:
-            SpeakerAppIconArtwork(size: size)
+            SpeakerAppIconArtwork(size: size, variant: variant)
                 .frame(width: size, height: size)
         )
         renderer.scale = 1

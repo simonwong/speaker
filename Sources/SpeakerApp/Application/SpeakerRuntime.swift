@@ -98,7 +98,7 @@ final class SpeakerRuntime: ObservableObject {
             preferences: dependencies.preferences,
             preferenceDomainNames: [
                 bundle.bundleIdentifier,
-                SpeakerBundleInfo.fallbackBundleIdentifier,
+                SpeakerBundleInfo.legacyDevelopmentBundleIdentifier,
             ]
         )
         self.dataErasureIntentStore = dataErasureIntentStore

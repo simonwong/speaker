@@ -1,4 +1,5 @@
 import Foundation
+import SpeakerCore
 
 package struct SpeakerOwnedDataLocations {
     package let applicationSupport: URL
@@ -20,7 +21,8 @@ package struct SpeakerOwnedDataLocations {
 
     package static func current(
         fileManager: FileManager = .default,
-        bundleIdentifier: String
+        bundleIdentifier: String,
+        dataDirectoryName: String = SpeakerDataDirectory.name
     ) -> SpeakerOwnedDataLocations {
         let home = fileManager.homeDirectoryForCurrentUser
         let applicationSupportBase =
@@ -47,7 +49,7 @@ package struct SpeakerOwnedDataLocations {
         )
         return SpeakerOwnedDataLocations(
             applicationSupport: applicationSupportBase.appendingPathComponent(
-                "Speaker",
+                dataDirectoryName,
                 isDirectory: true
             ),
             legacyApplicationSupport:
@@ -62,7 +64,7 @@ package struct SpeakerOwnedDataLocations {
                     isDirectory: true
                 ),
                 cachesBase.appendingPathComponent(
-                    "Speaker",
+                    dataDirectoryName,
                     isDirectory: true
                 ),
                 cachesBase.appendingPathComponent(

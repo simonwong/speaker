@@ -1151,6 +1151,25 @@ struct SpeakerAppScenarioSpecs {
         }
 
         run(
+            "a development bundle erases only its own data directory",
+            failures: &failures
+        ) {
+            let locations = SpeakerOwnedDataLocations.current(
+                bundleIdentifier: "app.local.speaker",
+                dataDirectoryName: "Speaker Dev"
+            )
+            try expect(locations.applicationSupport.lastPathComponent == "Speaker Dev")
+            let owned =
+                [locations.applicationSupport] + locations.caches
+                + locations.savedApplicationState
+            try expect(!owned.contains { $0.lastPathComponent == "Speaker" })
+            let intent = SpeakerDataErasureIntentStore.defaultIntentFileURL(
+                dataDirectoryName: "Speaker Dev"
+            )
+            try expect(intent.deletingLastPathComponent().lastPathComponent == "Speaker Dev")
+        }
+
+        run(
             "owned data locations include legacy cache for a production bundle",
             failures: &failures
         ) {

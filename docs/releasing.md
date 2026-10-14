@@ -22,7 +22,19 @@ Formal releases never derive a build number from dates, Git history, or the loca
 ./scripts/release
 ```
 
-该入口使用 `com.local.speaker` 和 ad-hoc 签名，只用于本机开发验证。它不生成可分发制品，也不能作为 TCC 权限跨版本保持的证据。
+开发版和正式版是同一台 Mac 上的两个 App，规则见 [ADR-0013](adr/0013-separate-development-and-release-builds.md)：
+
+| | 正式版 | 开发版 |
+| --- | --- | --- |
+| Bundle ID | `ReleaseIdentity.plist` | `app.local.speaker` |
+| 名称与图标 | Speaker | Speaker Dev，图标带 DEV 标记 |
+| 签名 | Developer ID，只经 `./scripts/distribute` | Xcode 登录 team 的 Apple Development 证书 |
+| 安装位置 | `/Applications/Speaker.app`，来自 DMG 或 Sparkle | `~/Applications/Speaker Dev.app` |
+| 数据目录 | `~/Library/Application Support/Speaker` | `~/Library/Application Support/Speaker Dev` |
+| Key | 钥匙串 | 开发版数据目录里的 `credentials.json` |
+| 更新 | Sparkle | 无 |
+
+`./scripts/release` 用 release 配置构建，安装到 `~/Applications/Speaker Dev.app` 并打开。它不生成可分发制品，也不能作为正式版 TCC 权限跨版本保持的证据。安装器拒绝把开发版放到 `/Applications/Speaker.app`。两个版本监听同一个全局快捷键，同一时间只运行一个：`./scripts/launch` 和 `./scripts/release` 打开开发版前会先退出正在运行的正式版，用完后手动打开正式版。
 
 Without explicit development metadata, `CFBundleVersion` is the current
 `HEAD` commit count and `SpeakerSourceRevision` is the 12-character commit SHA.
@@ -36,18 +48,12 @@ Specialized installs and black-box tests may set `SPEAKER_VERSION`,
 resolvable Git history must provide at least the build and source revision;
 the scripts never silently fall back to build 1.
 
-ad-hoc 签名的 designated requirement 会绑定单次构建的代码哈希。重新构建后，macOS
-可能要求重新授予麦克风和辅助功能权限；这不是正式发布版本可接受的身份模型。
-
-如果本机 Keychain 已有可信的代码签名 identity，可以让开发安装在多次构建间保持稳定身份：
-
-```bash
-SPEAKER_LOCAL_CODESIGN_IDENTITY="Apple Development: ..." ./scripts/release
-```
-
-`./scripts/release` 会自动选择唯一的 `Speaker Local Development` identity；
-若不存在，则会自动选择唯一的 `Apple Development: ...` identity。存在多个
-Apple Development identity 时必须显式指定，避免构建在不同证书之间漂移。
+开发签名自动选择登录钥匙串里唯一的 `Apple Development: ...` identity，即当前 Xcode
+登录 team 的证书；没有时选择唯一的自签名 `Speaker Local Development`；存在多个时必须用
+`SPEAKER_LOCAL_CODESIGN_IDENTITY` 显式指定。`security find-identity` 标出 `CSSMERR_...` 的证书
+（例如已吊销）会被跳过：用吊销证书签名的 App 会被 Gatekeeper 判为恶意软件并移到废纸篓。
+没有可用证书时，`./scripts/launch` 和 `./scripts/release` 直接报错，不退回 ad-hoc 签名，
+因为 ad-hoc 签名绑定单次构建的代码哈希，重新构建后会丢失麦克风和辅助功能授权。
 
 没有 Apple Development identity 时，可以按 Apple 推荐的图形界面流程创建仅供
 本机使用的自签名 identity：
@@ -59,16 +65,13 @@ Apple Development identity 时必须显式指定，避免构建在不同证书�
 4. 在证书的信任设置中只确认“代码签名”用途，并接受 macOS 的用户授权。
 5. 运行 `security find-identity -v -p codesigning`，确认该名称显示为 valid。
 
-不要使用允许所有应用访问私钥的导入选项。自签名 identity 只解决这台 Mac 上的
-开发构建身份稳定性，不具备 Developer ID 的分发信任或公证能力。
-
-本地具名签名仍使用 `com.local.speaker` 与 owner-only 本地凭据文件，不会被误认为正式制品。只有后续构建持续使用同一个 identity，TCC 权限身份才可能保持。
-脚本会拒绝 ad-hoc 结果或仍然绑定单次 CDHash 的 identity。可用 identity 可通过
-`security find-identity -v -p codesigning` 查看。
+不要使用允许所有应用访问私钥的导入选项。脚本会拒绝 ad-hoc 结果或仍然绑定单次 CDHash 的
+identity。
 
 ## 开发构建
 
-CI 不发布开发构建。`com.local.speaker` 的开发构建只用于本机安装；对外的公测版和稳定版都使用正式身份，按下文流程发布。
+CI 不发布开发构建。`app.local.speaker` 的开发构建只用于本机安装；用户使用的是正式版 DMG，
+正式版按下文流程发布。
 
 ## 正式候选构建
 

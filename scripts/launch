@@ -4,6 +4,9 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
+source "$SCRIPT_DIR/release-common"
+require_development_signing_identity || exit 1
 /bin/zsh "$SCRIPT_DIR/bundle"
 APP="$ROOT/.build/Speaker.app"
-exec open "$APP"
+quit_running_release "$ROOT"
+exec open -n "$APP"

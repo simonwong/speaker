@@ -106,7 +106,7 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | `distribute` | The only production entrypoint: Developer ID signing, notarization, DMG, signed appcast, evidence, and promotion. | release |
 | `frontmost-delivery-smoke` | Checks delivery into whatever app is frontmost, without a scripted target. | developer |
 | `generate-brand-assets` | Regenerates `Resources/AppIcon.png` and `AppIcon.icns` through `SpeakerBrandAssetGenerator`. | developer, `./scripts/test` |
-| `install` | Replaces `/Applications/Speaker.app` with a verified swap, identity checks, and rollback. | developer, `release`, `./scripts/test`, CI |
+| `install` | Replaces `~/Applications/Speaker Dev.app` with a verified swap, identity checks, and rollback. Refuses `/Applications/Speaker.app` for development builds. | developer, `release`, `./scripts/test`, CI |
 | `launch` | Bundles the development App and opens it. | developer |
 | `package-dmg` | Packages a signed App into an APFS/lzfse drag-to-Applications DMG without rebuilding or resigning. | `distribute`, developer |
 | `provider-smoke` | Doubao/DeepSeek connection probes and the paid evidence matrix. | developer (explicit approval), release |
@@ -153,18 +153,23 @@ Keep untested hardware/system combinations explicitly pending. A build, fake dir
 
 ## Launch, bundle, and local install
 
-Every command that bundles or launches Speaker must keep one stable local code identity:
+Development builds and the release are separate apps on the same Mac ([ADR-0013](../adr/0013-separate-development-and-release-builds.md)):
+
+- Development: `Speaker Dev`, `app.local.speaker`, `~/Applications/Speaker Dev.app`, data in `~/Library/Application Support/Speaker Dev`, Keys in that directory's `credentials.json`.
+- Release: `Speaker`, the Bundle ID in `Resources/ReleaseIdentity.plist`, `/Applications/Speaker.app` from the DMG or Sparkle, data in `~/Library/Application Support/Speaker`, Keys in the Keychain. Local scripts never install or replace it.
 
 ```bash
-SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Development" ./scripts/launch
-SPEAKER_LOCAL_CODESIGN_IDENTITY="Speaker Local Development" ./scripts/bundle
+./scripts/launch
+./scripts/release
 ```
 
-The certificate lives in the login keychain. Ad-hoc signing changes code identity after rebuilds, so macOS can silently discard Accessibility and Microphone grants.
+`./scripts/launch` builds a debug bundle at `.build/Speaker.app` and opens it. `./scripts/release` builds the release configuration, installs it to `~/Applications/Speaker Dev.app`, and opens it. This is the development "try my change" loop, not a production release. Both quit a running release first, because the two builds listen for the same global shortcut. Reopen the release with `open /Applications/Speaker.app` when you are done.
 
-Run `./scripts/release` without an identity override when the keychain contains exactly one `Speaker Local Development` identity. The script selects it automatically; if absent, it selects exactly one `Apple Development: ...` identity. Multiple matching identities require an explicit `SPEAKER_LOCAL_CODESIGN_IDENTITY`. This is the development “try my change” loop: release build, bundle, install to `/Applications/Speaker.app`, and launch. It is not a production release.
+Both scripts sign with the single valid `Apple Development: ...` identity in the login keychain, the certificate of the team signed in to Xcode. Without one they use a self-signed `Speaker Local Development`; several matching identities require an explicit `SPEAKER_LOCAL_CODESIGN_IDENTITY`. They skip identities that `security find-identity` marks `CSSMERR_...` and stop instead of signing ad-hoc. A revoked certificate is the dangerous case: Gatekeeper reports the app as malware and moves it to the Trash. Plain `./scripts/bundle` stays ad-hoc for tests and CI. Ad-hoc signing changes code identity after rebuilds, so macOS can silently discard Accessibility and Microphone grants.
 
-Local App verification is complete when the launched bundle uses the selected stable identity and the expected TCC grants remain effective.
+A new development data directory starts empty, so the first launch runs onboarding. Copy `settings.json` or `personal-dictionary.json` from the release directory only when a test needs them, and never copy `history.sqlite3` for evidence.
+
+Local App verification is complete when `codesign -d -r- ~/Applications/"Speaker Dev.app"` shows `anchor apple generic and certificate leaf[subject.CN] = "Apple Development: …"`, not `cdhash`, and the expected TCC grants remain effective.
 
 ## Production release
 

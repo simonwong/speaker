@@ -1,3 +1,4 @@
+import SpeakerCore
 import SwiftUI
 
 struct SettingsCard<Content: View>: View {
@@ -182,6 +183,6 @@ var speakerApplicationSupportDirectory: URL {
     FileManager.default.urls(
         for: .applicationSupportDirectory,
         in: .userDomainMask
-    ).first?.appendingPathComponent("Speaker", isDirectory: true)
+    ).first?.appendingPathComponent(SpeakerDataDirectory.name, isDirectory: true)
         ?? FileManager.default.homeDirectoryForCurrentUser
 }

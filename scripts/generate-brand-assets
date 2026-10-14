@@ -19,3 +19,4 @@ trap cleanup EXIT
 mkdir -p "$OUTPUT_DIRECTORY"
 cp "$WORK_DIRECTORY/AppIcon.png" "$OUTPUT_DIRECTORY/AppIcon.png"
 cp "$WORK_DIRECTORY/AppIcon.icns" "$OUTPUT_DIRECTORY/AppIcon.icns"
+cp "$WORK_DIRECTORY/AppIcon-Dev.icns" "$OUTPUT_DIRECTORY/AppIcon-Dev.icns"

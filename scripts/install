@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 ROOT="${SCRIPT_DIR:h}"
 source "$SCRIPT_DIR/release-common"
-INSTALL_APP="${SPEAKER_INSTALL_APP:-/Applications/Speaker.app}"
+INSTALL_APP="${SPEAKER_INSTALL_APP:-$DEVELOPMENT_INSTALL_APP}"
 
 path_has_symlink_component() {
     local candidate="$1"
@@ -74,7 +74,7 @@ INSTALL_APP="$CANONICAL_PARENT/$APP_BASENAME"
 SOURCE_APP="${SPEAKER_BUNDLE_OUTPUT_APP:-$ROOT/.build/Speaker.app}"
 STAGING_APP="${INSTALL_APP}.installing.$$"
 BACKUP_APP="${INSTALL_APP}.previous.$$"
-EXPECTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-com.local.speaker}"
+EXPECTED_BUNDLE_IDENTIFIER="${SPEAKER_BUNDLE_IDENTIFIER:-$DEVELOPMENT_BUNDLE_IDENTIFIER}"
 EXPECTED_TEAM_ID="${SPEAKER_EXPECTED_TEAM_ID:-}"
 PREVIOUS_WAS_RUNNING=0
 OPEN_AFTER_INSTALL="${SPEAKER_OPEN_AFTER_INSTALL:-preserve}"
@@ -150,6 +150,9 @@ if [[ "$SIGNING_MODE" == "developer-id" ]]; then
     verify_production_sparkle_signatures \
         "$STAGING_APP" \
         "$EXPECTED_TEAM_ID"
+elif [[ "$INSTALL_APP" == "$ALLOWED_SYSTEM_PARENT/Speaker.app" ]]; then
+    print -u2 "/Applications/Speaker.app is reserved for the release; install development builds to $DEVELOPMENT_INSTALL_APP."
+    exit 1
 fi
 
 if [[ -e "$INSTALL_APP" ]]; then
@@ -264,6 +267,9 @@ rm -rf "$SOURCE_APP"
 
 if [[ "$OPEN_AFTER_INSTALL" == "1" \
       || ( "$OPEN_AFTER_INSTALL" == "preserve" && "$PREVIOUS_WAS_RUNNING" == "1" ) ]]; then
+    if [[ "$SIGNING_MODE" != "developer-id" ]]; then
+        quit_running_release "$ROOT"
+    fi
     /usr/bin/open -n "$INSTALL_APP"
 fi
 if [[ "$SIGNING_MODE" == "development-ad-hoc" ]]; then

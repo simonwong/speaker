@@ -95,7 +95,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     public static func defaultFileURL(
         fileManager: FileManager = .default,
-        applicationDirectoryName: String = "Speaker"
+        applicationDirectoryName: String = SpeakerDataDirectory.name
     ) -> URL {
         let baseDirectory =
             fileManager.urls(

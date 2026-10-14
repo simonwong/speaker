@@ -155,7 +155,7 @@ write_bundle_short_version() {
     local short_version="$2"
     /usr/libexec/PlistBuddy \
         -c 'Clear dict' \
-        -c 'Add :CFBundleIdentifier string com.local.speaker' \
+        -c 'Add :CFBundleIdentifier string app.local.speaker' \
         -c "Add :CFBundleShortVersionString string $short_version" \
         -c 'Add :CFBundleVersion string 1' \
         "$root/Resources/Info.plist" >/dev/null
@@ -672,12 +672,20 @@ SINGLE_APPLE='
 [[ "$(select_local_signing_identity "$SINGLE_APPLE")" \
     == "Apple Development: Speaker Developer (A1B2C3D4E5)" ]]
 
-PREFERRED_OVER_APPLE='
-  1) ABCDEF1234 "Apple Development: Speaker Developer (A1B2C3D4E5)"
-  2) FEDCBA4321 "Speaker Local Development"
+APPLE_OVER_SELF_SIGNED='
+  1) FEDCBA4321 "Speaker Local Development"
+  2) ABCDEF1234 "Apple Development: Speaker Developer (A1B2C3D4E5)"
      2 valid identities found
 '
-[[ "$(select_local_signing_identity "$PREFERRED_OVER_APPLE")" \
+[[ "$(select_local_signing_identity "$APPLE_OVER_SELF_SIGNED")" \
+    == "Apple Development: Speaker Developer (A1B2C3D4E5)" ]]
+
+REVOKED_APPLE='
+  1) EB307B0352 "Speaker Local Development"
+  2) 7477DC9BDC "Apple Development: Speaker Developer (A1B2C3D4E5)" (CSSMERR_TP_CERT_REVOKED)
+     2 valid identities found
+'
+[[ "$(select_local_signing_identity "$REVOKED_APPLE")" \
     == "Speaker Local Development" ]]
 
 AMBIGUOUS_APPLE='
