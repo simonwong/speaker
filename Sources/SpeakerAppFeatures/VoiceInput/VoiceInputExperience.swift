@@ -97,6 +97,10 @@ package enum VoiceInputOverlayPresentation: Equatable, Sendable {
         recoveryAction: VoiceInputExperienceAction?,
         dismissAction: VoiceInputExperienceAction
     )
+    /// A short, non-interactive note after a delivery that still needs
+    /// saying, such as refinement falling back to the recognition result.
+    /// It closes on its own.
+    case notice(title: String)
 }
 
 /// Stable inputs for exercising the production HUD through AppKit's
@@ -171,6 +175,16 @@ package struct VoiceInputExperienceState: Equatable, Sendable {
     package let isRecording: Bool
     package let diagnosticCode: String
 
+    fileprivate func hidingOverlay() -> VoiceInputExperienceState {
+        VoiceInputExperienceState(
+            revision: revision,
+            menu: menu,
+            overlay: .hidden,
+            isRecording: isRecording,
+            diagnosticCode: diagnosticCode
+        )
+    }
+
     fileprivate static let idle = VoiceInputExperienceState(
         revision: 0,
         menu: .init(
@@ -236,6 +250,11 @@ package final class VoiceInputExperience: ObservableObject {
     private var problemAutoDismissSessionID: VoiceInputSessionID?
     private var problemAutoDismissTask: Task<Void, Never>?
     private var problemHeld = false
+    private var noticeHideTask: Task<Void, Never>?
+
+    /// How long a delivery notice stays before the HUD closes.
+    package static let defaultNoticeDuration: Duration = .seconds(2)
+    private let noticeDuration: Duration
 
     /// How long a Session Problem without a settings recovery stays on screen
     /// before it dismisses itself.
@@ -246,10 +265,12 @@ package final class VoiceInputExperience: ObservableObject {
         releaseCaptureHint:
             @escaping @Sendable () -> InputTargetCaptureHint? = { nil },
         problemAutoDismissDelay: Duration = defaultProblemAutoDismissDelay,
+        noticeDuration: Duration = defaultNoticeDuration,
         announce: @escaping Announce
     ) {
         self.sessions = sessions
         self.problemAutoDismissDelay = problemAutoDismissDelay
+        self.noticeDuration = noticeDuration
         self.announce = announce
         self.releaseCaptureHint = releaseCaptureHint
         let dispatcher = VoiceInputTriggerDispatcher(
@@ -445,6 +466,7 @@ package final class VoiceInputExperience: ObservableObject {
         }
         isShuttingDown = true
         cancelProblemAutoDismiss()
+        noticeHideTask?.cancel()
         triggerIntakeGate.close()
         escapeGate.setActive(false)
         let commandTask = commandTask
@@ -529,6 +551,25 @@ package final class VoiceInputExperience: ObservableObject {
         announceTransitionIfNeeded(presentation.activity)
         announceNoticeIfNeeded(presentation)
         scheduleProblemAutoDismissIfNeeded(presentation.activity)
+        scheduleNoticeHideIfNeeded()
+    }
+
+    /// A delivery notice closes the HUD on its own; any later presentation
+    /// replaces it first.
+    private func scheduleNoticeHideIfNeeded() {
+        noticeHideTask?.cancel()
+        noticeHideTask = nil
+        guard case .notice = state.overlay else { return }
+        let revision = state.revision
+        let duration = noticeDuration
+        noticeHideTask = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled, let self,
+                self.state.revision == revision,
+                case .notice = self.state.overlay
+            else { return }
+            self.state = self.state.hidingOverlay()
+        }
     }
 
     /// A visible problem that only informs the user closes on its own. One
@@ -684,6 +725,7 @@ package final class VoiceInputExperience: ObservableObject {
             ),
             overlay: makeOverlay(
                 activity: activity,
+                notice: presentation.notice,
                 telemetry: presentation.recordingTelemetry
             ),
             isRecording: activity.isRecording,
@@ -716,10 +758,13 @@ package final class VoiceInputExperience: ObservableObject {
 
     private static func makeOverlay(
         activity: VoiceInputActivity,
+        notice: VoiceInputNotice?,
         telemetry: RecordingTelemetry?
     ) -> VoiceInputOverlayPresentation {
         switch activity {
-        case .idle, .delivered, .cancelled:
+        case .delivered:
+            notice?.hudTitle.map { .notice(title: $0) } ?? .hidden
+        case .idle, .cancelled:
             .hidden
         case .preparing(let id):
             .processing(

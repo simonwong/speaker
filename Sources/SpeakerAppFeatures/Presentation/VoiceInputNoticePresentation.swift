@@ -12,8 +12,15 @@ extension VoiceInputNotice {
         "文字整理请求被限流，已使用语音识别结果。"
     package static let refinementFallbackMessage =
         "文字整理失败，已使用语音识别结果。"
+    package static let refinementFallbackHUDTitle = "整理失败，已输入识别结果"
     package static let recordingLimitReachedMessage =
         "已到单次录音上限，录音已自动结束，正在转成文字。"
+
+    /// The HUD's line after delivery, for the notices worth seeing without
+    /// opening the menu. The full sentence still goes to VoiceOver.
+    package var hudTitle: String? {
+        if case .refinementFellBack = self { Self.refinementFallbackHUDTitle } else { nil }
+    }
 
     package var userMessage: String {
         switch self {
