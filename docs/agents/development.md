@@ -169,7 +169,7 @@ Both scripts sign with the single valid `Apple Development: ...` identity in the
 
 A new development data directory starts empty, so the first launch runs onboarding. Copy `settings.json` or `personal-dictionary.json` from the release directory only when a test needs them, and never copy `history.sqlite3` for evidence.
 
-Local App verification is complete when `codesign -d -r- ~/Applications/"Speaker Dev.app"` shows `certificate leaf = H"…"` and the expected TCC grants remain effective.
+Local App verification is complete when `codesign -d -r- ~/Applications/"Speaker Dev.app"` shows `anchor apple generic and certificate leaf[subject.CN] = "Apple Development: …"`, not `cdhash`, and the expected TCC grants remain effective.
 
 ## Production release
 
