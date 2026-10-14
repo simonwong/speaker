@@ -11,6 +11,8 @@ SELECTED_CASE=""
 UPGRADE_SOURCE_APP=""
 STAGING_FEED_URL=""
 LIST_ONLY=0
+# Set when the upgrade source runs under the reviewed retired Bundle ID.
+IDENTITY_TRANSITION=0
 
 typeset -a CASE_IDS=(
     shortcut
@@ -152,15 +154,29 @@ case_instructions() {
             ;;
         developer-id-continuity)
             print "升级前后检查 Gatekeeper、Developer ID、Bundle ID 和 Team ID。"
-            print "通过：两版均为同一 Team 的真实 Developer ID 签名，升级后 Gatekeeper 接受。"
+            if (( IDENTITY_TRANSITION )); then
+                print "通过：两版均为同一 Team 的真实 Developer ID 签名，Bundle ID 从受审查的旧 ID 换成新 ID，升级后 Gatekeeper 接受。"
+            else
+                print "通过：两版均为同一 Team 的真实 Developer ID 签名，升级后 Gatekeeper 接受。"
+            fi
             ;;
         tcc-continuity)
-            print "旧版授予麦克风和辅助功能权限后升级，再直接录音和送达。"
-            print "通过：升级后权限仍有效，无需删除或重新添加 App。"
+            if (( IDENTITY_TRANSITION )); then
+                print "旧版授予麦克风和辅助功能权限后升级。Bundle ID 已更换，系统会把新版当作新 App。"
+                print "通过：升级后自动打开引导；按引导重新授权后可以录音和送达；设置、历史和词库保留。"
+            else
+                print "旧版授予麦克风和辅助功能权限后升级，再直接录音和送达。"
+                print "通过：升级后权限仍有效，无需删除或重新添加 App。"
+            fi
             ;;
         keychain-continuity)
-            print "旧版保存 provider Key 后升级，再运行连接检查。"
-            print "通过：升级后 Key 仍可用，未写入报告，也无需重新输入。"
+            if (( IDENTITY_TRANSITION )); then
+                print "旧版保存 provider Key 后升级。Bundle ID 已更换，新版不读取旧钥匙串条目。"
+                print "通过：升级后不弹钥匙串密码框；引导要求重新输入 Key，输入后连接检查通过；Key 未写入报告。"
+            else
+                print "旧版保存 provider Key 后升级，再运行连接检查。"
+                print "通过：升级后 Key 仍可用，未写入报告，也无需重新输入。"
+            fi
             ;;
         *) return 1 ;;
     esac
@@ -324,14 +340,25 @@ if [[ -n "$UPGRADE_SOURCE_APP" ]]; then
     upgrade_source_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$UPGRADE_SOURCE_APP/Contents/Info.plist")"
     upgrade_source_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$UPGRADE_SOURCE_APP/Contents/Info.plist")"
     upgrade_source_executable="$UPGRADE_SOURCE_APP/Contents/MacOS/SpeakerApp"
+    retired_bundle_identifier="$(
+        /usr/libexec/PlistBuddy \
+            -c 'Print :RetiredBundleIdentifier' \
+            "$ROOT/Resources/ReleaseIdentity.plist" 2>/dev/null
+    )" || retired_bundle_identifier=""
+    if [[ -n "$retired_bundle_identifier" \
+          && "$bundle_identifier" != "$retired_bundle_identifier" \
+          && "$upgrade_source_bundle_identifier" == "$retired_bundle_identifier" ]]; then
+        IDENTITY_TRANSITION=1
+    fi
     [[ "$signing_mode" == developer-id \
        && "$authority" == 'Developer ID Application:'* \
        && "$upgrade_source_authority" == 'Developer ID Application:'* \
-       && "$bundle_identifier" == "$upgrade_source_bundle_identifier" \
+       && ( "$bundle_identifier" == "$upgrade_source_bundle_identifier" \
+            || "$IDENTITY_TRANSITION" == 1 ) \
        && -n "$team_identifier" \
        && "$team_identifier" == "$upgrade_source_team_identifier" \
        && -x "$upgrade_source_executable" ]] || {
-        print -u2 "Production upgrade evidence requires two ordered apps with one Bundle ID and Developer ID Team."
+        print -u2 "Production upgrade evidence requires two ordered apps with one Bundle ID (or the reviewed retired one) and Developer ID Team."
         exit 65
     }
     matches_release_pattern "$source_commit" '^[0-9a-f]{40}$' \
@@ -369,6 +396,9 @@ fi
         print -r -- "- CodeDirectory CDHash arm64: $arm64_code_directory_hash"
         print -r -- "- CodeDirectory CDHash x86_64: $x86_64_code_directory_hash"
         print -r -- "- Upgrade Source: $upgrade_source_bundle_identifier $upgrade_source_version ($upgrade_source_build)"
+        if (( IDENTITY_TRANSITION )); then
+            print -r -- "- Identity Transition: $upgrade_source_bundle_identifier -> $bundle_identifier"
+        fi
         print -r -- "- Upgrade Source Team ID: $upgrade_source_team_identifier"
         print -r -- "- Upgrade Source Authority: $upgrade_source_authority"
         print -r -- "- Upgrade Source CodeDirectory CDHash arm64: $upgrade_source_arm64_code_directory_hash"

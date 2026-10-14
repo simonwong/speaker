@@ -395,6 +395,8 @@ Bundle ID 对 Sparkle 和 macOS 都是长期身份。Sparkle 维护者明确说�
 Bundle ID 永不改变，并用它在更新制品中匹配 App；Apple 也把 Bundle ID
 定义为系统识别 App 的唯一标识。
 
+正式版在 0.8.0 之后从 `cn.simonwong.speaker` 换到 `app.moonunder.speaker`，这是唯一一次例外，取舍与升级门槛见 [ADR-0014](../adr/0014-move-the-release-to-app-moonunder-speaker.md)。
+
 - [Sparkle maintainer: Bundle ID is permanent](https://github.com/sparkle-project/Sparkle/issues/1600)
 - [Apple: Preparing your app for distribution](https://developer.apple.com/documentation/xcode/preparing-your-app-for-distribution)
 

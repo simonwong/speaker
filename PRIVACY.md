@@ -77,15 +77,18 @@ Speaker 是一个由用户自行配置服务凭据的 macOS 语音输入工具�
 ~/Library/Application Support/Speaker
 ~/Library/Application Support/com.local.speaker
 ~/Library/Caches/Speaker
+~/Library/Caches/app.moonunder.speaker
 ~/Library/Caches/cn.simonwong.speaker
 ~/Library/Caches/com.local.speaker
+~/Library/Saved Application State/app.moonunder.speaker.savedState
 ~/Library/Saved Application State/cn.simonwong.speaker.savedState
 ~/Library/Saved Application State/com.local.speaker.savedState
+~/Library/Preferences/app.moonunder.speaker.plist
 ~/Library/Preferences/cn.simonwong.speaker.plist
 ~/Library/Preferences/com.local.speaker.plist
 ```
 
-App 内的“清除本地数据并退出”会按上述范围清理并逐项验证，同时注销登录项及删除当前/旧版 Keychain 凭据；任何步骤失败都不会报告成功。手动卸载时，还应在“系统设置 → 通用 → 登录项”中移除 Speaker，并按需在“隐私与安全性”中移除麦克风和辅助功能授权。仅删除 App 本身不会自动删除用户明确保留的历史、偏好或 Keychain 凭据。
+App 内的“清除本地数据并退出”会按上述范围清理并逐项验证，同时注销登录项及删除当前/旧版 Keychain 凭据；任何步骤失败都不会报告成功。0.8.0 及以前的版本使用 `cn.simonwong.speaker`，更新后 Speaker 不读取旧版的 Keychain 凭据，引导会要求重新输入 Key；旧凭据在清除本地数据时删除，也可以在“钥匙串访问”中搜索 `cn.simonwong.speaker.provider-api-keys` 手动删除。手动卸载时，还应在“系统设置 → 通用 → 登录项”中移除 Speaker，并按需在“隐私与安全性”中移除麦克风和辅助功能授权。仅删除 App 本身不会自动删除用户明确保留的历史、偏好或 Keychain 凭据。
 
 ## 变更与反馈
 

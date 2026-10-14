@@ -21,14 +21,25 @@ DEVELOPMENT_INSTALL_APP="$HOME/Applications/Speaker Dev.app"
 # terminate path before a development build opens.
 quit_running_release() {
     local root="$1"
+    local key
     local release_identifier
 
-    release_identifier="$(
-        /usr/libexec/PlistBuddy \
-            -c 'Print :BundleIdentifier' \
-            "$root/Resources/ReleaseIdentity.plist" 2>/dev/null
-    )" || return 0
-    [[ -n "$release_identifier" ]] || return 0
+    # A release from before the identity change still runs under the retired
+    # identifier until Sparkle replaces it.
+    for key in BundleIdentifier RetiredBundleIdentifier; do
+        release_identifier="$(
+            /usr/libexec/PlistBuddy \
+                -c "Print :$key" \
+                "$root/Resources/ReleaseIdentity.plist" 2>/dev/null
+        )" || continue
+        [[ -n "$release_identifier" ]] || continue
+        quit_release_identifier "$release_identifier" || return 1
+    done
+}
+
+quit_release_identifier() {
+    local release_identifier="$1"
+
     release_is_running "$release_identifier" || return 0
     print -u2 "Quitting the release Speaker so only one copy listens for the shortcut..."
     /usr/bin/osascript \
@@ -155,6 +166,8 @@ resolve_reviewed_upgrade_evidence() {
     local candidate_x86_64_code_directory_hash
     local staging_feed_url
     local upgrade_source
+    local upgrade_source_identifier
+    local retired_bundle_identifier
     local upgrade_source_version
     local upgrade_source_build
     local upgrade_source_hash
@@ -237,19 +250,31 @@ resolve_reviewed_upgrade_evidence() {
         release_error "Upgrade evidence has invalid release bindings."
         return 1
     fi
-    upgrade_source_version="${upgrade_source#$expected_bundle_identifier }"
+    upgrade_source_identifier="${upgrade_source%% *}"
+    retired_bundle_identifier="${REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER:-}"
+    if [[ "$upgrade_source_identifier" != "$expected_bundle_identifier" ]]; then
+        # One reviewed identity change: the old release updates into the new
+        # identifier, and permissions and Keys are granted again.
+        if [[ -z "$retired_bundle_identifier" \
+              || "$upgrade_source_identifier" != "$retired_bundle_identifier" \
+              || "$(grep -Fxc -- "- Identity Transition: $retired_bundle_identifier -> $expected_bundle_identifier" "$absolute_path")" != 1 ]]; then
+            release_error "Upgrade source must use the candidate's or the reviewed retired Bundle ID."
+            return 1
+        fi
+    fi
+    upgrade_source_version="${upgrade_source#$upgrade_source_identifier }"
     upgrade_source_version="${upgrade_source_version% \(*}"
     upgrade_source_build="${upgrade_source##* \(}"
     upgrade_source_build="${upgrade_source_build%\)}"
     if [[ "$upgrade_source" \
-          != "$expected_bundle_identifier $upgrade_source_version ($upgrade_source_build)" ]]; then
+          != "$upgrade_source_identifier $upgrade_source_version ($upgrade_source_build)" ]]; then
         release_error "Upgrade source metadata is malformed."
         return 1
     fi
     validate_bundle_metadata \
         "$upgrade_source_version" \
         "$upgrade_source_build" \
-        "$expected_bundle_identifier" || return 1
+        "$upgrade_source_identifier" || return 1
     if [[ "$upgrade_source_version" == "$candidate_version" ]] \
           || ! release_build_is_greater "$candidate_build" "$upgrade_source_build" \
           || { [[ "$previous_build" != 0 ]] \
@@ -631,6 +656,7 @@ load_reviewed_release_identity() {
     local update_download_url_prefix
     local product_url
     local update_public_ed_key
+    local retired_bundle_identifier
     local decoded_key
     local decoded_key_size
     local reviewed_value
@@ -695,8 +721,14 @@ load_reviewed_release_identity() {
         release_error "ReleaseIdentity.plist is missing ProductURL."
         return 1
     }
+    retired_bundle_identifier="$(
+        /usr/libexec/PlistBuddy \
+            -c 'Print :RetiredBundleIdentifier' \
+            "$identity_file" 2>/dev/null
+    )" || retired_bundle_identifier=""
     for reviewed_value in \
         "$bundle_identifier" \
+        "$retired_bundle_identifier" \
         "$team_identifier" \
         "$update_feed_url" \
         "$update_download_url_prefix" \
@@ -719,6 +751,13 @@ load_reviewed_release_identity() {
         "1" \
         "$bundle_identifier" \
         "$team_identifier" || return 1
+    if [[ -n "$retired_bundle_identifier" ]]; then
+        validate_bundle_metadata "1.0.0" "1" "$retired_bundle_identifier" || return 1
+        if [[ "$retired_bundle_identifier" == "$bundle_identifier" ]]; then
+            release_error "RetiredBundleIdentifier must differ from BundleIdentifier."
+            return 1
+        fi
+    fi
     if [[ "$update_feed_url" != https://* \
           || "$update_feed_url" == *".invalid"* ]]; then
         release_error "UpdateFeedURL must be a reviewed HTTPS production URL."
@@ -773,6 +812,7 @@ load_reviewed_release_identity() {
     fi
 
     typeset -g REVIEWED_RELEASE_BUNDLE_IDENTIFIER="$bundle_identifier"
+    typeset -g REVIEWED_RETIRED_RELEASE_BUNDLE_IDENTIFIER="$retired_bundle_identifier"
     typeset -g REVIEWED_RELEASE_TEAM_IDENTIFIER="$team_identifier"
     typeset -g REVIEWED_UPDATE_FEED_URL="$update_feed_url"
     typeset -g REVIEWED_UPDATE_DOWNLOAD_URL_PREFIX="$update_download_url_prefix"

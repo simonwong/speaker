@@ -8,7 +8,7 @@ package enum LegacyPrivacyStateCleaner {
     package static func removeObsoleteIdentifiers(
         from defaults: UserDefaults,
         legacyDefaults: UserDefaults? = UserDefaults(
-            suiteName: "com.local.speaker"
+            suiteName: SpeakerRetiredBundleIdentifiers.development
         )
     ) {
         defaults.removeObject(forKey: installationIdentifierKey)
