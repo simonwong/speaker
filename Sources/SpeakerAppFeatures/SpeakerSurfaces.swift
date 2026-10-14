@@ -67,7 +67,6 @@ package struct SpeakerPressableButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduceMotion ? pressedScale : 1)
             .opacity(opacity(pressed: configuration.isPressed))
             .animation(SpeakerMotion.feedback, value: configuration.isPressed)
-            .speakerPointingHandCursor()
     }
 
     private func opacity(pressed: Bool) -> Double {
@@ -76,8 +75,8 @@ package struct SpeakerPressableButtonStyle: ButtonStyle {
     }
 }
 
-/// Every control that acts on a click shows the pointing hand while the
-/// pointer is over it. A disabled control keeps the arrow.
+/// Text links show the pointing hand, as on the rest of the Mac; buttons,
+/// switches, menus, and rows keep the arrow. A disabled link keeps the arrow.
 package struct SpeakerPointingHandCursor: ViewModifier {
     @Environment(\.isEnabled) private var isEnabled
 

@@ -21,7 +21,6 @@ package struct SettingsButtonStyle: PrimitiveButtonStyle {
         styled(configuration)
             .buttonBorderShape(.capsule)
             .controlSize(controlSize == .regular ? .large : controlSize)
-            .speakerPointingHandCursor()
     }
 
     @ViewBuilder
