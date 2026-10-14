@@ -724,6 +724,9 @@ package final class DictionarySettingsModel: ObservableObject {
     @Published package private(set) var notice: String?
     /// Set when the last load preserved a corrupt dictionary file.
     @Published package private(set) var recovery: PersonalDictionaryRecovery?
+    /// The entry the last delete removed, offered back until the next change.
+    @Published package private(set) var recentlyDeleted: DictionaryEntry?
+    private var recentlyDeletedIndex = 0
 
     private let store: any PersonalDictionaryStoring
     private let configuration: VoiceInputConfigurationController
@@ -790,11 +793,36 @@ package final class DictionarySettingsModel: ObservableObject {
     @discardableResult
     package func add(word: String) async -> Bool {
         let entry = DictionaryEntry(word: word)
-        return await mutate { $0 + [entry] }
+        let added = await mutate { $0 + [entry] }
+        if added { recentlyDeleted = nil }
+        return added
     }
 
     package func delete(_ id: UUID) async {
-        _ = await mutate { $0.filter { $0.id != id } }
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let entry = entries[index]
+        guard await mutate({ $0.filter { $0.id != id } }) else { return }
+        recentlyDeleted = entry
+        recentlyDeletedIndex = index
+    }
+
+    /// Puts the last deleted entry back where it was.
+    @discardableResult
+    package func undoDelete() async -> Bool {
+        guard let entry = recentlyDeleted else { return false }
+        let index = recentlyDeletedIndex
+        let restored = await mutate { current in
+            guard !current.contains(where: { $0.id == entry.id }) else { return current }
+            var entries = current
+            entries.insert(entry, at: min(index, entries.count))
+            return entries
+        }
+        if restored { recentlyDeleted = nil }
+        return restored
+    }
+
+    package func dismissUndo() {
+        recentlyDeleted = nil
     }
 
     private func mutate(

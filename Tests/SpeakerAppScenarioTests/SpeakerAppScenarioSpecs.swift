@@ -2412,6 +2412,49 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
+            "a deleted dictionary entry can be put back where it was",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-dictionary-undo-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = VersionedJSONPersonalDictionaryStore(
+                fileURL: directory.appendingPathComponent("dictionary.json")
+            )
+            try await store.save(
+                PersonalDictionary(
+                    entries: ["Speaker", "豆包", "Swift"].map { DictionaryEntry(word: $0) }
+                ))
+            let model = DictionarySettingsModel(
+                store: store,
+                configuration: VoiceInputConfigurationController()
+            )
+            await model.load()
+            let removed = model.entries[1]
+
+            await model.delete(removed.id)
+            let offered = model.recentlyDeleted
+            let restored = await model.undoDelete()
+            let persisted = try await store.load().dictionary.entries
+
+            await model.delete(removed.id)
+            _ = await model.add(word: "Xcode")
+            let offeredAfterAdd = model.recentlyDeleted
+
+            try expect(offered == removed, "delete offered no undo")
+            try expect(restored, "undo failed")
+            try expect(
+                persisted.map(\.word) == ["Speaker", "豆包", "Swift"],
+                "undo did not restore the entry in place: \(persisted.map(\.word))"
+            )
+            try expect(persisted[1].id == removed.id, "undo created a new entry")
+            try expect(offeredAfterAdd == nil, "a later change kept a stale undo")
+        }
+
+        await runAsync(
             "dictionary settings reports a preserved corrupt dictionary and keeps saving",
             failures: &failures
         ) {

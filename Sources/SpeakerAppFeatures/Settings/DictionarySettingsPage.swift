@@ -53,6 +53,10 @@ struct DictionarySettingsPage: View {
                 }
             }
 
+            if let deleted = model.recentlyDeleted {
+                undoRow(for: deleted)
+            }
+
             if let notice = model.notice {
                 SettingsNotice(text: notice)
             }
@@ -67,6 +71,31 @@ struct DictionarySettingsPage: View {
     /// the fade.
     private var chipTransition: AnyTransition {
         reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity)
+    }
+
+    private func undoRow(for entry: DictionaryEntry) -> some View {
+        HStack(spacing: 10) {
+            Text("已删除「\(entry.word)」")
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 12)
+            Button("撤销") {
+                Task { await model.undoDelete() }
+            }
+            .buttonStyle(SettingsButtonStyle())
+            .accessibilityLabel("撤销删除 \(entry.word)")
+            Button {
+                model.dismissUndo()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("关闭")
+        }
+        .transition(.opacity)
     }
 
     private var hasOmittedEntries: Bool {
