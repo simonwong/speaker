@@ -264,7 +264,7 @@ package struct SpeakerOnboardingView: View {
                 axis: .vertical
             )
             .lineLimit(1...3)
-            .textFieldStyle(SettingsTextFieldStyle())
+            .textFieldStyle(SettingsMultilineTextFieldStyle())
             .accessibilityLabel("练习输入框")
             Text("文字会输入到结束录音时所在的输入框。看到文字出现在这里，就可以在任何 App 里这样用了。")
                 .font(SpeakerTypography.caption)

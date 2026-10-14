@@ -123,6 +123,7 @@ enum OnboardingFlowUISpecs {
                 "the keyboard tutorial offers no practice text field"
             )
             try capture(hosting, name: "onboarding-3-shortcut")
+            try capturePracticeText(in: hosting, name: "onboarding-3-practice-two-lines")
             window.contentMinSize = CGSize(width: 360, height: 360)
             window.minSize = CGSize(width: 360, height: 360)
             window.setContentSize(CGSize(width: 400, height: 480))
@@ -320,6 +321,22 @@ enum OnboardingFlowUISpecs {
             return [field]
         }
         return view.subviews.flatMap { practiceFields(in: $0) }
+    }
+
+    /// Fills the practice field with two lines of synthetic text for the
+    /// artifact, then clears it so the flow continues from an empty field.
+    @MainActor
+    private static func capturePracticeText(in view: NSView, name: String) throws {
+        guard ProcessInfo.processInfo.environment["SPEAKER_ONBOARDING_UI_ARTIFACTS"] != nil,
+            let field = practiceFields(in: view).first
+        else { return }
+        for text in [String(repeating: "这是一段用来检查两行排版的练习文字。", count: 4), ""] {
+            field.stringValue = text
+            NotificationCenter.default.post(
+                name: NSControl.textDidChangeNotification, object: field)
+            pump(view)
+            if !text.isEmpty { try capture(view, name: name) }
+        }
     }
 
     @MainActor
