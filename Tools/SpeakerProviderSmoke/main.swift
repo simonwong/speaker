@@ -1,5 +1,5 @@
-import Darwin
 import CryptoKit
+import Darwin
 import Foundation
 import SpeakerCore
 import SpeakerProviderEvidence
@@ -45,8 +45,8 @@ private struct EvidenceContext {
     let doubaoResource: DoubaoStreamingResource
 }
 
-private extension SmokeResult {
-    var evidenceCase: ProviderEvidenceCase {
+extension SmokeResult {
+    fileprivate var evidenceCase: ProviderEvidenceCase {
         ProviderEvidenceCase(
             provider: provider,
             caseID: caseID,
@@ -86,8 +86,8 @@ private struct PCM16MonoSample {
 
     init(wavData: Data) throws {
         guard wavData.count >= 44,
-              String(data: wavData.prefix(4), encoding: .ascii) == "RIFF",
-              String(data: wavData.dropFirst(8).prefix(4), encoding: .ascii)
+            String(data: wavData.prefix(4), encoding: .ascii) == "RIFF",
+            String(data: wavData.dropFirst(8).prefix(4), encoding: .ascii)
                 == "WAVE"
         else {
             throw SampleError.invalidWAV
@@ -104,8 +104,8 @@ private struct PCM16MonoSample {
             let chunkSize = Self.uint32LE(wavData, at: offset + 4)
             let payloadStart = offset + 8
             guard chunkSize <= Int.max,
-                  payloadStart <= wavData.count,
-                  Int(chunkSize) <= wavData.count - payloadStart
+                payloadStart <= wavData.count,
+                Int(chunkSize) <= wavData.count - payloadStart
             else {
                 throw SampleError.invalidWAV
             }
@@ -115,7 +115,8 @@ private struct PCM16MonoSample {
                 let channels = Self.uint16LE(wavData, at: payloadStart + 2)
                 let sampleRate = Self.uint32LE(wavData, at: payloadStart + 4)
                 let bitsPerSample = Self.uint16LE(wavData, at: payloadStart + 14)
-                formatIsSupported = audioFormat == 1
+                formatIsSupported =
+                    audioFormat == 1
                     && channels == 1
                     && sampleRate == Self.sampleRate
                     && bitsPerSample == 16
@@ -127,9 +128,9 @@ private struct PCM16MonoSample {
             offset = payloadStart + payloadSize + (payloadSize % 2)
         }
         guard formatIsSupported,
-              let audioData,
-              audioData.count >= 60 * Self.sampleRate * Self.bytesPerFrame,
-              audioData.count.isMultiple(of: Self.bytesPerFrame)
+            let audioData,
+            audioData.count >= 60 * Self.sampleRate * Self.bytesPerFrame,
+            audioData.count.isMultiple(of: Self.bytesPerFrame)
         else {
             throw SampleError.unsupportedFormat
         }
@@ -172,22 +173,24 @@ private struct SpeakerProviderSmoke {
         let results: [SmokeResult]
         var evidenceURL: URL?
         switch command {
-        case let .connection(providers):
+        case .connection(let providers):
             var checks: [SmokeResult] = []
             for provider in providers {
                 switch provider {
                 case .doubao:
-                    checks.append(await checkDoubaoConnection(
-                        credentials: developmentCredentials
-                    ))
+                    checks.append(
+                        await checkDoubaoConnection(
+                            credentials: developmentCredentials
+                        ))
                 case .deepSeek:
-                    checks.append(await checkDeepSeekConnection(
-                        credentials: developmentCredentials
-                    ))
+                    checks.append(
+                        await checkDeepSeekConnection(
+                            credentials: developmentCredentials
+                        ))
                 }
             }
             results = checks
-        case let .matrix(options):
+        case .matrix(let options):
             let credentialSource: EvidenceCredentialSource
             let credentials: any ProviderCredentialStoring
             if let keychainService = options.keychainService {
@@ -287,20 +290,21 @@ private struct SpeakerProviderSmoke {
                 }
             }
             guard confirmedPaidRequests,
-                  let evidenceDirectoryURL,
-                  let candidateVersion,
-                  let candidateBuild,
-                  keychainService == nil
+                let evidenceDirectoryURL,
+                let candidateVersion,
+                let candidateBuild,
+                keychainService == nil
                     || (ProviderMatrixEvidence.safeToken(keychainService) == keychainService
                         && keychainService?.hasSuffix(".provider-api-keys") == true)
             else { return nil }
-            return .matrix(MatrixOptions(
-                doubaoSampleURL: sampleURL,
-                evidenceDirectoryURL: evidenceDirectoryURL,
-                candidateVersion: candidateVersion,
-                candidateBuild: candidateBuild,
-                keychainService: keychainService
-            ))
+            return .matrix(
+                MatrixOptions(
+                    doubaoSampleURL: sampleURL,
+                    evidenceDirectoryURL: evidenceDirectoryURL,
+                    candidateVersion: candidateVersion,
+                    candidateBuild: candidateBuild,
+                    keychainService: keychainService
+                ))
         }
         guard arguments.count <= 1 else { return nil }
         switch first {
@@ -313,10 +317,10 @@ private struct SpeakerProviderSmoke {
 
     private static func printUsage() {
         let usage = """
-        Usage:
-          ./scripts/provider-smoke [doubao|deepseek|all]
-          ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav] [--keychain-service reviewed.bundle.id.provider-api-keys]
-        """
+            Usage:
+              ./scripts/provider-smoke [doubao|deepseek|all]
+              ./scripts/provider-smoke matrix --confirm-paid-requests --evidence-directory /new/private/directory --candidate-version 1.2.3 --candidate-build 42 [--doubao-sample /path/to/60s-16k-mono-pcm.wav] [--keychain-service reviewed.bundle.id.provider-api-keys]
+            """
         FileHandle.standardError.write(Data("\(usage)\n".utf8))
     }
 
@@ -326,18 +330,21 @@ private struct SpeakerProviderSmoke {
         doubaoResource: DoubaoStreamingResource
     ) async -> [SmokeResult] {
         var results: [SmokeResult] = []
-        results.append(await checkDoubaoConnection(
-            credentials: credentials,
-            resource: doubaoResource
-        ))
-        results.append(contentsOf: await checkDoubaoAudioMatrix(
-            credentials: credentials,
-            sampleURL: doubaoSampleURL,
-            resource: doubaoResource
-        ))
-        results.append(await checkDoubaoInvalidCredential(
-            resource: doubaoResource
-        ))
+        results.append(
+            await checkDoubaoConnection(
+                credentials: credentials,
+                resource: doubaoResource
+            ))
+        results.append(
+            contentsOf: await checkDoubaoAudioMatrix(
+                credentials: credentials,
+                sampleURL: doubaoSampleURL,
+                resource: doubaoResource
+            ))
+        results.append(
+            await checkDoubaoInvalidCredential(
+                resource: doubaoResource
+            ))
         results.append(await checkDeepSeekConnection(credentials: credentials))
         results.append(contentsOf: await checkDeepSeekModes(credentials: credentials))
         results.append(await checkDeepSeekCancellation(credentials: credentials))
@@ -402,20 +409,23 @@ private struct SpeakerProviderSmoke {
                         pacedAudioChunks(sample.pcm(durationSeconds: seconds)),
                         context: .init(hotwords: [], purpose: .defaultSmoothing)
                     )
-                    guard !transcription.text
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .isEmpty
+                    guard
+                        !transcription.text
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
                     else {
-                        results.append(result(
-                            caseID, .fail, .emptyTranscript,
-                            requestID: transcription.providerRequestID
-                        ))
+                        results.append(
+                            result(
+                                caseID, .fail, .emptyTranscript,
+                                requestID: transcription.providerRequestID
+                            ))
                         continue
                     }
-                    results.append(result(
-                        caseID, .pass, .passed,
-                        requestID: transcription.providerRequestID
-                    ))
+                    results.append(
+                        result(
+                            caseID, .pass, .passed,
+                            requestID: transcription.providerRequestID
+                        ))
                 } catch {
                     results.append(doubaoFailureResult(error, caseID: caseID))
                 }
@@ -431,21 +441,24 @@ private struct SpeakerProviderSmoke {
             cancellation.cancel()
             do {
                 _ = try await cancellation.value
-                results.append(result(
-                    .doubaoCancelStreaming, .fail, .acceptedAfterCancellation
-                ))
+                results.append(
+                    result(
+                        .doubaoCancelStreaming, .fail, .acceptedAfterCancellation
+                    ))
             } catch let failure as DoubaoASRFailure
                 where failure.kind == .cancelled
             {
-                results.append(result(
-                    .doubaoCancelStreaming, .pass, .cancelled,
-                    requestID: failure.providerRequestID
-                ))
+                results.append(
+                    result(
+                        .doubaoCancelStreaming, .pass, .cancelled,
+                        requestID: failure.providerRequestID
+                    ))
             } catch {
-                results.append(doubaoFailureResult(
-                    error,
-                    caseID: .doubaoCancelStreaming
-                ))
+                results.append(
+                    doubaoFailureResult(
+                        error,
+                        caseID: .doubaoCancelStreaming
+                    ))
             }
             return results
         } catch {
@@ -532,19 +545,21 @@ private struct SpeakerProviderSmoke {
                     source,
                     using: TextRefinementContext(mode: mode)
                 )
-                guard deepSeekOracle(
-                    source: source,
-                    output: refined.text,
-                    modeName: name
-                )
+                guard
+                    deepSeekOracle(
+                        source: source,
+                        output: refined.text,
+                        modeName: name
+                    )
                 else {
                     results.append(result(caseID, .fail, .semanticOracleFailed))
                     continue
                 }
-                results.append(result(
-                    caseID, .pass, .passed,
-                    requestID: refined.providerRequestID
-                ))
+                results.append(
+                    result(
+                        caseID, .pass, .passed,
+                        requestID: refined.providerRequestID
+                    ))
             } catch {
                 results.append(deepSeekFailureResult(error, caseID: caseID))
             }
@@ -639,15 +654,16 @@ private struct SpeakerProviderSmoke {
             .joined()
         let resource = await configuredDoubaoResource()
         let architecture: String
-#if arch(arm64)
-        architecture = "arm64"
-#elseif arch(x86_64)
-        architecture = "x86_64"
-#else
-        architecture = "unsupported"
-#endif
+        #if arch(arm64)
+            architecture = "arm64"
+        #elseif arch(x86_64)
+            architecture = "x86_64"
+        #else
+            architecture = "unsupported"
+        #endif
         let version = ProcessInfo.processInfo.operatingSystemVersion
-        let macOSVersion = version.patchVersion == 0
+        let macOSVersion =
+            version.patchVersion == 0
             ? "\(version.majorVersion).\(version.minorVersion)"
             : "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
         let environment = ProviderEvidenceEnvironment(
@@ -670,7 +686,7 @@ private struct SpeakerProviderSmoke {
                 provider: .deepSeek,
                 credentialSource: credentialSource,
                 resource: nil,
-                model: "deepseek-v4-flash"
+                model: "deepseek-flash"
             ),
         ]
         let validationFixture = ProviderMatrixEvidence(
@@ -715,7 +731,7 @@ private struct SpeakerProviderSmoke {
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         guard data.count <= 4 * 1_024 * 1_024,
-              let value = String(data: data, encoding: .utf8)
+            let value = String(data: data, encoding: .utf8)
         else { throw ProviderEvidenceError.invalidSchema("sourceRepository") }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard permitEmpty || !trimmed.isEmpty else {
@@ -823,8 +839,8 @@ private struct SpeakerProviderSmoke {
     ) -> Bool {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
-              ["2.0", "周五"].allSatisfy(trimmed.contains),
-              asciiNumberTokens(in: trimmed).isSubset(of: asciiNumberTokens(in: source))
+            ["2.0", "周五"].allSatisfy(trimmed.contains),
+            asciiNumberTokens(in: trimmed).isSubset(of: asciiNumberTokens(in: source))
         else { return false }
         switch modeName {
         case "concise":
@@ -876,14 +892,14 @@ private struct SpeakerProviderSmoke {
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         var information = stat()
         guard fstat(descriptor, &information) == 0,
-              (information.st_mode & S_IFMT) == S_IFREG,
-              information.st_size > 0,
-              information.st_size <= maximumBytes
+            (information.st_mode & S_IFMT) == S_IFREG,
+            information.st_size > 0,
+            information.st_size <= maximumBytes
         else {
             throw PCM16MonoSample.SampleError.invalidWAV
         }
         guard let data = try handle.readToEnd(),
-              data.count == Int(information.st_size)
+            data.count == Int(information.st_size)
         else {
             throw PCM16MonoSample.SampleError.invalidWAV
         }

@@ -14,7 +14,18 @@ enum RefinementProviderSpecs: CoreSpecDomain {
     static func run(failures: inout [String]) async {
         run("refinement provider legacy settings preserve the DeepSeek model", failures: &failures)
         {
-            try expect(RefinementProviderSettings().selectedProfile == .legacyDeepSeek)
+            try expect(
+                RefinementProviderSettings().selectedProfile == .defaultProfile(for: .deepSeek))
+            let retired = RefinementProviderProfile(
+                provider: .deepSeek, modelID: "deepseek-v4-flash",
+                baseURL: RefinementProviderCatalog.baseURL(for: .deepSeek))
+            let saved = RefinementProviderSettings(profiles: ["deepseek": retired])
+            try expect(saved.selectedProfile == retired)
+            try expect(
+                !RefinementProviderCatalog.modelIDs(for: .deepSeek).contains("deepseek-v4-flash"))
+            let configuration = try ChatCompletionRefinementConfiguration(
+                apiKey: "deepseek-test-key", profile: saved.selectedProfile)
+            try expect(configuration.model == "deepseek-v4-flash")
             for provider in RefinementProviderID.allCases where provider != .custom {
                 var profile = RefinementProviderProfile.defaultProfile(for: provider)
                 profile.baseURL = "https://attacker.invalid/v1"
@@ -28,7 +39,7 @@ enum RefinementProviderSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             for (provider, modelID) in [
-                (RefinementProviderID.deepSeek, "deepseek-v4-flash"),
+                (RefinementProviderID.deepSeek, "deepseek-flash"),
                 (.openAI, "gpt-5.6-luna"), (.kimi, "kimi-k2.6"), (.glm, "glm-5.3-flash"),
             ] {
                 let profile = RefinementProviderSettings().profile(for: provider)

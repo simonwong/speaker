@@ -11,7 +11,7 @@ public struct VoiceTextProcessingSnapshot: Equatable, Sendable {
         dictionary: PersonalDictionarySnapshot,
         dictionaryContext: DictionaryRequestContext,
         refinementMode: TextRefinementMode,
-        refinementProvider: RefinementProviderProfile = .legacyDeepSeek,
+        refinementProvider: RefinementProviderProfile = .defaultProfile(for: .deepSeek),
         recognitionProvider: SpeechRecognitionProfile = .doubao
     ) {
         self.dictionary = dictionary
@@ -186,7 +186,7 @@ public actor VoiceInputConfigurationController {
     public init(
         dictionary: PersonalDictionary = .empty,
         refinementMode: TextRefinementMode = .defaultSmooth,
-        refinementProvider: RefinementProviderProfile = .legacyDeepSeek,
+        refinementProvider: RefinementProviderProfile = .defaultProfile(for: .deepSeek),
         recognitionProvider: SpeechRecognitionProfile = .doubao
     ) {
         self.dictionary = dictionary

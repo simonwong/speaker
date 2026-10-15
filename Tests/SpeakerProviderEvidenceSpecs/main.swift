@@ -58,7 +58,7 @@ private func evidence(
                 provider: .deepSeek,
                 credentialSource: credentialSource,
                 resource: nil,
-                model: "deepseek-v4-flash"
+                model: "deepseek-flash"
             ),
         ],
         cases: results

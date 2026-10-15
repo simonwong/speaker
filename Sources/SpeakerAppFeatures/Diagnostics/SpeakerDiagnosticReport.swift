@@ -53,7 +53,7 @@ package enum SpeakerDiagnosticReport {
             recognitionConfigured: Bool = false,
             refinementConfigured: Bool,
             refinementVerified: Bool,
-            refinementProfile: RefinementProviderProfile = .legacyDeepSeek,
+            refinementProfile: RefinementProviderProfile = .defaultProfile(for: .deepSeek),
             historyRecordCount: Int,
             historyPersistence: String,
             audioCaptureEnvironment: AudioCaptureEnvironmentSnapshot? = nil,

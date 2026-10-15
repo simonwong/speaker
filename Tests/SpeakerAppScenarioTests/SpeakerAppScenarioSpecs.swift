@@ -2962,7 +2962,7 @@ struct SpeakerAppScenarioSpecs {
             let model = RefinementSettingsModel(
                 service: service, configuration: configuration, settingsStore: store)
             await model.load()
-            try expect(model.selectedProfile == .legacyDeepSeek)
+            try expect(model.selectedProfile == .defaultProfile(for: .deepSeek))
             try expect(model.mode == .fullRewrite())
             await model.selectProvider(.openAI)
             try expect(model.selectedProvider == .openAI && !model.hasStoredKey)
@@ -2976,7 +2976,8 @@ struct SpeakerAppScenarioSpecs {
             await model.saveAPIKey()
             try expect(model.mode == .fullRewrite())
             await model.selectProvider(.deepSeek)
-            try expect(model.hasStoredKey && model.selectedProfile == .legacyDeepSeek)
+            try expect(
+                model.hasStoredKey && model.selectedProfile == .defaultProfile(for: .deepSeek))
             await model.selectProvider(.openAI)
             try expect(model.hasStoredKey && model.selectedProfile.modelID == "gpt-4.1")
             await model.deleteAPIKey()
@@ -3024,6 +3025,34 @@ struct SpeakerAppScenarioSpecs {
             let key = try await credentials.apiKey(for: .openAI)
             try expect(key == "synthetic-openai")
             await model.shutdown()
+        }
+
+        await runAsync(
+            "saved retired DeepSeek alias stays selected but loses the recommendation",
+            failures: &failures
+        ) {
+            let saved = RefinementProviderProfile(
+                provider: .deepSeek, modelID: "deepseek-v4-flash",
+                baseURL: RefinementProviderCatalog.baseURL(for: .deepSeek))
+            var settings = SpeakerAppSettings.default
+            settings.refinementProviders = .init(
+                selectedProvider: .deepSeek, profiles: ["deepseek": saved])
+            settings.refinement = .fullRewrite
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: configuration,
+                settingsStore: ScenarioAppSettingsStore(settings: settings))
+            await model.load()
+            try expect(model.selectedProfile == saved)
+            try expect(model.modelIDs == ["deepseek-flash", "deepseek-v4-flash"])
+            try expect(model.modelTitle(for: "deepseek-flash") == "deepseek-flash（推荐）")
+            try expect(model.modelTitle(for: "deepseek-v4-flash") == "deepseek-v4-flash")
+            let snapshot = await configuration.captureSnapshot()
+            try expect(snapshot.refinementProvider == saved)
+            await model.selectModel("deepseek-flash")
+            try expect(model.selectedProfile == .defaultProfile(for: .deepSeek))
+            try expect(model.modelIDs == ["deepseek-flash"])
         }
 
         await runAsync(
@@ -3107,7 +3136,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(model.selectedProvider == .deepSeek && model.hasStoredKey)
             let snapshot = await configuration.captureSnapshot()
             try expect(
-                snapshot.refinementProvider == .legacyDeepSeek
+                snapshot.refinementProvider == .defaultProfile(for: .deepSeek)
                     && snapshot.refinementMode == .fullRewrite())
             try expect(model.providerNotice != nil)
         }
