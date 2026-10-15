@@ -50,11 +50,27 @@ Iterate with a filter, then run the whole executable. Daily checks avoid test wi
 
 ```bash
 ./scripts/test
-./scripts/test --ui-only   # Native UI checks; windows may appear.
-./scripts/test --with-ui   # Full deterministic gate, used by CI.
+./scripts/test --ui-only   # Native UI checks; windows appear. Substantial UI design changes only.
+./scripts/test --with-ui   # Full deterministic gate. CI and Production Release run it.
 ```
 
-`./scripts/test` runs non-UI specification executables, shell contract tests, and warnings-as-errors builds without launching `SpeakerAppUISpecs`. Its output explicitly excludes native UI coverage. `--ui-only` runs the native UI executable; `--with-ui` combines both lanes into the full deterministic gate. UI checks use real windows for focus, dialogs, accessibility, and screenshots, so run that lane on the macOS CI runner or when local desktop interruption is acceptable. An ordinary code change is test-complete when its tightest relevant specification executable and the full gate pass; separately passing the default lane and `--ui-only` against unchanged source is equivalent. The full deterministic gate is not the whole CI workflow.
+`./scripts/test` runs non-UI specification executables, shell contract tests, and warnings-as-errors builds without launching `SpeakerAppUISpecs`. Its output explicitly excludes native UI coverage. `--ui-only` runs the native UI executable; `--with-ui` combines both lanes into the full deterministic gate. The full deterministic gate is not the whole CI workflow.
+
+Local runs and CI split the work. Locally, before committing or pushing, run the executables and contract tests whose inputs the change touches, plus `swift format lint --strict --parallel --recursive Sources Tests`:
+
+| Change | Local checks |
+| --- | --- |
+| `Sources/SpeakerCore/` | `SpeakerCoreSpecs` and `SpeakerAppScenarioSpecs` |
+| `Sources/SpeakerAppFeatures/` | `SpeakerAppScenarioSpecs` |
+| `Sources/SpeakerApp/` only | The debug warnings-as-errors build of `SpeakerApp` (see the CI table below); no specification executable links it |
+| `Sources/SpeakerProviderEvidence/`, `Sources/SpeakerAccuracyMetrics/` | Their own specification executable |
+| `Tests/<executable>/` | That executable |
+| `scripts/<name>` | `./scripts/test-<name>`, when it exists |
+| Documentation only | Nothing |
+
+Run `./scripts/test` when a change spans several of these rows, or touches `Tests/SpeakerSpecSupport/`, `Tests/SpeakerCoreSpecFakes/`, `Package.swift`, `Package.resolved`, or `scripts/swiftw`. An ordinary code change is test-complete locally when those checks pass; whether it can merge is decided by CI, which runs the full deterministic gate, including native UI checks, on every pull request.
+
+UI checks use real windows for focus, dialogs, accessibility, and screenshots, and those windows come to the front over whatever the developer is doing. Do not run `--with-ui` or `--ui-only` locally as routine completion. Run `./scripts/test --ui-only` locally only for a substantial UI design change, such as a new or reworked window, HUD, onboarding step, or settings layout, and only when desktop interruption is acceptable; otherwise rely on CI's UI lane. [`docs/research/test-and-ci-cost.md`](../research/test-and-ci-cost.md) records the timing, failure history, and path-to-check map behind this split.
 
 `skills-lock.json` is validated rather than deleted because every name it locks still resolves to a real `.agents/skills/<name>/SKILL.md` exposed through `.claude/skills/`, so `./scripts/test-skills-lock` turns silent drift between the lock file and those directories into a failing gate.
 
