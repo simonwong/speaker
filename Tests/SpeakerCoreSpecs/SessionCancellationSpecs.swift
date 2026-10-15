@@ -422,6 +422,59 @@ enum SessionCancellationSpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "a press after Esc waits for a cancellation another caller is cleaning up",
+            failures: &failures
+        ) {
+            let audio = AudioCaptureFake(delaysCancel: true)
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
+                transcriber: SpeechTranscriberFake(text: "unused"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let dispatcher = VoiceInputTriggerDispatcher(sessions: sessions)
+            let presentations = await sessions.observe()
+
+            dispatcher.send(.pressed, at: 1_000_000_000)
+            var firstSessionID: VoiceInputSessionID?
+            for await presentation in presentations where presentation.activity.isRecording {
+                firstSessionID = presentation.activity.sessionID
+                break
+            }
+            guard let firstSessionID else {
+                throw SpecFailure(message: "the first press never started recording")
+            }
+
+            // A session-scoped cancel, such as the HUD button, owns the
+            // cleanup and holds it inside the recorder.
+            let buttonCancel = Task { await sessions.cancel(expectedSessionID: firstSessionID) }
+            let cleanupHeld = await eventually(before: .seconds(2)) {
+                await audio.hasPendingCancel
+            }
+            try expect(cleanupHeld, "the cancellation never reached recorder cleanup")
+
+            dispatcher.send(.cancel, at: 1_100_000_000)
+            dispatcher.send(.pressed, at: 1_200_000_000)
+            // Let the press reach the session while cleanup is still held, so
+            // a dispatcher that did not wait for it would reject the press.
+            await settle()
+            await audio.resumeCancel()
+            await buttonCancel.value
+
+            let restarted = await eventually(before: .seconds(2)) {
+                await audio.startCount == 2
+            }
+            let startCount = await audio.startCount
+            try expect(
+                restarted,
+                "the press after Esc was rejected during cleanup; recorder started \(startCount) times"
+            )
+            await dispatcher.shutdown()
+        }
+
+        await runAsync(
             "audio device changes stop recording with a local diagnostic", failures: &failures
         ) {
             let audio = StreamingAudioCaptureFake()
@@ -434,14 +487,13 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history
             )
-            let stream = await sessions.observe()
+            let terminalTask = terminalPresentation(from: await sessions.observe())
 
             await sessions.send(.pressed)
+            // The recorder replays its failure to a late subscriber, so the
+            // session sees it however its failure observation is scheduled.
             await audio.emitFailure(.deviceConfigurationChanged)
-            let terminal = await firstTerminalPresentation(
-                from: stream,
-                before: .seconds(2)
-            )
+            let terminal = await terminalTask.value
 
             if case .failed(_, let failure) = terminal?.activity {
                 try expect(failure == .audioDeviceChanged)
@@ -449,15 +501,11 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 throw SpecFailure(message: "device change did not close the recording")
             }
             // The terminal presentation is published before recorder cleanup
-            // and the history write, so wait for both rather than sampling.
-            let audioCancelled = await eventually(before: .seconds(2)) {
-                await audio.cancelCount == 1
-            }
-            let recordReady = await eventually(before: .seconds(2)) {
-                await history.records.last?.providerErrorCode
-                    == "audio.device_configuration_changed"
-            }
+            // and the history write. Shutdown returns once both have finished.
+            await sessions.shutdown()
+            let audioCancelled = await audio.cancelCount == 1
             let record = await history.records.last
+            let recordReady = record?.providerErrorCode == "audio.device_configuration_changed"
             try expect(audioCancelled, "device change did not cancel the recorder once")
             try expect(recordReady, "device change did not reach history")
             try expect(record?.transcriptionProvider == "local")

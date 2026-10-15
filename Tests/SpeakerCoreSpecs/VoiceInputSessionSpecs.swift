@@ -30,10 +30,10 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let presentations = await sessions.observe()
 
             await sessions.send(.pressed)
+            // A release returns only after its session has finished, delivery
+            // included.
             await sessions.send(.released)
-            let deliveryCompleted = await eventually(before: .seconds(1)) {
-                await delivery.deliveredTexts == ["你好，SwiftUI。"]
-            }
+            let deliveryCompleted = await delivery.deliveredTexts == ["你好，SwiftUI。"]
 
             let terminal = Task { () -> [VoiceInputPresentation] in
                 var values: [VoiceInputPresentation] = []
@@ -48,10 +48,11 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             let values = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
-            let historyCommitted = await eventually(before: .seconds(1)) {
-                await history.records.count == 1
-            }
+            // The Session Record is written after the terminal presentation;
+            // shutdown returns once every queued history write has finished.
+            await sessions.shutdown()
             let records = await history.records
+            let historyCommitted = records.count == 1
 
             try expect(
                 deliveryCompleted,

@@ -263,12 +263,12 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let cancelledPresentation = await cancelledTerminal.value
             try await cancellationClock.waitUntilCancelledSleepCount(1)
             cancellationClock.advance(by: .seconds(600))
-            let cancellationRecordReady = await eventually(
-                before: .seconds(5)
-            ) {
-                await cancellationHistory.records.last?.outcome.isCancelled == true
-            }
+            // Shutdown returns once recorder cleanup and every queued history
+            // write have finished.
+            await cancellationSessions.shutdown()
             let cancellationRecords = await cancellationHistory.records
+            let cancellationRecordReady =
+                cancellationRecords.last?.outcome.isCancelled == true
 
             try expect(
                 cancelledPresentation?.activity.isCancelled == true,
@@ -312,10 +312,10 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let providerPresentation = await providerTerminal.value
             try await providerClock.waitUntilCancelledSleepCount(1)
             providerClock.advance(by: .seconds(600))
-            let providerRecordReady = await eventually(before: .seconds(5)) {
-                await providerHistory.records.last?.outcome.failure == .providerAuthenticationFailed
-            }
+            await providerSessions.shutdown()
             let providerRecords = await providerHistory.records
+            let providerRecordReady =
+                providerRecords.last?.outcome.failure == .providerAuthenticationFailed
 
             try expect(
                 providerPresentation?.activity.failure
