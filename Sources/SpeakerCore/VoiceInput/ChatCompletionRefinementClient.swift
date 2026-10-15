@@ -14,7 +14,7 @@ public struct ChatCompletionRefinementConfiguration: Equatable, Sendable {
     public init(
         apiKey: String,
         endpoint: URL = Self.defaultEndpoint,
-        model: String = "deepseek-v4-flash",
+        model: String = "deepseek-flash",
         maximumOutputTokens: Int = 2_048
     ) {
         self.apiKey = apiKey

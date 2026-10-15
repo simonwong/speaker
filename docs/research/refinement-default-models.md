@@ -1,14 +1,14 @@
 # Low-cost Refinement Provider defaults
 
-Last reviewed: 2026-09-18
+Last reviewed: 2026-10-15
 
 ## Decision
 
-Use `deepseek-v4-flash`, `gpt-5.6-luna`, `kimi-k2.6`, and `glm-5.3-flash` as the built-in defaults. DeepSeek keeps its compatibility ID, which currently routes to the latest Flash backend. These choices preserve Speaker's final JSON Chat Completions contract; GLM 5.3 Flash uses mandatory low-effort thinking. Preserve saved model IDs and the legacy DeepSeek profile. A newer flagship is not automatically a suitable default for short text refinement.
+Use `deepseek-flash`, `gpt-5.6-luna`, `kimi-k2.6`, and `glm-5.3-flash` as the built-in defaults. These choices preserve Speaker's final JSON Chat Completions contract; GLM 5.3 Flash uses mandatory low-effort thinking. Preserve saved model IDs. A newer flagship is not automatically a suitable default for short text refinement.
 
 | Provider | Recommended default | Current price per million tokens | Optional choices |
 | --- | --- | --- | --- |
-| DeepSeek | `deepseek-v4-flash` | CNY 1 input / 4 output off-peak; CNY 2 / 8 peak. Cached input CNY 0.02 / 0.04 respectively. | `deepseek-flash` is the current provider alias. |
+| DeepSeek | `deepseek-flash` | CNY 1 input / 4 output off-peak; CNY 2 / 8 peak. Cached input CNY 0.02 / 0.04 respectively. | None bundled; `deepseek-v4-flash` is a retired compatibility name. |
 | OpenAI | `gpt-5.6-luna` | USD 0.20 input / 1.20 output / 0.02 cached input for ordinary context sizes. | `gpt-5.6-terra` for deliberate higher-cost use. |
 | Kimi China | `kimi-k2.6` | Exact current price not verified: the official pricing page's extracted content omitted its price table. | No additional default recommended without a verified cost advantage and matching request contract. |
 | GLM China | `glm-5.3-flash` | CNY 0.8 input / 2.8 output / 0.23 cached input. | `glm-4.7-flash` remains a free alternative; `glm-4.7-flashx`: CNY 0.5 input / 3 output / 0.1 cached input; `glm-5.2`: CNY 8 / 28 / 2. |
@@ -17,7 +17,7 @@ Prices above come from the [OpenAI Luna model page](https://developers.openai.co
 
 ## DeepSeek
 
-`deepseek-flash` currently serves DeepSeek-V4.1-Flash. The retired V4 Flash model IDs remain accepted and route to it at Flash pricing. Preserve the legacy ID as the default without a settings migration; offer the current alias as an explicit alternative. The current pricing page explicitly retains V4 Pro service after September 14, overriding the earlier retirement plan in the September 10 announcement. Peak periods are Beijing weekdays 09:00–12:00 and 14:00–18:00. [Models and pricing](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
+`deepseek-flash` currently serves DeepSeek-V4.1-Flash and is the name DeepSeek asks callers to use. As of October 15, 2026, the pricing page marks `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` as legacy names whose models are retired; they remain callable, route to V4.1-Flash at Flash pricing, and have no published shutdown date. Speaker bundles only `deepseek-flash`. A settings file without a saved DeepSeek profile uses it; a saved `deepseek-v4-flash` profile is kept unchanged and stays selectable without the recommendation. No settings migration rewrites saved IDs. The current pricing page explicitly retains V4 Pro service after September 14, overriding the earlier retirement plan in the September 10 announcement. Peak periods are Beijing weekdays 09:00–12:00 and 14:00–18:00. [Models and pricing](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 The current API documents `POST /chat/completions`, `thinking.type=disabled`, `response_format.type=json_object`, `max_tokens`, and temperature 0 in non-thinking mode. Speaker's fixed prompt already specifies JSON and its required text field. No request-shape change is needed for this default. [Chat Completions reference](https://api-docs.deepseek.com/api/create-chat-completion/)
 
@@ -47,4 +47,4 @@ GLM-5.3-Flash is newer and inexpensive at CNY 0.8 input / 2.8 output / 0.23 cach
 
 ## Evidence boundary
 
-Official pages were retrieved on September 18, 2026 and contain current September model changes. Most pages expose no revision timestamp, so retrieval date does not establish their exact last-update date. The recommendations follow their published API contracts and prices; they do not establish account entitlement, latency, semantic refinement quality, or live inference success. No credentials were read and no inference requests were sent. Existing saved selections remain governed by [ADR-0009](../adr/0009-select-text-refinement-providers.md).
+Official pages were retrieved on September 18, 2026 and contain current September model changes; the DeepSeek pricing page was rechecked on October 15, 2026. Most pages expose no revision timestamp, so retrieval date does not establish their exact last-update date. The recommendations follow their published API contracts and prices; they do not establish account entitlement, latency, semantic refinement quality, or live inference success. No credentials were read and no inference requests were sent. Existing saved selections remain governed by [ADR-0009](../adr/0009-select-text-refinement-providers.md).

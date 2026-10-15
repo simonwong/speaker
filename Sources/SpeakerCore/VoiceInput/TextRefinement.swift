@@ -195,7 +195,7 @@ public struct TextRefinementContext: Equatable, Sendable {
 
     public init(
         mode: TextRefinementMode, dictionaryWords: [String] = [],
-        provider: RefinementProviderProfile = .legacyDeepSeek
+        provider: RefinementProviderProfile = .defaultProfile(for: .deepSeek)
     ) {
         self.provider = provider
         self.mode = mode
@@ -259,7 +259,7 @@ public actor OptionalTextRefinementPipeline {
         doubaoText: String,
         mode: TextRefinementMode,
         dictionaryWords: [String] = [],
-        provider: RefinementProviderProfile = .legacyDeepSeek
+        provider: RefinementProviderProfile = .defaultProfile(for: .deepSeek)
     ) async throws -> TextRefinementOutcome {
         guard mode.requiresRefinement else {
             return TextRefinementOutcome(

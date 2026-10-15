@@ -222,7 +222,7 @@ public struct ProviderMatrixEvidence: Codable, Equatable, Sendable {
                     throw ProviderEvidenceError.invalidSchema("doubaoConfiguration")
                 }
             case .deepSeek:
-                guard provider.resource == nil, provider.model == "deepseek-v4-flash" else {
+                guard provider.resource == nil, provider.model == "deepseek-flash" else {
                     throw ProviderEvidenceError.invalidSchema("deepSeekConfiguration")
                 }
             }

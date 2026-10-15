@@ -16,7 +16,7 @@ The implementation sends:
 
 - `POST https://api.deepseek.com/chat/completions`;
 - `Authorization: Bearer <user API key>`;
-- model `deepseek-v4-flash`;
+- model `deepseek-flash` by default, or the saved model ID;
 - system and user messages that treat the transcript, refinement rule, and Personal Dictionary Entry words as data;
 - `thinking.type = disabled`;
 - `response_format.type = json_object`;

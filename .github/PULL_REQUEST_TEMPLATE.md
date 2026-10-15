@@ -4,7 +4,7 @@
 
 ## 检查清单
 
-- [ ] `./scripts/test --with-ui` 在本机通过（全部退出 0）
+- [ ] 按 [`docs/agents/development.md`](../docs/agents/development.md) 跑过改动路径对应的本地检查（UI 规格由 CI 运行，大改 UI 设计时才本机跑 `./scripts/test --ui-only`）
 - [ ] 已按 [AGENTS.md](../AGENTS.md) 的「Read by task」阅读并遵循对应文档：
       改动模块或接口读 [`docs/architecture.md`](../docs/architecture.md)；
       改动用户可见的语音输入行为读 [`docs/specs/voice-input.md`](../docs/specs/voice-input.md)；

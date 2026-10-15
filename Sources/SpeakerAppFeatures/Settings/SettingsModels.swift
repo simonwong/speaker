@@ -185,8 +185,10 @@ package final class RefinementSettingsModel: ObservableObject {
     @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
     @Published package private(set) var providers = RefinementProviderSettings()
     @Published package private(set) var isUpdatingProvider = false
-    @Published package var modelIDDraft = RefinementProviderProfile.legacyDeepSeek.modelID
-    @Published package var baseURLDraft = RefinementProviderProfile.legacyDeepSeek.baseURL
+    @Published package var modelIDDraft = RefinementProviderProfile.defaultProfile(for: .deepSeek)
+        .modelID
+    @Published package var baseURLDraft = RefinementProviderProfile.defaultProfile(for: .deepSeek)
+        .baseURL
     @Published package var isEditingModelID = false
     @Published package private(set) var providerNotice: String?
     @Published package var apiKeyDraft = ""

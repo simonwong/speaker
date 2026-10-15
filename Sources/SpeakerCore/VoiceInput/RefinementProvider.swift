@@ -21,7 +21,7 @@ public enum RefinementProviderID: String, Codable, CaseIterable, Sendable {
 public enum RefinementProviderCatalog {
     public static func modelIDs(for provider: RefinementProviderID) -> [String] {
         switch provider {
-        case .deepSeek: ["deepseek-v4-flash", "deepseek-flash"]
+        case .deepSeek: ["deepseek-flash"]
         case .openAI: ["gpt-5.6-luna", "gpt-5.6-terra"]
         case .kimi: ["kimi-k2.6"]
         case .glm: ["glm-5.3-flash", "glm-4.7-flash", "glm-4.7-flashx", "glm-5.2"]
@@ -50,11 +50,6 @@ public struct RefinementProviderProfile: Codable, Equatable, Sendable {
         self.modelID = modelID
         self.baseURL = baseURL
     }
-
-    public static let legacyDeepSeek = Self(
-        provider: .deepSeek, modelID: "deepseek-v4-flash",
-        baseURL: RefinementProviderCatalog.baseURL(for: .deepSeek)
-    )
 
     public static func defaultProfile(for provider: RefinementProviderID) -> Self {
         Self(
@@ -125,7 +120,7 @@ public struct RefinementProviderSettings: Codable, Equatable, Sendable {
         if let profile = profiles[provider.rawValue], profile.provider == provider {
             return profile
         }
-        return provider == .deepSeek ? .legacyDeepSeek : .defaultProfile(for: provider)
+        return .defaultProfile(for: provider)
     }
 
     public var selectedProfile: RefinementProviderProfile { profile(for: selectedProvider) }

@@ -498,7 +498,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(request.url == ChatCompletionRefinementConfiguration.defaultEndpoint)
             try expect(
                 request.value(forHTTPHeaderField: "Authorization") == "Bearer deepseek-test-key")
-            try expect(body?["model"] as? String == "deepseek-v4-flash")
+            try expect(body?["model"] as? String == "deepseek-flash")
             try expect(thinking?["type"] as? String == "disabled")
             try expect(responseFormat?["type"] as? String == "json_object")
             try expect(body?["stream"] as? Bool == false)
