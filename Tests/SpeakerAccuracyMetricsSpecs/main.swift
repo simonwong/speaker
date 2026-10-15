@@ -112,7 +112,7 @@ private struct SpeakerAccuracyMetricsSpecs {
 
         run("normalization removes punctuation and merges whitespace", failures: &failures) {
             let normalized = TranscriptNormalizer.normalize("你好，  世界！  Hello,   world.")
-            try expect(normalized == "你好 世界 hello world", "unexpected normalization: \(normalized)")
+            try expect(normalized == "CI 验证故意弄坏", "unexpected normalization: \(normalized)")
         }
 
         run("normalization folds Latin case, full-width forms, and NFKC", failures: &failures) {
