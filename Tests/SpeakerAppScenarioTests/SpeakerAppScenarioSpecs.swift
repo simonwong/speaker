@@ -4869,15 +4869,32 @@ struct SpeakerAppScenarioSpecs {
             experience.shortcutTarget.receive(.pressed)
             experience.perform(staleCancelAction)
 
-            let secondRecordingSurvived = await waitUntil {
+            // `isRecording` still describes the first session until the
+            // Experience observes the cancellation, so wait for the second
+            // session's own capability.
+            let secondRecordingStarted = await waitUntil(timeout: .seconds(5)) {
                 experience.state.isRecording
+                    && experience.state.menu.cancelAction != staleCancelAction
             }
-            try? await Task.sleep(for: .milliseconds(30))
             let startCount = await fixture.audio.startCount
-            try expect(secondRecordingSurvived)
             try expect(
-                startCount == 2 && experience.state.isRecording,
-                "an old session-scoped cancel action cancelled the new session"
+                secondRecordingStarted && startCount == 2,
+                "the press after Esc did not start a second recording; recorder started \(startCount) times"
+            )
+            guard case .recording(_, _, let finishAction, _) = experience.state.overlay else {
+                throw SpecFailure(message: "second session had no finish action")
+            }
+
+            // Experience commands run in order, so finishing the second
+            // session runs after the stale cancel. It retains the text only if
+            // the second session was still recording at that point.
+            experience.perform(finishAction)
+            let secondSessionFinished = await waitUntil(timeout: .seconds(5)) {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
+            }
+            try expect(
+                secondSessionFinished,
+                "an old session-scoped cancel action cancelled the new session; ended in \(experience.state.diagnosticCode)"
             )
             await experience.shutdown()
         }
