@@ -60,6 +60,9 @@ public actor VoiceInputSessions {
     private var deliveryResolution: DeliveryResolution?
     private var suppressedTerminalPresentationSessionID: VoiceInputSessionID?
     private var finishingTask: Task<Void, Never>?
+    /// Callers waiting for the cancellation that holds `.finalizing` to finish
+    /// its cleanup; `nil` while no cancellation cleanup is running.
+    private var cancellationCleanupWaiters: [CheckedContinuation<Void, Never>]?
     private var historyWrites = SessionHistoryWriteQueue()
     private var isShutDown = false
     private var preparingStartedAt: Date?
@@ -218,7 +221,18 @@ public actor VoiceInputSessions {
             dismissResult(expectedSessionID: id)
         default:
             await cancel(triggeredAtSequence: sequence)
+            // Esc also runs on the dispatcher's preempting task, and a
+            // session-scoped cancel action can run alongside it, so another
+            // caller may own the cleanup. Return only after it ends, so the
+            // dispatcher's next press finds the session idle instead of being
+            // rejected mid-cleanup.
+            await waitForCancellationCleanup()
         }
+    }
+
+    private func waitForCancellationCleanup() async {
+        guard cancellationCleanupWaiters != nil else { return }
+        await withCheckedContinuation { cancellationCleanupWaiters?.append($0) }
     }
 
     public func cancel(triggeredAtSequence sequence: UInt64) async {
@@ -914,6 +928,7 @@ public actor VoiceInputSessions {
         let audioStart = preparingAudioStart
         preparingAudioStart = nil
         phase = .finalizing(id)
+        cancellationCleanupWaiters = []
         finishActiveTriggerSequence()
         preparingStartedAt = nil
         activeSnapshot = nil
@@ -977,6 +992,9 @@ public actor VoiceInputSessions {
                 outcome: activity
             ))
         phase = .idle
+        let cleanupWaiters = cancellationCleanupWaiters ?? []
+        cancellationCleanupWaiters = nil
+        for waiter in cleanupWaiters { waiter.resume() }
     }
 
     /// Waits for whichever settles processing first: the processing task or
