@@ -14,9 +14,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Sorts the changed paths into the landing page (site/) and everything else.
-  # A change confined to site/ skips the macOS lanes and builds only the page.
-  # Anything this job cannot classify counts as an app change.
+  # Sorts the changed paths into the landing page (site/), files no check
+  # reads (docs/, the READMEs, the agent guides, LICENSE), and everything else.
+  # A change confined to the first two skips the macOS lanes; site/ also builds
+  # the page. Anything this job cannot classify counts as an app change, so
+  # list a path as unchecked only when no test, script, or bundle reads it.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-24.04
@@ -56,7 +58,11 @@ jobs:
           fi
           while IFS= read -r FILE; do
             [[ -n "$FILE" ]] || continue
-            if [[ "$FILE" == site/* ]]; then SITE=true; else APP=true; fi
+            case "$FILE" in
+              site/*) SITE=true ;;
+              docs/*|README.md|README.*.md|AGENTS.md|CLAUDE.md|CONTEXT.md|LICENSE) ;;
+              *) APP=true ;;
+            esac
           done <<< "$FILES"
 
           echo "app=$APP" >> "$GITHUB_OUTPUT"
@@ -87,10 +93,9 @@ jobs:
       - name: Build
         run: pnpm build
 
-  # The fast lane a pull request waits on: deterministic specifications, the
-  # shell contract tests, the warnings-as-errors builds, and the formatting
-  # check. It gates the slow bundling lane below, so a broken specification is
-  # reported in minutes instead of after a release build and an install.
+  # Deterministic specifications, the shell contract tests, the
+  # warnings-as-errors builds, and the formatting check. It runs alongside the
+  # bundling lane below; the `required` job reports both.
   specifications:
     name: Specifications, warnings, and formatting
     needs: changes
@@ -127,8 +132,8 @@ jobs:
       # dependency graph, so the key carries the Package.resolved hash. The
       # commit suffix keeps every run publishing a fresh incremental cache while
       # the prefix restore key still matches the newest cache for that graph.
-      # The slow lane deliberately does not restore this cache: it builds the
-      # release bundle in an isolated scratch path.
+      # The bundling lane deliberately does not restore this cache: it builds
+      # the release bundle in an isolated scratch path.
       - name: Cache SwiftPM build products
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -174,29 +179,18 @@ jobs:
           zsh -n scripts/*
           git diff --check
 
-  # The slow lane, gated by the fast one. `Test, build, and bundle` is the
-  # required status check on main; keep this name. The job runs even when the
-  # fast lane fails and reports that failure itself: branch protection treats
-  # a skipped required check as passing, so skipping here would let a broken
-  # specification merge. The one deliberate skip is a change confined to
-  # site/, which `changes` reports as app == 'false'; a failed `changes` job
-  # leaves that output empty, so this job still runs and fails below.
+  # The release bundle and the install checks. It does not wait for
+  # `specifications`: the two lanes run side by side and `required` joins them.
   verify:
-    name: Test, build, and bundle
-    needs: [changes, specifications]
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    name: Release bundle and install
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: macos-26
     timeout-minutes: 20
     env:
       CI: "true"
 
     steps:
-      - name: Require the fast lane to pass
-        if: ${{ needs.specifications.result != 'success' }}
-        run: |
-          echo "::error::Specifications, warnings, and formatting did not pass (${{ needs.specifications.result }})."
-          exit 1
-
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -252,3 +246,41 @@ jobs:
 
       - name: Verify reviewed release identity guard
         run: ./scripts/test-release-identity
+
+  # `Test, build, and bundle` is the required status check on main; keep this
+  # name. Branch protection treats a skipped required check as passing, so this
+  # job runs whenever the lanes above might have run and fails unless both
+  # passed; a skipped, failed, or cancelled lane fails it. The one deliberate
+  # skip is a change `changes` reports as app == 'false' (site/ or unchecked
+  # files only). A failed `changes` job leaves that output empty, so this job
+  # still runs and fails below.
+  required:
+    name: Test, build, and bundle
+    needs: [changes, specifications, verify]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every lane to pass
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          SPECIFICATIONS_RESULT: ${{ needs.specifications.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          set -euo pipefail
+          echo "changes=$CHANGES_RESULT specifications=$SPECIFICATIONS_RESULT verify=$VERIFY_RESULT"
+          STATUS=0
+          if [[ "$CHANGES_RESULT" != success ]]; then
+            echo "::error::Detect changed areas did not pass ($CHANGES_RESULT)."
+            STATUS=1
+          fi
+          if [[ "$SPECIFICATIONS_RESULT" != success ]]; then
+            echo "::error::Specifications, warnings, and formatting did not pass ($SPECIFICATIONS_RESULT)."
+            STATUS=1
+          fi
+          if [[ "$VERIFY_RESULT" != success ]]; then
+            echo "::error::Release bundle and install did not pass ($VERIFY_RESULT)."
+            STATUS=1
+          fi
+          exit "$STATUS"

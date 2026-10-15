@@ -64,14 +64,17 @@ For installer, release, or workflow changes, also inspect `.github/workflows/ci.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs two gating jobs so a pull request gets its specification verdict without waiting for a release build.
+`.github/workflows/ci.yml` runs two macOS lanes side by side and joins them in one required job, so the critical path is the slower lane rather than the sum of both.
 
 | Job | Name | Contents |
 | --- | --- | --- |
-| `specifications` | `Specifications, warnings, and formatting` | The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
-| `verify` | `Test, build, and bundle` | `needs: specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, the retained release candidate, install rollback, and the reviewed release identity guard. |
+| `changes` | `Detect changed areas` | Sorts the changed paths into `site/`, unchecked files, and app files. Unchecked files are `docs/`, `README.md`, `README.*.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, and `LICENSE`: no test, script, or bundle reads them. Every other path, including any it cannot classify, counts as an app change. |
+| `site` | `Build landing page` | Runs when `site/` changed. |
+| `specifications` | `Specifications, warnings, and formatting` | Runs on an app change. The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
+| `verify` | `Release bundle and install` | Runs on an app change, in parallel with `specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, install rollback, and the reviewed release identity guard. |
+| `required` | `Test, build, and bundle` | `needs: [changes, specifications, verify]`. Fails unless all three succeeded. |
 
-`Test, build, and bundle` is the required status check on `main`; renaming the `verify` job breaks branch protection until the required check is renamed to match.
+`Test, build, and bundle` is the required status check on `main`; renaming the `required` job breaks branch protection until the required check is renamed to match. Branch protection treats a skipped required check as passing, so `required` runs with `!cancelled()` and checks each lane's result itself: a failed, skipped, or cancelled lane fails it. It is skipped only when `changes` reports no app change, which is how a change confined to `site/` or unchecked files merges without the macOS lanes. A failed `changes` job leaves that output empty, so `required` still runs and fails. Add a path to the unchecked list only when nothing in CI reads it; `PRIVACY.md`, for example, is compared against the bundle and stays an app file.
 
 The `specifications` job caches `.build` through `actions/cache` under a key containing the `Package.resolved` hash, so a resolved dependency graph is compiled once and later runs restore it through the prefix restore key. The `verify` job does not restore that cache: `./scripts/bundle` builds the release into an isolated scratch path under `RUNNER_TEMP` on purpose. Every action in every workflow stays pinned to a full commit SHA, which `./scripts/test-workflow-security` enforces.
 
