@@ -31,3 +31,5 @@ Throwaway HTML mockups under [`prototypes/`](prototypes/). Each one answers a si
 - **Domain vocabulary or ADR work:** [`agents/domain.md`](agents/domain.md).
 - **Issue publication or triage:** [`agents/issue-tracker.md`](agents/issue-tracker.md) and [`agents/triage-labels.md`](agents/triage-labels.md).
 - **Production distribution:** [`releasing.md`](releasing.md).
+
+<!-- CI 验证用，不合并 -->
