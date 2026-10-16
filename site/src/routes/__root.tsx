@@ -1,8 +1,9 @@
-import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Outlet, Scripts, createRootRoute, useRouterState } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { langForPath } from '../components'
 import appCss from '../styles.css?url'
 
-// Page-specific title, description, canonical, social cards and JSON-LD live in routes/index.tsx.
+// Page-specific title, description, canonical, hreflang, social cards and JSON-LD live in each route.
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -20,8 +21,9 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: ReactNode }) {
+  const lang = useRouterState({ select: (state) => langForPath(state.location.pathname) })
   return (
-    <html lang="zh-CN">
+    <html lang={lang}>
       <head>
         <HeadContent />
       </head>

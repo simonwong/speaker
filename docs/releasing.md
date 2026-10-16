@@ -364,5 +364,6 @@ pnpm run deploy
 - 部署后同时检查旧域名：`curl -sI https://speaker.simonwong.cn/og.png` 应返回 301，`location` 指向新域名同一路径。
 - 页面不写版本号，下载按钮指向 `/download`：Worker 查询 GitHub 最新正式版，跳转到其中的 DMG（不含预发布版），查询失败时跳到 `releases/latest`。所以发布新版本时不需要重新部署官网。
 - 已发布的 App 引用 `/doubao`（「怎么申请？」），改动或删除这个路径前要考虑旧版本。
-- 修改分享图时编辑 `site/og/og.html`，运行 `pnpm og` 重新生成 `site/public/og.png`（需要本机安装 Chrome）。
-- 部署后读取线上首页，确认标题、`og:image`、JSON-LD 和正文已是新版本；新版本可能需要几十秒才在边缘节点生效。
+- 首页有中文 `/` 和英文 `/en` 两版，文案分别在 `site/src/routes/index.tsx` 和 `site/src/routes/en.tsx`，共用 `site/src/home.tsx` 的页面与 SEO 标签。改动首页内容时两版一起改；两页互相声明 hreflang，`site/public/sitemap.xml` 里也有同样的对应关系。
+- 修改分享图时编辑 `site/og/og.html`（中文）或 `site/og/og-en.html`（英文），运行 `pnpm og` 重新生成 `site/public/og.png` 和 `og-en.png`（需要本机安装 Chrome）。
+- 部署后读取线上首页（`/` 和 `/en`），确认标题、`og:image`、hreflang、JSON-LD 和正文已是新版本；新版本可能需要几十秒才在边缘节点生效。
