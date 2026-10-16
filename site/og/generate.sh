@@ -1,5 +1,6 @@
 #!/bin/sh
-# Renders og/og.html into public/og.png (1200×630) with headless Chrome.
+# Renders the share-card templates into public/ (1200×630) with headless Chrome:
+# og/og.html → public/og.png, og/og-en.html → public/og-en.png.
 # Set CHROME to override the browser binary.
 set -eu
 
@@ -11,7 +12,6 @@ if [ ! -x "$chrome" ]; then
 fi
 
 work="$(mktemp -d)"
-shot="$work/og.png"
 pid=""
 cleanup() {
   if [ -n "$pid" ]; then
@@ -22,30 +22,42 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Headless Chrome on macOS can stay alive after writing the screenshot, so
-# start it in the background and stop it once the file is complete.
-"$chrome" \
-  --headless=new \
-  --user-data-dir="$work/profile" \
-  --no-first-run \
-  --disable-gpu \
-  --hide-scrollbars \
-  --force-device-scale-factor=1 \
-  --window-size=1200,630 \
-  --screenshot="$shot" \
-  "file://$PWD/og/og.html" >/dev/null 2>&1 &
-pid=$!
+render() {
+  template="$1"
+  output="$2"
+  shot="$work/$output"
 
-tries=0
-while ! { [ -s "$shot" ] && sips -g pixelWidth "$shot" >/dev/null 2>&1; }; do
-  tries=$((tries + 1))
-  if [ "$tries" -gt 60 ]; then
-    echo "generate.sh: Chrome did not write a screenshot within 30 s" >&2
-    exit 1
-  fi
+  # Headless Chrome on macOS can stay alive after writing the screenshot, so
+  # start it in the background and stop it once the file is complete.
+  "$chrome" \
+    --headless=new \
+    --user-data-dir="$work/profile" \
+    --no-first-run \
+    --disable-gpu \
+    --hide-scrollbars \
+    --force-device-scale-factor=1 \
+    --window-size=1200,630 \
+    --screenshot="$shot" \
+    "file://$PWD/og/$template" >/dev/null 2>&1 &
+  pid=$!
+
+  tries=0
+  while ! { [ -s "$shot" ] && sips -g pixelWidth "$shot" >/dev/null 2>&1; }; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 60 ]; then
+      echo "generate.sh: Chrome did not write $output within 30 s" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
   sleep 0.5
-done
-sleep 0.5
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  pid=""
 
-mv "$shot" public/og.png
-echo "wrote public/og.png"
+  mv "$shot" "public/$output"
+  echo "wrote public/$output"
+}
+
+render og.html og.png
+render og-en.html og-en.png

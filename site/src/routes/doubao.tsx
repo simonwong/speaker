@@ -1,7 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Footer, Section } from '../components'
+import { Footer, SITE_URL, Section } from '../components'
 
-const PAGE_URL = 'https://speaker.moonunder.app/doubao'
+const PAGE_URL = `${SITE_URL}doubao`
+const OG_IMAGE_URL = `${SITE_URL}og.png`
 const CONSOLE_OVERVIEW_URL = 'https://console.volcengine.com/speech/new/overview?projectName=default'
 const CONSOLE_API_KEYS_URL =
   'https://console.volcengine.com/speech/new/setting/apikeys?projectName=default'
@@ -9,9 +10,34 @@ const QUICK_START_URL = 'https://docs.volcengine.com/docs/DoubaoVoice/QuickStart
 const PRICING_URL = 'https://docs.volcengine.com/docs/6561/1359370?lang=zh'
 const FREE_QUOTA_URL = 'https://docs.volcengine.com/docs/6561/1359369?lang=zh'
 
-const title = '申请豆包语音 API Key · Speaker'
+const title = '申请豆包语音 API Key：开通流式语音识别 2.0 · Speaker'
 const description =
   '在火山引擎豆包语音控制台开通流式语音识别模型 2.0、复制 API Key，并在 Speaker 中完成连接检查。包含常见报错和费用估算。'
+
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'TechArticle',
+      '@id': `${PAGE_URL}#article`,
+      headline: '申请豆包语音 API Key',
+      description,
+      url: PAGE_URL,
+      image: OG_IMAGE_URL,
+      inLanguage: 'zh-CN',
+      dateModified: '2026-10-13',
+      author: { '@type': 'Person', name: 'Simon Wong', url: 'https://github.com/simonwong' },
+      about: { '@id': `${SITE_URL}#app` },
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Speaker', item: SITE_URL },
+        { '@type': 'ListItem', position: 2, name: '申请豆包语音 API Key', item: PAGE_URL },
+      ],
+    },
+  ],
+}
 
 export const Route = createFileRoute('/doubao')({
   head: () => ({
@@ -25,8 +51,16 @@ export const Route = createFileRoute('/doubao')({
       { property: 'og:url', content: PAGE_URL },
       { property: 'og:title', content: title },
       { property: 'og:description', content: description },
+      { property: 'og:image', content: OG_IMAGE_URL },
+      { property: 'og:image:width', content: '1200' },
+      { property: 'og:image:height', content: '630' },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:title', content: title },
+      { name: 'twitter:description', content: description },
+      { name: 'twitter:image', content: OG_IMAGE_URL },
     ],
     links: [{ rel: 'canonical', href: PAGE_URL }],
+    scripts: [{ type: 'application/ld+json', children: JSON.stringify(structuredData) }],
   }),
   component: DoubaoGuide,
 })
