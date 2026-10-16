@@ -4,18 +4,18 @@ import { DOWNLOAD_URL, type HomeCopy, HomePage, homeHead } from '../home'
 
 const copy: HomeCopy = {
   lang: 'zh-CN',
-  title: 'Speaker：免费开源的 Mac 语音输入工具，说话转文字',
+  title: 'Speaker：Mac 语音转文字 App，免费开源的语音输入工具',
   description:
-    'Speaker 是免费开源的 Mac 语音输入工具：在任意输入框按住 Fn 说话，松开后文字出现在光标处。语音识别可选豆包、OpenAI、阿里千问，macOS 26 上还能用不需要 Key 的 Apple 本机识别。没有账号，没有服务端，适用于 macOS 14 及以上。',
+    'Speaker 是免费开源的 Mac 语音转文字 App：在任意输入框按住 Fn 说话，松开后文字直接出现在光标处。语音识别可选豆包、OpenAI、阿里千问，macOS 26 上还能用不需要 Key 的 Apple 本机识别。没有账号，不用订阅，适用于 macOS 14 及以上。',
   keywords:
-    'Mac 语音输入,Mac 语音转文字,语音输入法,语音打字,听写,豆包语音识别,OpenAI 语音识别,千问语音识别,Apple 本机语音识别,开源',
+    '语音转文字,语音转文字 App,语音转文字软件,Mac 语音转文字,Mac 语音输入,语音输入软件,AI 语音输入,语音打字,语音识别软件,豆包语音识别,开源',
   ogImage: `${SITE_URL}og.png`,
-  ogImageAlt: 'Speaker：Mac 语音输入，说话代替打字',
+  ogImageAlt: 'Speaker：Mac 语音转文字，说话代替打字',
   priceCurrency: 'CNY',
   requirements: 'macOS 14 或更高版本，Apple 芯片或 Intel 芯片；Apple 语音识别需要 macOS 26',
   iconAlt: 'Speaker 应用图标',
   otherLanguage: { lang: 'en', label: 'English' },
-  headline: 'Mac 语音输入，说话代替打字',
+  headline: 'Mac 语音转文字，说话代替打字',
   lede: (
     <>
       在任意输入框按住 <kbd>Fn</kbd> 说话，松开后文字出现在光标处。用你自己的 API Key 或 Apple 本机识别，没有账号，没有服务端。
@@ -26,7 +26,7 @@ const copy: HomeCopy = {
   sections: [
     {
       id: 'voice-to-text',
-      title: '语音转文字',
+      title: '在任意 App 里语音输入',
       body: (
         <>
           <p>
@@ -100,26 +100,22 @@ const copy: HomeCopy = {
     },
   ],
   compare: {
-    title: '和其他语音输入方式比较',
+    title: '和其他语音转文字 App 比较',
     aspectLabel: '方面',
-    columns: ['Speaker', '输入法自带的语音输入', 'macOS 听写'],
+    columns: ['Speaker', '其他语音转文字 App'],
     rows: [
-      ['怎么用', '任意输入框按快捷键，不换输入法', '先切换到这个输入法', '按系统听写快捷键'],
-      [
-        '语音交给谁',
-        '你选的服务商：豆包、OpenAI 或千问；也可以用 Apple 本机识别',
-        '输入法厂商',
-        'Apple',
-      ],
+      ['怎么用', '任意输入框按快捷键，文字直接出现在光标处', '多数在 App 里录音或导入音频，转写后再复制'],
+      ['语音交给谁', '你选的服务商：豆包、OpenAI 或千问；也可以用 Apple 本机识别', '通常是 App 厂商的服务器'],
       [
         '费用',
         '软件免费；云端识别按用量付给服务商，豆包约 1 元/小时；Apple 本机识别免费',
-        '免费',
-        '免费',
+        '通常有免费额度，超出后按月或按年付费',
       ],
-      ['整理文字', '可选服务商，可写自己的指令', '取决于产品', '不支持'],
-      ['准备工作', '申请 API Key，或下载 Apple 语音识别的语言模型', '安装输入法', '系统自带'],
-      ['开源', 'MIT', '否', '否'],
+      ['账号', '不需要', '通常需要注册登录'],
+      ['识别模型', '自己选', '厂商决定'],
+      ['整理文字', '可选服务商，可写自己的指令', '取决于产品'],
+      ['准备工作', '申请 API Key，或下载 Apple 语音识别的语言模型', '注册账号'],
+      ['开源', 'MIT', '多数不开源'],
     ],
   },
   faqTitle: '常见问题',
@@ -150,9 +146,9 @@ const copy: HomeCopy = {
         '豆包默认使用中英文模型，中英混说可以直接识别；OpenAI 和千问支持多种语言；Apple 语音识别使用系统首选语言里第一个支持的语言。App 界面目前只有简体中文。',
     },
     {
-      question: '和 macOS 自带的听写有什么不同？',
+      question: '和其他语音转文字 App 有什么不同？',
       answer:
-        'macOS 听写只能用 Apple 的识别。Speaker 可以选豆包、OpenAI、千问或 Apple 本机识别，另外有个人词库、文字整理和本机历史记录。',
+        '常见的语音转文字 App 通常要注册账号、开会员，音频发到厂商的服务器，转写完再复制出来。Speaker 免费开源，没有账号；识别服务自己选，按用量直接付给服务商，或者用 Apple 本机识别；文字直接出现在光标处，不用复制粘贴。',
     },
     {
       question: '按 Fn 时弹出表情或切换了输入法怎么办？',
