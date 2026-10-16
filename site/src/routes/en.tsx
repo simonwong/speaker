@@ -4,18 +4,20 @@ import { DOWNLOAD_URL, type HomeCopy, HomePage, homeHead } from '../home'
 
 const copy: HomeCopy = {
   lang: 'en',
-  title: 'Speaker: Free, Open-Source Voice Typing and Dictation for Mac',
+  title: 'Speaker: Free, Open-Source Speech-to-Text App for Mac',
   description:
-    'Speaker is a free, open-source dictation app for Mac. Hold Fn in any text field, speak, and release to type at the cursor. Bring your own OpenAI, Qwen, or Doubao API key, or use Apple on-device speech recognition on macOS 26. No account, no server. macOS 14 or later.',
+    'Speaker is a free, open-source speech-to-text app for Mac. Hold Fn in any text field, speak, and release: your words are typed at the cursor. Bring your own OpenAI, Qwen, or Doubao API key, or use Apple on-device speech recognition on macOS 26. No account, no subscription. macOS 14 or later.',
+  keywords:
+    'speech to text, speech to text app, speech to text Mac, voice to text app, voice typing, dictation app for Mac, AI dictation, open source',
   ogImage: `${SITE_URL}og-en.png`,
-  ogImageAlt: 'Speaker: voice typing for Mac. Talk instead of type.',
+  ogImageAlt: 'Speaker: speech to text for Mac. Talk instead of type.',
   priceCurrency: 'USD',
   requirements: 'macOS 14 or later on Apple silicon or Intel; Apple speech recognition requires macOS 26',
   iconAlt: 'Speaker app icon',
   otherLanguage: { lang: 'zh-CN', label: '简体中文' },
   headline: (
     <>
-      Voice typing for Mac.
+      Speech to text for Mac.
       <br />
       Talk instead of type.
     </>
@@ -31,7 +33,7 @@ const copy: HomeCopy = {
   sections: [
     {
       id: 'voice-to-text',
-      title: 'Speech to text in any app',
+      title: 'Voice typing in any app',
       body: (
         <>
           <p>
@@ -123,16 +125,25 @@ const copy: HomeCopy = {
     },
   ],
   compare: {
-    title: 'Speaker vs. macOS Dictation',
+    title: 'Speaker vs. other speech-to-text apps',
     aspectLabel: 'Aspect',
-    columns: ['Speaker', 'macOS Dictation'],
+    columns: ['Speaker', 'Other speech-to-text apps'],
     rows: [
-      ['How to start', 'Shortcut in any text field', 'System dictation shortcut'],
-      ['Who hears your voice', 'The provider you pick, or Apple on-device', 'Apple'],
-      ['Cost', 'App is free; cloud recognition is billed by your provider; Apple on-device is free', 'Free'],
-      ['Text cleanup', 'Your choice of provider and instructions', 'Not available'],
-      ['Dictionary and history', 'Yes, stored on your Mac', 'No'],
-      ['Open source', 'MIT', 'No'],
+      [
+        'How it works',
+        'Shortcut in any text field; text appears at the cursor',
+        'Varies: some type at the cursor, others transcribe recordings you copy from',
+      ],
+      ['Who hears your voice', 'The provider you pick, or Apple on-device', "Usually the vendor's servers"],
+      [
+        'Cost',
+        'App is free; cloud recognition is billed by your provider per use; Apple on-device is free',
+        'Usually a monthly or yearly subscription beyond a free tier',
+      ],
+      ['Account', 'None', 'Usually required'],
+      ['Recognition model', 'You choose', 'Chosen by the vendor'],
+      ['Text cleanup', 'Your choice of provider and instructions', 'Varies by app'],
+      ['Open source', 'MIT', 'Mostly closed source'],
     ],
   },
   faqTitle: 'FAQ',
@@ -153,9 +164,9 @@ const copy: HomeCopy = {
         'The interface is currently in Simplified Chinese only. Recognition is not limited to Chinese: OpenAI and Qwen support many languages, Doubao handles Chinese and English, and Apple speech recognition uses the first supported language in your system preferences.',
     },
     {
-      question: 'How is it different from macOS Dictation?',
+      question: 'How is it different from other speech-to-text apps?',
       answer:
-        'macOS Dictation always uses Apple recognition. Speaker lets you pick OpenAI, Qwen, Doubao, or Apple on-device recognition, and adds a personal dictionary, text refinement, and local history.',
+        "Most speech-to-text apps need an account and a subscription, and send your audio to the vendor's servers. Speaker is free and open source with no account. You pick the recognition service and pay it directly per use, or use Apple on-device recognition for free. Text goes straight to the cursor in any app.",
     },
     {
       question: 'Pressing Fn opens the emoji picker or switches input source. What do I do?',
