@@ -2903,18 +2903,23 @@ struct SpeakerAppScenarioSpecs {
                     error: URLError(.userAuthenticationRequired)
                 )
             )
-            let model = DoubaoSettingsModel(
-                service: service,
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials,
+                configuration: VoiceInputConfigurationController(),
                 settingsStore: VersionedLocalAppSettingsStore(
                     fileURL: directory.appendingPathComponent("settings.json")
-                )
+                ),
+                doubao: service
             )
+            await model.load()
             model.apiKeyDraft = "initial-test-key"
-            await model.save()
+            await model.saveAPIKey()
             try expect(
                 model.hasStoredKey && model.apiKeyDraft.isEmpty,
                 "the first save did not store the Key")
-            try expect(model.status == .configured, "first save left status \(model.status)")
+            try expect(
+                model.doubaoStatus == .configured,
+                "first save left status \(model.doubaoStatus)")
 
             let started = ContinuousClock.now
             do {
@@ -2932,13 +2937,13 @@ struct SpeakerAppScenarioSpecs {
 
             model.checkConnection()
             let failed = await eventually(before: .seconds(1)) {
-                if case .failure = model.status { true } else { false }
+                if case .failure = model.doubaoStatus { true } else { false }
             }
             try expect(failed, "the model never reported the failed connection check")
             try expect(model.hasStoredKey)
             model.apiKeyDraft = "replacement-test-key"
-            await model.save()
-            try expect(model.status == .configured && model.apiKeyDraft.isEmpty)
+            await model.saveAPIKey()
+            try expect(model.doubaoStatus == .configured && model.apiKeyDraft.isEmpty)
             let storedKey = try await credentials.apiKey(for: .doubao)
             try expect(storedKey == "replacement-test-key")
             await model.shutdown()

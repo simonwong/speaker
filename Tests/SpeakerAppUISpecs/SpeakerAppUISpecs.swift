@@ -94,7 +94,8 @@ struct SpeakerAppUISpecs {
                 let failed = await eventually(before: .seconds(1)) {
                     if case .failure = model.doubaoStatus { true } else { false }
                 }
-                try expect(failed, "the failed connection check never reported \(model.status)")
+                try expect(
+                    failed, "the failed connection check never reported \(model.doubaoStatus)")
                 try expect(model.hasStoredKey, "a failed check forgot the stored Key")
                 pumpUIRunLoop()
                 try expect(
@@ -122,7 +123,8 @@ struct SpeakerAppUISpecs {
                                 && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
                         }
                 }
-                try expect(replacementStored, "the replacement Key did not store: \(model.status)")
+                try expect(
+                    replacementStored, "the replacement Key did not store: \(model.doubaoStatus)")
                 let storedKey = try await credentials.apiKey(for: .doubao)
                 try expect(storedKey == "replacement-test-key", "the stored Key was not replaced")
                 let back = accessibilityButtons(in: hostingView).first { $0.label == "上一步" }
