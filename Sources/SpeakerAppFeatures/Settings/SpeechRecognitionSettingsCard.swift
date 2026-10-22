@@ -3,7 +3,6 @@ import SwiftUI
 
 package struct SpeechRecognitionSettingsCard: View {
     @ObservedObject var model: SpeechRecognitionSettingsModel
-    let doubao: DoubaoSettingsModel
 
     /// Settings already titles its section 语音识别, so it hides the card's
     /// own header; onboarding shows the card alone and keeps it.
@@ -11,11 +10,9 @@ package struct SpeechRecognitionSettingsCard: View {
 
     package init(
         model: SpeechRecognitionSettingsModel,
-        doubao: DoubaoSettingsModel,
         showsHeader: Bool = true
     ) {
         self.model = model
-        self.doubao = doubao
         self.showsHeader = showsHeader
     }
 
@@ -56,7 +53,7 @@ package struct SpeechRecognitionSettingsCard: View {
         SettingsRowDivider()
 
         if model.selectedProvider == .doubao {
-            DoubaoRecognitionSettings(model: doubao)
+            DoubaoRecognitionSettings(model: model)
                 .disabled(model.isMutating)
         } else if model.selectedProvider.isOnDevice {
             OnDeviceRecognitionSettings(model: model)

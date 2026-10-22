@@ -17,12 +17,14 @@ enum OnboardingFlowUISpecs {
                 "onboarding-flow-\(UUID())")
             defer { try? FileManager.default.removeItem(at: directory) }
             let service = OnboardingDoubaoService()
-            let model = DoubaoSettingsModel(
-                service: service,
+            let model = SpeechRecognitionSettingsModel(
+                credentials: LocalFileProviderCredentialStore(
+                    fileURL: directory.appendingPathComponent("recognition-keys.json")),
+                configuration: VoiceInputConfigurationController(),
                 settingsStore: VersionedLocalAppSettingsStore(
-                    fileURL: directory.appendingPathComponent("settings.json"))
-            )
-            await model.refresh()
+                    fileURL: directory.appendingPathComponent("settings.json")),
+                doubao: service)
+            await model.load()
             let access = PermissionAccessFake(
                 snapshot: .init(accessibility: .denied, microphone: .notDetermined))
             let permissions = PermissionModel(access: access)
@@ -30,13 +32,7 @@ enum OnboardingFlowUISpecs {
             let hosting = NSHostingView(
                 rootView: SpeakerOnboardingView(
                     permissions: permissions,
-                    doubao: model,
-                    recognition: SpeechRecognitionSettingsModel(
-                        credentials: LocalFileProviderCredentialStore(
-                            fileURL: directory.appendingPathComponent("recognition-keys.json")),
-                        configuration: VoiceInputConfigurationController(),
-                        settingsStore: VersionedLocalAppSettingsStore(
-                            fileURL: directory.appendingPathComponent("settings.json"))),
+                    recognition: model,
                     requestPermission: { await permissions.request($0) },
                     refreshPermissions: { permissions.refresh() },
                     announce: { _ in },
@@ -79,7 +75,7 @@ enum OnboardingFlowUISpecs {
             try capture(hosting, name: "onboarding-2-api-key")
             try captureSmall(hosting, window: window, name: "onboarding-2-api-key-small")
             model.apiKeyDraft = "synthetic-onboarding-key"
-            await model.save()
+            await model.saveAPIKey()
             pump(hosting)
             try expect(button("下一步", in: hosting)?.isAccessibilityEnabled() == false)
             let checksBeforeAction = await service.checkCount
@@ -136,7 +132,7 @@ enum OnboardingFlowUISpecs {
                 return !secureFields(in: hosting).isEmpty
             }
             try expect(returned)
-            await model.delete()
+            await model.deleteAPIKey()
             pump(hosting)
             try expect(button("下一步", in: hosting)?.isAccessibilityEnabled() == false)
             try expect(completions == 0)
@@ -160,8 +156,6 @@ enum OnboardingFlowUISpecs {
                 settingsStore: settings)
             await recognition.load()
             await recognition.selectProvider(.openAI)
-            let doubao = DoubaoSettingsModel(
-                service: OnboardingDoubaoService(), settingsStore: settings)
             let permissions = PermissionModel(
                 access: PermissionAccessFake(
                     snapshot: .init(accessibility: .granted, microphone: .granted)))
@@ -169,7 +163,7 @@ enum OnboardingFlowUISpecs {
             var completed = false
             let hosting = NSHostingView(
                 rootView: SpeakerOnboardingView(
-                    permissions: permissions, doubao: doubao, recognition: recognition,
+                    permissions: permissions, recognition: recognition,
                     requestPermission: { _ in }, refreshPermissions: { permissions.refresh() },
                     announce: { _ in }, completion: { completed = true }))
             let window = OnboardingWindowFactory.make(
@@ -209,7 +203,6 @@ enum OnboardingFlowUISpecs {
             pump(hosting)
             try expect(button("开始使用 Speaker", in: hosting)?.isAccessibilityEnabled() == false)
             await recognition.shutdown()
-            await doubao.shutdown()
         }
         await reviewGuide(failures: &failures)
     }
@@ -224,25 +217,23 @@ enum OnboardingFlowUISpecs {
                 "onboarding-review-\(UUID())")
             defer { try? FileManager.default.removeItem(at: directory) }
             let service = OnboardingDoubaoService()
-            let model = DoubaoSettingsModel(
-                service: service,
+            let model = SpeechRecognitionSettingsModel(
+                credentials: LocalFileProviderCredentialStore(
+                    fileURL: directory.appendingPathComponent("keys.json")),
+                configuration: VoiceInputConfigurationController(),
                 settingsStore: VersionedLocalAppSettingsStore(
-                    fileURL: directory.appendingPathComponent("settings.json")))
+                    fileURL: directory.appendingPathComponent("settings.json")),
+                doubao: service)
+            await model.load()
             model.apiKeyDraft = "synthetic-existing-key"
-            await model.save()
+            await model.saveAPIKey()
             let permissions = PermissionModel(
                 access: PermissionAccessFake(
                     snapshot: .init(accessibility: .denied, microphone: .denied)))
             var completed = false
             let hosting = NSHostingView(
                 rootView: SpeakerOnboardingView(
-                    permissions: permissions, doubao: model,
-                    recognition: SpeechRecognitionSettingsModel(
-                        credentials: LocalFileProviderCredentialStore(
-                            fileURL: directory.appendingPathComponent("keys.json")),
-                        configuration: VoiceInputConfigurationController(),
-                        settingsStore: VersionedLocalAppSettingsStore(
-                            fileURL: directory.appendingPathComponent("settings.json"))),
+                    permissions: permissions, recognition: model,
                     requestPermission: { _ in },
                     refreshPermissions: {}, announce: { _ in }, mode: .review,
                     completion: { completed = true }))
@@ -272,7 +263,7 @@ enum OnboardingFlowUISpecs {
             try expect(tutorial)
             let checkCount = await service.checkCount
             try expect(checkCount == 0)
-            try expect(model.status == .configured)
+            try expect(model.doubaoStatus == .configured)
             try expect(!permissions.snapshot.allGranted)
             try expect(button("完成", in: hosting)?.accessibilityPerformPress() == true)
             try expect(completed)
@@ -378,13 +369,9 @@ enum OnboardingFlowUISpecs {
     }
 }
 
-private actor OnboardingDoubaoService: DoubaoSettingsServicing {
-    private var hasKey = false
+private actor OnboardingDoubaoService: DoubaoRecognitionServicing {
     private(set) var checkCount = 0
     func setResource(_ resource: DoubaoStreamingResource) {}
-    func hasAPIKey() -> Bool { hasKey }
-    func saveAPIKey(_ apiKey: String) { hasKey = !apiKey.isEmpty }
-    func deleteAPIKey() { hasKey = false }
     func checkConnection() -> String? {
         checkCount += 1
         return "onboarding-ui-request"

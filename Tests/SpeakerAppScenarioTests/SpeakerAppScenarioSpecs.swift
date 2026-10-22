@@ -7,6 +7,7 @@ import SpeakerAppFeatures
 import SpeakerCore
 import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
+import os
 
 @main
 struct SpeakerAppScenarioSpecs {
@@ -96,18 +97,18 @@ struct SpeakerAppScenarioSpecs {
             await model.selectProvider(.apple)
             try expect(model.selectedProfile.provider == .apple && model.notice == nil)
             try expect(model.onDeviceModelStatus == .notInstalled)
-            try expect(!model.isSelectedProviderReady, "a missing model counted as ready")
+            try expect(model.readiness == .needsSetup, "a missing model counted as ready")
             let snapshot = await configuration.captureSnapshot()
             try expect(snapshot.recognitionProvider.provider == .apple)
             let gap = VoiceInputSetupGap.resolve(
                 permissions: PermissionSnapshot(accessibility: .granted, microphone: .granted),
-                recognitionProvider: .apple, hasRecognitionKey: false)
+                recognitionProvider: .apple, recognitionReadiness: model.readiness)
             try expect(gap == .speechRecognitionKey(.apple))
             try expect(
                 gap?.message.contains("语言模型") == true && gap?.message.contains("Key") == false)
 
             await model.installOnDeviceModel()
-            try expect(model.onDeviceModelStatus == .installed && model.isSelectedProviderReady)
+            try expect(model.onDeviceModelStatus == .installed && model.readiness == .ready)
             try expect(model.modelInstallProgress == nil)
             let installs = await onDevice.installCount
             try expect(installs == 1)
@@ -124,8 +125,7 @@ struct SpeakerAppScenarioSpecs {
 
             let ready = OnboardingPresentation(
                 permissions: PermissionSnapshot(accessibility: .granted, microphone: .granted),
-                doubaoStatus: .unconfigured, hasStoredDoubaoKey: false,
-                recognitionProvider: .apple, hasStoredRecognitionKey: true)
+                recognitionReadiness: model.readiness)
             try expect(
                 ready.isReady, "onboarding blocked on-device recognition behind a Doubao Key")
             await model.shutdown()
@@ -404,90 +404,49 @@ struct SpeakerAppScenarioSpecs {
             try expect(VoiceInputProcessingStage.transcribingAnnouncement == "正在等待语音识别结果")
         }
 
-        run(
+        await runAsync(
             "onboarding accepts saved ASR credentials without claiming live validation",
             failures: &failures
         ) {
+            let granted = PermissionSnapshot(accessibility: .granted, microphone: .granted)
             for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let credentials = ScenarioProviderCredentialStore()
+                let model = SpeechRecognitionSettingsModel(
+                    credentials: credentials, configuration: VoiceInputConfigurationController(),
+                    settingsStore: ScenarioAppSettingsStore(),
+                    doubao: ScenarioDoubaoRecognitionService())
+                await model.load()
+                await model.selectProvider(provider)
+                try expect(model.readiness == .needsSetup)
+                model.apiKeyDraft = "synthetic-\(provider.rawValue)-key"
+                await model.saveAPIKey()
+                try expect(!model.offersConnectionCheck && model.readiness == .ready)
                 let ready = OnboardingPresentation(
-                    permissions: .init(accessibility: .granted, microphone: .granted),
-                    doubaoStatus: .unconfigured, hasStoredDoubaoKey: false,
-                    recognitionProvider: provider, hasStoredRecognitionKey: true)
+                    permissions: granted, recognitionReadiness: model.readiness)
                 try expect(ready.isReady && ready.canContinue(from: .apiKey))
-                let absent = OnboardingPresentation(
-                    permissions: .init(accessibility: .granted, microphone: .granted),
-                    doubaoStatus: .success(nil), hasStoredDoubaoKey: true,
-                    recognitionProvider: provider, hasStoredRecognitionKey: false)
-                try expect(!absent.isReady, "old Doubao success unlocked another provider")
-                let saving = OnboardingPresentation(
-                    permissions: .init(accessibility: .granted, microphone: .granted),
-                    doubaoStatus: .unconfigured, hasStoredDoubaoKey: false,
-                    recognitionProvider: provider, hasStoredRecognitionKey: true,
-                    isUpdatingRecognition: true)
-                try expect(!saving.isReady)
+                await model.shutdown()
             }
         }
 
         run(
-            "Doubao refresh preserves a verified connection for an existing key",
+            "onboarding accepts only full recognition readiness and no change in progress",
             failures: &failures
         ) {
-            let status = DoubaoConnectionStatus.success("request-id")
-            try expect(
-                status.afterCredentialRefresh(keyExists: true)
-                    == .success("request-id")
-            )
-        }
-
-        run("Doubao refresh drops verification when the key disappears", failures: &failures) {
-            try expect(
-                DoubaoConnectionStatus.success(nil)
-                    .afterCredentialRefresh(keyExists: false) == .unconfigured
-            )
-        }
-
-        run(
-            "Doubao refresh clears a stale connection error for an existing key",
-            failures: &failures
-        ) {
-            try expect(
-                DoubaoConnectionStatus.failure("旧错误")
-                    .afterCredentialRefresh(keyExists: true) == .configured
-            )
-        }
-
-        run("onboarding requires both permissions and a verified connection", failures: &failures) {
-            let ready = OnboardingPresentation(
-                permissions: .init(
-                    accessibility: .granted,
-                    microphone: .granted
-                ),
-                doubaoStatus: .success(nil),
-                hasStoredDoubaoKey: true
-            )
-            let missingPermission = OnboardingPresentation(
-                permissions: .init(
-                    accessibility: .denied,
-                    microphone: .granted
-                ),
-                doubaoStatus: .success(nil),
-                hasStoredDoubaoKey: true
-            )
-            let unverified = OnboardingPresentation(
-                permissions: ready.permissions,
-                doubaoStatus: .configured,
-                hasStoredDoubaoKey: true
-            )
-            let deletedKeyWithStaleSuccess = OnboardingPresentation(
-                permissions: ready.permissions,
-                doubaoStatus: .success("stale-request"),
-                hasStoredDoubaoKey: false
-            )
-
+            let granted = PermissionSnapshot(accessibility: .granted, microphone: .granted)
+            let ready = OnboardingPresentation(permissions: granted, recognitionReadiness: .ready)
             try expect(ready.isReady)
+            for readiness in [SpeechRecognitionReadiness.unread, .needsSetup, .unverified] {
+                let blocked = OnboardingPresentation(
+                    permissions: granted, recognitionReadiness: readiness)
+                try expect(!blocked.isReady, "\(readiness) completed first-time setup")
+            }
+            let saving = OnboardingPresentation(
+                permissions: granted, recognitionReadiness: .ready, isUpdatingRecognition: true)
+            try expect(!saving.isReady)
+            let missingPermission = OnboardingPresentation(
+                permissions: .init(accessibility: .denied, microphone: .granted),
+                recognitionReadiness: .ready)
             try expect(!missingPermission.isReady)
-            try expect(!unverified.isReady)
-            try expect(!deletedKeyWithStaleSuccess.isReady)
         }
 
         run(
@@ -496,46 +455,40 @@ struct SpeakerAppScenarioSpecs {
         ) {
             let pending = OnboardingPresentation(
                 permissions: .init(accessibility: .denied, microphone: .notDetermined),
-                doubaoStatus: .unconfigured,
-                hasStoredDoubaoKey: false
+                recognitionReadiness: .needsSetup
             )
             try expect(!pending.canContinue(from: .permissions))
             try expect(pending.permissionInstructions(for: .microphone).contains("macOS"))
             try expect(pending.permissionInstructions(for: .accessibility).contains("+"))
             let authorized = OnboardingPresentation(
                 permissions: .init(accessibility: .granted, microphone: .granted),
-                doubaoStatus: .configured,
-                hasStoredDoubaoKey: true
+                recognitionReadiness: .unverified
             )
             try expect(authorized.canContinue(from: .permissions))
             try expect(!authorized.canContinue(from: .apiKey))
             try expect(!authorized.canContinue(from: .shortcut))
             let verified = OnboardingPresentation(
                 permissions: authorized.permissions,
-                doubaoStatus: .success(nil),
-                hasStoredDoubaoKey: true
+                recognitionReadiness: .ready
             )
             try expect(verified.canContinue(from: .apiKey))
             try expect(verified.canContinue(from: .shortcut))
             let changingKey = OnboardingPresentation(
                 permissions: authorized.permissions,
-                doubaoStatus: .success(nil),
-                hasStoredDoubaoKey: true,
-                isUpdatingDoubaoKey: true
+                recognitionReadiness: .ready,
+                isUpdatingRecognition: true
             )
             try expect(!changingKey.canContinue(from: .apiKey))
             try expect(!changingKey.canContinue(from: .shortcut))
             let removed = OnboardingPresentation(
                 permissions: authorized.permissions,
-                doubaoStatus: .success(nil),
-                hasStoredDoubaoKey: false
+                recognitionReadiness: .needsSetup
             )
             try expect(!removed.canContinue(from: .apiKey))
             try expect(!removed.canContinue(from: .shortcut))
             let revoked = OnboardingPresentation(
                 permissions: pending.permissions,
-                doubaoStatus: .success(nil),
-                hasStoredDoubaoKey: true
+                recognitionReadiness: .ready
             )
             try expect(!revoked.canContinue(from: .apiKey))
             try expect(!revoked.canContinue(from: .shortcut))
@@ -547,8 +500,7 @@ struct SpeakerAppScenarioSpecs {
         ) {
             let review = OnboardingPresentation(
                 permissions: .init(accessibility: .denied, microphone: .denied),
-                doubaoStatus: .configured,
-                hasStoredDoubaoKey: true,
+                recognitionReadiness: .unverified,
                 mode: .review
             )
             for step in OnboardingStep.allCases { try expect(review.canContinue(from: step)) }
@@ -661,8 +613,7 @@ struct SpeakerAppScenarioSpecs {
                     accessibility: .denied,
                     microphone: .notDetermined
                 ),
-                doubaoStatus: .checking,
-                hasStoredDoubaoKey: true
+                recognitionReadiness: .unverified
             )
 
             try expect(
@@ -680,8 +631,7 @@ struct SpeakerAppScenarioSpecs {
                     accessibility: .restricted,
                     microphone: .granted
                 ),
-                doubaoStatus: .configured,
-                hasStoredDoubaoKey: true
+                recognitionReadiness: .unverified
             )
             try expect(
                 restricted.permissionAction(for: .accessibility) == nil
@@ -2313,6 +2263,75 @@ struct SpeakerAppScenarioSpecs {
             try expect(router.shortcutTarget.shouldConsumeEscape())
         }
 
+        await runAsync(
+            "concurrent shortcut presses and clicks confirm an exclusive interaction once",
+            failures: &failures
+        ) {
+            let voice = RouterVoiceRecorder()
+            let router = GlobalVoiceInteractionRouter(
+                voiceTarget: voice.target
+            )
+            var confirmations = 0
+            router.beginExclusiveInteraction(
+                confirm: {
+                    confirmations += 1
+                    return true
+                },
+                cancel: {}
+            )
+
+            // The main actor stays blocked until every thread has finished,
+            // so the first confirmation cannot complete in between. Each
+            // thread reads `shortcutTarget` itself, so its first reads race.
+            DispatchQueue.concurrentPerform(iterations: 64) { index in
+                if index.isMultiple(of: 2) {
+                    router.shortcutTarget.receive(.pressed)
+                } else {
+                    router.confirmExclusiveInteraction()
+                }
+            }
+            let confirmed = await waitUntil { confirmations == 1 }
+            try? await Task.sleep(for: .milliseconds(50))
+
+            try expect(confirmed)
+            try expect(confirmations == 1)
+            try expect(!router.hasExclusiveInteraction)
+            try expect(voice.triggers.isEmpty)
+        }
+
+        run(
+            "global interaction router consults voice input outside its own lock",
+            failures: &failures
+        ) {
+            // Voice input that asks the router about its own state while the
+            // router is asking it whether to consume Escape.
+            let routerSlot = OSAllocatedUnfairLock<GlobalVoiceInteractionRouter?>(
+                initialState: nil
+            )
+            let router = GlobalVoiceInteractionRouter(
+                voiceTarget: VoiceTriggerTarget(
+                    receive: { _ in },
+                    shouldConsumeEscape: {
+                        routerSlot.withLock { $0 }?.hasExclusiveInteraction ?? false
+                    }
+                )
+            )
+            routerSlot.withLock { $0 = router }
+            defer { routerSlot.withLock { $0 = nil } }
+
+            let answered = DispatchSemaphore(value: 0)
+            let target = router.shortcutTarget
+            DispatchQueue.global().async {
+                _ = target.shouldConsumeEscape()
+                answered.signal()
+            }
+
+            try expect(
+                answered.wait(timeout: .now() + 1) == .success,
+                "the Escape check never returned"
+            )
+        }
+
         run(
             "onboarding fits the visible screen and keeps a useful resizable minimum",
             failures: &failures
@@ -2410,21 +2429,6 @@ struct SpeakerAppScenarioSpecs {
                     supportsLiquidGlass: false
                 ) == .opaque
             )
-        }
-
-        run("onboarding remains ready after an unchanged credential refresh", failures: &failures) {
-            let refreshedStatus = DoubaoConnectionStatus.success("verified")
-                .afterCredentialRefresh(keyExists: true)
-            let presentation = OnboardingPresentation(
-                permissions: .init(
-                    accessibility: .granted,
-                    microphone: .granted
-                ),
-                doubaoStatus: refreshedStatus,
-                hasStoredDoubaoKey: true
-            )
-
-            try expect(presentation.isReady)
         }
 
         run("login item awaiting approval stays enabled and exposes recovery", failures: &failures)
@@ -2903,72 +2907,49 @@ struct SpeakerAppScenarioSpecs {
 
         await runAsync("Doubao connection result cannot revive a deleted key", failures: &failures)
         {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent(
-                    "speaker-doubao-settings-\(UUID().uuidString)",
-                    isDirectory: true
-                )
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let service = ScenarioDoubaoSettingsService(hasKey: true)
-            let model = DoubaoSettingsModel(
-                service: service,
-                settingsStore: VersionedLocalAppSettingsStore(
-                    fileURL: directory.appendingPathComponent("settings.json")
-                )
-            )
-            await model.refresh()
+            let service = ScenarioDoubaoRecognitionService()
+            let model = await loadedDoubaoRecognition(service: service)
 
             model.checkConnection()
             let checking = await waitUntil {
-                if case .checking = model.status { true } else { false }
+                if case .checking = model.doubaoStatus { true } else { false }
             }
-            var checkStarted = false
-            for _ in 0..<50 {
-                if await service.isCheckPending {
-                    checkStarted = true
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(2))
+            let checkStarted = await eventually(before: .seconds(1)) {
+                await service.isCheckPending
             }
-            await model.delete()
+            await model.deleteAPIKey()
             await service.finishCheck(.success("stale-request"))
             try? await Task.sleep(for: .milliseconds(30))
 
             try expect(checking)
             try expect(checkStarted)
             try expect(!model.hasStoredKey)
-            try expect(model.status == .unconfigured)
+            try expect(model.doubaoStatus == .unconfigured)
+            try expect(model.readiness == .needsSetup)
+            await model.shutdown()
         }
 
         await runAsync(
             "Doubao connection result is bound to the checked resource", failures: &failures
         ) {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent(
-                    "speaker-doubao-resource-\(UUID().uuidString)",
-                    isDirectory: true
-                )
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let service = ScenarioDoubaoSettingsService(hasKey: true)
-            let model = DoubaoSettingsModel(
-                service: service,
-                settingsStore: VersionedLocalAppSettingsStore(
-                    fileURL: directory.appendingPathComponent("settings.json")
-                )
-            )
-            await model.refresh()
+            let service = ScenarioDoubaoRecognitionService()
+            let settings = ScenarioAppSettingsStore()
+            let model = await loadedDoubaoRecognition(service: service, settings: settings)
 
             model.checkConnection()
-            for _ in 0..<50 {
-                if await service.isCheckPending { break }
-                try? await Task.sleep(for: .milliseconds(2))
-            }
-            await model.selectResource(.model1Concurrent)
+            _ = await eventually(before: .seconds(1)) { await service.isCheckPending }
+            await model.selectDoubaoResource(.model1Concurrent)
             await service.finishCheck(.success("old-resource-request"))
             try? await Task.sleep(for: .milliseconds(30))
 
-            try expect(model.resource == .model1Concurrent)
-            try expect(model.status == .configured)
+            try expect(model.doubaoResource == .model1Concurrent)
+            try expect(model.doubaoStatus == .configured)
+            try expect(model.readiness == .unverified)
+            let saved = await settings.settings.doubaoResourceID
+            let applied = await service.resource
+            try expect(saved == DoubaoStreamingResource.model1Concurrent.rawValue)
+            try expect(applied == .model1Concurrent)
+            await model.shutdown()
         }
 
         await runAsync(
@@ -2992,18 +2973,23 @@ struct SpeakerAppScenarioSpecs {
                     error: URLError(.userAuthenticationRequired)
                 )
             )
-            let model = DoubaoSettingsModel(
-                service: service,
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials,
+                configuration: VoiceInputConfigurationController(),
                 settingsStore: VersionedLocalAppSettingsStore(
                     fileURL: directory.appendingPathComponent("settings.json")
-                )
+                ),
+                doubao: service
             )
+            await model.load()
             model.apiKeyDraft = "initial-test-key"
-            await model.save()
+            await model.saveAPIKey()
             try expect(
                 model.hasStoredKey && model.apiKeyDraft.isEmpty,
                 "the first save did not store the Key")
-            try expect(model.status == .configured, "first save left status \(model.status)")
+            try expect(
+                model.doubaoStatus == .configured,
+                "first save left status \(model.doubaoStatus)")
 
             let started = ContinuousClock.now
             do {
@@ -3021,13 +3007,13 @@ struct SpeakerAppScenarioSpecs {
 
             model.checkConnection()
             let failed = await eventually(before: .seconds(1)) {
-                if case .failure = model.status { true } else { false }
+                if case .failure = model.doubaoStatus { true } else { false }
             }
             try expect(failed, "the model never reported the failed connection check")
             try expect(model.hasStoredKey)
             model.apiKeyDraft = "replacement-test-key"
-            await model.save()
-            try expect(model.status == .configured && model.apiKeyDraft.isEmpty)
+            await model.saveAPIKey()
+            try expect(model.doubaoStatus == .configured && model.apiKeyDraft.isEmpty)
             let storedKey = try await credentials.apiKey(for: .doubao)
             try expect(storedKey == "replacement-test-key")
             await model.shutdown()
@@ -3037,40 +3023,211 @@ struct SpeakerAppScenarioSpecs {
             "Doubao connection failure names the checked resource and its fix",
             failures: &failures
         ) {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent(
-                    "speaker-doubao-failure-\(UUID().uuidString)",
-                    isDirectory: true
-                )
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let service = ScenarioDoubaoSettingsService(hasKey: true)
-            let model = DoubaoSettingsModel(
-                service: service,
-                settingsStore: VersionedLocalAppSettingsStore(
-                    fileURL: directory.appendingPathComponent("settings.json")
-                )
-            )
-            await model.refresh()
-            await model.selectResource(.model1Duration)
+            let service = ScenarioDoubaoRecognitionService()
+            let model = await loadedDoubaoRecognition(service: service)
+            await model.selectDoubaoResource(.model1Duration)
 
             for (kind, expected) in [
                 (DoubaoASRFailureKind.resourceNotActivated, "「流式模型 1.0 · 小时版」"),
                 (.invalidCredential, "不要填 APP ID 或 Access Token"),
             ] {
                 model.checkConnection()
-                for _ in 0..<50 {
-                    if await service.isCheckPending { break }
-                    try? await Task.sleep(for: .milliseconds(2))
-                }
+                _ = await eventually(before: .seconds(1)) { await service.isCheckPending }
                 await service.finishCheck(.failure(DoubaoASRFailure(kind: kind)))
                 let reported = await eventually(before: .seconds(1)) {
-                    if case .failure(let message) = model.status {
-                        return message.contains(expected)
+                    if case .failure(let message) = model.doubaoStatus {
+                        return message.contains(expected) && model.doubaoProblem == message
                     }
                     return false
                 }
                 try expect(reported, "\(kind) failure did not explain its fix")
+                try expect(model.readiness == .unverified)
             }
+            await model.shutdown()
+        }
+
+        await runAsync(
+            "Doubao readiness moves from a saved Key to a verified connection and back",
+            failures: &failures
+        ) {
+            let credentials = ScenarioProviderCredentialStore()
+            let service = ScenarioDoubaoRecognitionService()
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore(), doubao: service)
+            try expect(model.readiness == .unread && model.doubaoStatus == .loading)
+            await model.load()
+            try expect(model.selectedProvider == .doubao && model.offersConnectionCheck)
+            try expect(model.readiness == .needsSetup && model.doubaoStatus == .unconfigured)
+
+            model.apiKeyDraft = "synthetic-doubao-key"
+            await model.saveAPIKey()
+            try expect(model.readiness == .unverified && model.doubaoStatus == .configured)
+            try expect(model.apiKeyDraft.isEmpty)
+
+            model.checkConnection()
+            _ = await eventually(before: .seconds(1)) { await service.isCheckPending }
+            await service.finishCheck(.success("synthetic-request"))
+            let verified = await eventually(before: .seconds(1)) { model.readiness == .ready }
+            try expect(verified && model.doubaoStatus == .success("synthetic-request"))
+
+            await model.refresh()
+            try expect(model.readiness == .ready, "an unchanged refresh dropped verification")
+
+            await model.selectDoubaoResource(.model1Concurrent)
+            try expect(model.readiness == .unverified, "a new resource kept the old check")
+
+            model.checkConnection()
+            _ = await eventually(before: .seconds(1)) { await service.isCheckPending }
+            await service.finishCheck(.success("synthetic-request"))
+            _ = await eventually(before: .seconds(1)) { model.readiness == .ready }
+            model.apiKeyDraft = "synthetic-doubao-replacement"
+            await model.saveAPIKey()
+            try expect(model.readiness == .unverified, "a replaced Key kept the old check")
+
+            model.checkConnection()
+            _ = await eventually(before: .seconds(1)) { await service.isCheckPending }
+            await service.finishCheck(.failure(DoubaoASRFailure(kind: .invalidCredential)))
+            _ = await eventually(before: .seconds(1)) {
+                if case .failure = model.doubaoStatus { true } else { false }
+            }
+            await model.refresh()
+            try expect(
+                model.doubaoStatus == .configured, "a refresh kept a failed check on screen")
+
+            await credentials.deleteAPIKey(for: .doubao)
+            await model.refresh()
+            try expect(model.readiness == .needsSetup && model.doubaoStatus == .unconfigured)
+            let checks = await service.checkCount
+            try expect(checks == 3)
+            await model.shutdown()
+        }
+
+        await runAsync(
+            "setup gap, onboarding, and diagnostics read one recognition readiness",
+            failures: &failures
+        ) {
+            let granted = PermissionSnapshot(accessibility: .granted, microphone: .granted)
+            // (readiness, setup gap, onboarding may finish, diagnostics configured)
+            let table: [(SpeechRecognitionReadiness, VoiceInputSetupGap?, Bool, Bool)] = [
+                (.unread, nil, false, false),
+                (.needsSetup, .speechRecognitionKey(.doubao), false, false),
+                (.unverified, nil, false, true),
+                (.ready, nil, true, true),
+            ]
+            for (readiness, gap, onboardingReady, configured) in table {
+                let resolved = VoiceInputSetupGap.resolve(
+                    permissions: granted, recognitionProvider: .doubao,
+                    recognitionReadiness: readiness)
+                let onboarding = OnboardingPresentation(
+                    permissions: granted, recognitionReadiness: readiness)
+                try expect(resolved == gap, "\(readiness) resolved the wrong setup gap")
+                try expect(onboarding.isReady == onboardingReady, "\(readiness) onboarding")
+                try expect(readiness.isConfigured == configured, "\(readiness) diagnostics")
+            }
+
+            let service = ScenarioDoubaoRecognitionService()
+            let model = await loadedDoubaoRecognition(service: service)
+            @MainActor func observed() -> (VoiceInputSetupGap?, Bool, Bool) {
+                (
+                    VoiceInputSetupGap.current(permissions: granted, recognition: model),
+                    OnboardingPresentation(
+                        permissions: granted, recognitionReadiness: model.readiness,
+                        isUpdatingRecognition: model.isMutating
+                    ).isReady,
+                    model.readiness.isConfigured
+                )
+            }
+            let unverified = observed()
+            try expect(unverified.0 == nil && !unverified.1 && unverified.2)
+            model.checkConnection()
+            _ = await eventually(before: .seconds(1)) { await service.isCheckPending }
+            await service.finishCheck(.success(nil))
+            _ = await eventually(before: .seconds(1)) { model.readiness == .ready }
+            let ready = observed()
+            try expect(ready.0 == nil && ready.1 && ready.2)
+            await model.deleteAPIKey()
+            let removed = observed()
+            try expect(removed.0 == .speechRecognitionKey(.doubao) && !removed.1 && !removed.2)
+            await model.shutdown()
+        }
+
+        await runAsync(
+            "provider Key editors refuse saves, deletes, and checks after shutdown",
+            failures: &failures
+        ) {
+            let credentials = ScenarioProviderCredentialStore()
+            let service = ScenarioDoubaoRecognitionService()
+            let recognition = await loadedDoubaoRecognition(
+                service: service, credentials: credentials)
+            await recognition.shutdown()
+            recognition.apiKeyDraft = "synthetic-after-shutdown"
+            await recognition.saveAPIKey()
+            await recognition.deleteAPIKey()
+            recognition.checkConnection()
+            try? await Task.sleep(for: .milliseconds(30))
+            let doubaoKey = await credentials.apiKey(for: .doubao)
+            let doubaoChecks = await service.checkCount
+            try expect(doubaoKey == "synthetic-doubao-key", "a Key changed after shutdown")
+            try expect(doubaoChecks == 0 && !recognition.isUpdatingKey)
+
+            let refinementCredentials = ScenarioProviderCredentialStore()
+            let refinement = RefinementSettingsModel(
+                service: CredentialedTextRefiner(credentials: refinementCredentials),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore())
+            await refinement.load()
+            refinement.apiKeyDraft = "synthetic-deepseek-key"
+            await refinement.saveAPIKey()
+            try expect(refinement.hasStoredKey)
+            refinement.apiKeyDraft = "synthetic-unsent"
+            await refinement.shutdown()
+            try expect(refinement.apiKeyDraft.isEmpty, "shutdown kept an unsent draft")
+            refinement.apiKeyDraft = "synthetic-after-shutdown"
+            await refinement.saveAPIKey()
+            await refinement.deleteAPIKey()
+            let deepSeekKey = await refinementCredentials.apiKey(for: .deepSeek)
+            try expect(deepSeekKey == "synthetic-deepseek-key", "a Key changed after shutdown")
+
+            let suspended = ScenarioSuspendedRefinementService()
+            let checked = RefinementSettingsModel(
+                service: suspended, configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore())
+            await checked.load()
+            await checked.shutdown()
+            checked.checkConnection()
+            try? await Task.sleep(for: .milliseconds(30))
+            let refinementChecks = await suspended.checkCount
+            try expect(refinementChecks == 0 && !checked.isCheckingConnection)
+        }
+
+        await runAsync(
+            "refinement shutdown waits for a pending Key save", failures: &failures
+        ) {
+            let credentials = ScenarioProviderCredentialStore()
+            let model = RefinementSettingsModel(
+                service: CredentialedTextRefiner(credentials: credentials),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore())
+            await model.load()
+            model.apiKeyDraft = "synthetic-pending"
+            await credentials.pauseSaves()
+            let save = Task { await model.saveAPIKey() }
+            let pending = await eventually(before: .seconds(2)) {
+                await credentials.pendingSaveCount == 1
+            }
+            try expect(pending)
+            var shutdownFinished = false
+            let shutdown = Task {
+                await model.shutdown()
+                shutdownFinished = true
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+            try expect(!shutdownFinished, "shutdown returned while a Key write was in flight")
+            await credentials.resumeSaves()
+            await save.value
+            await shutdown.value
+            try expect(shutdownFinished)
         }
 
         run("provider key links point to each provider's own console", failures: &failures) {
@@ -3575,7 +3732,7 @@ struct SpeakerAppScenarioSpecs {
                     isRecording: false,
                     setupGap: VoiceInputSetupGap.resolve(
                         permissions: granted, recognitionProvider: .doubao,
-                        hasRecognitionKey: true)
+                        recognitionReadiness: .ready)
                 ) == .ready
             )
             try expect(
@@ -3583,7 +3740,7 @@ struct SpeakerAppScenarioSpecs {
                     isRecording: false,
                     setupGap: VoiceInputSetupGap.resolve(
                         permissions: missing, recognitionProvider: .doubao,
-                        hasRecognitionKey: true)
+                        recognitionReadiness: .ready)
                 ) == .needsSetup
             )
             try expect(
@@ -3591,7 +3748,7 @@ struct SpeakerAppScenarioSpecs {
                     isRecording: false,
                     setupGap: VoiceInputSetupGap.resolve(
                         permissions: granted, recognitionProvider: .openAI,
-                        hasRecognitionKey: false)
+                        recognitionReadiness: .needsSetup)
                 ) == .needsSetup
             )
         }
@@ -3605,20 +3762,22 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(
                 VoiceInputSetupGap.resolve(
-                    permissions: granted, recognitionProvider: .qwen, hasRecognitionKey: nil)
+                    permissions: granted, recognitionProvider: .qwen, recognitionReadiness: .unread)
                     == nil,
                 "an unread Key was reported missing")
             try expect(
                 VoiceInputSetupGap.resolve(
-                    permissions: granted, recognitionProvider: .qwen, hasRecognitionKey: false)
+                    permissions: granted, recognitionProvider: .qwen,
+                    recognitionReadiness: .needsSetup)
                     == .speechRecognitionKey(.qwen))
             try expect(
                 VoiceInputSetupGap.resolve(
-                    permissions: missing, recognitionProvider: .qwen, hasRecognitionKey: false)
+                    permissions: missing, recognitionProvider: .qwen,
+                    recognitionReadiness: .needsSetup)
                     == .permissions)
             try expect(
                 VoiceInputSetupGap.resolve(
-                    permissions: granted, recognitionProvider: .qwen, hasRecognitionKey: true)
+                    permissions: granted, recognitionProvider: .qwen, recognitionReadiness: .ready)
                     == nil)
             try expect(VoiceInputSetupGap.permissions.settingsGroup == .permissions)
             try expect(
@@ -3638,24 +3797,19 @@ struct SpeakerAppScenarioSpecs {
             let settings = VersionedLocalAppSettingsStore(
                 fileURL: directory.appendingPathComponent("settings.json"))
             let credentials = ScenarioProviderCredentialStore()
-            let doubao = DoubaoSettingsModel(
-                service: ScenarioDoubaoSettingsService(hasKey: false), settingsStore: settings)
             let recognition = SpeechRecognitionSettingsModel(
                 credentials: credentials, configuration: VoiceInputConfigurationController(),
-                settingsStore: settings)
+                settingsStore: settings, doubao: ScenarioDoubaoRecognitionService())
             let granted = PermissionSnapshot(accessibility: .granted, microphone: .granted)
             @MainActor func gap() -> VoiceInputSetupGap? {
-                VoiceInputSetupGap.current(
-                    permissions: granted, doubao: doubao, recognition: recognition)
+                VoiceInputSetupGap.current(permissions: granted, recognition: recognition)
             }
 
             try expect(gap() == nil, "a gap was reported before anything was read")
             await recognition.load()
-            try expect(gap() == nil, "Doubao's Key was reported missing before it was read")
-            await doubao.refresh()
             try expect(gap() == .speechRecognitionKey(.doubao))
-            doubao.apiKeyDraft = "synthetic-doubao-key"
-            await doubao.save()
+            recognition.apiKeyDraft = "synthetic-doubao-key"
+            await recognition.saveAPIKey()
             try expect(gap() == nil, "a saved but unchecked Doubao Key still reported a gap")
 
             await recognition.selectProvider(.openAI)
@@ -3664,7 +3818,6 @@ struct SpeakerAppScenarioSpecs {
             await recognition.saveAPIKey()
             try expect(gap() == nil)
             await recognition.shutdown()
-            await doubao.shutdown()
         }
 
         run("processing is not presented as active recording in the menu bar", failures: &failures)
@@ -3684,7 +3837,7 @@ struct SpeakerAppScenarioSpecs {
                     isRecording: activity.isRecording,
                     setupGap: VoiceInputSetupGap.resolve(
                         permissions: granted, recognitionProvider: .doubao,
-                        hasRecognitionKey: true)
+                        recognitionReadiness: .ready)
                 ) == .ready
             )
         }
@@ -3803,25 +3956,26 @@ struct SpeakerAppScenarioSpecs {
             let credentials = ScenarioProviderCredentialStore()
             let settings = VersionedLocalAppSettingsStore(
                 fileURL: directory.appendingPathComponent("settings.json"))
-            let doubao = DoubaoSettingsModel(
-                service: CredentialedDoubaoTranscriber(credentials: credentials),
-                settingsStore: settings)
+            let doubao = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
+                settingsStore: settings, doubao: ScenarioDoubaoRecognitionService())
             let refinement = RefinementSettingsModel(
                 service: CredentialedTextRefiner(credentials: credentials),
                 configuration: VoiceInputConfigurationController(), settingsStore: settings)
+            await doubao.load()
             doubao.apiKeyDraft = "synthetic-doubao-old"
             refinement.apiKeyDraft = "synthetic-deepseek-old"
-            await doubao.save()
+            await doubao.saveAPIKey()
             await refinement.saveAPIKey()
             await credentials.setSaveError(.storageUnavailable)
             doubao.apiKeyDraft = "synthetic-doubao-new"
             refinement.apiKeyDraft = "synthetic-deepseek-new"
-            await doubao.save()
+            await doubao.saveAPIKey()
             await refinement.saveAPIKey()
             try expect(doubao.hasStoredKey && refinement.hasStoredKey)
             try expect(doubao.apiKeyDraft == "synthetic-doubao-new")
             try expect(refinement.apiKeyDraft == "synthetic-deepseek-new")
-            if case .failure = doubao.status {
+            if case .failure = doubao.doubaoStatus {
             } else {
                 throw SpecFailure(message: "replacement failure was hidden")
             }
@@ -3830,14 +3984,14 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 oldDoubao == "synthetic-doubao-old" && oldDeepSeek == "synthetic-deepseek-old")
             await credentials.setSaveError(nil)
-            await doubao.save()
+            await doubao.saveAPIKey()
             await refinement.saveAPIKey()
             let newDoubao = await credentials.apiKey(for: .doubao)
             let newDeepSeek = await credentials.apiKey(for: .deepSeek)
             try expect(
                 newDoubao == "synthetic-doubao-new" && newDeepSeek == "synthetic-deepseek-new")
             try expect(doubao.apiKeyDraft.isEmpty && refinement.apiKeyDraft.isEmpty)
-            await doubao.delete()
+            await doubao.deleteAPIKey()
             await refinement.deleteAPIKey()
             try expect(!doubao.hasStoredKey && !refinement.hasStoredKey)
             await doubao.shutdown()
@@ -3855,18 +4009,19 @@ struct SpeakerAppScenarioSpecs {
                 fileURL: directory.appendingPathComponent("settings.json"))
             for provider in [ProviderID.doubao, .deepSeek] {
                 let credentials = ScenarioProviderCredentialStore()
-                let doubao = DoubaoSettingsModel(
-                    service: CredentialedDoubaoTranscriber(credentials: credentials),
-                    settingsStore: settings)
+                let doubao = SpeechRecognitionSettingsModel(
+                    credentials: credentials, configuration: VoiceInputConfigurationController(),
+                    settingsStore: settings, doubao: ScenarioDoubaoRecognitionService())
                 let refinement = RefinementSettingsModel(
                     service: CredentialedTextRefiner(credentials: credentials),
                     configuration: VoiceInputConfigurationController(), settingsStore: settings)
+                await doubao.load()
                 doubao.apiKeyDraft = "synthetic-first"
                 refinement.apiKeyDraft = "synthetic-first"
                 await credentials.pauseSaves()
                 let saveTask = Task {
                     if provider == .doubao {
-                        await doubao.save()
+                        await doubao.saveAPIKey()
                     } else {
                         await refinement.saveAPIKey()
                     }
@@ -3882,8 +4037,8 @@ struct SpeakerAppScenarioSpecs {
                 var duplicateFinished = false
                 let duplicateTask = Task {
                     if provider == .doubao {
-                        await doubao.save()
-                        await doubao.delete()
+                        await doubao.saveAPIKey()
+                        await doubao.deleteAPIKey()
                     } else {
                         await refinement.saveAPIKey()
                         await refinement.deleteAPIKey()
@@ -5431,31 +5586,19 @@ extension Duration {
     }
 }
 
-private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {
-    private var hasKey: Bool
+/// Doubao's resource and connection check, with a check that waits until the
+/// spec finishes it.
+private actor ScenarioDoubaoRecognitionService: DoubaoRecognitionServicing {
+    private(set) var resource: DoubaoStreamingResource = .default
+    private(set) var checkCount = 0
     private var checkContinuation: CheckedContinuation<Result<String?, Error>, Never>?
 
-    init(hasKey: Bool) {
-        self.hasKey = hasKey
-    }
-
-    func setResource(_ resource: DoubaoStreamingResource) async {}
-
-    func hasAPIKey() async throws -> Bool {
-        hasKey
-    }
-
-    func saveAPIKey(_ apiKey: String) async throws {
-        hasKey = !apiKey.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        ).isEmpty
-    }
-
-    func deleteAPIKey() async throws {
-        hasKey = false
+    func setResource(_ resource: DoubaoStreamingResource) async {
+        self.resource = resource
     }
 
     func checkConnection() async throws -> String? {
+        checkCount += 1
         let result = await withCheckedContinuation { continuation in
             checkContinuation = continuation
         }
@@ -5470,6 +5613,21 @@ private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {
         checkContinuation?.resume(returning: result)
         checkContinuation = nil
     }
+}
+
+/// A recognition settings model with Doubao selected and a saved Key.
+@MainActor
+private func loadedDoubaoRecognition(
+    service: ScenarioDoubaoRecognitionService,
+    settings: ScenarioAppSettingsStore = ScenarioAppSettingsStore(),
+    credentials: ScenarioProviderCredentialStore = ScenarioProviderCredentialStore()
+) async -> SpeechRecognitionSettingsModel {
+    try? await credentials.save(apiKey: "synthetic-doubao-key", for: .doubao)
+    let model = SpeechRecognitionSettingsModel(
+        credentials: credentials, configuration: VoiceInputConfigurationController(),
+        settingsStore: settings, doubao: service)
+    await model.load()
+    return model
 }
 
 /// An in-memory stand-in for `VersionedLocalAppSettingsStore`, proving the
@@ -5515,6 +5673,12 @@ private actor ScenarioAppSettingsStore: AppSettingsStoring {
         }
         if failProviderWrites { throw AppSettingsStoreError.writeFailed(reason: "fixture") }
         settings.speechRecognitionProviders = providers
+        return settings
+    }
+
+    @discardableResult
+    func updateDoubaoResource(_ resource: DoubaoStreamingResource) -> SpeakerAppSettings {
+        settings.doubaoResourceID = resource.rawValue
         return settings
     }
 
@@ -5845,28 +6009,27 @@ private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
     }
 }
 
-private final class RouterVoiceRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedTriggers: [GlobalVoiceTrigger] = []
+private final class RouterVoiceRecorder: Sendable {
+    private let storedTriggers = OSAllocatedUnfairLock(initialState: [GlobalVoiceTrigger]())
     private let escapeActive: Bool
 
     init(escapeActive: Bool = false) {
         self.escapeActive = escapeActive
     }
 
-    lazy var target = VoiceTriggerTarget(
-        receive: { [weak self] trigger in
-            self?.lock.withLock {
-                self?.storedTriggers.append(trigger)
+    var target: VoiceTriggerTarget {
+        VoiceTriggerTarget(
+            receive: { [storedTriggers] trigger in
+                storedTriggers.withLock { $0.append(trigger) }
+            },
+            shouldConsumeEscape: { [escapeActive] in
+                escapeActive
             }
-        },
-        shouldConsumeEscape: { [weak self] in
-            self?.escapeActive ?? false
-        }
-    )
+        )
+    }
 
     var triggers: [GlobalVoiceTrigger] {
-        lock.withLock { storedTriggers }
+        storedTriggers.withLock { $0 }
     }
 }
 

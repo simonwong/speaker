@@ -28,7 +28,6 @@ struct SpeakerApp: App {
                 settingsNavigation: runtime.settingsNavigation,
                 mainWindow: runtime.mainWindow,
                 permissions: runtime.permissions,
-                doubao: runtime.doubaoSettings,
                 recognition: runtime.recognitionSettings,
                 recentResults: runtime.recentResults,
                 startRuntime: runtime.start,
@@ -39,7 +38,6 @@ struct SpeakerApp: App {
             MenuBarStatusLabel(
                 voiceInput: runtime.voiceInput,
                 permissions: runtime.permissions,
-                doubao: runtime.doubaoSettings,
                 recognition: runtime.recognitionSettings
             )
         }

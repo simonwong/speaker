@@ -4,7 +4,6 @@ import SwiftUI
 
 package struct SpeakerOnboardingView: View {
     @ObservedObject var permissions: PermissionModel
-    @ObservedObject var doubao: DoubaoSettingsModel
     @ObservedObject var recognition: SpeechRecognitionSettingsModel
     @State private var step: OnboardingStep = .permissions
     @State private var movesForward = true
@@ -22,7 +21,6 @@ package struct SpeakerOnboardingView: View {
 
     package init(
         permissions: PermissionModel,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         requestPermission: @escaping (PermissionKind) async -> Void,
         refreshPermissions: @escaping () -> Void,
@@ -34,7 +32,6 @@ package struct SpeakerOnboardingView: View {
     ) {
         self.softwareUpdate = softwareUpdate
         self.permissions = permissions
-        self.doubao = doubao
         self.recognition = recognition
         self.completion = completion
         self.requestPermission = requestPermission
@@ -47,13 +44,8 @@ package struct SpeakerOnboardingView: View {
     private var presentation: OnboardingPresentation {
         OnboardingPresentation(
             permissions: permissions.snapshot,
-            doubaoStatus: doubao.status,
-            hasStoredDoubaoKey: doubao.hasStoredKey,
+            recognitionReadiness: recognition.readiness,
             mode: mode,
-            isUpdatingDoubaoKey: doubao.isUpdatingKey,
-            recognitionProvider: recognition.selectedProvider,
-            hasStoredRecognitionKey: recognition.isSelectedProviderReady
-                && recognition.hasValidProfile,
             isUpdatingRecognition: recognition.isMutating
         )
     }
@@ -77,7 +69,6 @@ package struct SpeakerOnboardingView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
             refreshPermissions()
-            await doubao.refresh()
             await recognition.refresh()
         }
         .onChange(of: permissions.snapshot) { previous, current in
@@ -87,7 +78,7 @@ package struct SpeakerOnboardingView: View {
                 announce("\(name)：\(PermissionStatusPresentation(state: current[permission]).text)")
             }
         }
-        .onChange(of: doubao.status) { _, status in
+        .onChange(of: recognition.doubaoStatus) { _, status in
             guard recognition.selectedProvider == .doubao else { return }
             switch status {
             case .checking: announce("正在检查豆包连接")
@@ -199,7 +190,7 @@ package struct SpeakerOnboardingView: View {
             }
         case .apiKey:
             VStack(alignment: .leading, spacing: 14) {
-                SpeechRecognitionSettingsCard(model: recognition, doubao: doubao)
+                SpeechRecognitionSettingsCard(model: recognition)
                     .environment(\.collapsesStoredProviderKeys, false)
             }
         case .shortcut:
