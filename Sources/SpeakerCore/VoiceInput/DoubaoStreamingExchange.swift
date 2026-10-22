@@ -34,9 +34,13 @@ package struct DoubaoStreamingExchange: Sendable {
         closeGate = DoubaoWebSocketCloseGate(connection: connection)
     }
 
+    /// Sends `requestPayload` and the audio in `chunks`. When `audioCaptureCompletion`
+    /// is given, the final audio frame waits for it: a rejected capture sends
+    /// no final frame and ends the exchange as cancelled.
     package func run(
         requestPayload: Data,
-        audio chunks: AsyncStream<Data>
+        audio chunks: AsyncStream<Data>,
+        audioCaptureCompletion: AudioCaptureCompletionGate? = nil
     ) async throws -> TranscriptionResult {
         try await withTaskCancellationHandler {
             do {
@@ -52,7 +56,8 @@ package struct DoubaoStreamingExchange: Sendable {
                     requestID: requestID,
                     phase: .requestSent
                 )
-                let result = try await exchangeAudio(chunks)
+                let result = try await exchangeAudio(
+                    chunks, audioCaptureCompletion: audioCaptureCompletion)
                 await closeGate.close()
                 await runtimeDiagnostics?.finishDoubao(requestID: requestID)
                 return result
@@ -99,14 +104,17 @@ package struct DoubaoStreamingExchange: Sendable {
     /// Runs the sender and receiver together and returns once both have
     /// finished: audio fully sent and a final result received. After the
     /// final audio frame, a liveness probe runs beside the receiver.
-    private func exchangeAudio(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
+    private func exchangeAudio(
+        _ chunks: AsyncStream<Data>,
+        audioCaptureCompletion: AudioCaptureCompletionGate?
+    ) async throws -> TranscriptionResult {
         try await withThrowingTaskGroup(
             of: Event.self,
             returning: TranscriptionResult.self
         ) { group in
             group.addTask {
                 do {
-                    try await sendAudio(chunks)
+                    try await sendAudio(chunks, audioCaptureCompletion: audioCaptureCompletion)
                     await runtimeDiagnostics?.updateDoubao(
                         requestID: requestID,
                         phase: .awaitingFinal
@@ -198,7 +206,10 @@ package struct DoubaoStreamingExchange: Sendable {
         return .probeEnded
     }
 
-    private func sendAudio(_ chunks: AsyncStream<Data>) async throws {
+    private func sendAudio(
+        _ chunks: AsyncStream<Data>,
+        audioCaptureCompletion: AudioCaptureCompletionGate?
+    ) async throws {
         var pending: Data?
         for await chunk in chunks {
             try Task.checkCancellation()
@@ -215,6 +226,10 @@ package struct DoubaoStreamingExchange: Sendable {
         // AsyncStream ends its iteration when the consuming task is cancelled.
         // Re-check here before treating the buffered chunk as a legitimate
         // end-of-audio frame; otherwise Esc can still send `isFinal=true`.
+        try Task.checkCancellation()
+        // The stream also ends when a capture fails or is cancelled. Only a
+        // capture the session accepted may end with a final frame.
+        try await audioCaptureCompletion?.wait()
         try Task.checkCancellation()
         guard let pending else {
             throw DoubaoASRFailure(kind: .emptyAudio, providerRequestID: requestID)

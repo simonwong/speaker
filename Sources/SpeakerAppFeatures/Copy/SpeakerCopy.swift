@@ -28,6 +28,47 @@ package enum SpeakerCopy {
         package static let conciseCleanup = "精简清理"
         package static let fullRewrite = "完整重写"
         package static let custom = "自定义"
+
+        /// The name a mode goes by: a built-in mode's name, or the name the
+        /// user gave a Custom Mode.
+        package static func title(for mode: TextRefinementMode) -> String {
+            switch mode.builtInMode {
+            case .conciseCleanup: conciseCleanup
+            case .fullRewrite: fullRewrite
+            case nil:
+                if case .custom(let name, _) = mode { name } else { defaultSmooth }
+            }
+        }
+    }
+
+    /// The Refinement Mode shortcut: its settings row, its recorder, and the
+    /// HUD notice a press shows.
+    package enum RefinementModeShortcut {
+        package static let title = "切换整理模式"
+        package static let unset = "未设置"
+        package static let recordingPrompt =
+            "请输入包含修饰键的组合键，例如 ⌃⌥M；按 Esc 取消。"
+        package static let usedByModeShortcut =
+            "这个组合键已用于“切换整理模式”，请换一个。"
+
+        /// The HUD notice after a press. It names the mode new sessions use.
+        package static func notice(for outcome: RefinementModeCycleOutcome) -> String? {
+            switch outcome {
+            case .selected(let mode): "整理模式：\(RefinementMode.title(for: mode))"
+            case .requiresKey(let providerName): "保存 \(providerName) Key 后才能切换整理模式"
+            case .unchanged: nil
+            }
+        }
+
+        package static func message(for rejection: RefinementModeShortcutRejection) -> String {
+            switch rejection {
+            case .modifierOnly: "切换整理模式需要组合键，不能单独使用修饰键。"
+            case .reservedForCancellation: "Esc 用于取消录音，请换一个组合键。"
+            case .editingConflict: ShortcutRecorderPolicy.editingConflictPrompt
+            case .unsafeShortcut: recordingPrompt
+            case .sameAsRecordingShortcut: "这个组合键已用作录音快捷键，请换一个。"
+            }
+        }
     }
 
     /// The clipboard confirmation. The voice HUD announces it after a manual
@@ -280,6 +321,8 @@ package enum SpeakerCopy {
                 "提示词不能为空。"
             case .customPromptTooLong:
                 "提示词不能超过 \(TextRefinementMode.maximumCustomPromptLength) 个字符。"
+            case .tooManyCustomModes:
+                "最多保存 \(CustomRefinementMode.maximumCount) 个自定义模式。"
             }
         }
     }

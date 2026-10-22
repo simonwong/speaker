@@ -116,11 +116,8 @@ package struct MenuBarContent: View {
             }
         case .refinementMode:
             Menu {
-                refinementToggle(.defaultSmooth, title: SpeakerCopy.RefinementMode.defaultSmooth)
-                refinementToggle(.conciseCleanup, title: SpeakerCopy.RefinementMode.conciseCleanup)
-                refinementToggle(.fullRewrite, title: SpeakerCopy.RefinementMode.fullRewrite)
-                if let customModeName = refinement.savedCustomModeName {
-                    refinementToggle(.custom, title: customModeName)
+                ForEach(refinement.menuEntries) { entry in
+                    refinementToggle(entry)
                 }
             } label: {
                 Label(refinement.mode.displayName, systemImage: "text.alignleft")
@@ -213,23 +210,17 @@ package struct MenuBarContent: View {
     /// A menu toggle shows the current mode's checkmark. Modes other than the
     /// default need a saved Key, so they stay disabled rather than silently
     /// refusing the click.
-    private func refinementToggle(_ choice: RefinementChoice, title: String) -> some View {
+    private func refinementToggle(_ entry: RefinementModeMenuEntry) -> some View {
         Toggle(
-            title,
+            entry.title,
             isOn: Binding(
-                get: { refinement.choice == choice },
+                get: { entry.isSelected },
                 set: { isOn in
                     guard isOn else { return }
-                    Task {
-                        if choice == .custom {
-                            await refinement.selectSavedCustomMode()
-                        } else {
-                            await refinement.select(choice)
-                        }
-                    }
+                    Task { await refinement.selectMode(entry.selection) }
                 }
             )
         )
-        .disabled(choice != .defaultSmooth && !refinement.hasStoredKey)
+        .disabled(!entry.isEnabled)
     }
 }

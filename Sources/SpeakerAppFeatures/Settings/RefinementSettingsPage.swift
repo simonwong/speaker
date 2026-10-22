@@ -2,8 +2,8 @@ import SpeakerCore
 import SwiftUI
 
 /// The 整理 page: one card with mode selection first, then at most one
-/// editor below it — the inspected built-in mode's prompt, or Custom Mode's
-/// own name and prompt.
+/// editor below it — the inspected built-in mode's prompt, or the Custom Mode
+/// list with the editor for one entry.
 package struct RefinementSettingsPage: View {
     @ObservedObject var model: RefinementSettingsModel
 
@@ -126,16 +126,70 @@ private struct RefinementPromptEditor: View {
     }
 }
 
-/// Custom Mode's own name and prompt. The save condition lives on the model as
-/// `canSaveCustomMode`, so this editor only renders it.
+/// The Custom Mode list and the editor for one entry. List order is the order
+/// the menu and the Refinement Mode shortcut use. The save conditions live on
+/// the model as `canSaveCustomMode` and `canSaveCustomModeDraft`, so this view
+/// only renders them.
 private struct CustomRefinementModeEditor: View {
     @ObservedObject var model: RefinementSettingsModel
+    @State private var pendingDeletion: CustomRefinementMode?
 
     var body: some View {
         VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
-            RefinementEditorSectionTitle(title: "自定义模式")
+            HStack(alignment: .firstTextBaseline) {
+                RefinementEditorSectionTitle(title: "自定义模式")
+                Text("\(model.customModes.count) / \(CustomRefinementMode.maximumCount)")
+                    .font(SpeakerTypography.footnote.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    model.beginNewCustomMode()
+                } label: {
+                    Label("新建模式", systemImage: "plus")
+                }
+                .buttonStyle(SettingsButtonStyle())
+                .disabled(!model.canAddCustomMode)
+            }
 
-            if model.choice != .custom {
+            if model.customModes.isEmpty {
+                Text("还没有自定义模式。填写名称和提示词后保存。")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(Array(model.customModes.enumerated()), id: \.element.id) {
+                        index, mode in
+                        CustomRefinementModeRow(
+                            mode: mode,
+                            isActive: model.selection == .custom(mode.id),
+                            isEditing: model.editingCustomModeID == mode.id,
+                            canUse: model.hasStoredKey,
+                            canMoveUp: index > 0,
+                            canMoveDown: index < model.customModes.count - 1,
+                            use: { Task { await model.selectCustomMode(mode.id) } },
+                            edit: { model.editCustomMode(mode.id) },
+                            moveUp: { Task { await model.moveCustomMode(mode.id, by: -1) } },
+                            moveDown: { Task { await model.moveCustomMode(mode.id, by: 1) } },
+                            delete: { pendingDeletion = mode }
+                        )
+                    }
+                }
+                Text("菜单栏和“切换整理模式”快捷键按内置模式、再按此列表的顺序排列。")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsRowDivider()
+
+            RefinementEditorSectionTitle(
+                title: model.editingCustomModeID == nil ? "新建模式" : "编辑“\(model.customName)”"
+            )
+
+            if model.isEditingActiveCustomMode {
+                Text("这是正在使用的模式，保存后从下一次输入开始生效。")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+            } else if model.choice != .custom || model.editingCustomModeID == nil {
                 Text("保存并启用后生效；当前使用「\(model.mode.displayName)」。")
                     .font(SpeakerTypography.footnote)
                     .foregroundStyle(.secondary)
@@ -182,13 +236,146 @@ private struct CustomRefinementModeEditor: View {
                         : .secondary
                 )
                 Spacer()
-                Button("保存并启用") {
+                if !model.isEditingActiveCustomMode {
+                    Button("保存") {
+                        Task { await model.saveCustomMode(enabling: false) }
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                    .disabled(!model.canSaveCustomModeDraft)
+                }
+                Button(model.isEditingActiveCustomMode ? "保存" : "保存并启用") {
                     Task { await model.saveCustomMode() }
                 }
                 .buttonStyle(SettingsButtonStyle(prominent: true))
                 .disabled(!model.canSaveCustomMode)
             }
         }
+        .confirmationDialog(
+            "删除“\(pendingDeletion?.name ?? "")”？",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeletion
+        ) { mode in
+            Button("删除模式", role: .destructive) {
+                Task { await model.deleteCustomMode(mode.id) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { mode in
+            Text(
+                model.selection == .custom(mode.id)
+                    ? "这是正在使用的模式。删除后，新的输入改用“默认顺滑”。"
+                    : "删除后无法恢复。"
+            )
+        }
+    }
+}
+
+/// One saved Custom Mode: coral marks the mode in use, gold the one open in
+/// the editor.
+private struct CustomRefinementModeRow: View {
+    let mode: CustomRefinementMode
+    let isActive: Bool
+    let isEditing: Bool
+    let canUse: Bool
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let use: () -> Void
+    let edit: () -> Void
+    let moveUp: () -> Void
+    let moveDown: () -> Void
+    let delete: () -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.adaptiveGlassSurfaceStyle) private var surfaceStyle
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            style: .continuous
+        )
+    }
+
+    private var strokeColor: Color {
+        if isEditing { return SpeakerVisualIdentity.warmGoldDeep.opacity(0.7) }
+        return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
+    }
+
+    @ViewBuilder
+    private func surface(_ content: some View) -> some View {
+        if #available(macOS 26.0, *), surfaceStyle == .liquidGlass {
+            content.glassEffect(
+                .regular.tint(isEditing ? SpeakerVisualIdentity.warmGold.opacity(0.14) : nil),
+                in: shape
+            )
+        } else {
+            content.background(
+                isEditing
+                    ? SpeakerVisualIdentity.warmGold.opacity(0.10) : Color.primary.opacity(0.03),
+                in: shape
+            )
+        }
+    }
+
+    var body: some View {
+        surface(row)
+            .overlay { shape.strokeBorder(strokeColor, lineWidth: 1) }
+    }
+
+    private var row: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(
+                    isActive
+                        ? SpeakerVisualIdentity.controlTint
+                        : Color.secondary.opacity(contrast == .increased ? 1 : 0.55)
+                )
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mode.name)
+                    .font(SpeakerTypography.bodyEmphasis)
+                    .lineLimit(1)
+                Text(mode.prompt)
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityValue(isActive ? "当前使用" : isEditing ? "正在编辑" : "")
+            Spacer(minLength: 8)
+            if isActive {
+                Text("使用中")
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(SpeakerVisualIdentity.controlTint)
+            } else {
+                Button("使用", action: use)
+                    .buttonStyle(SettingsButtonStyle())
+                    .controlSize(.small)
+                    .disabled(!canUse)
+                    .accessibilityLabel("使用“\(mode.name)”")
+            }
+            iconButton("pencil", label: "编辑“\(mode.name)”", action: edit)
+            iconButton("chevron.up", label: "上移“\(mode.name)”", action: moveUp)
+                .disabled(!canMoveUp)
+            iconButton("chevron.down", label: "下移“\(mode.name)”", action: moveDown)
+                .disabled(!canMoveDown)
+            iconButton("trash", label: "删除“\(mode.name)”", action: delete)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private func iconButton(
+        _ symbol: String, label: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .frame(width: 18, height: 18)
+        }
+        .buttonStyle(.borderless)
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 

@@ -279,6 +279,94 @@ enum VoiceInputFeedbackSpecs {
         }
 
         await runAsync(
+            "voice feedback keeps the recognition result offer when recognition confirms during Input Target capture",
+            failures: &failures
+        ) {
+            let target = TargetCaptureFake(
+                result: .writable(.init(id: UUID(), applicationName: "TextEdit")),
+                delaysFirstCapture: true
+            )
+            let processor = ConfirmedStreamingVoiceTextProcessor(confirmedText: "已识别的文字")
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(streamsAudio: true),
+                targetCapture: target,
+                textProcessor: processor,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let confirmedDuringCapture = await eventually(before: .seconds(2)) {
+                let refining = await processor.hasReportedRefining
+                let capturing = await target.hasPendingCapture
+                return refining && capturing
+            }
+            try expect(confirmedDuringCapture)
+            await target.resumeFirstCapture()
+            let captured = await eventually(before: .seconds(2)) {
+                await !target.hasPendingCapture
+            }
+            try expect(captured)
+            try await Task.sleep(for: .milliseconds(100))
+            try expect(
+                experience.state.diagnosticCode == "processing.refining",
+                "Input Target capture took back the recognition result offer")
+            guard case .processing(_, _, let useRecognition?) = experience.state.overlay else {
+                throw SpecFailure(message: "pending refinement offered no recognition result")
+            }
+            experience.perform(useRecognition)
+            let delivered = await eventually(before: .seconds(2)) {
+                await delivery.deliveredTexts == ["已识别的文字"]
+            }
+            await experience.shutdown()
+            try expect(delivered, "the recognition result was not delivered")
+        }
+
+        await runAsync(
+            "voice feedback delivers a short finished transcript without refinement and notes it in History",
+            failures: &failures
+        ) {
+            let refiner = TextRefinerFake(refinedText: "整理后的文字。")
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                textProcessor: DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(
+                        refinementMode: .conciseCleanup()),
+                    transcriber: SpeechTranscriberFake(text: "好的，收到。"),
+                    refinement: OptionalTextRefinementPipeline(refiner: refiner)
+                ),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let recorded = await eventually(before: .seconds(2)) {
+                await history.records.last?.outcome.isDelivered == true
+            }
+            let deliveredTexts = await delivery.deliveredTexts
+            let refineCount = await refiner.refineCount
+            let record = await history.records.last
+            await experience.shutdown()
+            try expect(recorded, "the session was not recorded as delivered")
+            try expect(deliveredTexts == ["好的，收到。"])
+            try expect(refineCount == 0, "a short finished transcript reached the provider")
+            guard let record else { throw SpecFailure(message: "no Session Record") }
+            let row = HistoryPresentation.row(for: record)
+            try expect(row.note == .refinementSkipped)
+            try expect(row.problem == nil, "a skipped refinement read as a fallback")
+            try expect(row.note?.label == "已跳过整理，用的是识别结果")
+        }
+
+        await runAsync(
             "voice feedback late Escape cannot cancel or dismiss a newer session",
             failures: &failures
         ) {
@@ -468,6 +556,72 @@ enum VoiceInputFeedbackSpecs {
             let after = experience.state.overlay
             await experience.shutdown()
             try expect(after == before, "the note replaced the retained result")
+        }
+
+        await runAsync(
+            "voice feedback names the next Refinement Mode while no session is on screen",
+            failures: &failures
+        ) {
+            var announcements: [String] = []
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                noticeDuration: .milliseconds(300),
+                announce: { announcements.append($0) })
+            experience.start()
+            let first = SpeakerCopy.RefinementModeShortcut.notice(
+                for: .selected(.conciseCleanup()))!
+            let second = SpeakerCopy.RefinementModeShortcut.notice(
+                for: .selected(.custom(name: "工作邮件", prompt: "整理成邮件")))!
+            experience.showRefinementModeNotice(first)
+            let shown = experience.state.overlay == .notice(title: first)
+            experience.showRefinementModeNotice(second)
+            let replaced = experience.state.overlay == .notice(title: second)
+            let hidden = await eventually(before: .seconds(2)) {
+                experience.state.overlay == .hidden
+            }
+            await experience.shutdown()
+
+            try expect(first == "整理模式：精简清理" && second == "整理模式：工作邮件")
+            try expect(shown, "the notice did not appear")
+            try expect(replaced, "a later press did not replace the notice")
+            try expect(announcements == [first, second], "the notice was not announced")
+            try expect(hidden, "the notice stayed on screen")
+        }
+
+        await runAsync(
+            "voice feedback keeps the session HUD over a Refinement Mode notice",
+            failures: &failures
+        ) {
+            var announcements: [String] = []
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                announce: { announcements.append($0) })
+            experience.start()
+            experience.shortcutTarget.receive(.pressed)
+            let recording = await eventually(before: .seconds(2)) { experience.state.isRecording }
+            try expect(recording)
+            let duringRecording = experience.state.overlay
+            experience.showRefinementModeNotice("整理模式：完整重写")
+            let afterRecordingPress = experience.state.overlay
+            guard case .recording(_, _, let finish, _) = duringRecording else {
+                throw SpecFailure(message: "recording action missing")
+            }
+            experience.perform(finish)
+            let retained = await eventually(before: .seconds(2)) {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
+            }
+            try expect(retained, "the result was not retained")
+            let before = experience.state.overlay
+            experience.showRefinementModeNotice("整理模式：默认顺滑")
+            let after = experience.state.overlay
+            await experience.shutdown()
+
+            try expect(
+                afterRecordingPress == duringRecording, "the notice covered the recording HUD")
+            try expect(after == before, "the notice replaced the retained result")
+            try expect(
+                !announcements.contains { $0.hasPrefix("整理模式") },
+                "a notice hidden behind the session HUD was announced")
         }
 
         SpeakerSpecSupport.run(

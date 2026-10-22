@@ -47,6 +47,7 @@ package protocol RuntimeStartupStages: AnyObject {
     func restoreLoginItem(desiredEnabled: Bool) async
     func restoreMicrophone(_ preference: MicrophonePreference)
     func restoreShortcut(_ preference: VoiceShortcutPreference)
+    func restoreRefinementModeShortcut(_ hotKey: CustomHotKey?)
     func presentOnboarding()
 }
 
@@ -155,6 +156,7 @@ package final class RuntimeStartupSequence {
         guard !Task.isCancelled else { return }
         stages.restoreMicrophone(settings.microphone)
         stages.restoreShortcut(settings.shortcut)
+        stages.restoreRefinementModeShortcut(settings.refinementModeShortcut)
         stages.presentOnboarding()
     }
 }

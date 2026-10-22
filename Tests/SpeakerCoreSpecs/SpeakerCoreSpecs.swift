@@ -17,6 +17,7 @@ struct SpeakerCoreSpecs {
         await SessionCancellationSpecs.run(failures: &failures)
         await SessionResetSpecs.run(failures: &failures)
         await SkipRefinementSpecs.run(failures: &failures)
+        await ReleaseLatencySpecs.run(failures: &failures)
         await PasteboardTransactionSpecs.run(failures: &failures)
         await DoubaoClientSpecs.run(failures: &failures)
         await DoubaoFrameCodecSpecs.run(failures: &failures)
@@ -32,6 +33,7 @@ struct SpeakerCoreSpecs {
         await OwnerOnlyPersistenceSpecs.run(failures: &failures)
         await VersionedDocumentStoreSpecs.run(failures: &failures)
         await AppSettingsStoreSpecs.run(failures: &failures)
+        await RefinementModeSpecs.run(failures: &failures)
         await UsageStatisticsSpecs.run(failures: &failures)
         await ServiceUsageSpecs.run(failures: &failures)
 
