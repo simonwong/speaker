@@ -208,7 +208,13 @@ gh release edit v<version> --repo simonwong/speaker --prerelease=false --latest
 SPEAKER_VERSION=<version> SPEAKER_BUILD_NUMBER=<build> ./scripts/verify-published-update
 ```
 
-7. 下一个候选把 `ReleaseCandidate.plist` 的 `PreviousPublishedBuildNumber` 改为本次 build。
+7. 更新 Homebrew cask：把 `Casks/speaker.rb` 的 `version` 改为 `<version>,<build>`，`sha256` 改为已发布 DMG 的值，然后提 PR 合入 `main`。本仓库就是 tap，用户执行 `brew upgrade` 时读取 `main` 上的这个文件；App 内有 Sparkle，cask 声明了 `auto_updates true`，所以没及时更新 cask 不会影响已安装用户的更新，只影响新安装拿到的版本。
+
+```bash
+gh api repos/simonwong/speaker/releases/tags/v<version> -q '.assets[] | select(.name | endswith(".dmg")) | .digest'
+```
+
+8. 下一个候选把 `ReleaseCandidate.plist` 的 `PreviousPublishedBuildNumber` 改为本次 build。
 
 ## GitHub Actions 正式发布
 
@@ -368,6 +374,13 @@ pnpm run deploy
 - 旧域名 `speaker.simonwong.cn` 仍绑定在同一个 Worker 上，由 `site/src/server.ts` 301 跳转到 `speaker.moonunder.app`，保留路径和查询参数。旧链接还在外面流通，不要从 `domains` 里删掉它。`assets.runWorkerFirst` 让静态文件也先经过 Worker，新域名的静态文件由 Worker 通过 `ASSETS` 绑定返回；去掉它会让旧域名下的 `og.png` 等文件不再跳转。
 - 部署后同时检查旧域名：`curl -sI https://speaker.simonwong.cn/og.png` 应返回 301，`location` 指向新域名同一路径。
 - 页面不写版本号，下载按钮指向 `/download`：Worker 查询 GitHub 最新正式版，跳转到其中的 DMG（不含预发布版），查询失败时跳到 `releases/latest`。所以发布新版本时不需要重新部署官网。
+- `/download` 每次 GET 往 Workers Analytics Engine 的 `speaker_site_downloads` 数据集（绑定名 `DOWNLOADS`）写一条计数：`blob1` 是页面语言（`zh`、`en`，无法判断时为 `unknown`；来自 `?lang=` 参数或本站来源页路径），`blob2` 是 Referer 的主机名（没有 Referer 时为空），`blob3` 是 UTC 日期。不写 IP、User-Agent 或 Cookie；写入失败不影响跳转。数据集在第一次写入时自动创建，保留三个月。PRIVACY.md 的“官网”一节描述同样的范围，改字段时两处一起改。查询用 SQL API，需要带 `Account Analytics Read` 权限的 API Token：
+
+```bash
+curl -s "https://api.cloudflare.com/client/v4/accounts/<account_id>/analytics_engine/sql" \
+  -H "Authorization: Bearer <token>" \
+  --data "SELECT blob3 AS day, blob1 AS lang, blob2 AS referrer, SUM(_sample_interval) AS downloads FROM speaker_site_downloads WHERE timestamp > NOW() - INTERVAL '30' DAY GROUP BY day, lang, referrer ORDER BY day DESC"
+```
 - 已发布的 App 引用 `/doubao`（「怎么申请？」），改动或删除这个路径前要考虑旧版本。
 - 首页有中文 `/` 和英文 `/en` 两版，文案分别在 `site/src/routes/index.tsx` 和 `site/src/routes/en.tsx`，共用 `site/src/home.tsx` 的页面与 SEO 标签。改动首页内容时两版一起改；两页互相声明 hreflang，`site/public/sitemap.xml` 里也有同样的对应关系。
 - 修改分享图时编辑 `site/og/og.html`（中文）或 `site/og/og-en.html`（英文），运行 `pnpm og` 重新生成 `site/public/og.png` 和 `og-en.png`（需要本机安装 Chrome）。

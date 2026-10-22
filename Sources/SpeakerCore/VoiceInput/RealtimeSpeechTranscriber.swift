@@ -2,8 +2,14 @@ import Foundation
 
 package struct RealtimeSpeechTranscriber: Sendable {
     private let connector: any RealtimeSpeechConnecting
+    private let liveness: TransportLivenessProbe
 
-    package init(connector: any RealtimeSpeechConnecting) { self.connector = connector }
+    package init(
+        connector: any RealtimeSpeechConnecting, liveness: TransportLivenessProbe = .live
+    ) {
+        self.connector = connector
+        self.liveness = liveness
+    }
 
     package func transcribe(
         _ chunks: AsyncStream<Data>, profile: SpeechRecognitionProfile,
@@ -51,6 +57,7 @@ package struct RealtimeSpeechTranscriber: Sendable {
     private enum Event: Sendable {
         case sent
         case result(TranscriptionResult)
+        case probeEnded
     }
 
     private func exchange(
@@ -58,7 +65,8 @@ package struct RealtimeSpeechTranscriber: Sendable {
         chunks: AsyncStream<Data>, profile: SpeechRecognitionProfile,
         context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
-        try await withThrowingTaskGroup(of: Event.self) { group in
+        let liveness = liveness
+        return try await withThrowingTaskGroup(of: Event.self) { group in
             group.addTask {
                 do {
                     try await state.waitForCreation()
@@ -85,7 +93,14 @@ package struct RealtimeSpeechTranscriber: Sendable {
                     return .result(
                         try await Self.receive(connection, state: state, profile: profile))
                 } catch {
-                    if error is CancellationError {
+                    if !(error is SpeechRecognitionFailure), await state.isConnectionLost {
+                        // The probe closed the socket and nothing final was
+                        // queued, so the close itself is the connection loss.
+                        await state.record(
+                            .init(
+                                provider: profile.provider, kind: .transport,
+                                code: "connection_lost"))
+                    } else if error is CancellationError {
                         await state.cancel()
                     } else {
                         await state.record(Self.classify(error, provider: profile.provider))
@@ -98,13 +113,46 @@ package struct RealtimeSpeechTranscriber: Sendable {
             var sent = false
             while let event = try await group.next() {
                 switch event {
-                case .sent: sent = true
+                case .sent:
+                    sent = true
+                    if result == nil {
+                        group.addTask {
+                            try await Self.watchLiveness(
+                                connection, state: state, probe: liveness)
+                        }
+                    }
                 case .result(let value): result = value
+                case .probeEnded: break
                 }
-                if sent, let result { return result }
+                if sent, let result {
+                    // A normal return awaits remaining children without
+                    // cancelling them; the liveness probe never ends alone.
+                    group.cancelAll()
+                    return result
+                }
             }
             throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidResponse)
         }
+    }
+
+    /// Probes the connection after the final commit. A failed ping closes the
+    /// socket and leaves the verdict to the receiver: a final result already
+    /// queued is still delivered, and only a receive that ends without one is
+    /// connection loss. An unanswered ping keeps the session Waiting For Result.
+    private static func watchLiveness(
+        _ connection: any RealtimeSpeechConnection, state: RealtimeSpeechState,
+        probe: TransportLivenessProbe
+    ) async throws -> Event {
+        do {
+            try await probe.watch { try await connection.ping() }
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if !(error is CancellationError) {
+                await state.markConnectionLost()
+                await connection.close()
+            }
+        }
+        return .probeEnded
     }
 
     private static func sendAudio(
@@ -361,8 +409,10 @@ private actor RealtimeSpeechState {
     private var committedItem: String?
     private var creationWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
     private var updateWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var connectionLost = false
     private(set) var failure: SpeechRecognitionFailure?
     var isCancelled: Bool { cancelled }
+    var isConnectionLost: Bool { connectionLost }
 
     init(provider: SpeechRecognitionProviderID) { self.provider = provider }
 
@@ -434,6 +484,10 @@ private actor RealtimeSpeechState {
     func validateFinish() throws {
         guard finishStarted, !cancelled else { throw invalid() }
     }
+
+    /// A liveness ping failed. This alone fails nothing: the receiver still
+    /// drains what the transport already delivered.
+    func markConnectionLost() { connectionLost = true }
 
     func record(_ failure: SpeechRecognitionFailure) {
         guard !cancelled else { return }
