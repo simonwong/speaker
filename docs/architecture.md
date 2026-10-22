@@ -42,6 +42,10 @@ The user interface is `select`, `retryActivation`, and observable state. The imp
 
 Production uses live event-monitor adapters; specifications use deterministic adapters. Callers and tests cross the same seam.
 
+Shortcut event taps run on `ShortcutEventTapThread`, one dedicated user-interactive thread with its own run loop, never on the main run loop. A session event tap holds each matching key event on the Mac until its callback returns, and macOS disables a tap that answers too late, so main-thread work cannot slow typing everywhere or cancel a recording through a tap timeout. The callback makes only the synchronous decisions in `ShortcutEventTapState` and hands triggers to the `VoiceTriggerTarget`. Everything that target reaches from the tap thread is lock-protected and returns without waiting: the interaction router, the trigger intake gate, the Escape gate, and the trigger dispatcher, which reads the cached microphone snapshot on press and only the frontmost PID on release. Presentation work hops to the main actor. Installing and removing taps, arming and disarming the Escape tap, re-enabling a tap after `tapDisabledByTimeout`, and the Secure Event Input poll all run on the tap thread. Carbon delivers chord hot keys on the main thread; their edges join the tap thread before they touch tap state.
+
+While idle, Speaker intercepts only its shortcut: modifier-flag changes for `Fn` or a single modifier, or the Carbon hot key for a chord. The keyDown/keyUp tap that watches `Esc` stays disabled until a shortcut press arms it, on the tap thread and before the press is dispatched. It disarms on the first key event after Speaker stops consuming `Esc` and any consumed `Esc` sequence has ended. A tap that macOS disables while it should be running cancels the press in progress, is re-enabled, and reports recovery; the key tap Speaker disarmed itself is not a loss.
+
 ### VoiceInputExperience
 
 `VoiceInputExperience` is the application-facing voice-input module. Its interface exposes:
@@ -147,6 +151,8 @@ The History and Overview dashboards group by calendar day from a reference date 
 
 The HUD uses the same pill for recording and processing: a warm live waveform represents recording and a neutral travelling waveform represents processing. Hover reveals a left cancellation control and, while recording, a right completion control without dimming the waveform. Completion freezes the Input Target through the same capture seam as shortcut release, and the session validates the action's identity before ending recording. `VoiceInputSessions` owns the recording deadline, derives it from the frozen recognition profile, and ends recording through that same finishing path when it expires; it adds the remaining time to recording telemetry, and the HUD replaces the waveform with a countdown for the final 30 seconds. Preparing and Waiting For Result expose cancellation only; while refinement is pending, hover also reveals a right-side control that resolves the session's processing with the confirmed recognition Stage Result, so whichever of refinement or that control arrives first wins and the other is discarded; their stage titles remain available in the menu and accessibility presentation. A Pending Copy Result uses a single-line text capsule with a copy icon and a hover-revealed dismiss control. Reduce Motion, Increase Contrast, VoiceOver labels, and announcements are product behavior owned by the application feature module.
 
+The HUD appears on the display that holds most of the frontmost App's front window, otherwise on the display under the pointer, otherwise on the main screen. `FrontmostWindowLocator` reads that window from the window server's window list (owner, layer, alpha, and bounds only, so no permission is needed), and `VoiceInputPanelScreenSelection` makes the choice as a pure function. Placement never sends Accessibility IPC to the frontmost App, so a hung App cannot block the main thread while the HUD appears or changes layout.
+
 Onboarding has a separate debug capture entry point that renders the production view and window. Content scrolls within constrained screens while the completion region remains reachable.
 
 ## Software updates and release
@@ -162,4 +168,5 @@ Onboarding has a separate debug capture entry point that renders the production 
 - Waiting For Result never becomes failure from local elapsed time alone.
 - Shutdown stops trigger intake, closes session dispatch, and then waits for required local persistence.
 - SwiftUI views observe one feature state and emit semantic intents; they do not coordinate multiple platform adapters.
+- Global event taps never run on the main run loop, and the main thread never waits on Accessibility IPC to another App.
 - A seam has both a live adapter and a deterministic adapter. Pass-through protocols without real variation are removed by the deletion test.

@@ -9,6 +9,10 @@ package enum GlobalVoiceTrigger: Equatable, Sendable {
     case monitorRecovered
 }
 
+/// Where the live shortcut monitors send their edges. Every closure is
+/// called on `ShortcutEventTapThread`, not the main thread, while a key event
+/// waits for the answer: each must be thread-safe, return without waiting for
+/// another thread, and hop to the main actor for presentation work.
 package struct VoiceTriggerTarget: Sendable {
     package let receive: @Sendable (GlobalVoiceTrigger) -> Void
     package let shouldConsumeEscape: @Sendable () -> Bool
@@ -71,7 +75,7 @@ package enum EscapeKeyEventDecision: Equatable, Sendable {
 /// key sequence. Repeats and the matching key-up stay consumed even after the
 /// session publishes its terminal state.
 package struct EscapeKeyEventPolicy: Sendable {
-    private var isConsumingSequence = false
+    package private(set) var isConsumingSequence = false
 
     package init() {}
 
@@ -137,12 +141,12 @@ package struct FunctionKeyFlagEventPolicy: Sendable {
     }
 }
 
+/// Observes the Fn key through `ShortcutEventTaps` on the shortcut event tap
+/// thread. While idle only modifier-flag changes are intercepted.
 @MainActor
 package final class FnEventMonitor {
     private let target: VoiceTriggerTarget
-    private var box: FnEventTapBox?
-    private var tap: CFMachPort?
-    private var source: CFRunLoopSource?
+    private var taps: ShortcutEventTaps?
 
     package init(
         target: VoiceTriggerTarget
@@ -150,184 +154,32 @@ package final class FnEventMonitor {
         self.target = target
     }
 
-    package var isRunning: Bool { tap != nil }
+    package var isRunning: Bool { taps != nil }
 
     @discardableResult
     package func start() -> FunctionKeyMonitorStartResult {
-        guard tap == nil else { return .active }
-
-        let box = FnEventTapBox(target: target)
-        let mask =
-            eventMask(for: .flagsChanged)
-            | eventMask(for: .keyDown)
-            | eventMask(for: .keyUp)
-        guard
-            let tap = CGEvent.tapCreate(
-                tap: .cgSessionEventTap,
-                place: .headInsertEventTap,
-                options: .defaultTap,
-                eventsOfInterest: mask,
-                callback: fnEventTapCallback,
-                userInfo: Unmanaged.passUnretained(box).toOpaque()
-            )
-        else {
+        guard taps == nil else { return .active }
+        let taps = ShortcutEventTaps(
+            target: target,
+            flagTrigger: .functionKey(FunctionKeyFlagEventPolicy())
+        )
+        switch taps.install() {
+        case .none:
+            self.taps = taps
+            return .active
+        case .eventTapUnavailable:
             return .eventTapUnavailable
-        }
-
-        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            CFMachPortInvalidate(tap)
+        case .runLoopSourceUnavailable:
             return .runLoopSourceUnavailable
         }
-
-        box.tap = tap
-        self.box = box
-        self.tap = tap
-        self.source = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        return .active
     }
 
     package func stop() {
-        guard let tap else { return }
-        box?.stop()
-        if let source {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        CGEvent.tapEnable(tap: tap, enable: false)
-        CFMachPortInvalidate(tap)
-        source = nil
-        self.tap = nil
-        box = nil
+        taps?.uninstall()
+        taps = nil
     }
 
     deinit {
-        if let tap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            CFMachPortInvalidate(tap)
-        }
+        taps?.uninstallLater()
     }
-
-    private func eventMask(for type: CGEventType) -> CGEventMask {
-        CGEventMask(1) << type.rawValue
-    }
-}
-
-private final class FnEventTapBox: @unchecked Sendable {
-    let target: VoiceTriggerTarget
-    var tap: CFMachPort?
-    var functionKeyPolicy = FunctionKeyFlagEventPolicy()
-    var didEmitPress = false
-    var secureInputTimer: DispatchSourceTimer?
-    var escapePolicy = EscapeKeyEventPolicy()
-
-    init(target: VoiceTriggerTarget) {
-        self.target = target
-    }
-
-    func handle(type: CGEventType, event: CGEvent) -> Bool {
-        switch type {
-        case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            functionKeyPolicy.reset()
-            didEmitPress = false
-            escapePolicy.reset()
-            stopSecureInputMonitoring()
-            target.receive(.cancel)
-            if let tap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-                target.receive(.monitorRecovered)
-            }
-            return false
-        case .flagsChanged:
-            let disposition = functionKeyPolicy.handle(
-                keyCode: event.getIntegerValueField(.keyboardEventKeycode),
-                flags: event.flags
-            )
-            guard case .consume(let trigger) = disposition else { return false }
-            switch trigger {
-            case .pressed:
-                guard !IsSecureEventInputEnabled() else {
-                    target.secureInputBlockedPress()
-                    return true
-                }
-                didEmitPress = true
-                target.receive(.pressed)
-                startSecureInputMonitoring()
-            case .released:
-                stopSecureInputMonitoring()
-                if didEmitPress {
-                    didEmitPress = false
-                    target.receive(.released)
-                }
-            }
-            return true
-        case .keyDown, .keyUp:
-            guard event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
-            let keyEvent: EscapeKeyEvent = type == .keyDown ? .keyDown : .keyUp
-            switch escapePolicy.handle(
-                keyEvent,
-                speakerIsActive: target.shouldConsumeEscape()
-            ) {
-            case .passThrough:
-                return false
-            case .consume:
-                return true
-            case .consumeAndCancel:
-                didEmitPress = false
-                stopSecureInputMonitoring()
-                target.receive(.cancel)
-                return true
-            }
-        default:
-            return false
-        }
-    }
-
-    private func startSecureInputMonitoring() {
-        stopSecureInputMonitoring()
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
-        timer.setEventHandler { [weak self] in
-            guard let self,
-                self.functionKeyPolicy.isDown,
-                self.didEmitPress
-            else { return }
-            guard IsSecureEventInputEnabled() else { return }
-            self.didEmitPress = false
-            self.stopSecureInputMonitoring()
-            self.target.receive(.cancel)
-        }
-        secureInputTimer = timer
-        timer.resume()
-    }
-
-    private func stopSecureInputMonitoring() {
-        secureInputTimer?.cancel()
-        secureInputTimer = nil
-    }
-
-    func stop() {
-        let hadActivePress = didEmitPress
-        functionKeyPolicy.reset()
-        didEmitPress = false
-        escapePolicy.reset()
-        stopSecureInputMonitoring()
-        if hadActivePress {
-            target.receive(.cancel)
-        }
-    }
-
-    deinit {
-        secureInputTimer?.cancel()
-    }
-}
-
-private let fnEventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
-    guard let userInfo else {
-        return Unmanaged.passUnretained(event)
-    }
-    let box = Unmanaged<FnEventTapBox>.fromOpaque(userInfo).takeUnretainedValue()
-    return box.handle(type: type, event: event)
-        ? nil
-        : Unmanaged.passUnretained(event)
 }
