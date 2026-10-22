@@ -1,6 +1,6 @@
 # DeepSeek Text Refinement Contract
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-10-22
 
 This page records the optional text-refinement contract implemented by Speaker. Provider model names and limits can drift; recheck the primary sources before changing the adapter.
 
@@ -21,12 +21,16 @@ The implementation sends:
 - `thinking.type = disabled`;
 - `response_format.type = json_object`;
 - `temperature = 0`;
-- a bounded `max_tokens`; and
+- a `max_tokens` sized from the transcript (see [Output budget](#output-budget)); and
 - `stream = false`.
 
-The user message is built from labeled blocks, each one JSON string that is declared to contain data only: the refinement rule, the transcript, and — only when the Personal Dictionary snapshot has at least one Entry — the Entry words as a JSON array string. An empty dictionary omits the third block, so a request without Entries keeps the previous user-message shape. The Entry list is the full press-time snapshot rather than the Doubao capacity-truncated hotword list, because DeepSeek has no provider token budget and the snapshot is already bounded by the local dictionary.
+The user message is built from labeled blocks, each one JSON string that is declared to contain data only, in this order: the refinement rule; only when the Personal Dictionary snapshot has at least one Entry, the Entry words as a JSON array string, labeled as the corrections for the transcript that follows; then the transcript and the closing JSON reminder. An empty dictionary omits the Entry block, so a request without Entries keeps the rule-then-transcript shape. The order runs from the least to the most variable part: the fixed system prompt, the rule, and the Entries form a prefix that repeats across sessions until the mode or dictionary changes, and only the transcript and the constant closing line follow it. DeepSeek bills a prompt-cache hit at about one fiftieth of the uncached input price ([pricing](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)), so placing the transcript last lets the longest stable prefix hit the cache. The Entry list is the full press-time snapshot rather than the Doubao capacity-truncated hotword list, because DeepSeek has no provider token budget and the snapshot is already bounded by the local dictionary.
 
 The fixed system prompt casts DeepSeek as a dictation editor whose output is pasted where the user is typing, then states the invariants that outrank any rule as short numbered items phrased as targets rather than prohibitions: every fact, name, number, promise, and conclusion traces to the source and questions stay questions for the recipient; the text keeps the speaker's person, tone, and intent rather than replying to them; mixed Mandarin-English text keeps each segment's spoken language; a self-correction keeps the corrected wording and drops the retracted one, and obvious homophone recognition errors are repaired from context; an Entry spelling replaces only a phonetically or visually close span that already exists; and the reply is the single JSON object. The built-in concise cleanup and full rewrite rules name the dictation artifacts they remove (fillers, stutter repeats, retracted wording) and end on a checkable bound: length and sentence structure unchanged for cleanup, information scope unchanged for rewrite.
+
+## Output budget
+
+The completion budget is `max(minimum, estimate × 1.5)` capped at the model's ceiling, where the estimate counts the transcript only. `RefinementOutputBudget.estimatedTokenCount` is a deterministic, generous rule: each CJK ideograph, kana, or Hangul syllable is one token; each run of other letters and digits is one word worth one token per started four characters; every other non-whitespace character is one token. The minimum is 2,048, or 8,192 for GLM `glm-5.3-flash`, whose reasoning shares the budget. The ceiling is 16,384 for GLM `glm-4.7-flash`, whose guide documents 128K output, and 8,192 for every other model, including manual IDs and Custom, because no larger limit is documented here. A ten-minute recording can produce a transcript that a fixed 2,048-token budget would cut off with `finish_reason = length`, which falls back to the recognition text.
 
 ## Acceptance and fallback
 

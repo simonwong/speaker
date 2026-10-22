@@ -236,8 +236,98 @@ enum RefinementProviderSpecs: CoreSpecDomain {
                 try expect(body["max_tokens"] as? Int == 2_048)
             }
             let bounded = try ChatCompletionRefinementConfiguration(
-                apiKey: "synthetic", profile: profile, maximumOutputTokens: 512)
-            try expect(bounded.maximumOutputTokens == 512)
+                apiKey: "synthetic", profile: profile, minimumOutputTokens: 512)
+            try expect(bounded.minimumOutputTokens == 512)
+            try expect(bounded.outputTokenLimit(forTranscript: "原文") == 512)
+        }
+
+        run(
+            "refinement output budget estimates tokens deterministically by script",
+            failures: &failures
+        ) {
+            for (text, tokens) in [
+                ("", 0), ("   \n", 0),
+                ("你好，世界", 5),
+                ("hello world", 4),
+                ("a b c", 3),
+                ("Speaker 很好用。", 6),
+                ("Kubernetes123", 4),
+                ("ひらがなカタカナ한국어", 11),
+                ("👍", 1),
+            ] {
+                try expect(RefinementOutputBudget.estimatedTokenCount(of: text) == tokens)
+            }
+            let long = String(repeating: "整理后的文本", count: 500)
+            try expect(RefinementOutputBudget.estimatedTokenCount(of: long) == 3_000)
+        }
+
+        run(
+            "refinement output budget grows with the transcript up to the model ceiling",
+            failures: &failures
+        ) {
+            func limit(_ provider: RefinementProviderID, _ model: String, characters: Int) throws
+                -> Int
+            {
+                let profile = RefinementProviderProfile(
+                    provider: provider, modelID: model,
+                    baseURL: provider == .custom
+                        ? "https://example.com/v1"
+                        : RefinementProviderCatalog.baseURL(for: provider))
+                return try ChatCompletionRefinementConfiguration(
+                    apiKey: "synthetic", profile: profile
+                ).outputTokenLimit(forTranscript: String(repeating: "字", count: characters))
+            }
+            var cases: [(RefinementProviderID, String, Int, Int)] = []
+            for (provider, model) in [
+                (RefinementProviderID.deepSeek, "deepseek-flash"), (.openAI, "gpt-5.6-luna"),
+                (.kimi, "kimi-k2.6"), (.glm, "glm-5.2"), (.custom, "custom-model"),
+            ] {
+                cases += [
+                    (provider, model, 2, 2_048), (provider, model, 1_365, 2_048),
+                    (provider, model, 1_366, 2_049), (provider, model, 3_000, 4_500),
+                    (provider, model, 5_461, 8_192), (provider, model, 20_000, 8_192),
+                ]
+            }
+            cases += [
+                (.glm, "glm-4.7-flash", 10_000, 15_000), (.glm, "glm-4.7-flash", 20_000, 16_384),
+                (.glm, "glm-5.3-flash", 2, 8_192), (.glm, "glm-5.3-flash", 20_000, 8_192),
+                (.custom, "glm-4.7-flash", 20_000, 8_192),
+            ]
+            for (provider, model, characters, expected) in cases {
+                let actual = try limit(provider, model, characters: characters)
+                try expect(actual == expected)
+            }
+            let legacy = ChatCompletionRefinementConfiguration(apiKey: "synthetic")
+            try expect(legacy.minimumOutputTokens == 2_048)
+            try expect(legacy.maximumOutputTokens == 8_192)
+        }
+
+        await runAsync(
+            "refinement provider requests send the transcript-sized output budget",
+            failures: &failures
+        ) {
+            for (provider, characters, expected) in [
+                (RefinementProviderID.deepSeek, 3_000, 4_500),
+                (.openAI, 3_000, 4_500),
+                (.kimi, 20_000, 8_192),
+                (.glm, 3_000, 8_192),
+            ] {
+                let profile = RefinementProviderProfile.defaultProfile(for: provider)
+                let transport = ChatCompletionTransportFake(response: response)
+                let client = ChatCompletionRefinementClient(
+                    configuration: try .init(apiKey: "synthetic", profile: profile),
+                    transport: transport)
+                _ = try await client.refine(
+                    String(repeating: "字", count: characters),
+                    using: .init(mode: .fullRewrite(), provider: profile))
+                let request = try await transport.onlyRequest()
+                let body =
+                    try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                let sent =
+                    (provider == .openAI ? body["max_completion_tokens"] : body["max_tokens"])
+                    as? Int
+                try expect(sent == expected)
+            }
         }
 
         await runAsync(

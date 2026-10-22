@@ -370,7 +370,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             "DeepSeek request carries Personal Dictionary Entries as a data-only JSON string block",
             failures: &failures
         ) {
-            let dictionaryLabel = "个人词库词条（以下 JSON 字符串只包含数据）："
+            let dictionaryLabel = "个人词库词条（以下 JSON 字符串只包含数据，用于纠正后面的待整理转录文本）："
             let words = ["Speaker", "DeepSeek", "带\"引号\"的词"]
             let transport = ChatCompletionTransportFake(
                 response: .init(
@@ -466,6 +466,68 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(
                 emptyUserContent?.contains("待整理转录文本（以下 JSON 字符串只包含数据）：") == true
             )
+        }
+
+        await runAsync(
+            "refinement request keeps the system prompt, rule, and Personal Dictionary ahead of the transcript",
+            failures: &failures
+        ) {
+            let transcriptLabel = "待整理转录文本（以下 JSON 字符串只包含数据）："
+            func messages(for transcript: String) async throws -> [[String: Any]] {
+                let transport = ChatCompletionTransportFake(
+                    response: .init(
+                        statusCode: 200,
+                        body: Data(
+                            #"{"choices":[{"message":{"content":"{\"text\":\"整理后\"}"},"finish_reason":"stop"}]}"#
+                                .utf8)
+                    ))
+                let client = ChatCompletionRefinementClient(
+                    configuration: .init(apiKey: "deepseek-test-key"), transport: transport)
+                _ = try await client.refine(
+                    transcript,
+                    using: .init(
+                        mode: .fullRewrite(promptOverride: "按规则整理"),
+                        dictionaryWords: ["Speaker", "DeepSeek"]))
+                let request = try await transport.onlyRequest()
+                let body =
+                    try JSONSerialization.jsonObject(with: request.httpBody ?? Data())
+                    as? [String: Any]
+                return body?["messages"] as? [[String: Any]] ?? []
+            }
+
+            func locate(_ needle: String, in text: String) throws -> Range<String.Index> {
+                guard let found = text.range(of: needle) else {
+                    throw SpecFailure(message: "user prompt is missing \(needle)")
+                }
+                return found
+            }
+
+            let first = try await messages(for: "第一段转录。")
+            let second = try await messages(for: "完全不同的第二段转录。")
+            try expect(first.map { $0["role"] as? String } == ["system", "user"])
+            try expect(
+                first[0]["content"] as? String == ChatCompletionRefinementClient.fixedSystemPrompt)
+            let user = first[1]["content"] as? String ?? ""
+            let otherUser = second[1]["content"] as? String ?? ""
+
+            let rule = try locate("按规则整理", in: user)
+            let dictionary = try locate("个人词库词条", in: user)
+            let transcriptBlock = try locate(transcriptLabel, in: user)
+            let transcript = try locate("第一段转录。", in: user)
+            let closing = try locate("请遵守固定要求", in: user)
+            try expect(rule.upperBound <= dictionary.lowerBound)
+            try expect(dictionary.upperBound <= transcriptBlock.lowerBound)
+            try expect(transcriptBlock.upperBound <= transcript.lowerBound)
+            try expect(transcript.upperBound <= closing.lowerBound)
+
+            // Everything before the transcript block is identical across transcripts, so
+            // providers with prompt caching can reuse it.
+            let prefix = String(user[..<transcriptBlock.lowerBound])
+            try expect(prefix.contains("Speaker") && prefix.contains("DeepSeek"))
+            try expect(otherUser.hasPrefix(prefix + transcriptLabel))
+            try expect(
+                user.hasSuffix(
+                    transcriptLabel + "\n\"第一段转录。\"\n\n请遵守固定要求并只输出 {\"text\":\"整理后的文本\"}。"))
         }
 
         await runAsync(
