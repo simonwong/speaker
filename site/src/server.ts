@@ -1,4 +1,5 @@
 import { createStartHandler, defaultStreamHandler } from '@tanstack/react-start/server'
+import { langForPath } from './components'
 
 // The site moved from speaker.simonwong.cn. The old host stays bound to this
 // Worker only to send visitors and search engines to the same path here, so
@@ -38,8 +39,52 @@ async function latestDMG(): Promise<string> {
   }
 }
 
+// One Analytics Engine data point per /download request, with no cookie and
+// nothing that identifies the visitor: the page language, the Referer host
+// without its path or query, and the UTC date. IP address and User-Agent are
+// never written. Analytics Engine adds its own write timestamp.
+interface DownloadDataset {
+  writeDataPoint(point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void
+}
+
+const SITE_HOSTS = new Set([CANONICAL_HOST, ...RETIRED_HOSTS])
+
+// zh or en from an explicit ?lang= link, else from the path of a page on this
+// site; unknown for other referrers or none.
+function downloadLanguage(url: URL, referrer: URL | null): string {
+  const lang = url.searchParams.get('lang')
+  if (lang === 'zh' || lang === 'en') return lang
+  if (referrer && SITE_HOSTS.has(referrer.hostname)) {
+    return langForPath(referrer.pathname) === 'en' ? 'en' : 'zh'
+  }
+  return 'unknown'
+}
+
+function recordDownload(dataset: DownloadDataset | undefined, request: Request, url: URL) {
+  if (!dataset || request.method !== 'GET') return
+  try {
+    let referrer: URL | null = null
+    try {
+      const header = request.headers.get('referer')
+      referrer = header ? new URL(header) : null
+    } catch {}
+    dataset.writeDataPoint({
+      blobs: [
+        downloadLanguage(url, referrer),
+        referrer?.hostname ?? '',
+        new Date().toISOString().slice(0, 10),
+      ],
+      doubles: [1],
+      indexes: ['download'],
+    })
+  } catch {
+    // Counting never blocks the download.
+  }
+}
+
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> }
+  DOWNLOADS?: DownloadDataset
 }
 
 export default {
@@ -52,6 +97,7 @@ export default {
       return Response.redirect(url.toString(), 301)
     }
     if (url.pathname === '/download') {
+      recordDownload(env.DOWNLOADS, request, url)
       return Response.redirect(await latestDMG(), 302)
     }
     const asset = await env.ASSETS.fetch(request)
