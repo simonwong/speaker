@@ -768,7 +768,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 ["public.png": Data([4, 5, 6])],
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            let sleeper = ControlledPasteboardRestoreSleep()
+            let clock = ManualVoiceInputClock()
             let pastePosts = LockedCounter()
             let liveSystem = LiveAccessibilityTargetSystem(
                 isSecureInputEnabled: { false },
@@ -778,12 +778,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                     await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        sleepBeforeRestore: { duration in
-                            try await sleeper.sleep(for: duration)
-                        },
-                        conditionalRestoreDidFinish: {
-                            await sleeper.markRestoreCompleted()
-                        }
+                        clock: clock
                     )
                 },
                 focusedTargetState: { _, _ in .success(true) },
@@ -806,8 +801,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
 
             await sessions.send(.pressed)
             await sessions.send(.released)
-            await sleeper.waitUntilStarted()
-            let requestedDuration = await sleeper.requestedDuration
+            try await clock.waitUntilSleepRequestCount(1)
             let shutdownCompletion = CompletionFlag()
             let shutdown = Task {
                 await sessions.shutdown()
@@ -816,7 +810,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             await settle()
             let completedBeforeRestore = await shutdownCompletion.isComplete
 
-            try expect(requestedDuration == .milliseconds(500))
+            try expect(clock.sleepRequests == [PasteboardRestoreTiming.standard.maximumDelay])
             try expect(!completedBeforeRestore)
             try expect(pastePosts.value == 1)
             try expect(
@@ -824,7 +818,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                     == [["public.utf8-plain-text": Data("hello".utf8)]]
             )
 
-            await sleeper.resume()
+            clock.advance(by: PasteboardRestoreTiming.standard.maximumDelay)
             await shutdown.value
             let completedAfterRestore = await shutdownCompletion.isComplete
             try expect(completedAfterRestore)
