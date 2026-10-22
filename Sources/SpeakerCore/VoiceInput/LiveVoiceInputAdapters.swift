@@ -890,26 +890,37 @@ package struct PCMChunkBuffer: Sendable {
 }
 
 package struct ClipboardPasteboardAccess: Sendable {
-    let changeCount: @MainActor @Sendable () -> Int
-    let itemCount: @MainActor @Sendable () -> Int?
-    let itemTypes: @MainActor @Sendable (Int) -> [String]?
-    let data: @MainActor @Sendable (Int, String) -> Data?
+    // Reading needs no main thread: the snapshot reads on a background
+    // executor so another App rendering its promised data cannot stall the
+    // main thread.
+    let changeCount: @Sendable () -> Int
+    let itemCount: @Sendable () -> Int?
+    let itemTypes: @Sendable (Int) -> [String]?
+    let data: @Sendable (Int, String) -> Data?
     /// Empties the clipboard; `true` keeps the next value on this Mac only.
     let clearContents: @MainActor @Sendable (_ currentHostOnly: Bool) -> Int
     /// Writes text, its ownership marker, and the purpose's privacy types.
     let writeText: @MainActor @Sendable (String, String, PasteboardWritePurpose) -> Bool
+    /// Writes the ownership marker and the purpose's privacy types now and
+    /// promises the text, which the promise renders on the first request.
+    let writePromisedText:
+        @MainActor @Sendable (PasteboardTextPromise, String, PasteboardWritePurpose) -> Bool
     let readString: @MainActor @Sendable () -> String?
     let readMarker: @MainActor @Sendable (PasteboardWritePurpose) -> String?
     let writeItems: @MainActor @Sendable ([[String: Data]]) -> Bool
 
     package init(
-        changeCount: @escaping @MainActor @Sendable () -> Int,
-        itemCount: @escaping @MainActor @Sendable () -> Int?,
-        itemTypes: @escaping @MainActor @Sendable (Int) -> [String]?,
-        data: @escaping @MainActor @Sendable (Int, String) -> Data?,
+        changeCount: @escaping @Sendable () -> Int,
+        itemCount: @escaping @Sendable () -> Int?,
+        itemTypes: @escaping @Sendable (Int) -> [String]?,
+        data: @escaping @Sendable (Int, String) -> Data?,
         clearContents: @escaping @MainActor @Sendable (_ currentHostOnly: Bool) -> Int,
         writeText:
             @escaping @MainActor @Sendable (String, String, PasteboardWritePurpose) -> Bool,
+        writePromisedText:
+            @escaping @MainActor @Sendable (
+                PasteboardTextPromise, String, PasteboardWritePurpose
+            ) -> Bool,
         readString: @escaping @MainActor @Sendable () -> String?,
         readMarker: @escaping @MainActor @Sendable (PasteboardWritePurpose) -> String?,
         writeItems: @escaping @MainActor @Sendable ([[String: Data]]) -> Bool
@@ -920,6 +931,7 @@ package struct ClipboardPasteboardAccess: Sendable {
         self.data = data
         self.clearContents = clearContents
         self.writeText = writeText
+        self.writePromisedText = writePromisedText
         self.readString = readString
         self.readMarker = readMarker
         self.writeItems = writeItems
@@ -948,6 +960,16 @@ package struct ClipboardPasteboardAccess: Sendable {
         writeText: { text, marker, purpose in
             let item = NSPasteboardItem()
             guard item.setString(text, forType: .string),
+                item.setString(marker, forType: purpose.markerType)
+            else { return false }
+            for type in purpose.privacyTypes {
+                guard item.setData(Data(), forType: type) else { return false }
+            }
+            return NSPasteboard.general.writeObjects([item])
+        },
+        writePromisedText: { promise, marker, purpose in
+            let item = NSPasteboardItem()
+            guard item.setDataProvider(promise, forTypes: [.string]),
                 item.setString(marker, forType: purpose.markerType)
             else { return false }
             for type in purpose.privacyTypes {
@@ -1000,13 +1022,27 @@ public struct SystemClipboardWriter: ClipboardWriting {
             case .ordinary: .explicitCopy
             case .concealed: .concealedCopy
             }
+        let snapshot: PasteboardSnapshot?
+        switch await PasteboardSnapshot.captureAwayFromMainThread(
+            from: pasteboard,
+            budget: snapshotBudget
+        ) {
+        case .success(let captured):
+            snapshot = captured
+        case .failure(.tooLarge):
+            // The user asked to replace this clipboard. One too large to set
+            // aside is replaced without a rollback copy.
+            snapshot = nil
+        case .failure(.unreadable):
+            return false
+        }
         return await MainActor.run {
             guard
-                let transaction = PasteboardReplacementTransaction.prepare(
-                    text: text,
+                let transaction = PasteboardReplacementTransaction.begin(
+                    replacing: snapshot,
+                    with: .text(text),
                     purpose: purpose,
-                    pasteboard: pasteboard,
-                    budget: snapshotBudget
+                    pasteboard: pasteboard
                 )
             else { return false }
             guard transaction.verifies(text) else {

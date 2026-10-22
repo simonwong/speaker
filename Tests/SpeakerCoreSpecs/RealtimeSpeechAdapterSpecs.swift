@@ -320,17 +320,20 @@ enum RealtimeSpeechAdapterSpecs: CoreSpecDomain {
             }
         }
         await realtimeSessionCases(failures: &failures)
+        await realtimeLivenessCases(failures: &failures)
     }
 
-    static func makeClient(_ connector: any RealtimeSpeechConnecting)
-        -> CredentialedSpeechTranscriber
-    {
+    static func makeClient(
+        _ connector: any RealtimeSpeechConnecting, liveness: TransportLivenessProbe = .live
+    ) -> CredentialedSpeechTranscriber {
         CredentialedSpeechTranscriber(
             credentials: ProviderCredentialStoreFake(values: [
                 .openAITranscription: "fixture-audio", .qwenASRBeijing: "fixture-audio",
                 .qwenASRSingapore: "fixture-singapore",
             ]),
-            doubao: StreamingContextualTranscriberFake(text: "unused"), realtimeConnector: connector
+            doubao: StreamingContextualTranscriberFake(text: "unused"),
+            realtimeConnector: connector,
+            realtimeLiveness: liveness
         )
     }
     static func context(
@@ -475,6 +478,257 @@ extension RealtimeSpeechAdapterSpecs {
                 } catch is SpeechRecognitionFailure {}
                 let requests = await connector.requests
                 try expect(requests.isEmpty)
+            }
+        }
+    }
+}
+
+extension RealtimeSpeechAdapterSpecs {
+    @MainActor
+    static func realtimeLivenessCases(failures: inout [String]) async {
+        await runAsync(
+            "realtime speech reports connection loss only when a liveness ping fails after the final commit",
+            failures: &failures
+        ) {
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let pings = PingScriptFake()
+                let socket = RealtimeSpeechSocketFake(
+                    provider: provider, completes: false, pings: pings)
+                let clock = ManualVoiceInputClock()
+                let signals = TransportLivenessSignalsFake()
+                let client = makeClient(
+                    RealtimeSpeechConnectorFake(socket: socket),
+                    liveness: .scripted(clock: clock, signals: signals))
+                let gate = AudioCaptureCompletionGate()
+                let (stream, continuation) = AsyncStream<Data>.makeStream()
+                let completion = CompletionFlag()
+                let task = transcription(
+                    client, stream, context: context(provider, gate: gate), completion: completion)
+                continuation.yield(Data(repeating: 1, count: 6_400))
+                continuation.finish()
+                let streaming = await eventually(before: .seconds(2)) {
+                    await socket.count("input_audio_buffer.append") > 0
+                }
+                try expect(streaming)
+                try expect(
+                    signals.subscriberCount == 0 && clock.sleepRequestCount == 0,
+                    "liveness probe started before the final commit")
+                await gate.accept()
+                try await signals.waitUntilSubscribed()
+                try await clock.waitUntilSleepRequestCount(1)
+                clock.advance(by: .seconds(15))
+                try await pings.waitUntilPingCount(1)
+                try await clock.waitUntilSleepRequestCount(2)
+                pings.answer(.hang)
+                clock.advance(by: .seconds(15))
+                try await pings.waitUntilPingCount(2)
+                // An unanswered ping is not evidence. Ten more minutes of
+                // local time keep the session Waiting For Result with that
+                // one ping in flight.
+                for tick in 0..<40 {
+                    try await clock.waitUntilSleepRequestCount(3 + tick)
+                    clock.advance(by: .seconds(15))
+                }
+                let stillWaiting = await !eventually(before: .milliseconds(50)) {
+                    await completion.isComplete
+                }
+                let closedWhileWaiting = await socket.closed
+                try expect(stillWaiting && !closedWhileWaiting, "elapsed time became a failure")
+                try expect(pings.pingCount == 2 && pings.hungCount == 1)
+                pings.answer(.fail(URLError(.networkConnectionLost)))
+                do {
+                    _ = try await task.value
+                    throw SpecFailure(message: "lost connection returned a result")
+                } catch let failure as SpeechRecognitionFailure {
+                    try expect(failure.provider == provider && failure.kind == .transport)
+                    try expect(failure.code == "connection_lost")
+                    try expect(failure.userFailure == .networkUnavailable)
+                }
+                let closed = await socket.closed
+                try expect(closed)
+                let unsubscribed = await eventually(before: .seconds(2)) {
+                    signals.subscriberCount == 0
+                }
+                try expect(unsubscribed, "liveness probe outlived its session")
+            }
+        }
+        await runAsync(
+            "realtime speech delivers a final result that arrives with a failed liveness ping",
+            failures: &failures
+        ) {
+            // The server sends the final result and closes at once, so the
+            // ping fails while that result is still unread.
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let pings = PingScriptFake()
+                pings.answer(.fail(URLError(.networkConnectionLost)))
+                let socket = RealtimeSpeechSocketFake(
+                    provider: provider, pings: pings, holdsFinalUntilClose: true)
+                let clock = ManualVoiceInputClock()
+                let signals = TransportLivenessSignalsFake()
+                let client = makeClient(
+                    RealtimeSpeechConnectorFake(socket: socket),
+                    liveness: .scripted(clock: clock, signals: signals))
+                let gate = AudioCaptureCompletionGate()
+                let (stream, continuation) = AsyncStream<Data>.makeStream()
+                let completion = CompletionFlag()
+                let task = transcription(
+                    client, stream, context: context(provider, gate: gate), completion: completion)
+                continuation.yield(Data(repeating: 1, count: 6_400))
+                continuation.finish()
+                await gate.accept()
+                try await signals.waitUntilSubscribed()
+                signals.emit()
+                let result = try await task.value
+                try expect(result.text == "confirmed result", "\(provider) lost the queued result")
+                try expect(pings.pingCount == 1)
+                let closed = await socket.closed
+                try expect(closed)
+            }
+        }
+        await runAsync(
+            "realtime speech probes at once on wake or network change and the event alone never fails",
+            failures: &failures
+        ) {
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let pings = PingScriptFake()
+                let socket = RealtimeSpeechSocketFake(
+                    provider: provider, completes: false, pings: pings)
+                let clock = ManualVoiceInputClock()
+                let signals = TransportLivenessSignalsFake()
+                let client = makeClient(
+                    RealtimeSpeechConnectorFake(socket: socket),
+                    liveness: .scripted(clock: clock, signals: signals))
+                let stream = AsyncStream<Data> {
+                    $0.yield(Data(repeating: 1, count: 6_400))
+                    $0.finish()
+                }
+                let completion = CompletionFlag()
+                let task = transcription(
+                    client, stream, context: context(provider), completion: completion)
+                try await signals.waitUntilSubscribed()
+                signals.emit()
+                try await pings.waitUntilPingCount(1)
+                signals.emit()
+                try await pings.waitUntilPingCount(2)
+                let stillWaiting = await !eventually(before: .milliseconds(50)) {
+                    await completion.isComplete
+                }
+                try expect(stillWaiting, "a wake or path change alone became a failure")
+                try expect(clock.sleepRequests == [.seconds(15)], "events moved the schedule")
+                pings.answer(.fail(URLError(.notConnectedToInternet)))
+                signals.emit()
+                do {
+                    _ = try await task.value
+                    throw SpecFailure(message: "lost connection returned a result")
+                } catch let failure as SpeechRecognitionFailure {
+                    try expect(failure.kind == .transport && failure.code == "connection_lost")
+                }
+                let closed = await socket.closed
+                try expect(closed && pings.pingCount == 3)
+            }
+        }
+        await runAsync(
+            "realtime speech cancellation during an unanswered liveness ping stays User Cancellation",
+            failures: &failures
+        ) {
+            let pings = PingScriptFake()
+            let socket = RealtimeSpeechSocketFake(provider: .openAI, completes: false, pings: pings)
+            let clock = ManualVoiceInputClock()
+            let signals = TransportLivenessSignalsFake()
+            let client = makeClient(
+                RealtimeSpeechConnectorFake(socket: socket),
+                liveness: .scripted(clock: clock, signals: signals))
+            let stream = AsyncStream<Data> {
+                $0.yield(Data(repeating: 1, count: 6_400))
+                $0.finish()
+            }
+            let task = Task { try await client.transcribe(stream, context: context(.openAI)) }
+            try await signals.waitUntilSubscribed()
+            pings.answer(.hang)
+            signals.emit()
+            try await pings.waitUntilPingCount(1)
+            task.cancel()
+            let finished = await finishes(task, before: .seconds(2))
+            try expect(finished, "an unanswered ping held up cancellation")
+            do {
+                _ = try await task.value
+                throw SpecFailure(message: "cancelled request returned a result")
+            } catch is CancellationError {}
+            pings.answer(.fail(URLError(.networkConnectionLost)))
+            let closed = await socket.closed
+            try expect(closed && pings.hungCount == 0)
+        }
+        await runAsync(
+            "realtime connection loss while Waiting For Result is a network Session Problem",
+            failures: &failures
+        ) {
+            let audio = StreamingAudioCaptureFake()
+            let pings = PingScriptFake()
+            let socket = RealtimeSpeechSocketFake(provider: .qwen, completes: false, pings: pings)
+            let clock = ManualVoiceInputClock()
+            let signals = TransportLivenessSignalsFake()
+            let refiner = DeepSeekRefinerFake(result: .success(.init(text: "must not refine")))
+            let processor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    refinementMode: .conciseCleanup(),
+                    recognitionProvider: .init(provider: .qwen, method: .streaming)),
+                transcriber: makeClient(
+                    RealtimeSpeechConnectorFake(socket: socket),
+                    liveness: .scripted(clock: clock, signals: signals)),
+                refinement: OptionalTextRefinementPipeline(refiner: refiner))
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: audio,
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                textProcessor: processor, delivery: delivery, clipboard: ClipboardFake(),
+                history: history)
+            let presentations = await sessions.observe()
+            await sessions.send(.pressed)
+            await audio.emit(Data(repeating: 1, count: 6_400))
+            let streaming = await eventually(before: .seconds(2)) {
+                await socket.count("input_audio_buffer.append") > 0
+            }
+            try expect(streaming)
+            // Release returns only when processing ends.
+            let release = Task { await sessions.send(.released) }
+            try await signals.waitUntilSubscribed()
+            pings.answer(.fail(URLError(.networkConnectionLost)))
+            signals.emit()
+            let presentation = await firstTerminalPresentation(
+                from: presentations, before: .seconds(2))
+            await release.value
+            if case .failed(_, let failure) = presentation?.activity {
+                try expect(failure == .networkUnavailable)
+            } else {
+                throw SpecFailure(message: "connection loss did not reach a Session Problem")
+            }
+            await sessions.send(.pressed)
+            let restarted = await eventually(before: .seconds(2)) { await audio.startCount == 2 }
+            try expect(restarted, "the shortcut stayed blocked after connection loss")
+            await sessions.send(.cancel)
+            await sessions.shutdown()
+            let records = await history.records
+            let texts = await delivery.deliveredTexts
+            let refinements = await refiner.callCount
+            try expect(records.first?.providerErrorCode == "connection_lost")
+            try expect(texts.isEmpty && refinements == 0)
+        }
+    }
+
+    static func transcription(
+        _ client: CredentialedSpeechTranscriber, _ stream: AsyncStream<Data>,
+        context: SpeechTranscriptionContext, completion: CompletionFlag
+    ) -> Task<TranscriptionResult, any Error> {
+        Task {
+            do {
+                let result = try await client.transcribe(stream, context: context)
+                await completion.markComplete()
+                return result
+            } catch {
+                await completion.markComplete()
+                throw error
             }
         }
     }

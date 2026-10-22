@@ -54,7 +54,13 @@ public enum PendingCopyReason: String, Equatable, Sendable {
     case targetApplicationUnresponsive
     /// Kept only so history written by older builds remains decodable.
     case deliveryTimedOut
+    /// Command-V was posted and the Input Target then showed a value that is
+    /// neither its value before the paste nor the expected result, so the
+    /// paste may have inserted the wrong text or none.
     case deliveryUnconfirmed
+    /// The clipboard is too large to set aside and restore, so automatic
+    /// delivery left it untouched.
+    case clipboardTooLarge
     case clipboardFailed
     /// Copying a secure Input Target's result failed. It stays a secure
     /// result, so a retry is still concealed.
@@ -225,6 +231,7 @@ public struct DeliveryDiagnostic: Equatable, Sendable {
         case focusRead
         case fallbackSelection
         case valueRead
+        case clipboardSnapshot
         case pastePost
         case pasteReceipt
     }
@@ -242,6 +249,7 @@ public struct DeliveryDiagnostic: Equatable, Sendable {
         case notFrontmost
         case rejected
         case changed
+        case tooLarge
     }
 
     public let stage: Stage

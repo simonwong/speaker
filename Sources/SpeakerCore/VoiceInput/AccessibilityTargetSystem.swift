@@ -170,6 +170,9 @@ package enum AccessibilityPasteResult: Equatable, Sendable {
     case secureTarget
     case targetChanged
     case clipboardFailed
+    /// The clipboard is too large to set aside and restore, so it was left
+    /// untouched.
+    case clipboardTooLarge
     case eventFailed
     case targetFailure(AccessibilityOperationFailure)
 }
@@ -201,10 +204,13 @@ package protocol AccessibilityTargetSystem: Sendable {
     func selection(
         of target: AccessibilityTargetReference
     ) async -> AccessibilityOperationResult<NSRange?>
+    /// Posts one Command-V. The user's clipboard comes back only after
+    /// `receipt` concludes, as `PasteboardDeliveryTransaction` describes.
     func paste(
         _ text: String,
         to target: AccessibilityTargetReference,
-        in processID: pid_t
+        in processID: pid_t,
+        receipt: PasteReceipt
     ) async -> AccessibilityPasteResult
     func shutdown() async
 }
@@ -249,7 +255,9 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     private let frontmostProcessIdentifier: @Sendable () -> pid_t
     private let canPostEvents: @Sendable () -> Bool
     private let preparePasteboardTransaction:
-        @Sendable (String) async -> PasteboardDeliveryTransaction?
+        @Sendable (String) async -> Result<
+            PasteboardDeliveryTransaction, PasteboardPreparationFailure
+        >
     private let focusedTargetState:
         (
             @Sendable (
@@ -280,7 +288,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         },
         preparePasteboardTransaction:
             @escaping @Sendable (String) async
-            -> PasteboardDeliveryTransaction? = { text in
+            -> Result<PasteboardDeliveryTransaction, PasteboardPreparationFailure> = { text in
                 await PasteboardDeliveryTransaction.prepare(text: text)
             },
         focusedTargetState:
@@ -616,14 +624,24 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     package func paste(
         _ text: String,
         to target: AccessibilityTargetReference,
-        in processID: pid_t
+        in processID: pid_t,
+        receipt: PasteReceipt
     ) async -> AccessibilityPasteResult {
         guard canPostEvents(),
             let restoreReservation = await pasteboardRestoreCoordinator.reserve()
         else { return .eventFailed }
-        guard !text.isEmpty,
-            let transaction = await preparePasteboardTransaction(text)
-        else {
+        guard !text.isEmpty else {
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
+            return .clipboardFailed
+        }
+        let transaction: PasteboardDeliveryTransaction
+        switch await preparePasteboardTransaction(text) {
+        case .success(let prepared):
+            transaction = prepared
+        case .failure(.tooLarge):
+            await pasteboardRestoreCoordinator.abandon(restoreReservation)
+            return .clipboardTooLarge
+        case .failure(.unavailable):
             await pasteboardRestoreCoordinator.abandon(restoreReservation)
             return .clipboardFailed
         }
@@ -673,7 +691,8 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         }
         await pasteboardRestoreCoordinator.schedule(
             transaction,
-            reservation: restoreReservation
+            reservation: restoreReservation,
+            receipt: receipt
         )
         return .posted
     }

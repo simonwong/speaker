@@ -160,6 +160,52 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
         }
 
+        await runAsync(
+            "cancel after commit keeps an unconfirmed paste truthful in history",
+            failures: &failures
+        ) {
+            let delivery = BlockingDeliveryFake(commitsBeforeBlocking: true)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "Slow App"))
+                ),
+                transcriber: SpeechTranscriberFake(text: "可能没有贴进去。"),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let stream = await sessions.observe()
+
+            await sessions.send(.pressed)
+            let release = Task { await sessions.send(.released) }
+            while await delivery.isBlocking == false { await Task.yield() }
+            await sessions.send(.cancel)
+            let cancelledPresentation = await firstTerminalPresentation(
+                from: stream,
+                before: .milliseconds(80)
+            )
+            await delivery.finish(
+                with: .pendingCopyDiagnosed(
+                    .deliveryUnconfirmed,
+                    .init(stage: .pasteReceipt, cause: .changed)
+                ))
+            await release.value
+            let recordReady = await eventually(before: .seconds(2)) {
+                await history.records.last?.outcome.isTerminal == true
+            }
+            let record = await history.records.last
+
+            try expect(cancelledPresentation?.activity.isCancelled == true)
+            try expect(recordReady)
+            try expect(
+                record?.outcome.pendingCopyReason == .deliveryUnconfirmed,
+                "history recorded \(String(describing: record?.outcome)) for a committed paste"
+            )
+            try expect(record?.deliveryDiagnosticCode == "pasteReceipt.changed")
+        }
+
         await runAsync("cancelled late transcription cannot deliver", failures: &failures) {
             let transcriber = SpeechTranscriberFake(text: "迟到结果", delaysResponse: true)
             let delivery = TextDeliveryFake(result: .delivered)

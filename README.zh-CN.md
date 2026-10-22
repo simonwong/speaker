@@ -44,6 +44,13 @@ Speaker 常驻菜单栏，默认使用 `Fn` 快捷键。你可以按住说话、
 2. 打开 DMG，在窗口中把 **Speaker** 拖到右侧的 **Applications（应用程序）**。
 3. 从“应用程序”打开 Speaker。
 
+也可以用 [Homebrew](https://brew.sh) 安装，本仓库就是 tap：
+
+```bash
+brew tap simonwong/speaker https://github.com/simonwong/speaker
+brew install --cask simonwong/speaker/speaker
+```
+
 之后的版本可以在 App 内更新：在“设置 → 关于”点 **检查更新…**，或在“通用”里打开自动检查更新。Speaker 安装更新前会校验其 Ed25519 签名。
 
 ### 首次使用

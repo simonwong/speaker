@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 /// Automatic delivery borrows the user's clipboard for one Command-V and must
@@ -18,6 +19,7 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             ],
             ["public.png": Data([0x89, 0x50, 0x4E, 0x47])],
         ]
+        let transcriptItems = [["public.utf8-plain-text": Data("Speaker 文本".utf8)]]
 
         await runAsync(
             "clipboard enumeration failure preserves the original contents when copying",
@@ -45,12 +47,12 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
                 itemEnumerationSucceeds: false
             )
 
-            let transaction = await PasteboardDeliveryTransaction.prepare(
+            let prepared = await PasteboardDeliveryTransaction.prepare(
                 text: "Speaker 文本",
                 pasteboard: pasteboard.access
             )
 
-            try expect(transaction == nil)
+            try expect(preparationFailure(prepared) == .unavailable)
             try expect(pasteboard.items == originalItems)
             try expect(pasteboard.clearCount == 0)
         }
@@ -60,15 +62,10 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let pasteboard = ClipboardPasteboardFake(items: [])
-            guard
-                let transaction = PasteboardReplacementTransaction.prepare(
-                    text: "Speaker 文本",
-                    purpose: .pasteTransaction,
-                    pasteboard: pasteboard.access
-                )
-            else {
-                throw SpecFailure(message: "a readable empty clipboard was rejected")
-            }
+            let transaction = try replacement(
+                of: try capturedSnapshot(pasteboard),
+                in: pasteboard
+            )
 
             try expect(transaction.verifies("Speaker 文本"))
             try expect(transaction.restoreIfOwned())
@@ -88,16 +85,7 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
 
-            guard
-                let snapshot = PasteboardSnapshot.capture(
-                    from: pasteboard.access,
-                    budget: .standard
-                )
-            else {
-                throw SpecFailure(
-                    message: "a clipboard within budget produced no snapshot"
-                )
-            }
+            let snapshot = try capturedSnapshot(pasteboard)
 
             try expect(
                 snapshot.items == originalItems,
@@ -124,7 +112,7 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             )
 
             try expect(
-                snapshot == nil,
+                snapshot == .failure(.unreadable),
                 "a clipboard that changed mid-capture produced a snapshot"
             )
             try expect(
@@ -133,28 +121,132 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             )
         }
 
+        run(
+            "clipboard snapshot tells an oversized clipboard from an unreadable one",
+            failures: &failures
+        ) {
+            let budget = PasteboardSnapshotBudget(
+                maximumItemCount: 2,
+                maximumRepresentationCount: 8,
+                maximumBytesPerRepresentation: 16,
+                maximumTotalBytes: 24
+            )
+            let oversizedRepresentation = ClipboardPasteboardFake(items: [
+                ["public.tiff": Data(count: 17)]
+            ])
+            let oversizedTotal = ClipboardPasteboardFake(items: [
+                ["public.tiff": Data(count: 16)],
+                ["public.png": Data(count: 16)],
+            ])
+            let tooManyItems = ClipboardPasteboardFake(items: [
+                ["public.utf8-plain-text": Data("一".utf8)],
+                ["public.utf8-plain-text": Data("二".utf8)],
+                ["public.utf8-plain-text": Data("三".utf8)],
+            ])
+            let unreadable = ClipboardPasteboardFake(
+                items: [["public.utf8-plain-text": Data("可读".utf8), "com.example.lazy": Data()]],
+                unreadableTypes: ["com.example.lazy"]
+            )
+
+            for pasteboard in [oversizedRepresentation, oversizedTotal, tooManyItems] {
+                try expect(
+                    PasteboardSnapshot.capture(from: pasteboard.access, budget: budget)
+                        == .failure(.tooLarge),
+                    "an over-budget clipboard was not reported as too large"
+                )
+            }
+            try expect(
+                PasteboardSnapshot.capture(from: unreadable.access, budget: budget)
+                    == .failure(.unreadable),
+                "one unreadable representation did not fail the whole snapshot"
+            )
+            let standardOverflow = ClipboardPasteboardFake(
+                items: Array(
+                    repeating: ["public.utf8-plain-text": Data("项".utf8)],
+                    count: PasteboardSnapshotBudget.standard.maximumItemCount + 1
+                ))
+            try expect(
+                PasteboardSnapshot.capture(from: standardOverflow.access, budget: .standard)
+                    == .failure(.tooLarge)
+            )
+        }
+
+        await runAsync(
+            "automatic delivery leaves an oversized clipboard untouched",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+
+            let prepared = await PasteboardDeliveryTransaction.prepare(
+                text: "Speaker 文本",
+                pasteboard: pasteboard.access,
+                snapshotBudget: PasteboardSnapshotBudget(
+                    maximumItemCount: 64,
+                    maximumRepresentationCount: 256,
+                    maximumBytesPerRepresentation: 4,
+                    maximumTotalBytes: 32
+                )
+            )
+
+            try expect(preparationFailure(prepared) == .tooLarge)
+            try expect(pasteboard.items == originalItems)
+            try expect(pasteboard.clearCount == 0)
+            try expect(pasteboard.writePurposes.isEmpty)
+        }
+
+        await runAsync(
+            "explicit copy replaces a clipboard too large to set aside",
+            failures: &failures
+        ) {
+            let oversizedItems = Array(
+                repeating: ["public.utf8-plain-text": Data("项".utf8)],
+                count: PasteboardSnapshotBudget.standard.maximumItemCount + 1
+            )
+            let pasteboard = ClipboardPasteboardFake(items: oversizedItems)
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+
+            let copied = await writer.copy("明确复制的文字")
+
+            try expect(copied, "the user's copy request was refused for a large clipboard")
+            try expect(
+                pasteboard.items == [["public.utf8-plain-text": Data("明确复制的文字".utf8)]]
+            )
+        }
+
+        await runAsync(
+            "clipboard snapshots are read away from the main thread",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+
+            let prepared = await PasteboardDeliveryTransaction.prepare(
+                text: "Speaker 文本",
+                pasteboard: pasteboard.access
+            )
+            let writer = SystemClipboardWriter(pasteboard: pasteboard.access)
+            _ = await writer.copy("明确复制的文字")
+
+            try expect(preparationFailure(prepared) == nil)
+            try expect(
+                pasteboard.representationReadsOnMainThread == 0,
+                "a clipboard snapshot blocked the main thread"
+            )
+        }
+
         await runAsync(
             "clipboard restore returns the snapshot while ownership holds",
             failures: &failures
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            guard
-                let transaction = PasteboardReplacementTransaction.prepare(
-                    text: "Speaker 文本",
-                    purpose: .pasteTransaction,
-                    pasteboard: pasteboard.access
-                )
-            else {
-                throw SpecFailure(
-                    message: "the replacement transaction refused a safe clipboard"
-                )
-            }
+            let transaction = try replacement(
+                of: try capturedSnapshot(pasteboard),
+                in: pasteboard
+            )
 
             try expect(transaction.verifies("Speaker 文本"))
             try expect(transaction.stillOwnsPasteboard())
             try expect(
-                pasteboard.items
-                    == [["public.utf8-plain-text": Data("Speaker 文本".utf8)]],
+                pasteboard.items == transcriptItems,
                 "the replacement did not reach the clipboard"
             )
 
@@ -181,17 +273,10 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
                 ["public.utf8-plain-text": Data("用户新复制".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            guard
-                let transaction = PasteboardReplacementTransaction.prepare(
-                    text: "Speaker 文本",
-                    purpose: .pasteTransaction,
-                    pasteboard: pasteboard.access
-                )
-            else {
-                throw SpecFailure(
-                    message: "the replacement transaction refused a safe clipboard"
-                )
-            }
+            let transaction = try replacement(
+                of: try capturedSnapshot(pasteboard),
+                in: pasteboard
+            )
 
             pasteboard.replaceExternally(with: externalItems)
 
@@ -209,27 +294,193 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "clipboard replacement refuses a snapshot another App has outdated",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let snapshot = try capturedSnapshot(pasteboard)
+            let externalItems = [["public.utf8-plain-text": Data("用户新复制".utf8)]]
+            pasteboard.replaceExternally(with: externalItems)
+
+            let transaction = PasteboardReplacementTransaction.begin(
+                replacing: snapshot,
+                with: .text("Speaker 文本"),
+                purpose: .pasteTransaction,
+                pasteboard: pasteboard.access
+            )
+
+            try expect(transaction == nil, "Speaker replaced a clipboard it had not set aside")
+            try expect(pasteboard.items == externalItems)
+        }
+
+        await runAsync(
+            "automatic delivery offers its text only when another App asks",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let clock = ManualVoiceInputClock()
+            let transaction = try await preparedTransaction(pasteboard, clock: clock)
+
+            try expect(pasteboard.items == transcriptItems)
+            try expect(
+                pasteboard.readPromisedTextAsAnotherApplication() == "Speaker 文本",
+                "the promised clipboard text did not render the transcript"
+            )
+            await transaction.restoreIfOwned()
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "clipboard restore waits for a slow reader instead of a fixed delay",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let clock = ManualVoiceInputClock()
+            let completion = PasteboardRestoreCompletion()
+            let transaction = try await preparedTransaction(
+                pasteboard, clock: clock, completion: completion)
+
+            let restore = Task { await transaction.restoreWhenReleased(by: .unconfirmed) }
+            try await clock.waitUntilSleepRequestCount(1)
+
+            clock.advance(by: .milliseconds(500))
+            await settle()
+            try expect(
+                pasteboard.items == transcriptItems,
+                "the clipboard was restored before the target read it"
+            )
+            clock.advance(by: .milliseconds(1_500))
+            await settle()
+            try expect(
+                pasteboard.items == transcriptItems,
+                "a reader slower than two seconds lost the transcript"
+            )
+
+            try expect(pasteboard.readPromisedTextAsAnotherApplication() == "Speaker 文本")
+            try await clock.waitUntilSleepRequestCount(2)
+            try expect(clock.sleepRequests.last == .milliseconds(100))
+            await settle()
+            let restoredAtRead = await completion.isCompleted
+            try expect(!restoredAtRead, "the clipboard was restored while the reader was reading")
+
+            clock.advance(by: .milliseconds(100))
+            try await completion.waitUntilCompleted()
+            await restore.value
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "clipboard restore holds an early read until the minimum delay",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let clock = ManualVoiceInputClock()
+            let completion = PasteboardRestoreCompletion()
+            let transaction = try await preparedTransaction(
+                pasteboard, clock: clock, completion: completion)
+
+            let restore = Task { await transaction.restoreWhenReleased(by: .unconfirmed) }
+            try await clock.waitUntilSleepRequestCount(1)
+            pasteboard.readPromisedTextAsAnotherApplication()
+            try await clock.waitUntilSleepRequestCount(2)
+            try expect(clock.sleepRequests.last == .milliseconds(500))
+
+            clock.advance(by: .milliseconds(100))
+            await settle()
+            let restoredEarly = await completion.isCompleted
+            try expect(!restoredEarly, "an early read restored before the minimum delay")
+
+            clock.advance(by: .milliseconds(400))
+            try await completion.waitUntilCompleted()
+            await restore.value
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "clipboard restore stops waiting for a target that never reads",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let clock = ManualVoiceInputClock()
+            let completion = PasteboardRestoreCompletion()
+            let transaction = try await preparedTransaction(
+                pasteboard, clock: clock, completion: completion)
+
+            let restore = Task { await transaction.restoreWhenReleased(by: .unconfirmed) }
+            try await clock.waitUntilSleepRequestCount(1)
+            try expect(clock.sleepRequests == [PasteboardRestoreTiming.standard.maximumDelay])
+
+            clock.advance(by: .milliseconds(2_999))
+            await settle()
+            let restoredEarly = await completion.isCompleted
+            try expect(!restoredEarly)
+
+            clock.advance(by: .milliseconds(1))
+            try await completion.waitUntilCompleted()
+            await restore.value
+            try expect(
+                pasteboard.items == originalItems,
+                "the cap did not give the clipboard back"
+            )
+        }
+
+        await runAsync(
+            "clipboard restore waits for a readable target's receipt before trusting a read",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let clock = ManualVoiceInputClock()
+            let completion = PasteboardRestoreCompletion()
+            let transaction = try await preparedTransaction(
+                pasteboard, clock: clock, completion: completion)
+            let receipt = PasteReceipt()
+
+            let restore = Task { await transaction.restoreWhenReleased(by: receipt) }
+            try await clock.waitUntilSleepRequestCount(1)
+            pasteboard.readPromisedTextAsAnotherApplication()
+            clock.advance(by: .milliseconds(800))
+            await settle()
+            let restoredBeforeReceipt = await completion.isCompleted
+            try expect(
+                !restoredBeforeReceipt,
+                "a read restored the clipboard before the receipt concluded"
+            )
+
+            receipt.conclude(.unconfirmed)
+            try await completion.waitUntilCompleted()
+            await restore.value
+            try expect(pasteboard.items == originalItems)
+        }
+
+        await runAsync(
+            "clipboard restore follows a confirmed receipt at once",
+            failures: &failures
+        ) {
+            let pasteboard = ClipboardPasteboardFake(items: originalItems)
+            let clock = ManualVoiceInputClock()
+            let completion = PasteboardRestoreCompletion()
+            let transaction = try await preparedTransaction(
+                pasteboard, clock: clock, completion: completion)
+            let receipt = PasteReceipt()
+
+            let restore = Task { await transaction.restoreWhenReleased(by: receipt) }
+            try await clock.waitUntilSleepRequestCount(1)
+            clock.advance(by: .milliseconds(200))
+
+            receipt.conclude(.confirmed)
+            try await completion.waitUntilCompleted()
+            await restore.value
+            try expect(pasteboard.items == originalItems)
+            try expect(clock.sleepRequestCount == 1)
+        }
+
+        await runAsync(
             "clipboard restore coordinator finishes a reserved restore before shutdown returns",
             failures: &failures
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            let sleeper = ControlledPasteboardRestoreSleep()
-            guard
-                let transaction = await PasteboardDeliveryTransaction.prepare(
-                    text: "Speaker 文本",
-                    pasteboard: pasteboard.access,
-                    sleepBeforeRestore: { duration in
-                        try await sleeper.sleep(for: duration)
-                    },
-                    conditionalRestoreDidFinish: {
-                        await sleeper.markRestoreCompleted()
-                    }
-                )
-            else {
-                throw SpecFailure(
-                    message: "the delivery transaction refused a safe clipboard"
-                )
-            }
+            let clock = ManualVoiceInputClock()
+            let transaction = try await preparedTransaction(pasteboard, clock: clock)
 
             let coordinator = PasteboardRestoreCoordinator()
             guard let reservation = await coordinator.reserve() else {
@@ -237,8 +488,9 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
                     message: "a fresh coordinator refused a reservation"
                 )
             }
-            await coordinator.schedule(transaction, reservation: reservation)
-            await sleeper.waitUntilStarted()
+            await coordinator.schedule(
+                transaction, reservation: reservation, receipt: .unconfirmed)
+            try await clock.waitUntilSleepRequestCount(1)
 
             let completion = CompletionFlag()
             let shutdown = Task {
@@ -252,7 +504,7 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
                 "shutdown returned while a restore was still pending"
             )
 
-            await sleeper.resume()
+            clock.advance(by: PasteboardRestoreTiming.standard.maximumDelay)
             await shutdown.value
             try expect(
                 pasteboard.items == originalItems,
@@ -326,14 +578,8 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            guard
-                let transaction = await PasteboardDeliveryTransaction.prepare(
-                    text: "Speaker 文本",
-                    pasteboard: pasteboard.access
-                )
-            else {
-                throw SpecFailure(message: "the delivery transaction refused a safe clipboard")
-            }
+            let transaction = try await preparedTransaction(
+                pasteboard, clock: ManualVoiceInputClock())
             try expect(pasteboard.writePurposes == [.pasteTransaction])
             try expect(pasteboard.clearsKeptOnCurrentHost == [true])
 
@@ -385,6 +631,61 @@ enum PasteboardTransactionSpecs: CoreSpecDomain {
             try expect(!AbandonedPasteTransaction.clear(from: foreign.access))
             try expect(foreign.items == originalItems)
             try expect(foreign.clearCount == 0)
+        }
+    }
+
+    private static func capturedSnapshot(
+        _ pasteboard: ClipboardPasteboardFake
+    ) throws -> PasteboardSnapshot {
+        switch PasteboardSnapshot.capture(from: pasteboard.access, budget: .standard) {
+        case .success(let snapshot):
+            return snapshot
+        case .failure(let failure):
+            throw SpecFailure(message: "a readable clipboard produced no snapshot: \(failure)")
+        }
+    }
+
+    @MainActor
+    private static func replacement(
+        of snapshot: PasteboardSnapshot,
+        in pasteboard: ClipboardPasteboardFake
+    ) throws -> PasteboardReplacementTransaction {
+        guard
+            let transaction = PasteboardReplacementTransaction.begin(
+                replacing: snapshot,
+                with: .text("Speaker 文本"),
+                purpose: .pasteTransaction,
+                pasteboard: pasteboard.access
+            )
+        else {
+            throw SpecFailure(message: "the replacement transaction refused a safe clipboard")
+        }
+        return transaction
+    }
+
+    private static func preparationFailure(
+        _ prepared: Result<PasteboardDeliveryTransaction, PasteboardPreparationFailure>
+    ) -> PasteboardPreparationFailure? {
+        if case .failure(let failure) = prepared { failure } else { nil }
+    }
+
+    private static func preparedTransaction(
+        _ pasteboard: ClipboardPasteboardFake,
+        clock: ManualVoiceInputClock,
+        completion: PasteboardRestoreCompletion? = nil
+    ) async throws -> PasteboardDeliveryTransaction {
+        let prepared = await PasteboardDeliveryTransaction.prepare(
+            text: "Speaker 文本",
+            pasteboard: pasteboard.access,
+            clock: clock,
+            conditionalRestoreDidFinish: { await completion?.markCompleted() }
+        )
+        switch prepared {
+        case .success(let transaction):
+            return transaction
+        case .failure(let failure):
+            throw SpecFailure(
+                message: "the delivery transaction refused a safe clipboard: \(failure)")
         }
     }
 }

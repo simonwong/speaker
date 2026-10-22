@@ -120,20 +120,34 @@ package struct PasteboardSnapshotBudget: Equatable, Sendable {
     )
 }
 
+/// Why the clipboard could not be set aside for rollback.
+package enum PasteboardSnapshotFailure: Error, Equatable, Sendable {
+    /// The clipboard could not be enumerated, a representation could not be
+    /// read, or another App changed it while Speaker was reading.
+    case unreadable
+    /// The clipboard holds more items, representations, or bytes than the
+    /// snapshot budget allows.
+    case tooLarge
+}
+
 package struct PasteboardSnapshot: Equatable, Sendable {
     package let items: [[String: Data]]
     fileprivate let changeCount: Int
 
-    @MainActor
+    /// Reads every representation. Reading can make another App render data
+    /// it promised, so callers run this away from the main thread; the
+    /// change count read before and after proves the copy is coherent.
     package static func capture(
         from pasteboard: ClipboardPasteboardAccess,
         budget: PasteboardSnapshotBudget
-    ) -> Self? {
+    ) -> Result<Self, PasteboardSnapshotFailure> {
         let capturedChangeCount = pasteboard.changeCount()
-        guard let itemCount = pasteboard.itemCount(),
-            itemCount >= 0,
-            itemCount <= budget.maximumItemCount
-        else { return nil }
+        guard let itemCount = pasteboard.itemCount(), itemCount >= 0 else {
+            return .failure(.unreadable)
+        }
+        guard itemCount <= budget.maximumItemCount else {
+            return .failure(.tooLarge)
+        }
 
         var representationCount = 0
         var totalBytes = 0
@@ -142,59 +156,215 @@ package struct PasteboardSnapshot: Equatable, Sendable {
 
         for itemIndex in 0..<itemCount {
             guard let types = pasteboard.itemTypes(itemIndex) else {
-                return nil
+                return .failure(.unreadable)
             }
             guard
                 types.count
                     <= budget.maximumRepresentationCount - representationCount
-            else { return nil }
+            else { return .failure(.tooLarge) }
             representationCount += types.count
 
             var representations: [String: Data] = [:]
             representations.reserveCapacity(types.count)
             for type in types {
                 guard representations[type] == nil,
-                    let data = pasteboard.data(itemIndex, type),
-                    data.count <= budget.maximumBytesPerRepresentation,
+                    let data = pasteboard.data(itemIndex, type)
+                else { return .failure(.unreadable) }
+                guard data.count <= budget.maximumBytesPerRepresentation,
                     data.count <= budget.maximumTotalBytes - totalBytes
-                else { return nil }
+                else { return .failure(.tooLarge) }
                 representations[type] = data
                 totalBytes += data.count
             }
             items.append(representations)
         }
 
-        guard pasteboard.changeCount() == capturedChangeCount else { return nil }
-        return Self(items: items, changeCount: capturedChangeCount)
+        guard pasteboard.changeCount() == capturedChangeCount else {
+            return .failure(.unreadable)
+        }
+        return .success(Self(items: items, changeCount: capturedChangeCount))
+    }
+
+    /// Captures on a background executor so a large clipboard, or another
+    /// App rendering its promised data, never blocks the main thread.
+    @concurrent
+    package static func captureAwayFromMainThread(
+        from pasteboard: ClipboardPasteboardAccess,
+        budget: PasteboardSnapshotBudget
+    ) async -> Result<Self, PasteboardSnapshotFailure> {
+        capture(from: pasteboard, budget: budget)
+    }
+}
+
+/// What a Speaker clipboard write puts under the plain-text type.
+package enum PasteboardReplacementContent: Sendable {
+    /// The text itself, written immediately.
+    case text(String)
+    /// The text, rendered only when a reader first asks for it.
+    case promise(PasteboardTextPromise)
+}
+
+/// The paste transaction's text, handed out through AppKit's lazy data
+/// provider. The first request for it is the only content-free evidence that
+/// some App read the clipboard after Speaker wrote it.
+package final class PasteboardTextPromise: NSObject, NSPasteboardItemDataProvider,
+    @unchecked Sendable
+{
+    package let text: String
+    private let clock: any VoiceInputClock
+    private let firstRead = PasteboardSettledValue<Duration>()
+
+    package init(text: String, clock: any VoiceInputClock) {
+        self.text = text
+        self.clock = clock
+    }
+
+    /// Records the first read and returns the text. AppKit may ask on any
+    /// thread.
+    package func provideText() -> String {
+        firstRead.settle(clock.monotonicNow)
+        return text
+    }
+
+    /// When the text was first read, or `nil` while it has not been read.
+    package var firstReadTime: Duration? {
+        firstRead.current
+    }
+
+    /// Returns `nil` when the waiting task is cancelled before any read.
+    package func waitForFirstRead() async -> Duration? {
+        await firstRead.wait()
+    }
+
+    package func pasteboard(
+        _ pasteboard: NSPasteboard?,
+        item: NSPasteboardItem,
+        provideDataForType type: NSPasteboard.PasteboardType
+    ) {
+        guard type == .string else { return }
+        item.setString(provideText(), forType: .string)
+    }
+
+    package func pasteboardFinishedWithDataProvider(_ pasteboard: NSPasteboard) {}
+}
+
+/// What the Input Target showed about one posted paste. The paste transaction
+/// keeps the user's clipboard aside until delivery concludes it.
+package final class PasteReceipt: Sendable {
+    package enum Conclusion: Equatable, Sendable {
+        /// The target's value became exactly the expected value, so the
+        /// target has consumed the paste.
+        case confirmed
+        /// The target gave no proof that it consumed the paste.
+        case unconfirmed
+    }
+
+    private let conclusion = PasteboardSettledValue<Conclusion>()
+
+    package init() {}
+
+    /// A receipt for a target without readable value evidence: nothing will
+    /// ever confirm its paste.
+    package static var unconfirmed: PasteReceipt {
+        let receipt = PasteReceipt()
+        receipt.conclude(.unconfirmed)
+        return receipt
+    }
+
+    /// The first conclusion wins.
+    package func conclude(_ value: Conclusion) {
+        conclusion.settle(value)
+    }
+
+    package var currentConclusion: Conclusion? {
+        conclusion.current
+    }
+
+    /// Returns `nil` when the waiting task is cancelled first.
+    package func wait() async -> Conclusion? {
+        await conclusion.wait()
+    }
+}
+
+/// A value settled once that tasks can await. Cancelling a waiter ends its
+/// wait with `nil` instead of leaving it suspended.
+private final class PasteboardSettledValue<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value?
+    private var waiters: [UUID: CheckedContinuation<Value?, Never>] = [:]
+
+    var current: Value? {
+        lock.withLock { value }
+    }
+
+    func settle(_ newValue: Value) {
+        let resumed: [CheckedContinuation<Value?, Never>] = lock.withLock {
+            guard value == nil else { return [] }
+            value = newValue
+            defer { waiters.removeAll() }
+            return Array(waiters.values)
+        }
+        for waiter in resumed {
+            waiter.resume(returning: newValue)
+        }
+    }
+
+    func wait() async -> Value? {
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let immediate: Value?? = lock.withLock {
+                    if let value { return .some(value) }
+                    if Task.isCancelled { return .some(nil) }
+                    waiters[id] = continuation
+                    return nil
+                }
+                if let immediate {
+                    continuation.resume(returning: immediate)
+                }
+            }
+        } onCancel: {
+            let waiter = lock.withLock { waiters.removeValue(forKey: id) }
+            waiter?.resume(returning: nil)
+        }
     }
 }
 
 package struct PasteboardReplacementTransaction: Sendable {
-    private let snapshot: PasteboardSnapshot
+    /// `nil` only for an explicit copy over a clipboard too large to set
+    /// aside: the user asked to replace it, so there is nothing to restore.
+    private let snapshot: PasteboardSnapshot?
     private let marker: String
     private let purpose: PasteboardWritePurpose
     private let ownedChangeCount: Int
     private let pasteboard: ClipboardPasteboardAccess
 
+    /// Replaces the clipboard that `snapshot` captured. It refuses when
+    /// another App changed the clipboard after the snapshot was read.
     @MainActor
-    package static func prepare(
-        text: String,
+    package static func begin(
+        replacing snapshot: PasteboardSnapshot?,
+        with content: PasteboardReplacementContent,
         purpose: PasteboardWritePurpose,
-        pasteboard: ClipboardPasteboardAccess,
-        budget: PasteboardSnapshotBudget = .standard
+        pasteboard: ClipboardPasteboardAccess
     ) -> Self? {
-        guard
-            let snapshot = PasteboardSnapshot.capture(
-                from: pasteboard,
-                budget: budget
-            ), pasteboard.changeCount() == snapshot.changeCount
-        else { return nil }
+        if let snapshot, pasteboard.changeCount() != snapshot.changeCount {
+            return nil
+        }
 
         let marker = UUID().uuidString
         let clearedChangeCount = pasteboard.clearContents(purpose.isCurrentHostOnly)
-        guard pasteboard.writeText(text, marker, purpose) else {
-            if pasteboard.changeCount() == clearedChangeCount
-                || pasteboard.readMarker(purpose) == marker
+        let written =
+            switch content {
+            case .text(let text):
+                pasteboard.writeText(text, marker, purpose)
+            case .promise(let promise):
+                pasteboard.writePromisedText(promise, marker, purpose)
+            }
+        guard written else {
+            if let snapshot,
+                pasteboard.changeCount() == clearedChangeCount
+                    || pasteboard.readMarker(purpose) == marker
             {
                 _ = restore(snapshot, to: pasteboard)
             }
@@ -209,15 +379,27 @@ package struct PasteboardReplacementTransaction: Sendable {
         )
     }
 
+    /// Reads the text back. Only for text written immediately: reading a
+    /// promise back would count as its first read.
     @MainActor
     package func verifies(_ text: String) -> Bool {
         stillOwnsPasteboard() && pasteboard.readString() == text
     }
 
+    /// Checks a promised write without rendering it: Speaker still owns the
+    /// clipboard and it offers plain text.
+    @MainActor
+    package func offersPromisedText() -> Bool {
+        stillOwnsPasteboard()
+            && pasteboard.itemTypes(0)?.contains(
+                NSPasteboard.PasteboardType.string.rawValue
+            ) == true
+    }
+
     @MainActor
     @discardableResult
     package func restoreIfOwned() -> Bool {
-        guard stillOwnsPasteboard() else { return false }
+        guard let snapshot, stillOwnsPasteboard() else { return false }
         return Self.restore(snapshot, to: pasteboard)
     }
 
@@ -383,43 +565,100 @@ package enum KeyboardLayoutKeyCodes {
     }
 }
 
+/// When a paste transaction gives the user's clipboard back.
+///
+/// A slow reader, such as a remote desktop client, a virtual machine, or a
+/// busy editor, can ask for the clipboard long after Command-V. Restoring on
+/// a fixed timer would hand it the user's previous clipboard instead of the
+/// transcript, so the restore waits for evidence that the paste was read.
+package struct PasteboardRestoreTiming: Equatable, Sendable {
+    /// Never restore sooner than this after Command-V, so a reader that took
+    /// the text before the keystroke arrived still has it when the keystroke
+    /// does.
+    package let minimumDelay: Duration
+    /// Wait this long after the first read, so a reader that asks for the
+    /// text more than once still receives it.
+    package let delayAfterRead: Duration
+    /// Restore regardless after this, so a target that never reads cannot
+    /// keep the user's clipboard.
+    package let maximumDelay: Duration
+
+    package init(
+        minimumDelay: Duration,
+        delayAfterRead: Duration,
+        maximumDelay: Duration
+    ) {
+        precondition(minimumDelay <= maximumDelay)
+        self.minimumDelay = minimumDelay
+        self.delayAfterRead = delayAfterRead
+        self.maximumDelay = maximumDelay
+    }
+
+    package static let standard = Self(
+        minimumDelay: .milliseconds(500),
+        delayAfterRead: .milliseconds(100),
+        maximumDelay: .seconds(3)
+    )
+}
+
+/// Why automatic delivery could not borrow the clipboard.
+package enum PasteboardPreparationFailure: Error, Equatable, Sendable {
+    /// The clipboard could not be read coherently or written.
+    case unavailable
+    /// The clipboard is too large to set aside and restore.
+    case tooLarge
+}
+
 package struct PasteboardDeliveryTransaction: Sendable {
     private let replacement: PasteboardReplacementTransaction
-    private let conditionalRestoreDelay: Duration
-    private let sleepBeforeRestore: @Sendable (Duration) async throws -> Void
+    private let promise: PasteboardTextPromise
+    private let restoreTiming: PasteboardRestoreTiming
+    private let clock: any VoiceInputClock
     private let conditionalRestoreDidFinish: @Sendable () async -> Void
 
     package static func prepare(
         text: String,
         pasteboard: ClipboardPasteboardAccess = .live,
         snapshotBudget: PasteboardSnapshotBudget = .standard,
-        conditionalRestoreDelay: Duration = .milliseconds(500),
-        sleepBeforeRestore:
-            @escaping @Sendable (Duration) async throws -> Void = { duration in
-                try await Task.sleep(for: duration)
-            },
+        restoreTiming: PasteboardRestoreTiming = .standard,
+        clock: any VoiceInputClock = ContinuousVoiceInputClock(),
         conditionalRestoreDidFinish:
             @escaping @Sendable () async -> Void = {}
-    ) async -> Self? {
-        await MainActor.run {
+    ) async -> Result<Self, PasteboardPreparationFailure> {
+        let snapshot: PasteboardSnapshot
+        switch await PasteboardSnapshot.captureAwayFromMainThread(
+            from: pasteboard,
+            budget: snapshotBudget
+        ) {
+        case .success(let captured):
+            snapshot = captured
+        case .failure(.tooLarge):
+            return .failure(.tooLarge)
+        case .failure(.unreadable):
+            return .failure(.unavailable)
+        }
+        let promise = PasteboardTextPromise(text: text, clock: clock)
+        return await MainActor.run {
             guard
-                let replacement = PasteboardReplacementTransaction.prepare(
-                    text: text,
+                let replacement = PasteboardReplacementTransaction.begin(
+                    replacing: snapshot,
+                    with: .promise(promise),
                     purpose: .pasteTransaction,
-                    pasteboard: pasteboard,
-                    budget: snapshotBudget
+                    pasteboard: pasteboard
                 )
-            else { return nil }
-            guard replacement.verifies(text) else {
+            else { return .failure(.unavailable) }
+            guard replacement.offersPromisedText() else {
                 replacement.restoreIfOwned()
-                return nil
+                return .failure(.unavailable)
             }
-            return Self(
-                replacement: replacement,
-                conditionalRestoreDelay: conditionalRestoreDelay,
-                sleepBeforeRestore: sleepBeforeRestore,
-                conditionalRestoreDidFinish: conditionalRestoreDidFinish
-            )
+            return .success(
+                Self(
+                    replacement: replacement,
+                    promise: promise,
+                    restoreTiming: restoreTiming,
+                    clock: clock,
+                    conditionalRestoreDidFinish: conditionalRestoreDidFinish
+                ))
         }
     }
 
@@ -449,14 +688,48 @@ package struct PasteboardDeliveryTransaction: Sendable {
         }
     }
 
-    package func restoreAfterDelay() async {
-        do {
-            try await sleepBeforeRestore(conditionalRestoreDelay)
-        } catch {
-            return
+    /// Restores the user's clipboard after Command-V has been posted, at the
+    /// earliest of:
+    /// - the receipt confirming that the target consumed the paste;
+    /// - once the receipt concludes without that proof, the first read of the
+    ///   promised text plus `delayAfterRead`, but never sooner than
+    ///   `minimumDelay` after posting;
+    /// - `maximumDelay` after posting.
+    package func restoreWhenReleased(by receipt: PasteReceipt) async {
+        let postedAt = clock.monotonicNow
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await sleep(until: postedAt + restoreTiming.maximumDelay)
+            }
+            group.addTask {
+                await waitForRelease(by: receipt, postedAt: postedAt)
+            }
+            await group.next()
+            group.cancelAll()
         }
         await restoreIfOwned()
         await conditionalRestoreDidFinish()
+    }
+
+    private func waitForRelease(
+        by receipt: PasteReceipt,
+        postedAt: Duration
+    ) async {
+        guard let conclusion = await receipt.wait(),
+            conclusion == .unconfirmed
+        else { return }
+        guard let readAt = await promise.waitForFirstRead() else { return }
+        await sleep(
+            until: max(
+                postedAt + restoreTiming.minimumDelay,
+                readAt + restoreTiming.delayAfterRead
+            ))
+    }
+
+    private func sleep(until deadline: Duration) async {
+        let remaining = deadline - clock.monotonicNow
+        guard remaining > .zero else { return }
+        try? await clock.sleep(for: remaining)
     }
 
     package static func postCommandV(
@@ -507,11 +780,12 @@ package actor PasteboardRestoreCoordinator {
 
     package func schedule(
         _ transaction: PasteboardDeliveryTransaction,
-        reservation id: UUID
+        reservation id: UUID,
+        receipt: PasteReceipt
     ) {
         precondition(active.contains(id))
         pending[id] = Task { [weak self] in
-            await transaction.restoreAfterDelay()
+            await transaction.restoreWhenReleased(by: receipt)
             await self?.didFinish(id)
         }
     }

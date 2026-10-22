@@ -25,6 +25,9 @@ This matrix separates deterministic contract evidence from behavior that only a 
 | Posted paste cannot be confirmed | Record a posted-unconfirmed outcome; never expose retryable Pending Copy after the command may have inserted text |
 | Voice Input Session to an isolated native editor | Run the real press/release, release-time target capture, processing, and transactional paste path; the target process must read back the exact expected text |
 | Pasteboard changes after Speaker prepares delivery | Preserve the newer clipboard value instead of restoring Speaker's stale snapshot |
+| Slow clipboard reader, such as a remote desktop or virtual machine | Keep the transcript on the clipboard until the target reads it; restore 100 ms after the first read, no sooner than 500 ms and no later than 3 s after Command-V |
+| Readable target shows a third value after paste | Never paste again; keep the result as Pending Copy (`deliveryUnconfirmed`) for the user to check first |
+| Clipboard over the snapshot budget | Leave the clipboard untouched and keep the result as Pending Copy (`clipboardTooLarge`); an explicit copy replaces it |
 | Target application does not complete AX IPC | Preserve the exact read/write stage in a content-free diagnostic |
 | Explicit copy | Verify the clipboard value after writing; retain the Pending Copy Result if verification fails |
 | Event tap disabled by the system | Reset gesture ownership, re-enable the tap, and surface recovery state |

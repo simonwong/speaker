@@ -28,8 +28,13 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         let evidence: AccessibilityTargetEvidence
     }
 
+    /// How long a posted paste may take to show in a readable target's value.
+    package static let receiptTimeout: Duration = .seconds(1)
+    private static let receiptPollInterval: Duration = .milliseconds(50)
+
     private var targets: [UUID: StoredTarget] = [:]
     private let system: any AccessibilityTargetSystem
+    private let clock: any VoiceInputClock
     private nonisolated let releaseCapture: @Sendable () -> AccessibilityReleaseCapture
     private nonisolated let releaseCaptureCache =
         AccessibilityReleaseCaptureCache()
@@ -37,6 +42,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
     public init() {
         let system = LiveAccessibilityTargetSystem()
         self.system = system
+        clock = ContinuousVoiceInputClock()
         releaseCapture = {
             system.captureReleaseProcess()
         }
@@ -44,12 +50,14 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
 
     package init(
         system: any AccessibilityTargetSystem,
+        clock: any VoiceInputClock = ContinuousVoiceInputClock(),
         releaseCapture:
             @escaping @Sendable () -> AccessibilityReleaseCapture = {
                 .unavailable(processID: 0, reason: .missingTarget)
             }
     ) {
         self.system = system
+        self.clock = clock
         self.releaseCapture = releaseCapture
     }
 
@@ -279,33 +287,48 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         guard !Task.isCancelled else {
             return .pendingCopy(.deliveryFailed)
         }
+        // A readable target keeps the user's clipboard aside until its value
+        // shows whether the paste landed; any other target has no receipt.
+        let receiptEvidence = expectedValue.flatMap { expectedValue in
+            evidence.originalValue.map { (expectedValue, $0) }
+        }
+        let receipt = receiptEvidence == nil ? PasteReceipt.unconfirmed : PasteReceipt()
         switch await system.paste(
             text,
             to: evidence.reference,
-            in: evidence.processID
+            in: evidence.processID,
+            receipt: receipt
         ) {
         case .posted:
-            if let expectedValue,
-                let originalValue = evidence.originalValue
-            {
-                return await verifyMutationReceipt(
-                    expectedValue,
-                    originalValue: originalValue,
-                    target: evidence.reference,
-                    diagnosticStage: .pasteReceipt
-                )
+            guard let (expectedValue, originalValue) = receiptEvidence else {
+                return .pasteCommandPosted(
+                    .init(
+                        stage: .pasteReceipt,
+                        cause: .unconfirmed
+                    ))
             }
-            return .pasteCommandPosted(
-                .init(
-                    stage: .pasteReceipt,
-                    cause: .unconfirmed
-                ))
+            let outcome = await verifyMutationReceipt(
+                expectedValue,
+                originalValue: originalValue,
+                target: evidence.reference,
+                diagnosticStage: .pasteReceipt
+            )
+            receipt.conclude(outcome == .delivered ? .confirmed : .unconfirmed)
+            return outcome
         case .secureTarget:
             return .pendingCopy(.secureTarget)
         case .targetChanged:
             return .pendingCopy(.invalidatedTarget)
         case .targetFailure(let failure):
             return Self.failedOperation(stage: .focusRead, failure: failure)
+        case .clipboardTooLarge:
+            return .pendingCopyDiagnosed(
+                .clipboardTooLarge,
+                .init(
+                    stage: .clipboardSnapshot,
+                    cause: .tooLarge
+                )
+            )
         case .clipboardFailed, .eventFailed:
             return .pendingCopyDiagnosed(
                 .deliveryFailed,
@@ -331,14 +354,19 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         target: AccessibilityTargetReference,
         diagnosticStage: DeliveryDiagnostic.Stage
     ) async -> DeliveryOutcome {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(1))
+        let deadline = clock.monotonicNow + Self.receiptTimeout
+        // The latest readable value was neither the original nor the
+        // expected one. A value can pass through such a state while the
+        // target applies the paste, so only the last reading decides.
+        var showsThirdValue = false
         while true {
             switch await system.value(of: target) {
             case .success(let value?) where value == expectedValue:
                 return .delivered
             case .success(let value?) where value == originalValue:
-                break
+                showsThirdValue = false
+            case .success(.some):
+                showsThirdValue = true
             case .success(nil), .failure(.cannotComplete):
                 break
             case .failure(.invalidUIElement):
@@ -355,7 +383,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                         cause: .unsupported
                     )
                 )
-            case .failure(.other), .success(.some):
+            case .failure(.other):
                 return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
@@ -363,7 +391,20 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                     )
                 )
             }
-            guard clock.now < deadline else {
+            guard clock.monotonicNow < deadline else {
+                // The paste is committed and is never posted again. A third
+                // value means it may have inserted something other than the
+                // result, such as the user's previous clipboard, so the
+                // result stays available for the user to check and copy.
+                if showsThirdValue {
+                    return .pendingCopyDiagnosed(
+                        .deliveryUnconfirmed,
+                        .init(
+                            stage: diagnosticStage,
+                            cause: .changed
+                        )
+                    )
+                }
                 return .pasteCommandPosted(
                     .init(
                         stage: diagnosticStage,
@@ -371,7 +412,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                     )
                 )
             }
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await clock.sleep(for: Self.receiptPollInterval)
             guard !Task.isCancelled else {
                 return .pasteCommandPosted(
                     .init(
