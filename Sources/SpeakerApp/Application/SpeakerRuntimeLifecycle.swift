@@ -75,7 +75,6 @@ final class OnboardingPresenter {
 @MainActor
 final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     private let settingsStore: VersionedLocalAppSettingsStore
-    private let doubao: DoubaoSettingsModel
     private let recognition: SpeechRecognitionSettingsModel
     private let migratingCredentials: MigratingProviderCredentialStore?
     private let dictionaryFileURL: URL
@@ -94,7 +93,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
 
     init(
         settingsStore: VersionedLocalAppSettingsStore,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         migratingCredentials: MigratingProviderCredentialStore?,
         dictionaryFileURL: URL,
@@ -112,7 +110,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         launchArguments: [String]
     ) {
         self.settingsStore = settingsStore
-        self.doubao = doubao
         self.recognition = recognition
         self.migratingCredentials = migratingCredentials
         self.dictionaryFileURL = dictionaryFileURL
@@ -144,7 +141,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func loadDoubaoResource(rawValue: String?) async {
-        await doubao.loadResource(rawValue: rawValue)
+        await recognition.loadDoubaoResource(rawValue: rawValue)
     }
 
     func migrateCredentials() async -> [ProviderID] {
@@ -167,10 +164,9 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func loadRefinement() async {
+        // Reads the selected provider's Key or language model, so the menu
+        // bar and Overview can report a missing one before Settings is opened.
         await recognition.load()
-        // Reads only whether a Doubao Key exists, so the menu bar and
-        // Overview can report a missing one before Settings is opened.
-        await doubao.refresh()
         await refinement.load()
     }
 
@@ -189,27 +185,23 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
             // untouched instead of being read through.
             return .legacyProtectionFailed
         }
-        let legacy = VersionedLocalSessionHistory(fileURL: legacyHistoryFileURL)
-        if let notice = await legacy.persistenceStatus().notice {
-            switch notice {
-            case .corruptedDataPreserved(let backupURL, _):
-                return .legacyCorrupted(backupName: backupURL.lastPathComponent)
-            case .privacyMigrationFailed:
-                return .legacyProtectionFailed
-            case .corruptedRecordsSkipped, .writeFailed:
-                return .legacyNotReady
-            case .recoveryArchivePruneFailed:
-                // Old evidence that refused to delete says nothing about the
-                // legacy records, which loaded normally; migration continues.
-                break
-            }
+        let legacy = LegacyHistoryReader(fileURL: legacyHistoryFileURL)
+        let records: [VoiceInputHistoryRecord]
+        switch legacy.read() {
+        case .records(let legacyRecords):
+            records = legacyRecords
+        case .corruptedPreserved(let backupURL):
+            return .legacyCorrupted(backupName: backupURL.lastPathComponent)
+        case .protectionFailed:
+            return .legacyProtectionFailed
+        case .unreadable:
+            return .legacyNotReady
         }
-        let records = await legacy.allRecords()
         guard await history.importLegacyRecords(records) else {
             return .importRefused
         }
         do {
-            try OwnerOnlyFilePersistence.removeRegularFile(at: legacyHistoryFileURL)
+            try legacy.removeDocument()
         } catch {
             return .migratedLegacyFileRemains
         }
@@ -278,7 +270,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     private let onboarding: OnboardingPresenter
     private let panel: VoiceInputPanelController
     private let refinement: RefinementSettingsModel
-    private let doubao: DoubaoSettingsModel
     private let recognition: SpeechRecognitionSettingsModel
     private let voiceInput: VoiceInputExperience
 
@@ -290,7 +281,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         onboarding: OnboardingPresenter,
         panel: VoiceInputPanelController,
         refinement: RefinementSettingsModel,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         voiceInput: VoiceInputExperience
     ) {
@@ -301,7 +291,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         self.onboarding = onboarding
         self.panel = panel
         self.refinement = refinement
-        self.doubao = doubao
         self.recognition = recognition
         self.voiceInput = voiceInput
     }
@@ -313,10 +302,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     func closeOnboarding() { onboarding.close() }
     func closePanel() { panel.stop() }
     func shutdownRefinement() async { await refinement.shutdown() }
-    func shutdownDoubao() async {
-        await recognition.shutdown()
-        await doubao.shutdown()
-    }
+    func shutdownRecognition() async { await recognition.shutdown() }
     func shutdownVoiceInput() async { await voiceInput.shutdown() }
     func awaitStartup() async { await startup.waitUntilFinished() }
     func flushPersistence() async {

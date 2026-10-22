@@ -2,12 +2,16 @@ import AppKit
 @preconcurrency import ApplicationServices
 @preconcurrency import Carbon
 import Foundation
+import os
 
 package enum AccessibilityTargetScope: Sendable {
     case element
     case window
 }
 
+/// `@unchecked` because `AXUIElement` is not annotated `Sendable`. The
+/// reference is immutable, and the Accessibility API accepts an element from
+/// any thread.
 package struct AccessibilityTargetReference: @unchecked Sendable, Equatable {
     package let id: UUID
     package let scope: AccessibilityTargetScope
@@ -81,7 +85,7 @@ package struct AccessibilityTargetEvidence: Sendable {
     }
 }
 
-package struct AccessibilityReleaseTarget: @unchecked Sendable {
+package struct AccessibilityReleaseTarget: Sendable {
     package let reference: AccessibilityTargetReference
     package let processID: pid_t
 
@@ -94,7 +98,7 @@ package struct AccessibilityReleaseTarget: @unchecked Sendable {
     }
 }
 
-package enum AccessibilityReleaseCapture: @unchecked Sendable {
+package enum AccessibilityReleaseCapture: Sendable {
     case process(processID: pid_t)
     case target(AccessibilityReleaseTarget)
     case unavailable(processID: pid_t, reason: PendingCopyReason)
@@ -264,19 +268,6 @@ extension AccessibilityTargetSystem {
     }
 }
 
-private final class AccessibilityCaptureDiagnosticBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedValue: String?
-
-    var value: String? {
-        lock.withLock { storedValue }
-    }
-
-    func set(_ value: String) {
-        lock.withLock { storedValue = value }
-    }
-}
-
 package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
     private enum RawReadResult {
         case success(CFTypeRef?)
@@ -300,10 +291,15 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         )?
     private let postPasteCommand: @Sendable () async -> Bool
     private let pasteboardRestoreCoordinator: PasteboardRestoreCoordinator
-    private let captureDiagnosticBox = AccessibilityCaptureDiagnosticBox()
+    /// Shared by every copy of this value.
+    private let lastCaptureDiagnostic = OSAllocatedUnfairLock<String?>(initialState: nil)
 
     package var captureDiagnostic: String? {
-        captureDiagnosticBox.value
+        lastCaptureDiagnostic.withLock { $0 }
+    }
+
+    private func recordCaptureDiagnostic(_ diagnostic: String) {
+        lastCaptureDiagnostic.withLock { $0 = diagnostic }
     }
 
     package init(
@@ -496,7 +492,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         _ target: AccessibilityReleaseTarget
     ) async -> AccessibilityTargetCapture {
         guard let element = target.reference.element else {
-            captureDiagnosticBox.set("inspect.invalidReference")
+            recordCaptureDiagnostic("inspect.invalidReference")
             return .unavailable(.invalidatedTarget)
         }
         _ = AXUIElementSetMessagingTimeout(element, 1)
@@ -525,7 +521,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         case .failure(.attributeUnsupported), .failure(.notImplemented):
             subrole = nil
         case .failure(let failure):
-            captureDiagnosticBox.set(
+            recordCaptureDiagnostic(
                 "inspect.subrole.\(failure)"
             )
             return .unavailable(failure.pendingCopyReason)
@@ -542,7 +538,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             .failure(.notImplemented):
             selection = nil
         case .failure(let failure):
-            captureDiagnosticBox.set(
+            recordCaptureDiagnostic(
                 "inspect.selection.\(failure)"
             )
             return .unavailable(failure.pendingCopyReason)
@@ -555,7 +551,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         case .failure(.attributeUnsupported), .failure(.notImplemented):
             role = nil
         case .failure(let failure):
-            captureDiagnosticBox.set(
+            recordCaptureDiagnostic(
                 "inspect.role.\(failure)"
             )
             return .unavailable(failure.pendingCopyReason)
@@ -583,7 +579,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             }
         )
         guard isEditable else {
-            captureDiagnosticBox.set("inspect.notEditable")
+            recordCaptureDiagnostic("inspect.notEditable")
             return .unavailable(.missingTarget)
         }
 
@@ -594,7 +590,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         case .failure(.attributeUnsupported), .failure(.notImplemented):
             valueSample = nil
         case .failure(let failure):
-            captureDiagnosticBox.set(
+            recordCaptureDiagnostic(
                 "inspect.value.\(failure)"
             )
             return .unavailable(failure.pendingCopyReason)

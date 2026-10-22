@@ -1,6 +1,7 @@
 @preconcurrency import Carbon
 @preconcurrency import CoreGraphics
 import Foundation
+import os
 
 package enum GlobalVoiceTrigger: Equatable, Sendable {
     case pressed
@@ -45,18 +46,17 @@ package enum SecureEventInputHolder {
 
 /// Thread-safe policy shared by the event tap and the session presentation.
 /// Escape is consumed only while Speaker owns an active voice interaction.
-package final class EscapeCancellationGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var active = false
+package final class EscapeCancellationGate: Sendable {
+    private let active = OSAllocatedUnfairLock(initialState: false)
 
     package init() {}
 
     package func setActive(_ active: Bool) {
-        lock.withLock { self.active = active }
+        self.active.withLock { $0 = active }
     }
 
     package var shouldConsumeEscape: Bool {
-        lock.withLock { active }
+        active.withLock { $0 }
     }
 }
 
