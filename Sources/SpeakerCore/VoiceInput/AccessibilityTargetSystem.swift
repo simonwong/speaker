@@ -58,20 +58,24 @@ package enum AccessibilityReleaseTargetSelection {
 package struct AccessibilityTargetEvidence: Sendable {
     package let reference: AccessibilityTargetReference
     package let selection: NSRange?
-    package let originalValue: String?
+    /// A bounded window of the value around the selection, or `nil` when the
+    /// value is unreadable or longer than
+    /// `AccessibilityValueEvidenceLimits.maximumCharacterCount`. Without it,
+    /// delivery is paste-only and the paste stays unconfirmed.
+    package let valueSample: AccessibilityTextSample?
     package let processID: pid_t
     package let applicationName: String
 
     package init(
         reference: AccessibilityTargetReference,
         selection: NSRange?,
-        originalValue: String?,
+        valueSample: AccessibilityTextSample?,
         processID: pid_t,
         applicationName: String
     ) {
         self.reference = reference
         self.selection = selection
-        self.originalValue = originalValue
+        self.valueSample = valueSample
         self.processID = processID
         self.applicationName = applicationName
     }
@@ -165,6 +169,31 @@ package enum AccessibilityAttributeReadPolicy {
     }
 }
 
+/// An element-scope target receives an automatic paste only with a positive
+/// sign that it edits text. Any one signal is enough; the costlier ones are
+/// read only when the cheaper ones are missing.
+package enum AccessibilityEditableSignal {
+    package static let textRoles: Set<String> = [
+        kAXTextFieldRole,
+        kAXTextAreaRole,
+        kAXComboBoxRole,
+        "AXSearchField",
+    ]
+
+    package static func isEditable(
+        role: String?,
+        subrole: String?,
+        hasSelectedTextRange: Bool,
+        isValueSettable: () -> Bool,
+        hasEditableAncestor: () -> Bool
+    ) -> Bool {
+        if let role, textRoles.contains(role) { return true }
+        if subrole == kAXSearchFieldSubrole { return true }
+        if hasSelectedTextRange { return true }
+        return isValueSettable() || hasEditableAncestor()
+    }
+}
+
 package enum AccessibilityPasteResult: Equatable, Sendable {
     case posted
     case secureTarget
@@ -193,9 +222,13 @@ package protocol AccessibilityTargetSystem: Sendable {
     func role(
         of target: AccessibilityTargetReference
     ) async -> AccessibilityOperationResult<String?>
-    func value(
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<String?>
+    /// Reads the part of the value in `range`, clamped to the value. Returns
+    /// `nil` when the value is absent or longer than
+    /// `AccessibilityValueEvidenceLimits.maximumCharacterCount`.
+    func textSample(
+        of target: AccessibilityTargetReference,
+        in range: NSRange
+    ) async -> AccessibilityOperationResult<AccessibilityTextSample?>
     func focusedState(
         _ target: AccessibilityTargetReference,
         in processID: pid_t
@@ -476,19 +509,21 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
                 .init(
                     reference: target.reference,
                     selection: nil,
-                    originalValue: nil,
+                    valueSample: nil,
                     processID: target.processID,
                     applicationName: runningApplication?.localizedName
                         ?? Self.unknownApplicationName
                 ))
         }
 
+        let subrole: String?
         switch readString(from: element, attribute: kAXSubroleAttribute) {
-        case .success(let subrole?) where subrole == kAXSecureTextFieldSubrole:
+        case .success(let value?) where value == kAXSecureTextFieldSubrole:
             return .unavailable(.secureTarget)
-        case .success, .failure(.attributeUnsupported),
-            .failure(.notImplemented):
-            break
+        case .success(let value):
+            subrole = value
+        case .failure(.attributeUnsupported), .failure(.notImplemented):
+            subrole = nil
         case .failure(let failure):
             captureDiagnosticBox.set(
                 "inspect.subrole.\(failure)"
@@ -513,16 +548,51 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             return .unavailable(failure.pendingCopyReason)
         }
 
-        let originalValue: String?
-        switch readString(
-            from: element,
-            attribute: kAXValueAttribute
-        ) {
-        case .success(let value?):
-            originalValue = value
-        case .success(nil), .failure(.attributeUnsupported),
-            .failure(.notImplemented):
-            originalValue = nil
+        let role: String?
+        switch readString(from: element, attribute: kAXRoleAttribute) {
+        case .success(let value):
+            role = value
+        case .failure(.attributeUnsupported), .failure(.notImplemented):
+            role = nil
+        case .failure(let failure):
+            captureDiagnosticBox.set(
+                "inspect.role.\(failure)"
+            )
+            return .unavailable(failure.pendingCopyReason)
+        }
+        let isEditable = AccessibilityEditableSignal.isEditable(
+            role: role,
+            subrole: subrole,
+            hasSelectedTextRange: selection != nil,
+            isValueSettable: {
+                var settable = DarwinBoolean(false)
+                return AXUIElementIsAttributeSettable(
+                    element,
+                    kAXValueAttribute as CFString,
+                    &settable
+                ) == .success && settable.boolValue
+            },
+            hasEditableAncestor: {
+                if case .success(.some) = readValue(
+                    from: element,
+                    attribute: Self.editableAncestorAttribute
+                ) {
+                    return true
+                }
+                return false
+            }
+        )
+        guard isEditable else {
+            captureDiagnosticBox.set("inspect.notEditable")
+            return .unavailable(.missingTarget)
+        }
+
+        let valueSample: AccessibilityTextSample?
+        switch readEvidenceSample(from: element, selection: selection) {
+        case .success(let sample):
+            valueSample = sample
+        case .failure(.attributeUnsupported), .failure(.notImplemented):
+            valueSample = nil
         case .failure(let failure):
             captureDiagnosticBox.set(
                 "inspect.value.\(failure)"
@@ -537,7 +607,7 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             .init(
                 reference: target.reference,
                 selection: selection,
-                originalValue: originalValue,
+                valueSample: valueSample,
                 processID: target.processID,
                 applicationName: runningApplication?.localizedName ?? Self.unknownApplicationName
             ))
@@ -569,13 +639,24 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
         return readString(from: element, attribute: kAXRoleAttribute)
     }
 
-    package func value(
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<String?> {
+    package func textSample(
+        of target: AccessibilityTargetReference,
+        in range: NSRange
+    ) async -> AccessibilityOperationResult<AccessibilityTextSample?> {
         guard let element = target.element else {
             return .failure(.invalidUIElement)
         }
-        return readString(from: element, attribute: kAXValueAttribute)
+        switch readCharacterCount(from: element) {
+        case .success(let length?):
+            return readTextSample(from: element, in: range, length: length)
+        case .success(nil), .failure(.attributeUnsupported),
+            .failure(.notImplemented):
+            return readWholeValueSample(from: element) {
+                AccessibilityTextSample(value: $0, range: range)
+            }
+        case .failure(let failure):
+            return .failure(failure)
+        }
     }
 
     package func focusedState(
@@ -699,6 +780,119 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
 
     package func shutdown() async {
         await pasteboardRestoreCoordinator.shutdown()
+    }
+
+    /// Chromium and WebKit expose this on elements inside an editable region.
+    private static let editableAncestorAttribute = "AXEditableAncestor"
+
+    /// The capture-time evidence window. The length is read first so a long
+    /// value is never transferred.
+    private func readEvidenceSample(
+        from element: AXUIElement,
+        selection: NSRange?
+    ) -> AccessibilityOperationResult<AccessibilityTextSample?> {
+        switch readCharacterCount(from: element) {
+        case .success(let length?):
+            guard
+                let range = AccessibilityValueEvidence.sampleRange(
+                    around: selection,
+                    length: length
+                )
+            else { return .success(nil) }
+            return readTextSample(from: element, in: range, length: length)
+        case .success(nil), .failure(.attributeUnsupported),
+            .failure(.notImplemented):
+            return readWholeValueSample(from: element) {
+                AccessibilityTextSample.evidence(fromValue: $0, selection: selection)
+            }
+        case .failure(let failure):
+            return .failure(failure)
+        }
+    }
+
+    private func readCharacterCount(
+        from element: AXUIElement
+    ) -> AccessibilityOperationResult<Int?> {
+        switch readValue(
+            from: element,
+            attribute: kAXNumberOfCharactersAttribute
+        ) {
+        case .success(let value):
+            return .success(value as? Int)
+        case .failure(let failure):
+            return .failure(failure)
+        }
+    }
+
+    /// Reads `range` with `AXStringForRange`. A target that cannot read a
+    /// range, or returns a window of the wrong length, falls back to the
+    /// capped whole-value read.
+    private func readTextSample(
+        from element: AXUIElement,
+        in range: NSRange,
+        length: Int
+    ) -> AccessibilityOperationResult<AccessibilityTextSample?> {
+        guard length >= 0,
+            length <= AccessibilityValueEvidenceLimits.maximumCharacterCount
+        else { return .success(nil) }
+        let clamped = AccessibilityValueEvidence.clamp(range, toLength: length)
+        guard clamped.length > 0 else {
+            return .success(
+                AccessibilityTextSample(length: length, range: clamped, codeUnits: [])
+            )
+        }
+        var cfRange = CFRange(location: clamped.location, length: clamped.length)
+        guard let parameter = AXValueCreate(.cfRange, &cfRange) else {
+            return .failure(.other)
+        }
+        var value: CFTypeRef?
+        let error = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            parameter,
+            &value
+        )
+        switch error {
+        case .success:
+            if let text = value as? String {
+                let sample = AccessibilityTextSample(
+                    length: length,
+                    range: clamped,
+                    text: text
+                )
+                if sample.codeUnits.count == clamped.length {
+                    return .success(sample)
+                }
+            }
+        case .noValue, .parameterizedAttributeUnsupported,
+            .attributeUnsupported, .notImplemented, .illegalArgument:
+            break
+        default:
+            return .failure(map(error))
+        }
+        return readWholeValueSample(from: element) {
+            AccessibilityTextSample(value: $0, range: range)
+        }
+    }
+
+    /// The fallback for targets without `AXStringForRange`. The whole value
+    /// still crosses IPC, but a value over the limit is never used.
+    private func readWholeValueSample(
+        from element: AXUIElement,
+        sample: (String) -> AccessibilityTextSample?
+    ) -> AccessibilityOperationResult<AccessibilityTextSample?> {
+        switch readString(from: element, attribute: kAXValueAttribute) {
+        case .success(let value?):
+            guard
+                value.utf16.count
+                    <= AccessibilityValueEvidenceLimits.maximumCharacterCount
+            else { return .success(nil) }
+            return .success(sample(value))
+        case .success(nil):
+            return .success(nil)
+        case .failure(let failure):
+            return .failure(failure)
+        }
     }
 
     private func readElement(
