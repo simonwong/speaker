@@ -35,43 +35,26 @@ package enum OnboardingStep: Int, CaseIterable, Sendable {
 package struct OnboardingPresentation: Equatable, Sendable {
     package let mode: OnboardingMode
     package let permissions: PermissionSnapshot
-    package let doubaoStatus: DoubaoConnectionStatus
-    package let hasStoredDoubaoKey: Bool
-    package let isUpdatingDoubaoKey: Bool
-    package let recognitionProvider: SpeechRecognitionProviderID
-    package let hasStoredRecognitionKey: Bool
+    package let recognitionReadiness: SpeechRecognitionReadiness
     package let isUpdatingRecognition: Bool
 
     package init(
         permissions: PermissionSnapshot,
-        doubaoStatus: DoubaoConnectionStatus,
-        hasStoredDoubaoKey: Bool,
+        recognitionReadiness: SpeechRecognitionReadiness,
         mode: OnboardingMode = .setup,
-        isUpdatingDoubaoKey: Bool = false,
-        recognitionProvider: SpeechRecognitionProviderID = .doubao,
-        hasStoredRecognitionKey: Bool = false,
         isUpdatingRecognition: Bool = false
     ) {
         self.mode = mode
         self.permissions = permissions
-        self.doubaoStatus = doubaoStatus
-        self.hasStoredDoubaoKey = hasStoredDoubaoKey
-        self.isUpdatingDoubaoKey = isUpdatingDoubaoKey
-        self.recognitionProvider = recognitionProvider
-        self.hasStoredRecognitionKey = hasStoredRecognitionKey
+        self.recognitionReadiness = recognitionReadiness
         self.isUpdatingRecognition = isUpdatingRecognition
     }
 
+    /// First-time setup accepts only full readiness: unlike the menu bar,
+    /// it waits for Doubao's explicit connection check, and no Key, profile,
+    /// or language-model change may be in progress.
     package var isReady: Bool {
-        guard permissions.allGranted, !isUpdatingRecognition else { return false }
-        // For on-device recognition, `hasStoredRecognitionKey` means the language
-        // model is installed; there is no Key.
-        if recognitionProvider != .doubao { return hasStoredRecognitionKey }
-        return hasStoredDoubaoKey && connectionSucceeded && !isUpdatingDoubaoKey
-    }
-
-    private var connectionSucceeded: Bool {
-        if case .success = doubaoStatus { true } else { false }
+        permissions.allGranted && !isUpdatingRecognition && recognitionReadiness == .ready
     }
 
     package func canContinue(from step: OnboardingStep) -> Bool {

@@ -75,7 +75,6 @@ final class OnboardingPresenter {
 @MainActor
 final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     private let settingsStore: VersionedLocalAppSettingsStore
-    private let doubao: DoubaoSettingsModel
     private let recognition: SpeechRecognitionSettingsModel
     private let migratingCredentials: MigratingProviderCredentialStore?
     private let dictionaryFileURL: URL
@@ -94,7 +93,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
 
     init(
         settingsStore: VersionedLocalAppSettingsStore,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         migratingCredentials: MigratingProviderCredentialStore?,
         dictionaryFileURL: URL,
@@ -112,7 +110,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         launchArguments: [String]
     ) {
         self.settingsStore = settingsStore
-        self.doubao = doubao
         self.recognition = recognition
         self.migratingCredentials = migratingCredentials
         self.dictionaryFileURL = dictionaryFileURL
@@ -144,7 +141,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func loadDoubaoResource(rawValue: String?) async {
-        await doubao.loadResource(rawValue: rawValue)
+        await recognition.loadDoubaoResource(rawValue: rawValue)
     }
 
     func migrateCredentials() async -> [ProviderID] {
@@ -167,10 +164,9 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func loadRefinement() async {
+        // Reads the selected provider's Key or language model, so the menu
+        // bar and Overview can report a missing one before Settings is opened.
         await recognition.load()
-        // Reads only whether a Doubao Key exists, so the menu bar and
-        // Overview can report a missing one before Settings is opened.
-        await doubao.refresh()
         await refinement.load()
     }
 
@@ -271,7 +267,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     private let onboarding: OnboardingPresenter
     private let panel: VoiceInputPanelController
     private let refinement: RefinementSettingsModel
-    private let doubao: DoubaoSettingsModel
     private let recognition: SpeechRecognitionSettingsModel
     private let voiceInput: VoiceInputExperience
 
@@ -283,7 +278,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         onboarding: OnboardingPresenter,
         panel: VoiceInputPanelController,
         refinement: RefinementSettingsModel,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         voiceInput: VoiceInputExperience
     ) {
@@ -294,7 +288,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         self.onboarding = onboarding
         self.panel = panel
         self.refinement = refinement
-        self.doubao = doubao
         self.recognition = recognition
         self.voiceInput = voiceInput
     }
@@ -306,10 +299,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     func closeOnboarding() { onboarding.close() }
     func closePanel() { panel.stop() }
     func shutdownRefinement() async { await refinement.shutdown() }
-    func shutdownDoubao() async {
-        await recognition.shutdown()
-        await doubao.shutdown()
-    }
+    func shutdownRecognition() async { await recognition.shutdown() }
     func shutdownVoiceInput() async { await voiceInput.shutdown() }
     func awaitStartup() async { await startup.waitUntilFinished() }
     func flushPersistence() async {

@@ -125,7 +125,7 @@ private final class ShutdownStagesFake: RuntimeShutdownStages {
     func closeOnboarding() { calls.append("closeOnboarding") }
     func closePanel() { calls.append("closePanel") }
     func shutdownRefinement() async { calls.append("shutdownRefinement") }
-    func shutdownDoubao() async { calls.append("shutdownDoubao") }
+    func shutdownRecognition() async { calls.append("shutdownRecognition") }
 
     func shutdownVoiceInput() async {
         calls.append("shutdownVoiceInput")
@@ -163,7 +163,7 @@ enum RuntimeLifecycleSpecs {
         "closeOnboarding",
         "closePanel",
         "shutdownRefinement",
-        "shutdownDoubao",
+        "shutdownRecognition",
         "shutdownVoiceInput",
         "awaitStartup",
         "flushPersistence",

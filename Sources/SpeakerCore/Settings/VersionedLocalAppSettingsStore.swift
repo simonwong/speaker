@@ -417,6 +417,11 @@ public protocol AppSettingsStoring: Sendable {
     func updateHistoryRetention(
         _ policy: HistoryRetentionPolicy
     ) async throws -> SpeakerAppSettings
+
+    @discardableResult
+    func updateDoubaoResource(
+        _ resource: DoubaoStreamingResource
+    ) async throws -> SpeakerAppSettings
 }
 
 public actor VersionedLocalAppSettingsStore: AppSettingsStoring {

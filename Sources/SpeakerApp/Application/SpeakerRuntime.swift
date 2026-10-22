@@ -9,7 +9,6 @@ final class SpeakerRuntime: ObservableObject {
     let permissions: PermissionModel
     let voiceInput: VoiceInputExperience
     let history: SQLiteSessionHistory
-    let doubaoSettings: DoubaoSettingsModel
     let recognitionSettings: SpeechRecognitionSettingsModel
     let refinementSettings: RefinementSettingsModel
     let dictionarySettings: DictionarySettingsModel
@@ -51,7 +50,6 @@ final class SpeakerRuntime: ObservableObject {
         microphones: microphones,
         loginItemSettings: loginItemSettings,
         historyRetention: historyRetention,
-        doubao: doubaoSettings,
         recognition: recognitionSettings,
         refinement: refinementSettings,
         dictionary: dictionarySettings,
@@ -164,15 +162,11 @@ final class SpeakerRuntime: ObservableObject {
             voiceTarget: voiceInput.shortcutTarget
         )
         self.globalInteraction = globalInteraction
-        let doubaoSettings = DoubaoSettingsModel(
-            service: doubao,
-            settingsStore: settingsStore
-        )
-        self.doubaoSettings = doubaoSettings
         let recognitionSettings = SpeechRecognitionSettingsModel(
             credentials: dependencies.credentials.store,
             configuration: configuration,
-            settingsStore: settingsStore)
+            settingsStore: settingsStore,
+            doubao: doubao)
         self.recognitionSettings = recognitionSettings
         let refinementSettings = RefinementSettingsModel(
             service: textRefiner,
@@ -255,7 +249,6 @@ final class SpeakerRuntime: ObservableObject {
             makeController: { mode, completion in
                 SpeakerOnboardingWindowController(
                     permissions: permissions,
-                    doubao: doubaoSettings,
                     recognition: recognitionSettings,
                     requestPermission: { permission in
                         await onboardingPermissionCoordinator.request(permission)
@@ -275,7 +268,6 @@ final class SpeakerRuntime: ObservableObject {
         let startup = RuntimeStartupSequence(
             stages: SpeakerRuntimeStartupStages(
                 settingsStore: settingsStore,
-                doubao: doubaoSettings,
                 recognition: recognitionSettings,
                 migratingCredentials: dependencies.credentials.migrating,
                 dictionaryFileURL: dependencies.dictionaryStore.fileURL,
@@ -304,7 +296,6 @@ final class SpeakerRuntime: ObservableObject {
                 onboarding: onboarding,
                 panel: panel,
                 refinement: refinementSettings,
-                doubao: doubaoSettings,
                 recognition: recognitionSettings,
                 voiceInput: voiceInput
             )
@@ -455,6 +446,9 @@ final class SpeakerRuntime: ObservableObject {
             await providerRuntimeDiagnostics.activeSnapshot()
         let audioCaptureEnvironment =
             await dependencies.audioCapture.captureEnvironmentSnapshot()
+        // Doubao's Key is reported even while another provider is selected.
+        let storedDoubaoKey = try? await dependencies.credentials.store.apiKey(for: .doubao)
+        let doubaoConfigured = storedDoubaoKey.flatMap { $0 } != nil
         let bundle = dependencies.bundle
         let buildIdentity = bundle.buildInfo.buildIdentity
         let activity = voiceInput.state.diagnosticCode
@@ -481,12 +475,10 @@ final class SpeakerRuntime: ObservableObject {
                 shortcut: shortcut.preference.displayName,
                 activity: activity,
                 refinement: refinementSettings.mode.diagnosticKind,
-                doubaoConfigured: doubaoSettings.hasConfiguredKey,
-                doubaoResource: doubaoSettings.resource.rawValue,
+                doubaoConfigured: doubaoConfigured,
+                doubaoResource: recognitionSettings.doubaoResource.rawValue,
                 recognitionProfile: recognitionSettings.selectedProfile,
-                recognitionConfigured: recognitionSettings.selectedProvider == .doubao
-                    ? doubaoSettings.hasConfiguredKey
-                    : recognitionSettings.isSelectedProviderReady,
+                recognitionConfigured: recognitionSettings.readiness.isConfigured,
                 refinementConfigured: refinementSettings.hasStoredKey,
                 refinementVerified: refinementSettings.isConnectionVerified,
                 refinementProfile: refinementSettings.selectedProfile,

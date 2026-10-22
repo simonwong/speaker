@@ -13,7 +13,6 @@ package struct MenuBarContent: View {
     @ObservedObject var settingsNavigation: SettingsNavigationModel
     @ObservedObject var mainWindow: MainWindowModel
     @ObservedObject var permissions: PermissionModel
-    @ObservedObject var doubao: DoubaoSettingsModel
     @ObservedObject var recognition: SpeechRecognitionSettingsModel
     @ObservedObject var recentResults: MenuBarRecentResultsModel
     let startRuntime: () -> Void
@@ -29,7 +28,6 @@ package struct MenuBarContent: View {
         settingsNavigation: SettingsNavigationModel,
         mainWindow: MainWindowModel,
         permissions: PermissionModel,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         recentResults: MenuBarRecentResultsModel,
         startRuntime: @escaping () -> Void,
@@ -43,7 +41,6 @@ package struct MenuBarContent: View {
         self.settingsNavigation = settingsNavigation
         self.mainWindow = mainWindow
         self.permissions = permissions
-        self.doubao = doubao
         self.recognition = recognition
         self.recentResults = recentResults
         self.startRuntime = startRuntime
@@ -69,7 +66,6 @@ package struct MenuBarContent: View {
     private var setupGap: VoiceInputSetupGap? {
         VoiceInputSetupGap.current(
             permissions: permissions.snapshot,
-            doubao: doubao,
             recognition: recognition
         )
     }
