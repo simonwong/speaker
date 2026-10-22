@@ -281,7 +281,10 @@ package actor DoubaoStreamingASRClient {
         self.liveness = liveness
     }
 
-    package func transcribe(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
+    package func transcribe(
+        _ chunks: AsyncStream<Data>,
+        audioCaptureCompletion: AudioCaptureCompletionGate? = nil
+    ) async throws -> TranscriptionResult {
         guard !configuration.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw DoubaoASRFailure(kind: .invalidCredential)
         }
@@ -299,7 +302,11 @@ package actor DoubaoStreamingASRClient {
             runtimeDiagnostics: runtimeDiagnostics,
             liveness: liveness
         )
-        return try await exchange.run(requestPayload: requestPayload, audio: chunks)
+        return try await exchange.run(
+            requestPayload: requestPayload,
+            audio: chunks,
+            audioCaptureCompletion: audioCaptureCompletion
+        )
     }
 
     /// Opens the socket, finishing the diagnostics entry on any failure so a

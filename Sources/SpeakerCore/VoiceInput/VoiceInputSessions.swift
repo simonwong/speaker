@@ -293,6 +293,25 @@ public actor VoiceInputSessions {
             return
         }
 
+        // Streaming recognition connects while the microphone starts. Audio
+        // captured before the connection is ready waits in the bounded chunk
+        // stream and is sent in order once it is; only the completion gate,
+        // accepted after a successful stop, authorizes the final audio.
+        if let liveStream, let streamingProcessor {
+            let completion = AudioCaptureCompletionGate()
+            active?.audioCaptureCompletion = completion
+            let sessions = self
+            active?.transcriptionTask = Task {
+                try await streamingProcessor.processStreaming(
+                    liveStream,
+                    snapshot: snapshot,
+                    audioCaptureCompletion: completion
+                ) { progress in
+                    await sessions.receivedProcessingProgress(progress, id: id)
+                }
+            }
+        }
+
         do {
             try await audioStart.start()
             guard isCurrent(id, at: .preparing) else {
@@ -304,20 +323,9 @@ public actor VoiceInputSessions {
             active?.audit.advance(stage: "recording", now: clock.monotonicNow)
             publish(.recording(id))
             startRecordingLimit(for: id, snapshot: snapshot)
-            if let liveStream, let streamingProcessor {
-                let completion = AudioCaptureCompletionGate()
-                active?.audioCaptureCompletion = completion
-                let sessions = self
-                let transcriptionTask = Task {
-                    try await streamingProcessor.processStreaming(
-                        liveStream,
-                        snapshot: snapshot,
-                        audioCaptureCompletion: completion
-                    ) { progress in
-                        await sessions.receivedProcessingProgress(progress, id: id)
-                    }
-                }
-                active?.transcriptionTask = transcriptionTask
+            // A connection that already failed while the microphone started
+            // ends the recording here, through the same path as a later one.
+            if let transcriptionTask = active?.transcriptionTask {
                 observeStreamingCompletion(transcriptionTask, id: id)
             }
             observeRecordingTelemetry(for: id)
@@ -342,6 +350,8 @@ public actor VoiceInputSessions {
             let activity = VoiceInputActivity.failed(id, problem.failure)
             let auditedStageDurations = active?.audit.finish(now: clock.monotonicNow) ?? [:]
             beginFinalizing()
+            // The connection opened beside the failed start never sends final audio.
+            await session.audioCaptureCompletion?.reject()
             let record = VoiceInputSessionRecordBuilder.make(
                 VoiceInputSessionEnding(
                     id: id,
@@ -466,17 +476,23 @@ public actor VoiceInputSessions {
             await discard(target)
             return
         }
-        active?.audit.advance(
-            stage: snapshot.recognitionProvider.provider.rawValue,
-            now: clock.monotonicNow
-        )
-        publish(.processing(id, .transcribing))
-        saveStage(
-            .processing(id, .transcribing),
-            id: id,
-            startedAt: startedAt,
-            snapshot: snapshot
-        )
+        // Streaming recognition can confirm its text and start refinement
+        // while the Input Target is still being captured. The session then
+        // stays in refinement, with its skip control, instead of stepping
+        // back to recognition.
+        if active?.confirmedRecognition == nil {
+            active?.audit.advance(
+                stage: snapshot.recognitionProvider.provider.rawValue,
+                now: clock.monotonicNow
+            )
+            publish(.processing(id, .transcribing))
+            saveStage(
+                .processing(id, .transcribing),
+                id: id,
+                startedAt: startedAt,
+                snapshot: snapshot
+            )
+        }
 
         let task: Task<VoiceTextProcessingResult, Error>
         if let liveTask = active?.transcriptionTask {

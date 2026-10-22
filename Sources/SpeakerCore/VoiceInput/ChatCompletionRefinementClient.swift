@@ -71,6 +71,14 @@ public struct ChatCompletionTransportResponse: Equatable, Sendable {
 
 public protocol ChatCompletionTransport: Sendable {
     func send(_ request: URLRequest) async throws -> ChatCompletionTransportResponse
+    /// Opens a connection to `endpoint`'s host that a later `send` can reuse,
+    /// without a credential or any request content. It never throws: a failed
+    /// preparation only means the request connects as usual.
+    func prepareConnection(to endpoint: URL) async
+}
+
+extension ChatCompletionTransport {
+    public func prepareConnection(to endpoint: URL) async {}
 }
 
 public struct URLSessionChatCompletionTransport: ChatCompletionTransport {
@@ -82,6 +90,28 @@ public struct URLSessionChatCompletionTransport: ChatCompletionTransport {
 
     public init() {
         session = ProviderURLSessionFactory.makeSession()
+    }
+
+    /// A bodiless `HEAD` to the completion endpoint with no `Authorization`
+    /// header. Without a credential the provider cannot attribute it to an
+    /// account, so it cannot be billed; it carries no transcript, rule, or
+    /// Entry. Its only effect is the DNS, TCP, and TLS work, which leaves an
+    /// open connection in this transport's session for the request to reuse.
+    package static func connectionPreparationRequest(for endpoint: URL) -> URLRequest {
+        var request = URLRequest(
+            url: endpoint,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 10
+        )
+        request.httpMethod = "HEAD"
+        return request
+    }
+
+    public func prepareConnection(to endpoint: URL) async {
+        _ = try? await session.data(
+            for: Self.connectionPreparationRequest(for: endpoint),
+            delegate: ChatCompletionRedirectPolicy()
+        )
     }
 
     public func send(_ request: URLRequest) async throws -> ChatCompletionTransportResponse {

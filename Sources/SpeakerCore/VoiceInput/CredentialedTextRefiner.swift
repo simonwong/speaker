@@ -43,6 +43,12 @@ public actor CredentialedTextRefiner: TextRefining {
         ).refine(text, using: context)
     }
 
+    /// Uses only the profile's destination; the Key stays unread.
+    public nonisolated func prepareConnection(to provider: RefinementProviderProfile) async {
+        guard let endpoint = try? provider.completionEndpoint() else { return }
+        await transport.prepareConnection(to: endpoint)
+    }
+
     public func hasAPIKey(for profile: RefinementProviderProfile) async throws -> Bool {
         try await apiKey(for: profile.validated()) != nil
     }
