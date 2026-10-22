@@ -4,6 +4,11 @@ import SpeakerCore
 import SpeakerSpecSupport
 
 enum SessionHistorySpecs: CoreSpecDomain {
+    /// The cases that hold a reader open across a write or checkpoint expect
+    /// SQLite to report busy; a short wait reaches the same outcome as the
+    /// three-second production default without spending it.
+    private static let busyReaderTimeout: Duration = .milliseconds(50)
+
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
@@ -271,7 +276,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("history.sqlite3")
             let id = VoiceInputSessionID()
             let secret = "retry-provider-secret-\(UUID().uuidString)"
-            let store = SQLiteSessionHistory(fileURL: fileURL)
+            let store = SQLiteSessionHistory(fileURL: fileURL, busyTimeout: busyReaderTimeout)
             await store.save(
                 .init(
                     sessionID: id,
@@ -573,7 +578,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .appendingPathComponent("speaker-sqlite-busy-clear-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("history.sqlite3")
-            let store = SQLiteSessionHistory(fileURL: fileURL)
+            try expect(SQLiteSessionHistory.defaultBusyTimeout == .seconds(3))
+            let store = SQLiteSessionHistory(fileURL: fileURL, busyTimeout: busyReaderTimeout)
             let id = VoiceInputSessionID()
             let secret = "speaker-sensitive-clear-marker-\(UUID().uuidString)"
             await store.save(
@@ -634,7 +640,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 )
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("history.sqlite3")
-            let store = SQLiteSessionHistory(fileURL: fileURL)
+            let store = SQLiteSessionHistory(fileURL: fileURL, busyTimeout: busyReaderTimeout)
             let now = Date()
             let oldID = VoiceInputSessionID()
             await store.save(
@@ -717,7 +723,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("history.sqlite3")
             let store = SQLiteSessionHistory(
                 fileURL: fileURL,
-                maximumRecordCount: 1
+                maximumRecordCount: 1,
+                busyTimeout: busyReaderTimeout
             )
             let secret = "pruned-history-secret-\(UUID().uuidString)"
             let oldID = VoiceInputSessionID()

@@ -30,6 +30,14 @@ PACKAGE_RESOLVED_SHA256="${SPEAKER_PACKAGE_RESOLVED_SHA256:-}"
 RELEASE_NOTES_SHA256="${SPEAKER_RELEASE_NOTES_SHA256:-}"
 CUSTOM_BUNDLE_PATHS=0
 TEST_ISOLATED_OUTPUT=0
+# CI sets this to 1 so its development bundle build is also the release
+# warnings gate. Production-signed builds always treat warnings as errors.
+WARNINGS_AS_ERRORS="${SPEAKER_BUNDLE_WARNINGS_AS_ERRORS:-0}"
+
+if [[ "$WARNINGS_AS_ERRORS" != 0 && "$WARNINGS_AS_ERRORS" != 1 ]]; then
+    print -u2 "SPEAKER_BUNDLE_WARNINGS_AS_ERRORS must be 0 or 1."
+    exit 1
+fi
 
 if [[ -n "${SPEAKER_SWIFT_SCRATCH_PATH:-}" \
       || -n "${SPEAKER_BUNDLE_OUTPUT_APP:-}" \
@@ -184,7 +192,11 @@ if [[ "$SIGNING_IDENTITY" != "-" ]]; then
         "$X86_BIN_PATH/SpeakerApp" \
         -output "$UNIVERSAL_EXECUTABLE"
 else
-    /bin/zsh "$SCRIPT_DIR/build" >&2
+    BUILD_FLAGS=()
+    if [[ "$WARNINGS_AS_ERRORS" == 1 ]]; then
+        BUILD_FLAGS=(-Xswiftc -warnings-as-errors)
+    fi
+    /bin/zsh "$SCRIPT_DIR/build" "${BUILD_FLAGS[@]}" >&2
     BIN_PATH="$(/bin/zsh "$SCRIPT_DIR/swiftw" build --disable-sandbox --configuration "$CONFIGURATION" --show-bin-path)"
 fi
 

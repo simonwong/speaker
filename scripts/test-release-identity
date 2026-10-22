@@ -1124,6 +1124,17 @@ if SPEAKER_BUNDLE_PENDING_ROOT="$BUNDLE_PATH_FIXTURE" \
 fi
 [[ "$(<"$BUNDLE_PATH_FIXTURE/Important.app/sentinel")" == sentinel ]]
 
+if SPEAKER_BUNDLE_WARNINGS_AS_ERRORS=yes \
+    /bin/zsh "$SCRIPT_DIR/bundle" > "$TEST_ROOT/bundle-warnings-switch.log" 2>&1; then
+    print -u2 "Bundle accepted an unrecognized warnings-as-errors switch."
+    exit 1
+fi
+grep -Fq "SPEAKER_BUNDLE_WARNINGS_AS_ERRORS must be 0 or 1." \
+    "$TEST_ROOT/bundle-warnings-switch.log" || {
+    print -u2 "Bundle did not reject the warnings-as-errors switch before building."
+    exit 1
+}
+
 PROMOTION_FIXTURE="$TEST_ROOT/promotion"
 mkdir -p "$PROMOTION_FIXTURE"
 print -r -- 'old-feed' > "$PROMOTION_FIXTURE/previous.xml"

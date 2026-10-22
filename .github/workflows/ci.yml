@@ -93,8 +93,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-  # Deterministic specifications, the shell contract tests, the
-  # warnings-as-errors builds, and the formatting check. It runs alongside the
+  # Deterministic specifications, the shell contract tests, the debug
+  # warnings-as-errors build, and the formatting check. It runs alongside the
   # bundling lane below; the `required` job reports both.
   specifications:
     name: Specifications, warnings, and formatting
@@ -158,6 +158,9 @@ jobs:
           source scripts/release-common
           verify_swiftpm_dependency_checkouts_clean "$PWD"
 
+      # Debug only. The release configuration's warnings gate is the `verify`
+      # lane's bundle build, which compiles the same SpeakerApp product in
+      # release with SPEAKER_BUNDLE_WARNINGS_AS_ERRORS=1.
       - name: Treat compiler warnings as errors
         run: >-
           ./scripts/swiftw build
@@ -166,21 +169,14 @@ jobs:
           --product SpeakerApp
           -Xswiftc -warnings-as-errors
 
-      - name: Treat release compiler warnings as errors
-        run: >-
-          ./scripts/swiftw build
-          --disable-sandbox
-          --configuration release
-          --product SpeakerApp
-          -Xswiftc -warnings-as-errors
-
       - name: Check scripts and patch hygiene
         run: |
           zsh -n scripts/*
           git diff --check
 
-  # The release bundle and the install checks. It does not wait for
-  # `specifications`: the two lanes run side by side and `required` joins them.
+  # The release bundle, built with warnings as errors, and the install checks.
+  # It does not wait for `specifications`: the two lanes run side by side and
+  # `required` joins them.
   verify:
     name: Release bundle and install
     needs: changes
@@ -213,9 +209,12 @@ jobs:
           echo "SPEAKER_SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
           echo "Selected SDK: $SDK_CANONICAL_NAME ($SDK_PATH)"
 
+      # Treating warnings as errors here makes this release build the release
+      # warnings gate as well; `specifications` keeps only the debug one.
       - name: Build and validate isolated release bundle
         env:
           SPEAKER_CONFIGURATION: release
+          SPEAKER_BUNDLE_WARNINGS_AS_ERRORS: "1"
           SPEAKER_BUNDLE_PENDING_ROOT: ${{ runner.temp }}/speaker-release-pending
           SPEAKER_SWIFT_SCRATCH_PATH: ${{ runner.temp }}/speaker-release-pending/swift-build
           SPEAKER_BUNDLE_OUTPUT_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
@@ -241,11 +240,10 @@ jobs:
           SPEAKER_EVIDENCE_TEST_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
         run: ./scripts/test-release-evidence
 
+      # The reviewed release identity guard runs inside `./scripts/test` in the
+      # `specifications` lane, against the same fixtures.
       - name: Verify install rollback
         run: ./scripts/test-install-rollback
-
-      - name: Verify reviewed release identity guard
-        run: ./scripts/test-release-identity
 
   # `Test, build, and bundle` is the required status check on main; keep this
   # name. Branch protection treats a skipped required check as passing, so this
