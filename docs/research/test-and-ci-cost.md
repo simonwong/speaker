@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-10-15
 
-这一步只做了调研，没有改 CI 配置、测试代码或脚本，也没有发出计费的 provider 请求。下面的建议都还没有实施。
+这一步只做了调研，没有改 CI 配置、测试代码或脚本，也没有发出计费的 provider 请求。调研时下面的建议都还没有实施；之后实施的项在该项下标了状态。
 
 ## 来源标注
 
@@ -394,6 +394,8 @@ CI 的 verify job 用的是正常打包、签名有效、UUID 匹配的 App，�
 
 **D. 把 "Treat release compiler warnings as errors"（50 秒）并入 verify 的 release 打包。**
 
+- 状态：已实施（2026-10-22）。`scripts/bundle` 读 `SPEAKER_BUNDLE_WARNINGS_AS_ERRORS=1`，在 ad-hoc 路径上给 `scripts/build` 加 `-Xswiftc -warnings-as-errors`；只有 ci.yml 的 verify 打包设置它。specifications 里的 release warnings 步骤已删除。两者编译的是同一个 `SpeakerApp` 产品、release 配置、同一个 SDK 和构建系统，区别只是打包用隔离的空 scratch 路径（全量编译）和只读 `Package.resolved` 的解析参数。
+
 - 现状：
   - release warnings 步骤把 SpeakerApp 按 release 配置编了一遍。
   - verify 的打包也是 release 配置，又编了一遍。但 CI 走的是 ad-hoc 签名路径，`scripts/bundle` 只在正式签名路径上加 `-warnings-as-errors`。
@@ -406,6 +408,8 @@ CI 的 verify job 用的是正常打包、签名有效、UUID 匹配的 App，�
 - 风险：打包用的是隔离的 scratch 路径，要确认它编的产物和原来的 release warnings 步骤一致。
 
 **E. 去掉 verify 里重复的 `test-release-identity`（15 秒）。**
+
+- 状态：已实施（2026-10-22）。verify 不再单独跑它，specifications 的 `./scripts/test --with-ui` 照常跑。
 
 - 现状：门禁子步骤里已经跑过同一个脚本，读的是同样的 fixture。
 - `test-release-evidence` 不是重复：verify 那次用的是真打包的 App（`SPEAKER_EVIDENCE_TEST_APP`），门禁里那次用的是 C 写的假 App。
@@ -444,6 +448,13 @@ CI 的 verify job 用的是正常打包、签名有效、UUID 匹配的 App，�
 - 这两项是测试代码，单独开任务。
 - 收益是安全性，不是速度。四个方面都没有影响。
 
+**I. SessionHistorySpecs 里 busy reader 用例不再等满 3 秒。**
+
+- 状态：已实施（2026-10-22）。这一项不在最初的调研里。
+- 原状：`SQLiteConnection` 写死 `PRAGMA busy_timeout=3000`。4 条用例（privacy scrub 重试、busy checkpoint 的 clear、retention、cap pruning）各自开着一个读事务，等 SQLite 报 busy，每条在 CI 上要 4–6 秒。
+- 做法：busy timeout 改成 `SQLiteSessionHistory` 的构造参数，生产默认仍是 3 秒（`defaultBusyTimeout`），这 4 条用例传 50 毫秒。读事务在整个调用期间都不释放，所以超时长短不改变结果：仍然报 busy，释放后重试成功。本机每条从约 3.2 秒降到约 0.1 秒（privacy scrub 那条约 0.8 秒）。
+- 四个方面都没有影响。
+
 ## 6. 步骤一览
 
 | 步骤 | p50 / p90 | 防的是什么 | 建议 |
@@ -465,13 +476,13 @@ CI 的 verify job 用的是正常打包、签名有效、UUID 匹配的 App，�
 | Metrics、Evidence spec 和其余工具步骤 | 各 2–4s | 各自模块 | 保留 |
 | 并发的 4 个脚本测试 | 各 ≤0.3s（本机） | workflow 安全、构建身份、门禁汇总、skills 锁 | 保留 |
 | Debug SpeakerApp warnings | 16s / 23s | Swift 6 并发错误；抓到过 4 次（#140） | 保留 |
-| Release SpeakerApp warnings | 50s / 65s | release 配置的警告；从未单独抓到过东西 | 并入打包（D） |
+| Release SpeakerApp warnings | 50s / 65s | release 配置的警告；从未单独抓到过东西 | 已并入打包（D，已实施） |
 | pristine deps、脚本和补丁卫生 | 约 1s | 依赖被改动、`zsh -n`、空白错误 | 保留 |
 | Build isolated release bundle | 120s / 143s | release 打包能成功 | 保留；与 specifications 并行（A） |
 | Verify release identity and integrity | <1s | Info.plist 身份、签名 | 保留 |
 | Verify release evidence dSYM binding | 7s / 9s | 真 App 的 dSYM 绑定 | 保留 |
 | Verify install rollback | 61s / 74s | 安装失败时回滚 | 保留；push main 时可跳过（G） |
-| Verify reviewed release identity guard | 15s / 19s | 和门禁内的同一个脚本 | 去掉重复（E） |
+| Verify reviewed release identity guard | 15s / 19s | 和门禁内的同一个脚本 | 已去掉（E，已实施） |
 
 ## 7. 建议的本地测试规则
 
@@ -509,10 +520,10 @@ CI 的 verify job 用的是正常打包、签名有效、UUID 匹配的 App，�
 | 2 | A：verify 与 specifications 并行，新汇总 job 承接 `Test, build, and bundle` | 关键路径约 −3.7 分钟 | 中：汇总 job 写错会重现 PR #104 的漏网 | 开 3 个 draft PR：(a) 正常改动，看必需检查是否为 success、墙钟时间多少；(b) 故意弄坏一个 spec，必需检查必须是 failure，合并按钮必须不可用；(c) 故意弄坏打包，同上。拿 (a) 和同一提交在旧 workflow 下的耗时对比 |
 | 3 | C：修 4 条 flaky 规格 | 减少约一半的失败重跑 | 低 | 本机对同一提交用 `SPEAKER_SPEC_TRACE=1` 循环跑 50 次，修前修后比较失败次数；之后 50 次 CI 运行统计 flaky 次数 |
 | 4 | B：纯文档 PR 跳过 macOS | 约 8% 的 PR 省 10 分钟 | 低到中：分类写错会漏测 | 开 2 个 draft PR：只改 docs/ 时，必需检查应为 success 且 specifications 被跳过；同时改 docs/ 和 Sources/ 时，应该全跑 |
-| 5 | D：release warnings 并入打包 | specifications −50 秒 | 中 | 在同一提交上，加一个只在 release 下出现的警告（`#if !DEBUG` 里的未使用变量）：改前应在 release warnings 步骤失败，改后应在打包步骤失败；对比两边的总耗时 |
+| 5 | D：release warnings 并入打包（已实施） | specifications −50 秒 | 中 | 在同一提交上，加一个只在 release 下出现的警告（`#if !DEBUG` 里的未使用变量）：改前应在 release warnings 步骤失败，改后应在打包步骤失败；对比两边的总耗时 |
 | 6 | H：补安装签名和 dSYM UUID 两个反例 | 堵住故障注入发现的两个缺口 | 低 | 重跑第 3.3 节对应的两处注入，应当被抓到 |
 | 7 | G：push main 不跑 verify | 每次合并少占约 3.7 分钟 runner | 低 | 看之后 main push 的 cache 保存是否照常（`cache_restores` 里来自 main 的命中率不下降），以及连续合并时的排队时间 |
-| 8 | E：去掉重复的 release identity | −15 秒 | 低 | 同一提交前后对比 verify 的耗时 |
+| 8 | E：去掉重复的 release identity（已实施） | −15 秒 | 低 | 同一提交前后对比 verify 的耗时 |
 | 9 | F：CI 内按路径选测试 | 模型上每 PR 省 207 秒，做完 1–8 后会更少 | 中到高 | 先在本地用一个月，统计 CI 失败是否都落在本地选中的步骤里，再决定要不要做 |
 
 1 只改文档，可以马上做。2、4、5、7、8 要改 ci.yml，3、6 要改测试代码，都需要你点头后单独开分支。

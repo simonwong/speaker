@@ -50,7 +50,9 @@ final class SQLiteConnection: @unchecked Sendable {
     /// because a busy database has not been detached from its files.
     var isOpen: Bool { handle != nil }
 
-    init(fileURL: URL) throws {
+    /// - Parameter busyTimeout: How long a statement waits on another
+    ///   connection's lock before SQLite reports busy.
+    init(fileURL: URL, busyTimeout: Duration) throws {
         self.fileURL = fileURL
         self.handle = nil
         try OwnerOnlyFilePersistence.protectExistingFile(at: fileURL)
@@ -67,11 +69,17 @@ final class SQLiteConnection: @unchecked Sendable {
             try execute("PRAGMA journal_mode=WAL")
             try execute("PRAGMA synchronous=FULL")
             try execute("PRAGMA secure_delete=ON")
-            try execute("PRAGMA busy_timeout=3000")
+            try execute("PRAGMA busy_timeout=\(Self.milliseconds(busyTimeout))")
         } catch {
             closeIgnoringFailure()
             throw error
         }
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int32 {
+        let (seconds, attoseconds) = duration.components
+        let milliseconds = seconds * 1_000 + attoseconds / 1_000_000_000_000_000
+        return Int32(clamping: max(0, milliseconds))
     }
 
     deinit {

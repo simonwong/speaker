@@ -86,8 +86,8 @@ For installer, release, or workflow changes, also inspect `.github/workflows/ci.
 | --- | --- | --- |
 | `changes` | `Detect changed areas` | Sorts the changed paths into `site/`, unchecked files, and app files. Unchecked files are `docs/`, `README.md`, `README.*.md`, `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md`, and `LICENSE`: no test, script, or bundle reads them. Every other path, including any it cannot classify, counts as an app change. |
 | `site` | `Build landing page` | Runs when `site/` changed. |
-| `specifications` | `Specifications, warnings, and formatting` | Runs on an app change. The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug and release warnings-as-errors builds, and script/patch hygiene. |
-| `verify` | `Release bundle and install` | Runs on an app change, in parallel with `specifications`. The isolated release bundle, release identity and integrity, the dSYM evidence binding, install rollback, and the reviewed release identity guard. |
+| `specifications` | `Specifications, warnings, and formatting` | Runs on an app change. The SwiftPM build-product cache, the swift-format check, `./scripts/test --with-ui` (every specification executable and shell contract test), the pristine dependency checkout gate, the debug warnings-as-errors build, and script/patch hygiene. `./scripts/test` also runs the reviewed release identity guard here. |
+| `verify` | `Release bundle and install` | Runs on an app change, in parallel with `specifications`. The isolated release bundle, built with `SPEAKER_BUNDLE_WARNINGS_AS_ERRORS=1` so it is also the release warnings-as-errors build, release identity and integrity, the dSYM evidence binding, and install rollback. |
 | `required` | `Test, build, and bundle` | `needs: [changes, specifications, verify]`. Fails unless all three succeeded. |
 
 `Test, build, and bundle` is the required status check on `main`; renaming the `required` job breaks branch protection until the required check is renamed to match. Branch protection treats a skipped required check as passing, so `required` runs with `!cancelled()` and checks each lane's result itself: a failed, skipped, or cancelled lane fails it. It is skipped only when `changes` reports no app change, which is how a change confined to `site/` or unchecked files merges without the macOS lanes. A failed `changes` job leaves that output empty, so `required` still runs and fails. Add a path to the unchecked list only when nothing in CI reads it; `PRIVACY.md`, for example, is compared against the bundle and stays an app file.
@@ -116,8 +116,8 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 
 | Script | Purpose | Called by |
 | --- | --- | --- |
-| `build` | Builds the `SpeakerApp` product in `SPEAKER_CONFIGURATION` (default debug). | developer |
-| `bundle` | Assembles, versions, signs, and validates `Speaker.app` from the built executable. | developer, `launch`, `install`, `distribute`, `./scripts/test`, CI |
+| `build` | Builds the `SpeakerApp` product in `SPEAKER_CONFIGURATION` (default debug), passing any extra arguments to SwiftPM. | developer |
+| `bundle` | Assembles, versions, signs, and validates `Speaker.app` from the built executable. `SPEAKER_BUNDLE_WARNINGS_AS_ERRORS=1`, set only by CI, builds a development bundle with warnings as errors; production-signed builds always do. | developer, `launch`, `install`, `distribute`, `./scripts/test`, CI |
 | `compatibility-smoke` | Runs the manual cross-application delivery matrix and writes a redacted owner-only report. | developer (manual gate) |
 | `delivery-e2e-smoke` | Drives an end-to-end delivery run against the `SpeakerDeliverySmokeTarget` fixture app. | developer |
 | `delivery-smoke` | Delivers one fixed string into TextEdit or Terminal and checks the receipt. | developer |

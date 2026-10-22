@@ -33,6 +33,9 @@ enum SQLiteHistorySchema {
 /// database.
 public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     public static let defaultMaximumRecordCount = 10_000
+    /// How long a write or checkpoint waits for another connection's lock
+    /// before the store reports the database busy.
+    public static let defaultBusyTimeout: Duration = .seconds(3)
 
     private let fileURL: URL
     private var connection: SQLiteConnection?
@@ -45,7 +48,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
     public init(
         fileURL: URL,
         retentionPolicy: HistoryRetentionPolicy = .forever,
-        maximumRecordCount: Int = SQLiteSessionHistory.defaultMaximumRecordCount
+        maximumRecordCount: Int = SQLiteSessionHistory.defaultMaximumRecordCount,
+        busyTimeout: Duration = SQLiteSessionHistory.defaultBusyTimeout
     ) {
         self.fileURL = fileURL
         self.retentionPolicy = retentionPolicy
@@ -54,14 +58,14 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         var resolvedConnection: SQLiteConnection?
         var resolvedNotice: LocalHistoryPersistenceNotice?
         do {
-            resolvedConnection = try Self.openStore(at: fileURL)
+            resolvedConnection = try Self.openStore(at: fileURL, busyTimeout: busyTimeout)
         } catch let error as SQLiteHistoryError where error.isRecoverableCorruption {
             do {
                 let preserved =
                     try SQLiteHistoryCorruptionRecovery
                     .preserveCorruptedDatabase(at: fileURL)
                 pruning = preserved.pruning
-                resolvedConnection = try Self.openStore(at: fileURL)
+                resolvedConnection = try Self.openStore(at: fileURL, busyTimeout: busyTimeout)
                 resolvedNotice = .corruptedDataPreserved(
                     backupURL: preserved.backupURL,
                     reason: PrivacySafeText.reason(for: error)
@@ -521,8 +525,10 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         return connection
     }
 
-    private static func openStore(at fileURL: URL) throws -> SQLiteConnection {
-        let connection = try SQLiteConnection(fileURL: fileURL)
+    private static func openStore(at fileURL: URL, busyTimeout: Duration) throws
+        -> SQLiteConnection
+    {
+        let connection = try SQLiteConnection(fileURL: fileURL, busyTimeout: busyTimeout)
         do {
             try createSchema(on: connection)
             try connection.protectDatabaseFiles()
