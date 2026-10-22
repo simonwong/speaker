@@ -11,6 +11,10 @@ import Foundation
 /// Tap state, the Secure Event Input poll, and enabling, disabling, or
 /// re-enabling a tap all happen on this thread; other threads hand work to
 /// it with `perform` or `performAndWait`.
+///
+/// `@unchecked` because `CFRunLoop` is not annotated `Sendable`. The run loop
+/// is immutable after `init`, and `CFRunLoopPerformBlock` and
+/// `CFRunLoopWakeUp` accept it from any thread.
 package final class ShortcutEventTapThread: @unchecked Sendable {
     package static let shared = ShortcutEventTapThread()
 
@@ -58,6 +62,8 @@ package final class ShortcutEventTapThread: @unchecked Sendable {
         }
     }
 
+    /// `@unchecked` because it publishes a `CFRunLoop`; `condition` guards it
+    /// and lets the creating thread block until the tap thread publishes.
     private final class RunLoopHandoff: @unchecked Sendable {
         private let condition = NSCondition()
         private var runLoop: CFRunLoop?
@@ -77,6 +83,9 @@ package final class ShortcutEventTapThread: @unchecked Sendable {
         }
     }
 
+    /// `@unchecked` because `T` need not be `Sendable`. The tap thread writes
+    /// the value before signalling, and the waiting thread reads it only after
+    /// the semaphore wait returns.
     private final class ResultSlot<T>: @unchecked Sendable {
         var value: T?
     }
@@ -259,7 +268,8 @@ package struct ShortcutEventTapState: Sendable {
 }
 
 /// Live event taps for one shortcut monitor. Every stored property is
-/// confined to the tap thread.
+/// confined to the tap thread, which is what makes the `@unchecked` sound;
+/// the Core Graphics tap objects it holds are not `Sendable`.
 package final class ShortcutEventTaps: @unchecked Sendable {
     package enum InstallFailure: Error, Equatable, Sendable {
         case eventTapUnavailable

@@ -7,6 +7,7 @@ import SpeakerAppFeatures
 import SpeakerCore
 import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
+import os
 
 @main
 struct SpeakerAppScenarioSpecs {
@@ -2260,6 +2261,75 @@ struct SpeakerAppScenarioSpecs {
             try expect(!began)
             try expect(!router.hasExclusiveInteraction)
             try expect(router.shortcutTarget.shouldConsumeEscape())
+        }
+
+        await runAsync(
+            "concurrent shortcut presses and clicks confirm an exclusive interaction once",
+            failures: &failures
+        ) {
+            let voice = RouterVoiceRecorder()
+            let router = GlobalVoiceInteractionRouter(
+                voiceTarget: voice.target
+            )
+            var confirmations = 0
+            router.beginExclusiveInteraction(
+                confirm: {
+                    confirmations += 1
+                    return true
+                },
+                cancel: {}
+            )
+
+            // The main actor stays blocked until every thread has finished,
+            // so the first confirmation cannot complete in between. Each
+            // thread reads `shortcutTarget` itself, so its first reads race.
+            DispatchQueue.concurrentPerform(iterations: 64) { index in
+                if index.isMultiple(of: 2) {
+                    router.shortcutTarget.receive(.pressed)
+                } else {
+                    router.confirmExclusiveInteraction()
+                }
+            }
+            let confirmed = await waitUntil { confirmations == 1 }
+            try? await Task.sleep(for: .milliseconds(50))
+
+            try expect(confirmed)
+            try expect(confirmations == 1)
+            try expect(!router.hasExclusiveInteraction)
+            try expect(voice.triggers.isEmpty)
+        }
+
+        run(
+            "global interaction router consults voice input outside its own lock",
+            failures: &failures
+        ) {
+            // Voice input that asks the router about its own state while the
+            // router is asking it whether to consume Escape.
+            let routerSlot = OSAllocatedUnfairLock<GlobalVoiceInteractionRouter?>(
+                initialState: nil
+            )
+            let router = GlobalVoiceInteractionRouter(
+                voiceTarget: VoiceTriggerTarget(
+                    receive: { _ in },
+                    shouldConsumeEscape: {
+                        routerSlot.withLock { $0 }?.hasExclusiveInteraction ?? false
+                    }
+                )
+            )
+            routerSlot.withLock { $0 = router }
+            defer { routerSlot.withLock { $0 = nil } }
+
+            let answered = DispatchSemaphore(value: 0)
+            let target = router.shortcutTarget
+            DispatchQueue.global().async {
+                _ = target.shouldConsumeEscape()
+                answered.signal()
+            }
+
+            try expect(
+                answered.wait(timeout: .now() + 1) == .success,
+                "the Escape check never returned"
+            )
         }
 
         run(
@@ -5938,28 +6008,27 @@ private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
     }
 }
 
-private final class RouterVoiceRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedTriggers: [GlobalVoiceTrigger] = []
+private final class RouterVoiceRecorder: Sendable {
+    private let storedTriggers = OSAllocatedUnfairLock(initialState: [GlobalVoiceTrigger]())
     private let escapeActive: Bool
 
     init(escapeActive: Bool = false) {
         self.escapeActive = escapeActive
     }
 
-    lazy var target = VoiceTriggerTarget(
-        receive: { [weak self] trigger in
-            self?.lock.withLock {
-                self?.storedTriggers.append(trigger)
+    var target: VoiceTriggerTarget {
+        VoiceTriggerTarget(
+            receive: { [storedTriggers] trigger in
+                storedTriggers.withLock { $0.append(trigger) }
+            },
+            shouldConsumeEscape: { [escapeActive] in
+                escapeActive
             }
-        },
-        shouldConsumeEscape: { [weak self] in
-            self?.escapeActive ?? false
-        }
-    )
+        )
+    }
 
     var triggers: [GlobalVoiceTrigger] {
-        lock.withLock { storedTriggers }
+        storedTriggers.withLock { $0 }
     }
 }
 

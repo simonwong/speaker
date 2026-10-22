@@ -1,7 +1,20 @@
 @preconcurrency import CoreAudio
 import Foundation
+import os
 
+/// `@unchecked` because the CoreAudio listener registry holds
+/// `AudioObjectPropertyListenerBlock` values, which are not `Sendable`.
+/// `refreshLock` serializes every refresh and guards that registry; the
+/// published snapshot and its observers live in `state`.
 public final class CoreAudioMicrophoneDevices: MicrophoneDeviceSource, @unchecked Sendable {
+    private struct State: Sendable {
+        var current = MicrophoneDeviceSnapshot(
+            devices: [], systemDefaultDeviceID: nil, isAvailable: false
+        )
+        var observers: [UUID: AsyncStream<MicrophoneDeviceSnapshot>.Continuation] = [:]
+        var isShutDown = false
+    }
+
     private struct Listener {
         let objectID: AudioObjectID
         var address: AudioObjectPropertyAddress
@@ -10,16 +23,11 @@ public final class CoreAudioMicrophoneDevices: MicrophoneDeviceSource, @unchecke
 
     private enum ReadFailure: Error { case unavailable }
 
-    private let lock = NSRecursiveLock()
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let refreshLock = NSRecursiveLock()
     private let queue = DispatchQueue(label: "speaker.microphone-devices")
     private var listeners: [Listener] = []
     private var observedDeviceIDs: Set<AudioObjectID> = []
-    private var current = MicrophoneDeviceSnapshot(
-        devices: [], systemDefaultDeviceID: nil, isAvailable: false
-    )
-    private var observers: [UUID: AsyncStream<MicrophoneDeviceSnapshot>.Continuation] = [:]
-    private var isShutDown = false
     private var listenersAvailable = true
 
     public init() { refresh() }
@@ -27,7 +35,7 @@ public final class CoreAudioMicrophoneDevices: MicrophoneDeviceSource, @unchecke
     deinit { shutdown() }
 
     public func snapshot() -> MicrophoneDeviceSnapshot {
-        lock.withLock { current }
+        state.withLock { $0.current }
     }
 
     public func observeChanges() -> AsyncStream<MicrophoneDeviceSnapshot> {
@@ -38,20 +46,21 @@ public final class CoreAudioMicrophoneDevices: MicrophoneDeviceSource, @unchecke
         continuation.onTermination = { [weak self] _ in
             self?.removeObserver(id)
         }
-        lock.withLock {
-            guard !isShutDown else {
-                continuation.finish()
-                return
-            }
-            observers[id] = continuation
-            continuation.yield(current)
+        let registered = state.withLock { state -> Bool in
+            guard !state.isShutDown else { return false }
+            state.observers[id] = continuation
+            continuation.yield(state.current)
+            return true
+        }
+        if !registered {
+            continuation.finish()
         }
         return stream
     }
 
     public func refresh() {
         refreshLock.withLock {
-            guard lock.withLock({ !isShutDown }) else { return }
+            guard state.withLock({ !$0.isShutDown }) else { return }
             let previous = snapshot()
             let next: MicrophoneDeviceSnapshot
             listenersAvailable = true
@@ -95,27 +104,30 @@ public final class CoreAudioMicrophoneDevices: MicrophoneDeviceSource, @unchecke
                     isAvailable: false
                 )
             }
-            lock.withLock {
-                guard !isShutDown, next != current else { return }
-                current = next
-                for continuation in observers.values { continuation.yield(next) }
+            state.withLock { state in
+                guard !state.isShutDown, next != state.current else { return }
+                state.current = next
+                for continuation in state.observers.values { continuation.yield(next) }
             }
         }
     }
 
     public func shutdown() {
-        let removed: [Listener] = refreshLock.withLock {
-            lock.withLock {
-                guard !isShutDown else { return [] }
-                isShutDown = true
-                let removed = listeners
-                listeners.removeAll()
-                let continuations = Array(observers.values)
-                observers.removeAll()
-                for continuation in continuations { continuation.finish() }
-                return removed
+        let (removed, continuations) = refreshLock.withLock {
+            () -> ([Listener], [AsyncStream<MicrophoneDeviceSnapshot>.Continuation]) in
+            let continuations = state.withLock {
+                state -> [AsyncStream<MicrophoneDeviceSnapshot>.Continuation]? in
+                guard !state.isShutDown else { return nil }
+                state.isShutDown = true
+                defer { state.observers.removeAll() }
+                return Array(state.observers.values)
             }
+            guard let continuations else { return ([], []) }
+            let removed = listeners
+            listeners.removeAll()
+            return (removed, continuations)
         }
+        for continuation in continuations { continuation.finish() }
         for var listener in removed {
             AudioObjectRemovePropertyListenerBlock(
                 listener.objectID, &listener.address, queue, listener.block
@@ -166,7 +178,7 @@ public final class CoreAudioMicrophoneDevices: MicrophoneDeviceSource, @unchecke
     }
 
     private func removeObserver(_ id: UUID) {
-        _ = lock.withLock { observers.removeValue(forKey: id) }
+        _ = state.withLock { $0.observers.removeValue(forKey: id) }
     }
 
     private static func address(

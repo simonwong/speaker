@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public enum MicrophonePreference: Equatable, Hashable, Codable, Sendable {
     case systemDefault
@@ -53,15 +54,14 @@ public protocol MicrophoneLevelTesting: Sendable {
     func stopLevelTest() async
 }
 
-package final class MicrophoneCapturePlan: @unchecked Sendable {
+package final class MicrophoneCapturePlan: Sendable {
     package let id = UUID()
     package let device: Result<MicrophoneDevice, AudioCaptureError>
-    private let lock = NSLock()
-    private var cancelled = false
+    private let cancelled = OSAllocatedUnfairLock(initialState: false)
 
     package init(device: Result<MicrophoneDevice, AudioCaptureError>) { self.device = device }
-    package var isCancelled: Bool { lock.withLock { cancelled } }
-    package func cancel() { lock.withLock { cancelled = true } }
+    package var isCancelled: Bool { cancelled.withLock { $0 } }
+    package func cancel() { cancelled.withLock { $0 = true } }
 }
 
 package enum MicrophoneCapturePurpose: Sendable {
@@ -76,41 +76,64 @@ package struct MicrophoneCaptureLease: Equatable, Sendable {
     package let purpose: MicrophoneCapturePurpose
 }
 
-public final class MicrophoneRouting: @unchecked Sendable {
-    private let lock = NSRecursiveLock()
+/// Routing state lives in one lock. The device source is read inside it only
+/// where a published snapshot must match the state it describes;
+/// `MicrophoneDeviceSource.snapshot()` is a leaf read that never calls back
+/// into routing. Stream termination and task cancellation, which run
+/// handlers synchronously, always happen outside the lock.
+public final class MicrophoneRouting: Sendable {
+    private struct State: Sendable {
+        var preference: MicrophonePreference = .systemDefault
+        var activeCapture: MicrophoneCaptureLease?
+        var captureStarted = false
+        var observers: [UUID: AsyncStream<MicrophoneRoutingSnapshot>.Continuation] = [:]
+        var observation: Task<Void, Never>?
+        var isShutDown = false
+
+        func isCurrent(_ lease: MicrophoneCaptureLease) -> Bool {
+            !isShutDown && activeCapture?.id == lease.id
+        }
+
+        func snapshot(devices: MicrophoneDeviceSnapshot) -> MicrophoneRoutingSnapshot {
+            MicrophoneRoutingSnapshot(
+                preference: preference,
+                devices: devices,
+                actualDevice: captureStarted ? activeCapture?.device : nil,
+                isTesting: activeCapture?.purpose == .levelTest
+            )
+        }
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let devices: any MicrophoneDeviceSource
-    private var preference: MicrophonePreference = .systemDefault
-    private var activeCapture: MicrophoneCaptureLease?
-    private var captureStarted = false
-    private var observers: [UUID: AsyncStream<MicrophoneRoutingSnapshot>.Continuation] = [:]
-    private var observation: Task<Void, Never>?
-    private var isShutDown = false
 
     public init(devices: any MicrophoneDeviceSource) {
         self.devices = devices
         let changes = devices.observeChanges()
-        observation = Task { [weak self] in
+        let observation = Task { [weak self] in
             for await _ in changes {
                 guard !Task.isCancelled else { return }
                 self?.publish()
             }
         }
+        state.withLock { $0.observation = observation }
     }
 
     public func snapshot() -> MicrophoneRoutingSnapshot {
-        lock.withLock { currentSnapshot() }
+        let devices = devices.snapshot()
+        return state.withLock { $0.snapshot(devices: devices) }
     }
 
     public func select(_ preference: MicrophonePreference) {
-        lock.withLock {
-            guard !isShutDown, self.preference != preference else { return }
-            self.preference = preference
-            publish()
+        state.withLock { state in
+            guard !state.isShutDown, state.preference != preference else { return }
+            state.preference = preference
+            publish(&state)
         }
     }
 
     public func refresh() {
-        guard lock.withLock({ !isShutDown }) else { return }
+        guard state.withLock({ !$0.isShutDown }) else { return }
         devices.refresh()
         publish()
     }
@@ -123,51 +146,55 @@ public final class MicrophoneRouting: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in
             self?.removeObserver(id)
         }
-        lock.withLock {
-            guard !isShutDown else {
-                continuation.finish()
-                return
-            }
-            observers[id] = continuation
-            continuation.yield(currentSnapshot())
+        let registered = state.withLock { [devices] state -> Bool in
+            guard !state.isShutDown else { return false }
+            state.observers[id] = continuation
+            continuation.yield(state.snapshot(devices: devices.snapshot()))
+            return true
+        }
+        if !registered {
+            continuation.finish()
         }
         return stream
     }
 
     public func shutdown() {
-        lock.withLock {
-            guard !isShutDown else { return }
-            isShutDown = true
-            activeCapture = nil
+        let stopped = state.withLock {
+            state -> (Task<Void, Never>?, [AsyncStream<MicrophoneRoutingSnapshot>.Continuation])? in
+            guard !state.isShutDown else { return nil }
+            state.isShutDown = true
+            state.activeCapture = nil
+            let observation = state.observation
+            state.observation = nil
+            let continuations = Array(state.observers.values)
+            state.observers.removeAll()
+            return (observation, continuations)
+        }
+        if let (observation, continuations) = stopped {
             observation?.cancel()
-            observation = nil
-            let continuations = Array(observers.values)
-            observers.removeAll()
             for continuation in continuations { continuation.finish() }
         }
         devices.shutdown()
     }
 
     package func prepareCapture() -> MicrophoneCapturePlan {
-        lock.withLock {
-            guard !isShutDown else {
-                return MicrophoneCapturePlan(device: .failure(.microphoneUnavailable))
-            }
-            let snapshot = devices.snapshot()
-            guard snapshot.isAvailable else {
-                return MicrophoneCapturePlan(device: .failure(.microphoneUnavailable))
-            }
-            let device: MicrophoneDevice?
-            switch preference {
-            case .systemDefault:
-                device = snapshot.devices.first { $0.deviceID == snapshot.systemDefaultDeviceID }
-            case .device(let uid):
-                device = snapshot.devices.first { $0.uid == uid }
-            }
-            return MicrophoneCapturePlan(
-                device: device.map { .success($0) } ?? .failure(.microphoneUnavailable)
-            )
+        let snapshot = devices.snapshot()
+        let preference = state.withLock { state -> MicrophonePreference? in
+            state.isShutDown ? nil : state.preference
         }
+        guard let preference, snapshot.isAvailable else {
+            return MicrophoneCapturePlan(device: .failure(.microphoneUnavailable))
+        }
+        let device: MicrophoneDevice?
+        switch preference {
+        case .systemDefault:
+            device = snapshot.devices.first { $0.deviceID == snapshot.systemDefaultDeviceID }
+        case .device(let uid):
+            device = snapshot.devices.first { $0.uid == uid }
+        }
+        return MicrophoneCapturePlan(
+            device: device.map { .success($0) } ?? .failure(.microphoneUnavailable)
+        )
     }
 
     package func acquire(
@@ -175,68 +202,60 @@ public final class MicrophoneRouting: @unchecked Sendable {
         purpose: MicrophoneCapturePurpose
     ) throws -> MicrophoneCaptureLease {
         devices.refresh()
-        return try lock.withLock {
-            guard !isShutDown else { throw AudioCaptureError.microphoneUnavailable }
-            guard !plan.isCancelled else { throw CancellationError() }
-            if let activeCapture,
+        let isCancelled = plan.isCancelled
+        let snapshot = devices.snapshot()
+        return try state.withLock { state in
+            guard !state.isShutDown else { throw AudioCaptureError.microphoneUnavailable }
+            guard !isCancelled else { throw CancellationError() }
+            if let activeCapture = state.activeCapture,
                 activeCapture.purpose == .voice || purpose == .levelTest
             {
                 throw AudioCaptureError.alreadyRecording
             }
             let device = try plan.device.get()
-            guard contains(device, in: devices.snapshot()) else {
+            guard Self.contains(device, in: snapshot) else {
                 throw AudioCaptureError.microphoneUnavailable
             }
             let lease = MicrophoneCaptureLease(
                 id: UUID(), planID: plan.id, device: device, purpose: purpose)
-            activeCapture = lease
-            captureStarted = false
-            publish()
+            state.activeCapture = lease
+            state.captureStarted = false
+            publish(&state)
             return lease
         }
     }
 
     package func markStarted(_ lease: MicrophoneCaptureLease) {
-        lock.withLock {
-            guard isCurrent(lease) else { return }
-            captureStarted = true
-            publish()
+        state.withLock { state in
+            guard state.isCurrent(lease) else { return }
+            state.captureStarted = true
+            publish(&state)
         }
     }
 
     package func isCurrent(_ lease: MicrophoneCaptureLease) -> Bool {
-        lock.withLock { !isShutDown && activeCapture?.id == lease.id }
+        state.withLock { $0.isCurrent(lease) }
     }
 
     package func deviceIsAvailable(_ lease: MicrophoneCaptureLease) -> Bool {
-        lock.withLock { contains(lease.device, in: devices.snapshot()) }
+        Self.contains(lease.device, in: devices.snapshot())
     }
 
     package func refreshAndValidate(_ lease: MicrophoneCaptureLease) -> Bool {
         devices.refresh()
-        return lock.withLock {
-            isCurrent(lease) && contains(lease.device, in: devices.snapshot())
-        }
+        let snapshot = devices.snapshot()
+        return isCurrent(lease) && Self.contains(lease.device, in: snapshot)
     }
 
     package func release(_ lease: MicrophoneCaptureLease) {
-        lock.withLock {
-            guard activeCapture?.id == lease.id else { return }
-            activeCapture = nil
-            publish()
+        state.withLock { state in
+            guard state.activeCapture?.id == lease.id else { return }
+            state.activeCapture = nil
+            publish(&state)
         }
     }
 
-    private func currentSnapshot() -> MicrophoneRoutingSnapshot {
-        MicrophoneRoutingSnapshot(
-            preference: preference,
-            devices: devices.snapshot(),
-            actualDevice: captureStarted ? activeCapture?.device : nil,
-            isTesting: activeCapture?.purpose == .levelTest
-        )
-    }
-
-    private func contains(
+    private static func contains(
         _ device: MicrophoneDevice,
         in snapshot: MicrophoneDeviceSnapshot
     ) -> Bool {
@@ -247,14 +266,18 @@ public final class MicrophoneRouting: @unchecked Sendable {
     }
 
     private func publish() {
-        lock.withLock {
-            guard !isShutDown else { return }
-            let snapshot = currentSnapshot()
-            for continuation in observers.values { continuation.yield(snapshot) }
-        }
+        state.withLock { state in publish(&state) }
+    }
+
+    /// Yields inside the lock so observers see snapshots in state order.
+    /// Yielding never runs observer code synchronously.
+    private func publish(_ state: inout State) {
+        guard !state.isShutDown else { return }
+        let snapshot = state.snapshot(devices: devices.snapshot())
+        for continuation in state.observers.values { continuation.yield(snapshot) }
     }
 
     private func removeObserver(_ id: UUID) {
-        _ = lock.withLock { observers.removeValue(forKey: id) }
+        _ = state.withLock { $0.observers.removeValue(forKey: id) }
     }
 }
