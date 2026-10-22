@@ -320,6 +320,137 @@ enum DoubaoClientSpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "Doubao reports connection loss only when a liveness ping fails after the final frame",
+            failures: &failures
+        ) {
+            let pings = PingScriptFake()
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [], blocksReceiveUntilClose: true, pings: pings)
+            let clock = ManualVoiceInputClock()
+            let signals = TransportLivenessSignalsFake()
+            let client = DoubaoStreamingASRClient(
+                configuration: .init(apiKey: "test-api-key", requestUserID: "request-user"),
+                connector: DoubaoWebSocketConnectorFake(connection: connection),
+                liveness: .scripted(clock: clock, signals: signals)
+            )
+            let (stream, audio) = AsyncStream<Data>.makeStream()
+            let completion = CompletionFlag()
+            let request = Task {
+                do {
+                    let result = try await client.transcribe(stream)
+                    await completion.markComplete()
+                    return result
+                } catch {
+                    await completion.markComplete()
+                    throw error
+                }
+            }
+            audio.yield(Data([1, 2]))
+            audio.yield(Data([3, 4]))
+            let streaming = await eventually(before: .seconds(2)) {
+                await connection.sentFrames.count == 2
+            }
+            try expect(streaming)
+            try expect(
+                signals.subscriberCount == 0 && clock.sleepRequestCount == 0,
+                "liveness probe started before the final audio frame")
+            audio.finish()
+            try await signals.waitUntilSubscribed()
+            signals.emit()
+            try await pings.waitUntilPingCount(1)
+            try await clock.waitUntilSleepRequestCount(1)
+            pings.answer(.hang)
+            clock.advance(by: .seconds(15))
+            try await pings.waitUntilPingCount(2)
+            for tick in 0..<40 {
+                try await clock.waitUntilSleepRequestCount(2 + tick)
+                clock.advance(by: .seconds(15))
+            }
+            let ended = await eventually(before: .milliseconds(50)) {
+                await completion.isComplete
+            }
+            let closedWhileWaiting = await connection.closeCount
+            try expect(!ended && closedWhileWaiting == 0, "elapsed time became a failure")
+            try expect(pings.pingCount == 2 && pings.hungCount == 1)
+            pings.answer(.fail(URLError(.networkConnectionLost)))
+            do {
+                _ = try await request.value
+                throw SpecFailure(message: "lost Doubao connection returned a result")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .network)
+                try expect(failure.providerStatusCode == "url.networkConnectionLost")
+                try expect(VoiceInputProblem(doubaoFailure: failure).failure == .networkUnavailable)
+            }
+            let closeCount = await connection.closeCount
+            try expect(closeCount == 1)
+            let unsubscribed = await eventually(before: .seconds(2)) {
+                signals.subscriberCount == 0
+            }
+            try expect(unsubscribed, "liveness probe outlived its request")
+        }
+
+        await runAsync(
+            "Doubao delivers a final result that arrives with a failed liveness ping",
+            failures: &failures
+        ) {
+            // The server sends the final result and closes at once, so the
+            // ping fails while that result is still unread.
+            let pings = PingScriptFake()
+            pings.answer(.fail(URLError(.networkConnectionLost)))
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [makeDoubaoServerResponse(text: "confirmed result", isFinal: true)],
+                blocksReceiveUntilClose: true, pings: pings)
+            let clock = ManualVoiceInputClock()
+            let signals = TransportLivenessSignalsFake()
+            let client = DoubaoStreamingASRClient(
+                configuration: .init(apiKey: "test-api-key", requestUserID: "request-user"),
+                connector: DoubaoWebSocketConnectorFake(connection: connection),
+                liveness: .scripted(clock: clock, signals: signals)
+            )
+            let (stream, audio) = AsyncStream<Data>.makeStream()
+            let request = Task { try await client.transcribe(stream) }
+            audio.yield(Data([1, 2]))
+            audio.finish()
+            try await signals.waitUntilSubscribed()
+            signals.emit()
+            let result = try await request.value
+            try expect(result.text == "confirmed result")
+            try expect(pings.pingCount == 1)
+            let closeCount = await connection.closeCount
+            try expect(closeCount == 1)
+        }
+
+        await runAsync(
+            "Doubao cancellation during an unanswered liveness ping stays User Cancellation",
+            failures: &failures
+        ) {
+            let pings = PingScriptFake()
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [], blocksReceiveUntilClose: true, pings: pings)
+            let signals = TransportLivenessSignalsFake()
+            let client = DoubaoStreamingASRClient(
+                configuration: .init(apiKey: "test-api-key", requestUserID: "request-user"),
+                connector: DoubaoWebSocketConnectorFake(connection: connection),
+                liveness: .scripted(clock: ManualVoiceInputClock(), signals: signals)
+            )
+            let request = Task { try await client.transcribe(makeAudioStream([Data([1, 2])])) }
+            try await signals.waitUntilSubscribed()
+            pings.answer(.hang)
+            signals.emit()
+            try await pings.waitUntilPingCount(1)
+            request.cancel()
+            let finished = await finishes(request, before: .seconds(2))
+            try expect(finished, "an unanswered ping held up cancellation")
+            do {
+                _ = try await request.value
+                throw SpecFailure(message: "cancelled Doubao request succeeded")
+            } catch let failure as DoubaoASRFailure {
+                try expect(failure.kind == .cancelled)
+            }
+            try expect(pings.hungCount == 0)
+        }
+
+        await runAsync(
             "Doubao runtime diagnostics report the exact active transport phase",
             failures: &failures
         ) {

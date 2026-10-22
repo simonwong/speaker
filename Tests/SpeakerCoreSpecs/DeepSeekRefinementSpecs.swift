@@ -180,7 +180,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "DeepSeek credential-store failures keep the transcript and preserve the exact boundary",
+            "Refinement Provider credential-store failures keep the transcript and preserve the exact boundary",
             failures: &failures
         ) {
             let mappings: [(ProviderCredentialStoreError, TextRefinementFailureKind)] = [
@@ -191,7 +191,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             ]
 
             for (storeError, expectedKind) in mappings {
-                let refiner = CredentialedDeepSeekTextRefiner(
+                let refiner = CredentialedTextRefiner(
                     credentials: ProviderCredentialStoreFake(
                         readError: storeError
                     ),

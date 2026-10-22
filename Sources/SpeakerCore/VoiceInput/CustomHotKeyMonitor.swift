@@ -186,14 +186,15 @@ package enum CustomShortcutRegistrationResult: Equatable, Sendable {
     case shortcutRunLoopSourceUnavailable
 }
 
+/// Registers a key chord as a Carbon hot key, or observes a single physical
+/// modifier through `ShortcutEventTaps`. Both deliver edges to the shortcut
+/// event tap thread, which also watches Escape while a session can use it.
 @MainActor
 package final class CustomHotKeyMonitor {
     private let target: VoiceTriggerTarget
-    private var box: CustomHotKeyBox?
+    private var taps: ShortcutEventTaps?
     private var hotKeyReference: EventHotKeyRef?
     private var eventHandlerReference: EventHandlerRef?
-    private var eventTap: CFMachPort?
-    private var eventSource: CFRunLoopSource?
 
     package init(
         target: VoiceTriggerTarget
@@ -202,17 +203,21 @@ package final class CustomHotKeyMonitor {
     }
 
     package var isRegistered: Bool {
-        eventTap != nil && (hotKeyReference != nil || box?.modifierOnlyPolicy != nil)
+        taps != nil
     }
 
     @discardableResult
     package func register(_ hotKey: CustomHotKey) -> CustomShortcutRegistrationResult {
         unregister()
 
-        let box = CustomHotKeyBox(target: target, hotKey: hotKey)
+        let modifierOnlyPolicy = ModifierOnlyFlagEventPolicy(hotKey: hotKey)
+        let taps = ShortcutEventTaps(
+            target: target,
+            flagTrigger: modifierOnlyPolicy.map { .modifierOnly($0) } ?? .none
+        )
         var eventHandler: EventHandlerRef?
         var reference: EventHotKeyRef?
-        if box.modifierOnlyPolicy == nil {
+        if modifierOnlyPolicy == nil {
             var eventTypes = [
                 EventTypeSpec(
                     eventClass: OSType(kEventClassKeyboard),
@@ -228,7 +233,7 @@ package final class CustomHotKeyMonitor {
                 customHotKeyCallback,
                 eventTypes.count,
                 &eventTypes,
-                Unmanaged.passUnretained(box).toOpaque(),
+                Unmanaged.passUnretained(taps).toOpaque(),
                 &eventHandler
             )
             guard handlerStatus == noErr, let eventHandler else {
@@ -250,47 +255,20 @@ package final class CustomHotKeyMonitor {
             }
         }
 
-        var eventMask =
-            (CGEventMask(1) << CGEventType.keyDown.rawValue)
-            | (CGEventMask(1) << CGEventType.keyUp.rawValue)
-        if box.modifierOnlyPolicy != nil {
-            eventMask |= CGEventMask(1) << CGEventType.flagsChanged.rawValue
-        }
-        guard
-            let eventTap = CGEvent.tapCreate(
-                tap: .cgSessionEventTap,
-                place: .headInsertEventTap,
-                options: .defaultTap,
-                eventsOfInterest: eventMask,
-                callback: customShortcutEventTapCallback,
-                userInfo: Unmanaged.passUnretained(box).toOpaque()
-            )
-        else {
+        if let failure = taps.install() {
             if let reference { UnregisterEventHotKey(reference) }
             if let eventHandler { RemoveEventHandler(eventHandler) }
-            return .shortcutEventTapUnavailable
-        }
-        guard
-            let eventSource = CFMachPortCreateRunLoopSource(
-                kCFAllocatorDefault,
-                eventTap,
-                0
-            )
-        else {
-            CFMachPortInvalidate(eventTap)
-            if let reference { UnregisterEventHotKey(reference) }
-            if let eventHandler { RemoveEventHandler(eventHandler) }
-            return .shortcutRunLoopSourceUnavailable
+            switch failure {
+            case .eventTapUnavailable:
+                return .shortcutEventTapUnavailable
+            case .runLoopSourceUnavailable:
+                return .shortcutRunLoopSourceUnavailable
+            }
         }
 
-        self.box = box
+        self.taps = taps
         eventHandlerReference = eventHandler
         hotKeyReference = reference
-        self.eventTap = eventTap
-        self.eventSource = eventSource
-        box.eventTap = eventTap
-        CFRunLoopAddSource(CFRunLoopGetMain(), eventSource, .commonModes)
-        CGEvent.tapEnable(tap: eventTap, enable: true)
         return .active
     }
 
@@ -301,155 +279,27 @@ package final class CustomHotKeyMonitor {
         if let eventHandlerReference {
             RemoveEventHandler(eventHandlerReference)
         }
-        if let eventSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), eventSource, .commonModes)
-        }
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            CFMachPortInvalidate(eventTap)
-        }
-        box?.stop()
+        taps?.uninstall()
         hotKeyReference = nil
         eventHandlerReference = nil
-        eventSource = nil
-        eventTap = nil
-        box = nil
+        taps = nil
     }
 
-}
-
-private final class CustomHotKeyBox: @unchecked Sendable {
-    let target: VoiceTriggerTarget
-    var eventTap: CFMachPort?
-    var modifierOnlyPolicy: ModifierOnlyFlagEventPolicy?
-    var isDown = false
-    var didEmitPress = false
-    var secureInputTimer: DispatchSourceTimer?
-    var escapePolicy = EscapeKeyEventPolicy()
-
-    init(target: VoiceTriggerTarget, hotKey: CustomHotKey) {
-        self.target = target
-        modifierOnlyPolicy = ModifierOnlyFlagEventPolicy(hotKey: hotKey)
-    }
-
-    func pressed() {
-        guard !IsSecureEventInputEnabled() else {
-            target.secureInputBlockedPress()
-            return
-        }
-        isDown = true
-        didEmitPress = true
-        target.receive(.pressed)
-        startSecureInputMonitoring()
-    }
-
-    func released() {
-        isDown = false
-        stopSecureInputMonitoring()
-        guard didEmitPress else { return }
-        didEmitPress = false
-        target.receive(.released)
-    }
-
-    func handleEventTap(type: CGEventType, event: CGEvent) -> Bool {
-        switch type {
-        case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            modifierOnlyPolicy?.reset()
-            isDown = false
-            didEmitPress = false
-            escapePolicy.reset()
-            stopSecureInputMonitoring()
-            target.receive(.cancel)
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-                target.receive(.monitorRecovered)
-            }
-            return false
-        case .flagsChanged:
-            guard var modifierOnlyPolicy else { return false }
-            let disposition = modifierOnlyPolicy.handle(
-                keyCode: event.getIntegerValueField(.keyboardEventKeycode),
-                flags: event.flags
-            )
-            self.modifierOnlyPolicy = modifierOnlyPolicy
-            guard case .consume(let trigger) = disposition else { return false }
-            switch trigger {
-            case .pressed: pressed()
-            case .released: released()
-            }
-            return true
-        case .keyDown, .keyUp:
-            guard event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
-            let keyEvent: EscapeKeyEvent = type == .keyDown ? .keyDown : .keyUp
-            switch escapePolicy.handle(
-                keyEvent,
-                speakerIsActive: target.shouldConsumeEscape()
-            ) {
-            case .passThrough:
-                return false
-            case .consume:
-                return true
-            case .consumeAndCancel:
-                didEmitPress = false
-                stopSecureInputMonitoring()
-                target.receive(.cancel)
-                return true
-            }
-        default:
-            return false
-        }
-    }
-
-    func stop() {
-        let hadActivePress = didEmitPress
-        isDown = false
-        didEmitPress = false
-        escapePolicy.reset()
-        stopSecureInputMonitoring()
-        if hadActivePress {
-            target.receive(.cancel)
-        }
-    }
-
-    private func startSecureInputMonitoring() {
-        stopSecureInputMonitoring()
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
-        timer.setEventHandler { [weak self] in
-            guard let self, self.isDown, self.didEmitPress else { return }
-            guard IsSecureEventInputEnabled() else { return }
-            self.didEmitPress = false
-            self.stopSecureInputMonitoring()
-            self.target.receive(.cancel)
-        }
-        secureInputTimer = timer
-        timer.resume()
-    }
-
-    private func stopSecureInputMonitoring() {
-        secureInputTimer?.cancel()
-        secureInputTimer = nil
+    deinit {
+        taps?.uninstallLater()
     }
 }
 
 private let customHotKeyCallback: EventHandlerUPP = { _, event, userData in
     guard let event, let userData else { return OSStatus(eventNotHandledErr) }
-    let box = Unmanaged<CustomHotKeyBox>.fromOpaque(userData).takeUnretainedValue()
+    let taps = Unmanaged<ShortcutEventTaps>.fromOpaque(userData).takeUnretainedValue()
     switch GetEventKind(event) {
     case UInt32(kEventHotKeyPressed):
-        box.pressed()
+        taps.shortcutPressed()
     case UInt32(kEventHotKeyReleased):
-        box.released()
+        taps.shortcutReleased()
     default:
         return OSStatus(eventNotHandledErr)
     }
     return noErr
-}
-
-private let customShortcutEventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
-    guard let userInfo else { return Unmanaged.passUnretained(event) }
-    let box = Unmanaged<CustomHotKeyBox>.fromOpaque(userInfo).takeUnretainedValue()
-    return box.handleEventTap(type: type, event: event)
-        ? nil
-        : Unmanaged.passUnretained(event)
 }
