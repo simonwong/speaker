@@ -19,7 +19,11 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
     let mode: String
     let receiveError: (any Error)?
     nonisolated let pings: PingScriptFake
+    /// Holds every reply to the commit until the socket closes, so the final
+    /// result is already queued when a failed ping closes the connection.
+    let holdsFinalUntilClose: Bool
     private var queue: [String] = []
+    private var held: [String] = []
     private var waiter: CheckedContinuation<String, Error>?
     private(set) var sent: [String] = []
     private(set) var closed = false
@@ -28,9 +32,10 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
     init(
         provider: SpeechRecognitionProviderID, creation: Bool = true, updates: Bool = true,
         completes: Bool = true, mode: String = "", receiveError: (any Error)? = nil,
-        pings: PingScriptFake = PingScriptFake()
+        pings: PingScriptFake = PingScriptFake(), holdsFinalUntilClose: Bool = false
     ) {
         self.pings = pings
+        self.holdsFinalUntilClose = holdsFinalUntilClose
         self.provider = provider
         self.updates = updates
         self.completes = completes
@@ -67,18 +72,18 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
             if mode == "earlyFinal" { push(result(item: "unrequested")) }
         }
         if type == "input_audio_buffer.commit" {
-            push(
+            reply(
                 #"{"type":"input_audio_buffer.committed","item_id":"item-1","previous_item_id":null}"#
             )
             if completes {
-                push(result(item: mode == "wrongItem" ? "other-item" : "item-1"))
+                reply(result(item: mode == "wrongItem" ? "other-item" : "item-1"))
             } else {
-                push(
+                reply(
                     #"{"type":"conversation.item.input_audio_transcription.delta","item_id":"item-1","content_index":0,"delta":"partial must not deliver"}"#
                 )
             }
         }
-        if type == "session.finish", completes { push(#"{"type":"session.finished"}"#) }
+        if type == "session.finish", completes { reply(#"{"type":"session.finished"}"#) }
     }
     func receive() async throws -> String {
         receiveCount += 1
@@ -95,8 +100,15 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
     }
     func close() {
         closed = true
-        waiter?.resume(throwing: URLError(.cancelled))
-        waiter = nil
+        queue.append(contentsOf: held)
+        held.removeAll()
+        guard let waiter else { return }
+        self.waiter = nil
+        if queue.isEmpty {
+            waiter.resume(throwing: URLError(.cancelled))
+        } else {
+            waiter.resume(returning: queue.removeFirst())
+        }
     }
     func count(_ type: String) -> Int {
         sent.filter { object($0)?["type"] as? String == type }.count
@@ -122,6 +134,9 @@ actor RealtimeSpeechSocketFake: RealtimeSpeechConnection {
     }
     private func json(_ object: [String: Any]) -> String {
         String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+    private func reply(_ text: String) {
+        if holdsFinalUntilClose { held.append(text) } else { push(text) }
     }
     private func push(_ text: String) {
         if let waiter {
