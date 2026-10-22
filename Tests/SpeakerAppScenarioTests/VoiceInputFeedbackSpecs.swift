@@ -254,6 +254,94 @@ enum VoiceInputFeedbackSpecs {
         }
 
         await runAsync(
+            "voice feedback keeps the recognition result offer when recognition confirms during Input Target capture",
+            failures: &failures
+        ) {
+            let target = TargetCaptureFake(
+                result: .writable(.init(id: UUID(), applicationName: "TextEdit")),
+                delaysFirstCapture: true
+            )
+            let processor = ConfirmedStreamingVoiceTextProcessor(confirmedText: "已识别的文字")
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(streamsAudio: true),
+                targetCapture: target,
+                textProcessor: processor,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let confirmedDuringCapture = await eventually(before: .seconds(2)) {
+                let refining = await processor.hasReportedRefining
+                let capturing = await target.hasPendingCapture
+                return refining && capturing
+            }
+            try expect(confirmedDuringCapture)
+            await target.resumeFirstCapture()
+            let captured = await eventually(before: .seconds(2)) {
+                await !target.hasPendingCapture
+            }
+            try expect(captured)
+            try await Task.sleep(for: .milliseconds(100))
+            try expect(
+                experience.state.diagnosticCode == "processing.refining",
+                "Input Target capture took back the recognition result offer")
+            guard case .processing(_, _, let useRecognition?) = experience.state.overlay else {
+                throw SpecFailure(message: "pending refinement offered no recognition result")
+            }
+            experience.perform(useRecognition)
+            let delivered = await eventually(before: .seconds(2)) {
+                await delivery.deliveredTexts == ["已识别的文字"]
+            }
+            await experience.shutdown()
+            try expect(delivered, "the recognition result was not delivered")
+        }
+
+        await runAsync(
+            "voice feedback delivers a short finished transcript without refinement and notes it in History",
+            failures: &failures
+        ) {
+            let refiner = TextRefinerFake(refinedText: "整理后的文字。")
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                textProcessor: DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(
+                        refinementMode: .conciseCleanup()),
+                    transcriber: SpeechTranscriberFake(text: "好的，收到。"),
+                    refinement: OptionalTextRefinementPipeline(refiner: refiner)
+                ),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let recorded = await eventually(before: .seconds(2)) {
+                await history.records.last?.outcome.isDelivered == true
+            }
+            let deliveredTexts = await delivery.deliveredTexts
+            let refineCount = await refiner.refineCount
+            let record = await history.records.last
+            await experience.shutdown()
+            try expect(recorded, "the session was not recorded as delivered")
+            try expect(deliveredTexts == ["好的，收到。"])
+            try expect(refineCount == 0, "a short finished transcript reached the provider")
+            guard let record else { throw SpecFailure(message: "no Session Record") }
+            let row = HistoryPresentation.row(for: record)
+            try expect(row.note == .refinementSkipped)
+            try expect(row.problem == nil, "a skipped refinement read as a fallback")
+            try expect(row.note?.label == "已跳过整理，用的是识别结果")
+        }
+
+        await runAsync(
             "voice feedback late Escape cannot cancel or dismiss a newer session",
             failures: &failures
         ) {

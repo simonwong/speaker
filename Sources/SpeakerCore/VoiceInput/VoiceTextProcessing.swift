@@ -313,6 +313,9 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         snapshot: VoiceTextProcessingSnapshot,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
+        // The complete recording arrives after recording ended, so refinement
+        // is next: its connection opens while recognition runs.
+        prepareRefinementConnection(for: snapshot)
         let clock = ContinuousClock()
         let transcriptionStarted = clock.now
         let transcriptionResult: TranscriptionResult
@@ -370,6 +373,12 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
                 )
             )
         }
+        if let audioCaptureCompletion {
+            // Recording ends when the session accepts the capture; refinement
+            // is then next, so its connection opens while recognition settles.
+            // A rejected capture opens nothing.
+            prepareRefinementConnection(for: snapshot, after: audioCaptureCompletion)
+        }
         let clock = ContinuousClock()
         let transcriptionStarted = clock.now
         let transcriptionResult: TranscriptionResult
@@ -414,7 +423,16 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
         try Task.checkCancellation()
-        if snapshot.refinementMode.requiresRefinement {
+        let dictionaryWords = snapshot.dictionary.entries.map(\.word)
+        // A transcript that skips refinement goes straight to delivery; it
+        // never presents a pending refinement.
+        if snapshot.refinementMode.requiresRefinement,
+            !refinement.skipsRefinement(
+                of: transcriptionResult.text,
+                mode: snapshot.refinementMode,
+                dictionaryWords: dictionaryWords
+            )
+        {
             await progress(
                 .init(
                     stage: .refining,
@@ -425,7 +443,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         let refinementOutcome = try await refinement.refine(
             doubaoText: transcriptionResult.text,
             mode: snapshot.refinementMode,
-            dictionaryWords: snapshot.dictionary.entries.map(\.word),
+            dictionaryWords: dictionaryWords,
             provider: snapshot.refinementProvider
         )
         let refinementDuration = refinementStarted.duration(to: .now)
@@ -451,6 +469,24 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             refinementFailure: refinementOutcome.failure,
             stageDurationsMilliseconds: stageDurations
         )
+    }
+
+    /// Starts, without waiting for it, the connection the refinement request
+    /// will reuse, once `gate` accepts the capture when one is given. Default
+    /// Smoothing contacts no Refinement Provider.
+    private nonisolated func prepareRefinementConnection(
+        for snapshot: VoiceTextProcessingSnapshot,
+        after gate: AudioCaptureCompletionGate? = nil
+    ) {
+        guard snapshot.refinementMode.requiresRefinement else { return }
+        let refinement = refinement
+        Task {
+            do { try await gate?.wait() } catch { return }
+            await refinement.prepareConnection(
+                mode: snapshot.refinementMode,
+                provider: snapshot.refinementProvider
+            )
+        }
     }
 
     private static func milliseconds(_ duration: Duration) -> Int {

@@ -48,7 +48,8 @@ package enum HistoryRecordProblem: Equatable, Sendable {
 package enum HistoryRecordNote: Equatable, Sendable {
     /// Cancelled after recognition was confirmed: the text is kept, never delivered.
     case cancelled
-    /// The user took the recognition result before refinement finished.
+    /// The recognition result was delivered without refinement: the user took
+    /// it before refinement finished, or the transcript was too short to refine.
     case refinementSkipped
 
     package var label: String {

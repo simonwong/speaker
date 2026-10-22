@@ -82,7 +82,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
             runtimeOperation: runtimeOperation,
             liveness: liveness
         )
-        return try await client.transcribe(audioChunks)
+        return try await client.transcribe(
+            audioChunks, audioCaptureCompletion: context.audioCaptureCompletion)
     }
 
     public func setResource(_ resource: DoubaoStreamingResource) {
