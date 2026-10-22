@@ -29,8 +29,8 @@ enum PendingCopyRecoveryUISpecs {
             }
             defer { presenter.stop() }
             do {
-                await sessions.send(.pressed)
-                await sessions.send(.released)
+                await sessions.dispatchPress()
+                await sessions.releaseAndAwaitTerminal()
                 let pending = await eventually(before: .seconds(2)) {
                     experience.state.menu.copyRetainedTextAction != nil
                 }

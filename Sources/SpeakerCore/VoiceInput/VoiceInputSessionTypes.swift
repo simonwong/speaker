@@ -8,14 +8,6 @@ public struct VoiceInputSessionID: Hashable, Sendable {
     }
 }
 
-package enum VoiceInputCommand: Sendable {
-    case pressed
-    case released
-    case cancel
-    case copyPendingResult
-    case dismissResult
-}
-
 /// Content-free identity frozen inside the physical stop-gesture callback.
 ///
 /// Full Accessibility inspection remains asynchronous, but it must resolve to

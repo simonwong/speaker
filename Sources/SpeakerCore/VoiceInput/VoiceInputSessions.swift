@@ -177,18 +177,17 @@ public actor VoiceInputSessions {
         audioCapture.prepareStart()
     }
 
-    package func send(_ command: VoiceInputCommand) async {
-        let audioStart = command == .pressed ? prepareAudioStart() : nil
-        await send(command, triggerSequence: nil, audioStart: audioStart)
-    }
-
-    package func send(
-        _ command: VoiceInputCommand,
+    /// Starts a Voice Input Session for the dispatcher's press edge. The
+    /// sequence fences a later Escape and is published again when the session
+    /// terminates.
+    package func press(
         triggerSequence: UInt64,
         audioStart: AudioCaptureStart? = nil
     ) async {
-        let start = audioStart ?? (command == .pressed ? prepareAudioStart() : nil)
-        await send(command, triggerSequence: Optional(triggerSequence), audioStart: start)
+        await beginSession(
+            triggerSequence: triggerSequence,
+            audioStart: audioStart ?? prepareAudioStart()
+        )
     }
 
     package func releaseFromDispatcher(
@@ -235,7 +234,7 @@ public actor VoiceInputSessions {
         await withCheckedContinuation { cancellationCleanupWaiters?.append($0) }
     }
 
-    public func cancel(triggeredAtSequence sequence: UInt64) async {
+    private func cancel(triggeredAtSequence sequence: UInt64) async {
         guard let activeTriggerSequence,
             activeTriggerSequence <= sequence
         else { return }
@@ -276,20 +275,12 @@ public actor VoiceInputSessions {
         if settled { refinement?.cancel() }
     }
 
+    /// A secure Input Target's result is copied as concealed clipboard
+    /// content, and a failed copy keeps it classified as secure.
     package func copyPendingResult(expectedSessionID: VoiceInputSessionID) async {
         guard case .pendingCopy(let id, let text, let reason) = presentation.activity,
             id == expectedSessionID
         else { return }
-        await copyRetainedResult(id: id, text: text, reason: reason)
-    }
-
-    /// A secure Input Target's result is copied as concealed clipboard
-    /// content, and a failed copy keeps it classified as secure.
-    private func copyRetainedResult(
-        id: VoiceInputSessionID,
-        text: String,
-        reason: PendingCopyReason
-    ) async {
         let copied = await clipboard.copy(
             text,
             privacy: reason.isSecureTarget ? .concealed : .ordinary
@@ -325,7 +316,7 @@ public actor VoiceInputSessions {
 
     /// Stops active work and waits until every queued history mutation has
     /// reached durable storage. App termination must use this instead of only
-    /// sending `.cancel`, otherwise the final cancellation record can be lost.
+    /// cancelling, otherwise the final cancellation record can be lost.
     public func shutdown() async {
         isShutDown = true
         let limitTask = cancelRecordingLimit()
@@ -344,37 +335,6 @@ public actor VoiceInputSessions {
         }
     }
 
-    private func send(
-        _ command: VoiceInputCommand,
-        triggerSequence: UInt64?,
-        audioStart: AudioCaptureStart?
-    ) async {
-        switch command {
-        case .pressed:
-            await beginSession(
-                triggerSequence: triggerSequence,
-                audioStart: audioStart ?? prepareAudioStart()
-            )
-        case .released:
-            if case .preparing = phase {
-                releasePending = true
-                pendingReleaseCaptureHint = nil
-            } else {
-                beginFinishingSession(captureHint: nil)
-                await finishingTask?.value
-            }
-        case .cancel:
-            await cancelSession()
-        case .copyPendingResult:
-            guard case .pendingCopy(let id, let text, let reason) = presentation.activity
-            else { return }
-            await copyRetainedResult(id: id, text: text, reason: reason)
-        case .dismissResult:
-            guard phase == .idle else { return }
-            publish(.idle)
-        }
-    }
-
     private var currentActiveSessionID: VoiceInputSessionID? {
         switch phase {
         case .idle:
@@ -388,13 +348,11 @@ public actor VoiceInputSessions {
     }
 
     private func beginSession(
-        triggerSequence: UInt64?,
+        triggerSequence: UInt64,
         audioStart: AudioCaptureStart
     ) async {
         guard !isShutDown, phase == .idle else {
-            if let triggerSequence {
-                finishRejectedTriggerSequence(triggerSequence)
-            }
+            finishRejectedTriggerSequence(triggerSequence)
             return
         }
         // A press while retained text is awaiting copy deliberately abandons

@@ -20,7 +20,7 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
             let started = await eventually(before: .seconds(2)) {
                 probe.startedChoices == ["system-input"]
             }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             dispatcher.send(.cancel, at: 1_500_000_000)
             dispatcher.send(.pressed, at: 2_000_000_000)
             let restarted = await eventually(before: .seconds(2)) {
@@ -45,7 +45,7 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                 return .empty
             }
             let sessions = makeSessions(audio: audio, processor: processor)
-            let press = Task { await sessions.send(.pressed) }
+            let press = Task { await sessions.dispatchPress() }
             let waiting = await eventually(before: .seconds(2)) { await gate.entered }
             let preparedBeforeConfiguration = probe.preparedCount
             probe.select("later-input")
@@ -98,9 +98,9 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                 history: SessionHistoryFake()
             )
             let presentations = await sessions.observe()
-            let press = Task { await sessions.send(.pressed) }
+            let press = Task { await sessions.dispatchPress() }
             let started = await eventually(before: .seconds(2)) { await audio.startCount == 1 }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await audio.resumeStart()
             await press.value
             let terminal = await firstTerminalPresentation(from: presentations, before: .seconds(2))
@@ -127,12 +127,12 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
-            let oldPress = Task { await sessions.send(.pressed) }
+            let oldPress = Task { await sessions.dispatchPress() }
             let waiting = await eventually(before: .seconds(2)) {
                 await audio.audioChunksCount == 1
             }
-            await sessions.send(.cancel)
-            await sessions.send(.pressed)
+            await sessions.dispatchEscape()
+            await sessions.dispatchPress()
             let startedBeforeOldResult = await audio.startCount
             await audio.resumeFirstAudioChunks()
             await oldPress.value
@@ -166,10 +166,10 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                 )
             })
             let sessions = makeSessions(audio: audio)
-            let oldPress = Task { await sessions.send(.pressed) }
+            let oldPress = Task { await sessions.dispatchPress() }
             let waiting = await eventually(before: .seconds(2)) { await gate.entered }
-            await sessions.send(.cancel)
-            await sessions.send(.pressed)
+            await sessions.dispatchEscape()
+            await sessions.dispatchPress()
             let activeBeforeOldResult = await audio.isActive
             await gate.resume()
             await oldPress.value
@@ -201,7 +201,7 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                     history: history
                 )
                 let presentations = await sessions.observe()
-                await sessions.send(.pressed)
+                await sessions.dispatchPress()
                 let terminal = await firstTerminalPresentation(
                     from: presentations, before: .seconds(2))
                 await sessions.shutdown()

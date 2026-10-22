@@ -713,8 +713,8 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
 
             let presentation = await terminal.value
             await sessions.shutdown()
@@ -759,8 +759,8 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 }
                 return nil
             }
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             let presentation = await noticePresentation.value
             try expect(
                 presentation?.notice

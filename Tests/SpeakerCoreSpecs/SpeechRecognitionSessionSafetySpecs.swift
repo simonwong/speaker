@@ -20,9 +20,9 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                     let sessions = makeSessions(
                         audio: audio, target: target, provider: provider, transport: transport,
                         history: history)
-                    await sessions.send(.pressed)
+                    await sessions.dispatchPress()
                     await audio.emit(Data([1, 0]))
-                    let release = Task { await sessions.send(.released) }
+                    let release = Task { await sessions.releaseAndAwaitTerminal() }
                     let captured = await eventually(before: .seconds(2)) {
                         await target.hasPendingCapture
                     }
@@ -31,7 +31,7 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                         await !transport.requests.isEmpty
                     }
                     await target.resumeFirstCapture()
-                    await release.value
+                    _ = await release.value
                     await sessions.shutdown()
                     try expect(!prematurelyUploaded)
                     let requests = await transport.requests
@@ -56,9 +56,9 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                 let sessions = makeSessions(
                     audio: audio, target: target, provider: provider, transport: transport,
                     history: history)
-                await sessions.send(.pressed)
+                await sessions.dispatchPress()
                 await audio.emit(Data([1, 0]))
-                let release = Task { await sessions.send(.released) }
+                let release = Task { await sessions.releaseAndAwaitTerminal() }
                 let stopped = await eventually(before: .seconds(2)) { await audio.hasPendingStop }
                 try expect(stopped)
                 let premature = await eventually(before: .milliseconds(40)) {
@@ -73,7 +73,7 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                 let targetStillPending = await target.hasPendingCapture
                 try expect(targetStillPending)
                 await target.resumeFirstCapture()
-                await release.value
+                _ = await release.value
                 await sessions.shutdown()
                 let record = await history.records.last
                 try expect(record?.finalText == "private result")
@@ -101,26 +101,26 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                     audioCapture: audio, targetCapture: target, textProcessor: processor,
                     delivery: TextDeliveryFake(result: .delivered), clipboard: ClipboardFake(),
                     history: history)
-                await sessions.send(.pressed)
+                await sessions.dispatchPress()
                 await audio.emit(Data([1, 0]))
-                let firstRelease = Task { await sessions.send(.released) }
+                let firstRelease = Task { await sessions.releaseAndAwaitTerminal() }
                 let stopped = await eventually(before: .seconds(2)) { await audio.hasPendingStop }
                 try expect(stopped)
-                await sessions.send(.cancel)
-                await sessions.send(.pressed)
+                await sessions.dispatchEscape()
+                await sessions.dispatchPress()
                 await audio.emit(Data([1, 0]))
-                let secondRelease = Task { await sessions.send(.released) }
+                let secondRelease = Task { await sessions.releaseAndAwaitTerminal() }
                 let refining = await eventually(before: .seconds(2)) {
                     await refiner.callCount == 1
                 }
                 try expect(refining)
                 await audio.resumeFirstStop()
                 await target.resumeFirstCapture()
-                await firstRelease.value
+                _ = await firstRelease.value
                 let unexpectedCancellation = await refiner.cancellationCount
                 try expect(unexpectedCancellation == 0)
-                await sessions.send(.cancel)
-                await secondRelease.value
+                await sessions.dispatchEscape()
+                _ = await secondRelease.value
                 await sessions.shutdown()
                 let records = await history.records
                 try expect(records.count == 2)

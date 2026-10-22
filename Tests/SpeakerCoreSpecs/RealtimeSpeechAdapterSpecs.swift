@@ -384,7 +384,7 @@ extension RealtimeSpeechAdapterSpecs {
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
                 textProcessor: processor, delivery: delivery, clipboard: ClipboardFake(),
                 history: history)
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data(repeating: 1, count: 6_400))
             let streaming = await eventually(before: .seconds(2)) {
                 await socket.count("input_audio_buffer.append") > 0
@@ -394,7 +394,7 @@ extension RealtimeSpeechAdapterSpecs {
             try expect(beforeRelease.isEmpty)
             try await configuration.selectRecognitionProvider(
                 .init(provider: .openAI, method: .completeRecording))
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let firstDone = await eventually(before: .seconds(2)) {
                 await delivery.deliveredTexts.count == 1
             }
@@ -403,11 +403,11 @@ extension RealtimeSpeechAdapterSpecs {
             try expect(firstText == ["confirmed result"])
             let initialHTTP = await transport.requests
             try expect(initialHTTP.isEmpty)
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data(repeating: 1, count: 6_400))
             let prematureHTTP = await transport.requests
             try expect(prematureHTTP.isEmpty)
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let secondDone = await eventually(before: .seconds(2)) {
                 await delivery.deliveredTexts.count == 2
             }
@@ -444,13 +444,17 @@ extension RealtimeSpeechAdapterSpecs {
                         result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
                     textProcessor: processor, delivery: delivery, clipboard: ClipboardFake(),
                     history: history)
-                await sessions.send(.pressed)
+                await sessions.dispatchPress()
                 await audio.emit(Data(repeating: 1, count: 6_400))
                 let sent = await eventually(before: .seconds(2)) {
                     await socket.count("input_audio_buffer.append") > 0
                 }
                 try expect(sent)
-                await sessions.send(cancel ? .cancel : .released)
+                if cancel {
+                    await sessions.dispatchEscape()
+                } else {
+                    await sessions.releaseAndAwaitTerminal()
+                }
                 await sessions.shutdown()
                 let commits = await socket.count("input_audio_buffer.commit")
                 let texts = await delivery.deliveredTexts

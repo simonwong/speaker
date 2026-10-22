@@ -13,8 +13,8 @@ enum SkipRefinementSpecs: CoreSpecDomain {
             let fixture = makeFixture()
             let stream = await fixture.sessions.observe()
 
-            await fixture.sessions.send(.pressed)
-            let release = Task { await fixture.sessions.send(.released) }
+            await fixture.sessions.dispatchPress()
+            let release = Task { await fixture.sessions.releaseAndAwaitTerminal() }
             guard let id = await refiningSessionID(from: stream) else {
                 throw SpecFailure(message: "refinement never became pending")
             }
@@ -29,7 +29,7 @@ enum SkipRefinementSpecs: CoreSpecDomain {
 
             await fixture.sessions.useRecognitionResult(expectedSessionID: id)
             let terminal = await firstTerminalPresentation(from: stream, before: .seconds(2))
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await fixture.delivery.deliveredTexts
             let cancellationCount = await fixture.refiner.cancellationCount
@@ -54,14 +54,14 @@ enum SkipRefinementSpecs: CoreSpecDomain {
             let fixture = makeFixture()
             let stream = await fixture.sessions.observe()
 
-            await fixture.sessions.send(.pressed)
-            let release = Task { await fixture.sessions.send(.released) }
+            await fixture.sessions.dispatchPress()
+            let release = Task { await fixture.sessions.releaseAndAwaitTerminal() }
             guard let id = await refiningSessionID(from: stream) else {
                 throw SpecFailure(message: "refinement never became pending")
             }
             await fixture.sessions.cancel(expectedSessionID: id)
             await fixture.sessions.useRecognitionResult(expectedSessionID: id)
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await fixture.delivery.deliveredTexts
             try expect(deliveredTexts.isEmpty)

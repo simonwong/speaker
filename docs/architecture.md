@@ -71,6 +71,8 @@ Every main-window tab and the onboarding window share one adaptive surface langu
 
 `VoiceInputSessions` is the core deep module. Semantic commands enter one ordered actor and publish a revisioned presentation. At most one Voice Input Session is active. Duplicate edges are idempotent, release during recorder startup is remembered, asynchronous results carry session identity, and stale results are discarded.
 
+Its interface has two callers. The trigger dispatcher sends sequenced shortcut edges: `press(triggerSequence:audioStart:)`, `releaseFromDispatcher(captureHint:)`, and `handleEscape(triggeredAtSequence:)`. `VoiceInputExperience` sends actions bound to a session ID: `finishRecording`, `cancel`, `useRecognitionResult`, `copyPendingResult`, and `dismissResult`. Specifications cross the same entry points; `SpeakerCoreSpecFakes` only numbers the edges the way the dispatcher does and waits for published presentations, so a release never blocks until processing ends.
+
 Recording, target capture, transcription, optional refinement, delivery, cancellation, persistence, and cleanup remain behind this interface. Terminal presentation is published before its Session Record settles; a history failure adds a notice but cannot delay or replace the user's result.
 
 User Cancellation is distinct from a Session Problem. Cancellation suppresses late provider results. Once `DeliveryCommitGate` commits a mutation, cancellation may close the HUD and release the shortcut, while receipt and Session Record settlement continue with the real mutation outcome.

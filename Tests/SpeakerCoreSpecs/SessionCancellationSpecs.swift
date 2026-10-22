@@ -22,12 +22,12 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history
             )
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await audio.stopCount == 0 { await Task.yield() }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await audio.failStop()
-            await release.value
+            _ = await release.value
             await history.unblock()
 
             let cancellationPersisted = await eventually(before: .seconds(1)) {
@@ -60,12 +60,12 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 clipboard: ClipboardFake(),
                 history: history
             )
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await delivery.entered == false { await Task.yield() }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await delivery.allowCommitAttempt()
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await delivery.deliveredTexts
             let record = await history.records.last
@@ -90,9 +90,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let stream = await sessions.observe()
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             while await history.saveCallCount == 0 { await Task.yield() }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             let terminal = await firstTerminalPresentation(
                 from: stream,
                 before: .seconds(2)
@@ -120,16 +120,16 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let stream = await sessions.observe()
 
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await delivery.isBlocking == false { await Task.yield() }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             let cancelledPresentation = await firstTerminalPresentation(
                 from: stream,
                 before: .milliseconds(80)
             )
             await delivery.finish(with: .delivered)
-            await release.value
+            _ = await release.value
             let recordReady = await eventually(before: .seconds(2)) {
                 await history.records.last?.outcome.isTerminal == true
             }
@@ -176,10 +176,10 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let stream = await sessions.observe()
 
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await delivery.isBlocking == false { await Task.yield() }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             let cancelledPresentation = await firstTerminalPresentation(
                 from: stream,
                 before: .milliseconds(80)
@@ -189,7 +189,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                     .deliveryUnconfirmed,
                     .init(stage: .pasteReceipt, cause: .changed)
                 ))
-            await release.value
+            _ = await release.value
             let recordReady = await eventually(before: .seconds(2)) {
                 await history.records.last?.outcome.isTerminal == true
             }
@@ -218,14 +218,14 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await transcriber.callCount == 0 {
                 await Task.yield()
             }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await transcriber.resume()
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await delivery.deliveredTexts
             let cancellationCount = await transcriber.cancellationCount
@@ -258,15 +258,15 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let stream = await sessions.observe()
 
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await refiner.callCount == 0 { await Task.yield() }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             let terminal = await firstTerminalPresentation(
                 from: stream,
                 before: .seconds(2)
             )
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await delivery.deliveredTexts
             let cancellationCount = await refiner.cancellationCount
@@ -297,8 +297,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let stream = await sessions.observe()
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
 
             var iterator = stream.makeAsyncIterator()
             let firstVisiblePresentation = await iterator.next()
@@ -325,7 +325,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data([1, 2, 3, 4]))
             while await processor.receivedChunkCount == 0 {
                 await Task.yield()
@@ -333,7 +333,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let stopCountDuringRecording = await audio.stopCount
             try expect(stopCountDuringRecording == 0, "audio was not streamed during recording")
 
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
 
             let receivedChunkCount = await processor.receivedChunkCount
             let deliveredTexts = await delivery.deliveredTexts
@@ -369,9 +369,9 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let presentations = await sessions.observe()
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data(repeating: 0, count: 6_400))
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let terminal = await firstTerminalPresentation(
                 from: presentations,
                 before: .seconds(2)
@@ -406,7 +406,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let stream = await sessions.observe()
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             let terminal = await firstTerminalPresentation(
                 from: stream,
                 before: .seconds(2)
@@ -535,7 +535,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             )
             let terminalTask = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             // The recorder replays its failure to a late subscriber, so the
             // session sees it however its failure observation is scheduled.
             await audio.emitFailure(.deviceConfigurationChanged)

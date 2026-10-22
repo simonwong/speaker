@@ -44,8 +44,7 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                         guard !Task.isCancelled else { return }
                         switch event.trigger {
                         case .pressed:
-                            await sessions.send(
-                                .pressed,
+                            await sessions.press(
                                 triggerSequence: event.sequence,
                                 audioStart: event.audioStart
                             )
@@ -58,8 +57,7 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
                                     at: event.uptimeNanoseconds
                                 )
                             {
-                                await sessions.send(
-                                    .pressed,
+                                await sessions.press(
                                     triggerSequence: event.sequence,
                                     audioStart: event.audioStart
                                 )
