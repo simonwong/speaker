@@ -285,9 +285,10 @@ enum InputTargetSpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "normalized pasted text remains unconfirmed instead of inviting duplicate copy",
+            "a passing third value settles back into an unconfirmed paste",
             failures: &failures
         ) {
+            let clock = ManualVoiceInputClock()
             let system = AccessibilityTargetSystemFake(
                 valueResponses: [
                     .success("Hello"),
@@ -295,23 +296,154 @@ enum InputTargetSpecs: CoreSpecDomain {
                     .success("Hello world\n"),
                 ]
             )
+            let targets = AccessibilityInputTargets(system: system, clock: clock)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "fake AX target was not captured")
+            }
+
+            let delivery = Task {
+                await targets.deliver(" world", to: target, commitGate: DeliveryCommitGate())
+            }
+            try await driveReceiptPolls(clock)
+            let outcome = await delivery.value
+
+            guard case .pasteCommandPosted(let diagnostic) = outcome else {
+                throw SpecFailure(
+                    message: "a value the target passed through invited duplicate delivery"
+                )
+            }
+            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
+        }
+
+        await runAsync(
+            "a third value after paste keeps the result for the user to check",
+            failures: &failures
+        ) {
+            let clock = ManualVoiceInputClock()
+            let system = AccessibilityTargetSystemFake(
+                valueResponses: [
+                    .success("Hello"),
+                    .success("Hello"),
+                ],
+                valueAfterResponses: .success("Hello 上一次剪贴板")
+            )
+            let targets = AccessibilityInputTargets(system: system, clock: clock)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "fake AX target was not captured")
+            }
+            let commitGate = DeliveryCommitGate()
+
+            let delivery = Task {
+                await targets.deliver(" world", to: target, commitGate: commitGate)
+            }
+            try await driveReceiptPolls(clock)
+            let outcome = await delivery.value
+            let pasteCount = await system.pasteCallCount
+            let receipts = await system.pasteReceipts
+
+            try expect(
+                outcome
+                    == .pendingCopyDiagnosed(
+                        .deliveryUnconfirmed,
+                        .init(stage: .pasteReceipt, cause: .changed)
+                    ),
+                "a target showing neither value was reported as \(outcome)"
+            )
+            try expect(pasteCount == 1, "a committed paste was posted again")
+            try expect(
+                receipts.map(\.currentConclusion) == [.unconfirmed],
+                "the clipboard restore was not told the paste is unconfirmed"
+            )
+            let cancelledAfterCommit = await commitGate.cancel()
+            try expect(
+                !cancelledAfterCommit,
+                "a committed paste could still be reported as cancelled"
+            )
+        }
+
+        await runAsync(
+            "a readable target's receipt releases the clipboard as soon as the result shows",
+            failures: &failures
+        ) {
+            let clock = ManualVoiceInputClock()
+            let system = AccessibilityTargetSystemFake(
+                valueResponses: [
+                    .success("Hello"),
+                    .success("Hello"),
+                    .success("Hello"),
+                    .success("Hello world"),
+                ]
+            )
+            let targets = AccessibilityInputTargets(system: system, clock: clock)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "fake AX target was not captured")
+            }
+
+            let delivery = Task {
+                await targets.deliver(" world", to: target, commitGate: DeliveryCommitGate())
+            }
+            try await clock.waitUntilSleepRequestCount(1)
+            let receipts = await system.pasteReceipts
+            try expect(
+                receipts.map(\.currentConclusion) == [nil],
+                "the receipt concluded before the target was read again"
+            )
+            clock.advance(by: .milliseconds(50))
+            let outcome = await delivery.value
+
+            try expect(outcome == .delivered)
+            try expect(receipts.map(\.currentConclusion) == [.confirmed])
+        }
+
+        await runAsync(
+            "a target without a readable value pastes with an already concluded receipt",
+            failures: &failures
+        ) {
+            let system = AccessibilityTargetSystemFake(
+                originalValue: nil,
+                selection: nil,
+                valueResponses: [],
+                roleResponses: [.success("AXGroup")]
+            )
             let targets = AccessibilityInputTargets(system: system)
             guard case .writable(let target) = await targets.capture() else {
                 throw SpecFailure(message: "fake AX target was not captured")
             }
 
-            let outcome = await targets.deliver(
-                " world",
-                to: target,
-                commitGate: DeliveryCommitGate()
-            )
+            _ = await targets.deliver(" world", to: target, commitGate: DeliveryCommitGate())
+            let receipts = await system.pasteReceipts
 
-            guard case .pasteCommandPosted(let diagnostic) = outcome else {
-                throw SpecFailure(
-                    message: "normalized paste invited duplicate delivery"
-                )
+            try expect(
+                receipts.map(\.currentConclusion) == [.unconfirmed],
+                "a target with no receipt held the clipboard restore open"
+            )
+        }
+
+        await runAsync(
+            "an oversized clipboard keeps the result for manual paste",
+            failures: &failures
+        ) {
+            let system = AccessibilityTargetSystemFake(
+                valueResponses: [.success("Hello")],
+                pasteResult: .clipboardTooLarge
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "fake AX target was not captured")
             }
-            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
+            let commitGate = DeliveryCommitGate()
+
+            let outcome = await targets.deliver(" world", to: target, commitGate: commitGate)
+
+            try expect(
+                outcome
+                    == .pendingCopyDiagnosed(
+                        .clipboardTooLarge,
+                        .init(stage: .clipboardSnapshot, cause: .tooLarge)
+                    ),
+                "an oversized clipboard was reported as \(outcome)"
+            )
+            try expect(outcome.deliveryDiagnostic?.code == "clipboardSnapshot.tooLarge")
         }
 
         await runAsync(
@@ -718,14 +850,15 @@ enum InputTargetSpecs: CoreSpecDomain {
                 canPostEvents: { false },
                 preparePasteboardTransaction: { _ in
                     preparationCalls.increment()
-                    return nil
+                    return .failure(.unavailable)
                 }
             )
 
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
 
             try expect(result == .eventFailed)
@@ -761,10 +894,11 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
 
-            try expect(result == .clipboardFailed)
+            try expect(result == .clipboardTooLarge)
             try expect(pasteboard.clearCount == 0)
         }
 
@@ -800,7 +934,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
 
             try expect(result == .secureTarget)
@@ -832,7 +967,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
 
             try expect(result == .clipboardFailed)
@@ -840,7 +976,7 @@ enum InputTargetSpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "automatic paste rejects an inexact replacement before Command-V",
+            "automatic paste rolls back a failed clipboard write before Command-V",
             failures: &failures
         ) {
             let originalItems = [
@@ -848,7 +984,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             ]
             let pasteboard = ClipboardPasteboardFake(
                 items: originalItems,
-                replacementReadback: "mismatched text"
+                replacementWriteSucceeds: false,
+                failedReplacementItems: [["public.utf8-plain-text": Data("partial".utf8)]]
             )
             let pastePosts = LockedCounter()
             let system = LiveAccessibilityTargetSystem(
@@ -868,7 +1005,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
 
             try expect(result == .clipboardFailed)
@@ -877,7 +1015,7 @@ enum InputTargetSpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "successful automatic paste posts once then restores after 500 milliseconds",
+            "successful automatic paste posts once then restores after the target reads",
             failures: &failures
         ) {
             let originalItems = [
@@ -885,7 +1023,8 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ["public.png": Data([4, 5, 6])],
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            let sleeper = ControlledPasteboardRestoreSleep()
+            let clock = ManualVoiceInputClock()
+            let restoreCompletion = PasteboardRestoreCompletion()
             let pastePosts = LockedCounter()
             let system = LiveAccessibilityTargetSystem(
                 isSecureInputEnabled: { false },
@@ -895,11 +1034,9 @@ enum InputTargetSpecs: CoreSpecDomain {
                     await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        sleepBeforeRestore: { duration in
-                            try await sleeper.sleep(for: duration)
-                        },
+                        clock: clock,
                         conditionalRestoreDidFinish: {
-                            await sleeper.markRestoreCompleted()
+                            await restoreCompletion.markCompleted()
                         }
                     )
                 },
@@ -913,9 +1050,10 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
-            await sleeper.waitUntilStarted()
+            try await clock.waitUntilSleepRequestCount(1)
 
             try expect(result == .posted)
             try expect(pastePosts.value == 1)
@@ -923,11 +1061,12 @@ enum InputTargetSpecs: CoreSpecDomain {
                 pasteboard.items
                     == [["public.utf8-plain-text": Data("hello".utf8)]]
             )
-            let requestedDuration = await sleeper.requestedDuration
-            try expect(requestedDuration == .milliseconds(500))
+            try expect(pasteboard.readPromisedTextAsAnotherApplication() == "hello")
+            try await clock.waitUntilSleepRequestCount(2)
+            try expect(clock.sleepRequests == [.seconds(3), .milliseconds(500)])
 
-            await sleeper.resume()
-            await sleeper.waitUntilRestoreCompleted()
+            clock.advance(by: .milliseconds(500))
+            try await restoreCompletion.waitUntilCompleted()
             try expect(pasteboard.items == originalItems)
         }
 
@@ -941,7 +1080,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             let pasteboard = ClipboardPasteboardFake(
                 items: [["public.png": Data([1, 2, 3])]]
             )
-            let sleeper = ControlledPasteboardRestoreSleep()
+            let clock = ManualVoiceInputClock()
+            let restoreCompletion = PasteboardRestoreCompletion()
             let system = LiveAccessibilityTargetSystem(
                 isSecureInputEnabled: { false },
                 frontmostProcessIdentifier: { 42 },
@@ -950,11 +1090,9 @@ enum InputTargetSpecs: CoreSpecDomain {
                     await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        sleepBeforeRestore: { duration in
-                            try await sleeper.sleep(for: duration)
-                        },
+                        clock: clock,
                         conditionalRestoreDidFinish: {
-                            await sleeper.markRestoreCompleted()
+                            await restoreCompletion.markCompleted()
                         }
                     )
                 },
@@ -965,12 +1103,13 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
-            await sleeper.waitUntilStarted()
+            try await clock.waitUntilSleepRequestCount(1)
             pasteboard.replaceExternally(with: externalItems)
-            await sleeper.resume()
-            await sleeper.waitUntilRestoreCompleted()
+            clock.advance(by: .seconds(3))
+            try await restoreCompletion.waitUntilCompleted()
 
             try expect(result == .posted)
             try expect(pasteboard.items == externalItems)
@@ -987,7 +1126,8 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ["public.utf8-plain-text": Data("external".utf8)]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            let sleeper = ControlledPasteboardRestoreSleep()
+            let clock = ManualVoiceInputClock()
+            let restoreCompletion = PasteboardRestoreCompletion()
             let pastePosts = LockedCounter()
             let system = LiveAccessibilityTargetSystem(
                 isSecureInputEnabled: { false },
@@ -997,11 +1137,9 @@ enum InputTargetSpecs: CoreSpecDomain {
                     await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        sleepBeforeRestore: { duration in
-                            try await sleeper.sleep(for: duration)
-                        },
+                        clock: clock,
                         conditionalRestoreDidFinish: {
-                            await sleeper.markRestoreCompleted()
+                            await restoreCompletion.markCompleted()
                         }
                     )
                 },
@@ -1015,9 +1153,10 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await system.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
-            await sleeper.waitUntilStarted()
+            try await clock.waitUntilSleepRequestCount(1)
             pasteboard.replaceExternally(with: externalItems)
 
             let firstCompletion = CompletionFlag()
@@ -1038,7 +1177,7 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(!firstCompletedEarly && !secondCompletedEarly)
             try expect(pastePosts.value == 1)
 
-            await sleeper.resume()
+            clock.advance(by: .seconds(3))
             await firstShutdown.value
             await secondShutdown.value
             try expect(pasteboard.items == externalItems)
@@ -1047,7 +1186,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             let lateResult = await system.paste(
                 "late text",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
             try expect(lateResult == .eventFailed)
             try expect(pastePosts.value == 1)
@@ -1063,7 +1203,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
             let preparation = ControlledPasteboardPreparation()
-            let sleeper = ControlledPasteboardRestoreSleep()
+            let clock = ManualVoiceInputClock()
+            let restoreCompletion = PasteboardRestoreCompletion()
             let pastePosts = LockedCounter()
             let system = LiveAccessibilityTargetSystem(
                 isSecureInputEnabled: { false },
@@ -1074,11 +1215,9 @@ enum InputTargetSpecs: CoreSpecDomain {
                     return await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        sleepBeforeRestore: { duration in
-                            try await sleeper.sleep(for: duration)
-                        },
+                        clock: clock,
                         conditionalRestoreDidFinish: {
-                            await sleeper.markRestoreCompleted()
+                            await restoreCompletion.markCompleted()
                         }
                     )
                 },
@@ -1092,7 +1231,8 @@ enum InputTargetSpecs: CoreSpecDomain {
                 await system.paste(
                     "hello",
                     to: AccessibilityTargetReference(),
-                    in: 42
+                    in: 42,
+                    receipt: .unconfirmed
                 )
             }
             await preparation.waitUntilBlocked()
@@ -1107,11 +1247,11 @@ enum InputTargetSpecs: CoreSpecDomain {
             try expect(!completedDuringPreparation)
 
             await preparation.resume()
-            await sleeper.waitUntilStarted()
+            try await clock.waitUntilSleepRequestCount(1)
             let completedBeforeRestore = await completion.isComplete
             try expect(!completedBeforeRestore)
 
-            await sleeper.resume()
+            clock.advance(by: .seconds(3))
             let result = await paste.value
             await shutdown.value
             try expect(result == .posted)
@@ -1127,7 +1267,8 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ["public.rtf": Data([1, 2, 3])]
             ]
             let pasteboard = ClipboardPasteboardFake(items: originalItems)
-            let sleeper = ControlledPasteboardRestoreSleep()
+            let clock = ManualVoiceInputClock()
+            let restoreCompletion = PasteboardRestoreCompletion()
             let liveSystem = LiveAccessibilityTargetSystem(
                 isSecureInputEnabled: { false },
                 frontmostProcessIdentifier: { 42 },
@@ -1136,11 +1277,9 @@ enum InputTargetSpecs: CoreSpecDomain {
                     await PasteboardDeliveryTransaction.prepare(
                         text: text,
                         pasteboard: pasteboard.access,
-                        sleepBeforeRestore: { duration in
-                            try await sleeper.sleep(for: duration)
-                        },
+                        clock: clock,
                         conditionalRestoreDidFinish: {
-                            await sleeper.markRestoreCompleted()
+                            await restoreCompletion.markCompleted()
                         }
                     )
                 },
@@ -1150,11 +1289,12 @@ enum InputTargetSpecs: CoreSpecDomain {
             let result = await liveSystem.paste(
                 "hello",
                 to: AccessibilityTargetReference(),
-                in: 42
+                in: 42,
+                receipt: .unconfirmed
             )
-            await sleeper.waitUntilStarted()
-            await sleeper.resume()
-            await sleeper.waitUntilRestoreCompleted()
+            try await clock.waitUntilSleepRequestCount(1)
+            clock.advance(by: .seconds(3))
+            try await restoreCompletion.waitUntilCompleted()
 
             let targets = AccessibilityInputTargets(
                 system: LifecycleAccessibilityTargetSystem(live: liveSystem)
@@ -1238,6 +1378,17 @@ enum InputTargetSpecs: CoreSpecDomain {
                 outcome.deliveryDiagnostic?.code
                     == "pastePost.rejected"
             )
+        }
+    }
+
+    /// Advances `clock` through every receipt poll until the receipt
+    /// deadline passes.
+    private static func driveReceiptPolls(_ clock: ManualVoiceInputClock) async throws {
+        let interval = Duration.milliseconds(50)
+        let polls = Int(AccessibilityInputTargets.receiptTimeout / interval)
+        for poll in 1...polls {
+            try await clock.waitUntilSleepRequestCount(poll)
+            clock.advance(by: interval)
         }
     }
 }

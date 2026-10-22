@@ -1935,6 +1935,69 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        await runAsync(
+            "an unconfirmed paste and an oversized clipboard each name their own reason",
+            failures: &failures
+        ) {
+            let cases: [(DeliveryOutcome, String, String)] = [
+                (
+                    .pendingCopyDiagnosed(
+                        .deliveryUnconfirmed,
+                        .init(stage: .pasteReceipt, cause: .changed)
+                    ),
+                    PendingCopyReason.deliveryUnconfirmedTitle,
+                    "确认未输入后复制"
+                ),
+                (
+                    .pendingCopyDiagnosed(
+                        .clipboardTooLarge,
+                        .init(stage: .clipboardSnapshot, cause: .tooLarge)
+                    ),
+                    PendingCopyReason.clipboardTooLargeTitle,
+                    "复制"
+                ),
+            ]
+            for (outcome, expectedTitle, expectedCopyTitle) in cases {
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                    ),
+                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    delivery: TextDeliveryFake(result: outcome),
+                    clipboard: ClipboardFake(),
+                    history: SessionHistoryFake()
+                )
+                let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+                experience.start()
+
+                experience.shortcutTarget.receive(.pressed)
+                _ = await waitUntil { experience.state.isRecording }
+                experience.shortcutTarget.receive(.released)
+                experience.shortcutTarget.receive(.pressed)
+                experience.shortcutTarget.receive(.released)
+                _ = await waitUntil {
+                    if case .pendingCopy = experience.state.overlay { true } else { false }
+                }
+                let overlay = experience.state.overlay
+                await experience.shutdown()
+
+                guard
+                    case .pendingCopy(let title, let text, let copyTitle, _, _, _) = overlay
+                else {
+                    throw SpecFailure(message: "\(outcome) did not keep the result")
+                }
+                try expect(title == expectedTitle, "\(outcome) was titled \(title)")
+                try expect(text == "保留的文字")
+                try expect(copyTitle == expectedCopyTitle)
+            }
+            try expect(
+                PendingCopyReason.clipboardTooLarge.userTitle
+                    != PendingCopyReason.clipboardFailed.userTitle,
+                "an oversized clipboard read as a failed copy"
+            )
+        }
+
         run(
             "diagnostic report renders audio capture environment and unknown fallbacks",
             failures: &failures

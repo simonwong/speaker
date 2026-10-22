@@ -31,7 +31,7 @@ Delivery follows a conservative ladder:
 2. confirm the target is editable and non-secure;
 3. recheck selection and value evidence for concurrent changes;
 4. preflight event-post access and use one transactional Command-V for every compatible target while the retained element or window remains current, frontmost, and non-secure;
-5. conditionally restore the pasteboard only while Speaker's change count and private marker still match; and
+5. conditionally restore the pasteboard only while Speaker's change count and private marker still match, after the target's receipt or its first read of the promised text, and no later than a three-second cap; and
 6. preserve the text as a Pending Copy Result only when no paste event was posted.
 
 Speaker does not restore focus, rewrite an entire rich document value, repeat a committed paste, or overwrite a newer user clipboard value. Detailed 2026-07-29 evidence for Chromium/Electron AX behavior, transactional paste timing, and HUD alpha verification lives in [Voice Input AX Delivery and HUD Transparency Best Practices](voice-input-ax-hud-best-practices.md).
