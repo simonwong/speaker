@@ -252,6 +252,65 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             )
         }
 
+        run(
+            "directory tree removal deletes links themselves and never their destinations",
+            failures: &failures
+        ) {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-directory-tree-removal-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let outside = root.appendingPathComponent("outside", isDirectory: true)
+            let outsideFile = outside.appendingPathComponent("keep.txt")
+            try FileManager.default.createDirectory(
+                at: outside, withIntermediateDirectories: true)
+            try Data("outside".utf8).write(to: outsideFile)
+
+            let tree = root.appendingPathComponent("archive", isDirectory: true)
+            let nested = tree.appendingPathComponent("nested", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: nested, withIntermediateDirectories: true)
+            try Data("evidence".utf8).write(to: nested.appendingPathComponent("data"))
+            try FileManager.default.createSymbolicLink(
+                at: tree.appendingPathComponent("file-link"),
+                withDestinationURL: outsideFile
+            )
+            try FileManager.default.createSymbolicLink(
+                at: nested.appendingPathComponent("directory-link"),
+                withDestinationURL: outside
+            )
+
+            let removed = try OwnerOnlyFilePersistence.removeDirectoryTree(at: tree)
+            let removedAgain = try OwnerOnlyFilePersistence.removeDirectoryTree(at: tree)
+            try expect(removed)
+            try expect(!removedAgain, "an absent directory was reported as removed")
+            try expect(!FileManager.default.fileExists(atPath: tree.path))
+            try expect((try? Data(contentsOf: outsideFile)) == Data("outside".utf8))
+
+            // A link standing where the directory should be is refused as a
+            // whole: neither the link nor the directory it names is touched.
+            let linkedTree = root.appendingPathComponent("linked-archive")
+            try FileManager.default.createSymbolicLink(
+                at: linkedTree,
+                withDestinationURL: outside
+            )
+            do {
+                try OwnerOnlyFilePersistence.removeDirectoryTree(at: linkedTree)
+                throw SpecFailure(message: "a symbolic link was removed as a directory tree")
+            } catch let failure as SpecFailure {
+                throw failure
+            } catch {
+                // Expected: the top-level entry is not a directory.
+            }
+            try expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: linkedTree.path))
+                    != nil
+            )
+            try expect((try? Data(contentsOf: outsideFile)) == Data("outside".utf8))
+        }
+
         run("recovery archives retain only recent bounded no-follow evidence", failures: &failures)
         {
             let root = FileManager.default.temporaryDirectory

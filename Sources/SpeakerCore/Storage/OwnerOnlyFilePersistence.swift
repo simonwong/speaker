@@ -25,6 +25,8 @@ package enum OwnerOnlyFilePersistenceError: Error {
     case nonRegularFile
     case unexpectedOwner
     case fileTooLarge(maximumByteCount: Int)
+    /// A directory was replaced between inspecting and opening it.
+    case changedDuringRemoval
 }
 
 /// Centralizes the privacy and crash-safety contract for Speaker's local data.
@@ -301,9 +303,166 @@ package enum OwnerOnlyFilePersistence {
             return false
         }
     }
+
+    /// Removes a directory and everything inside it without following a
+    /// symbolic link at any level.
+    ///
+    /// Each entry is inspected with `fstatat(AT_SYMLINK_NOFOLLOW)` relative to
+    /// its already-open parent. A symbolic link, like any other
+    /// non-directory, is unlinked itself and its destination is never
+    /// touched; a subdirectory is opened with `O_DIRECTORY | O_NOFOLLOW` and
+    /// must still be the inode that was inspected before its contents are
+    /// removed. Every entry must belong to the current user. The first entry
+    /// that cannot be removed stops the walk and is reported; entries removed
+    /// before it stay removed. Returns `false` when nothing exists at
+    /// `directoryURL`.
+    @discardableResult
+    package static func removeDirectoryTree(at directoryURL: URL) throws -> Bool {
+        do {
+            return try withDirectoryDescriptor(
+                for: directoryURL,
+                createIfMissing: false
+            ) { parentFD, name in
+                guard
+                    let status = try entryStatus(
+                        named: name,
+                        in: parentFD,
+                        pathForError: directoryURL.path
+                    )
+                else {
+                    return false
+                }
+                guard (status.st_mode & S_IFMT) == S_IFDIR else {
+                    throw OwnerOnlyFilePersistenceError.nonRegularFile
+                }
+                try removeEntry(
+                    named: name,
+                    in: parentFD,
+                    pathForError: directoryURL.path
+                )
+                guard Darwin.fsync(parentFD) == 0 else {
+                    throw posixError(path: directoryURL.deletingLastPathComponent().path)
+                }
+                return true
+            }
+        } catch OwnerOnlyFilePersistenceError.missingDirectory {
+            return false
+        }
+    }
 }
 
 extension OwnerOnlyFilePersistence {
+    /// The entry's own metadata, never its link destination's, or `nil` when
+    /// it does not exist. An entry owned by someone else is refused.
+    fileprivate static func entryStatus(
+        named name: String,
+        in parentFD: Int32,
+        pathForError: String
+    ) throws -> stat? {
+        var status = stat()
+        let result = name.withCString { pointer in
+            Darwin.fstatat(parentFD, pointer, &status, AT_SYMLINK_NOFOLLOW)
+        }
+        if result != 0, errno == ENOENT { return nil }
+        guard result == 0 else {
+            throw posixError(path: pathForError)
+        }
+        guard status.st_uid == geteuid() else {
+            throw OwnerOnlyFilePersistenceError.unexpectedOwner
+        }
+        return status
+    }
+
+    fileprivate static func removeEntry(
+        named name: String,
+        in parentFD: Int32,
+        pathForError: String
+    ) throws {
+        guard
+            let status = try entryStatus(
+                named: name,
+                in: parentFD,
+                pathForError: pathForError
+            )
+        else {
+            return
+        }
+        var flags: Int32 = 0
+        if (status.st_mode & S_IFMT) == S_IFDIR {
+            let directoryFD = name.withCString { pointer in
+                Darwin.openat(
+                    parentFD,
+                    pointer,
+                    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+                )
+            }
+            guard directoryFD >= 0 else {
+                throw posixError(path: pathForError)
+            }
+            defer { Darwin.close(directoryFD) }
+            var opened = stat()
+            guard Darwin.fstat(directoryFD, &opened) == 0 else {
+                throw posixError(path: pathForError)
+            }
+            guard opened.st_dev == status.st_dev, opened.st_ino == status.st_ino else {
+                throw OwnerOnlyFilePersistenceError.changedDuringRemoval
+            }
+            for child in try entryNames(in: directoryFD, pathForError: pathForError) {
+                try removeEntry(
+                    named: child,
+                    in: directoryFD,
+                    pathForError: pathForError + "/" + child
+                )
+            }
+            flags = AT_REMOVEDIR
+        }
+        let result = name.withCString { pointer in
+            Darwin.unlinkat(parentFD, pointer, flags)
+        }
+        if result != 0, errno != ENOENT {
+            throw posixError(path: pathForError)
+        }
+    }
+
+    /// Lists a directory through its descriptor, so the listing describes the
+    /// directory already opened rather than whatever its path names now.
+    fileprivate static func entryNames(
+        in directoryFD: Int32,
+        pathForError: String
+    ) throws -> [String] {
+        let listingFD = Darwin.dup(directoryFD)
+        guard listingFD >= 0 else {
+            throw posixError(path: pathForError)
+        }
+        guard let directory = Darwin.fdopendir(listingFD) else {
+            Darwin.close(listingFD)
+            throw posixError(path: pathForError)
+        }
+        defer { Darwin.closedir(directory) }
+        var names: [String] = []
+        while true {
+            // `readdir` reports both the end and an error as `nil`; only an
+            // error sets `errno`.
+            errno = 0
+            guard let entry = Darwin.readdir(directory) else {
+                guard errno == 0 else {
+                    throw posixError(path: pathForError)
+                }
+                break
+            }
+            let name = withUnsafePointer(to: entry.pointee.d_name) { pointer in
+                pointer.withMemoryRebound(
+                    to: CChar.self,
+                    capacity: MemoryLayout.size(ofValue: entry.pointee.d_name)
+                ) { String(cString: $0) }
+            }
+            if name != ".", name != ".." {
+                names.append(name)
+            }
+        }
+        return names
+    }
+
     fileprivate static func withDirectoryDescriptor<Result>(
         for fileURL: URL,
         createIfMissing: Bool,

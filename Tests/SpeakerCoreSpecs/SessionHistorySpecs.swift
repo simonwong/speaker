@@ -12,111 +12,105 @@ enum SessionHistorySpecs: CoreSpecDomain {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
-            "versioned local history retains explicit errors and excludes sensitive fields",
+            "Session Record payload bytes stay fixed for every outcome kind",
             failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
-                    "speaker-history-spec-\(UUID().uuidString)", isDirectory: true)
+                    "speaker-history-payload-lock-\(UUID().uuidString)",
+                    isDirectory: true
+                )
             defer { try? FileManager.default.removeItem(at: directory) }
-            let fileURL = directory.appendingPathComponent("history.json")
-            let firstID = VoiceInputSessionID()
-            let secondID = VoiceInputSessionID()
-            let snapshotID = UUID()
-            let dictionaryEntry = DictionaryEntry(word: "豆包")
-            let store = VersionedLocalSessionHistory(fileURL: fileURL)
-            await store.save(
-                .init(
-                    sessionID: firstID,
-                    startedAt: Date(timeIntervalSince1970: 100),
-                    applicationName: "TextEdit",
-                    transcription: "豆包原文 alpha",
-                    finalText: "最终文本",
-                    transcriptionProvider: "openai",
-                    transcriptionModelID: "gpt-transcribe",
-                    providerRequestID: "request-log-1",
-                    providerErrorCode: nil,
-                    deliveryDiagnosticCode:
-                        "pasteReceipt.unconfirmed",
-                    deepSeekText: "DeepSeek 结果 beta",
-                    deepSeekRequestID: "deepseek-log-1",
-                    refinementProviderID: .openAI,
-                    refinementModelID: "gpt-4.1-mini",
-                    refinementModeName: "精简清理",
-                    refinementPrompt: "只清理口语杂质",
-                    refinementStatus: "succeeded",
-                    dictionarySnapshotID: snapshotID,
-                    dictionarySnapshotEntries: [RecordedDictionaryEntry(dictionaryEntry)],
-                    dictionaryRequestContext: .init(
-                        snapshotID: snapshotID,
-                        hotwords: ["豆包"],
-                        includedEntryIDs: [dictionaryEntry.id],
-                        omissions: []
-                    ),
-                    dictionaryReplacements: [
-                        .init(
-                            entryID: UUID(),
-                            alias: "豆宝",
-                            canonicalTerm: "豆包",
-                            matchedText: "豆宝",
-                            utf16Location: 0,
-                            utf16Length: 2
-                        )
-                    ],
-                    durationMilliseconds: 1_234,
-                    stageDurationsMilliseconds: ["doubao": 500, "deepseek": 300],
-                    outcome: .delivered(firstID, applicationName: "TextEdit", text: "最终文本")
-                ))
-            await store.save(
-                .init(
-                    sessionID: secondID,
-                    startedAt: Date(timeIntervalSince1970: 200),
-                    applicationName: "Notes",
-                    transcription: " \n ",
-                    finalText: "\t",
-                    providerRequestID: "request-log-2",
-                    providerErrorCode: "invalidCredential",
-                    outcome: .failed(secondID, .providerNotConfigured)
-                ))
+            for (index, fixture) in SessionRecordPayloadFixtures.all.enumerated() {
+                let fileURL = directory.appendingPathComponent("history-\(index).sqlite3")
+                let store = SQLiteSessionHistory(fileURL: fileURL)
+                await store.save(fixture.record)
+                let payload = try readHistoryPayload(from: fileURL)
+                try expect(
+                    payload == fixture.payload,
+                    "payload \(index) changed: \(payload)"
+                )
+                let decoded = await store.record(sessionID: fixture.record.sessionID)
+                try expect(
+                    decoded == fixture.decoded,
+                    "payload \(index) decoded to a different record"
+                )
+            }
+        }
 
-            let reloaded = VersionedLocalSessionHistory(fileURL: fileURL)
-            let allRecords = await reloaded.allRecords()
-            let encoded = try String(contentsOf: fileURL, encoding: .utf8)
-            let historyAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-            try expect(
-                (historyAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
-                "history file is not owner-only"
+        await runAsync(
+            "legacy history reader returns the document's records without rewriting it",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-legacy-history-reader-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let legacyURL = directory.appendingPathComponent("history.json")
+            let sqliteURL = directory.appendingPathComponent("history.sqlite3")
+            let olderBuildID = SessionRecordPayloadFixtures.sessionID("6")
+            let olderBuildRecord = """
+                {"sessionID":"\(olderBuildID.rawValue.uuidString)","startedAt":1600000000000,\
+                "applicationName":"TextEdit","transcription":"旧版记录",\
+                "providerMessage":"older-provider-text",\
+                "refinementFailureMessage":"older-refinement-text",\
+                "outcome":{"kind":"delivered","sessionID":"\(olderBuildID.rawValue.uuidString)",\
+                "applicationName":"TextEdit","text":"旧版记录"}}
+                """
+            let document = Data(
+                legacyHistoryDocument(
+                    records: SessionRecordPayloadFixtures.all.map(\.payload) + [olderBuildRecord]
+                ).utf8
             )
-            try expect(allRecords.map(\.sessionID) == [secondID, firstID])
-            try expect(allRecords.last?.transcription == "豆包原文 alpha")
-            try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
-            try expect(allRecords.last?.transcriptionProvider == "openai")
-            try expect(
-                allRecords.last?.deliveryDiagnosticCode
-                    == "pasteReceipt.unconfirmed"
-            )
-            try expect(allRecords.last?.transcriptionModelID == "gpt-transcribe")
-            try expect(allRecords.last?.refinementProviderID == .openAI)
-            try expect(allRecords.last?.refinementModelID == "gpt-4.1-mini")
-            try expect(allRecords.last?.refinementPrompt == "只清理口语杂质")
-            try expect(
-                allRecords.last?.dictionarySnapshotEntries
-                    == [RecordedDictionaryEntry(dictionaryEntry)]
-            )
-            try expect(allRecords.last?.dictionaryRequestContext?.hotwords == ["豆包"])
-            try expect(allRecords.last?.dictionaryReplacements.count == 1)
-            try expect(allRecords.last?.stageDurationsMilliseconds["doubao"] == 500)
-            try expect(!encoded.contains("apiKey"))
-            try expect(!encoded.contains("audio"))
-            try expect(!encoded.contains("clipboard"))
-            try expect(!encoded.contains("TextEdit"))
-            try expect(!encoded.contains("Notes"))
+            try writeLegacyHistoryFixture(document, to: legacyURL)
 
-            let deleted = await reloaded.delete(sessionID: firstID)
-            try expect(deleted)
-            await reloaded.clear()
-            let recordsAfterClear = await reloaded.allRecords()
-            try expect(recordsAfterClear.isEmpty)
+            let reader = LegacyHistoryReader(fileURL: legacyURL)
+            guard case .records(let records) = reader.read() else {
+                throw SpecFailure(message: "legacy history fixture did not load")
+            }
+            let attributes = try FileManager.default.attributesOfItem(atPath: legacyURL.path)
+            try expect(
+                (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+                "legacy history was not protected as owner-only"
+            )
+            try expect(
+                (try? Data(contentsOf: legacyURL)) == document,
+                "reading legacy history rewrote the document"
+            )
+            try expect(
+                records.map(\.sessionID)
+                    == ["5", "4", "3", "2", "1", "6"].map {
+                        SessionRecordPayloadFixtures.sessionID(Character($0))
+                    }
+            )
+            try expect(
+                Array(records.prefix(5))
+                    == SessionRecordPayloadFixtures.all.reversed().map(\.decoded)
+            )
+            let olderBuild = records.last
+            try expect(olderBuild?.transcription == "旧版记录")
+            try expect(olderBuild?.providerMessage == nil)
+            try expect(olderBuild?.refinementFailureMessage == nil)
+            try expect(olderBuild?.dictionarySnapshotEntries == [])
+            try expect(olderBuild?.durationMilliseconds == 0)
+
+            let sqlite = SQLiteSessionHistory(fileURL: sqliteURL)
+            let imported = await sqlite.importLegacyRecords(records)
+            try expect(imported)
+            for marker in ["TextEdit", "older-provider-text", "older-refinement-text"] {
+                try expect(
+                    !sqliteFilesContain(Data(marker.utf8), at: sqliteURL),
+                    "\(marker) reached the SQLite history"
+                )
+            }
+
+            try reader.removeDocument()
+            try expect(!FileManager.default.fileExists(atPath: legacyURL.path))
+            guard case .records(let afterRemoval) = reader.read(), afterRemoval.isEmpty else {
+                throw SpecFailure(message: "a removed legacy document still produced records")
+            }
         }
 
         await runAsync(
@@ -132,48 +126,27 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let sqliteURL = directory.appendingPathComponent("history.sqlite3")
             let sessionID = VoiceInputSessionID()
             let entryID = UUID()
-            let writer = VersionedLocalSessionHistory(fileURL: legacyURL)
-            await writer.save(
-                .init(
-                    sessionID: sessionID,
-                    startedAt: Date(timeIntervalSince1970: 100),
-                    applicationName: "TextEdit",
-                    transcription: "旧记录",
-                    finalText: "旧记录",
-                    dictionarySnapshotEntries: [
-                        RecordedDictionaryEntry(
-                            id: entryID,
-                            word: "豆包",
-                            legacyAliases: ["豆宝"]
-                        )
-                    ],
-                    outcome: .delivered(
-                        sessionID,
-                        applicationName: "TextEdit",
-                        text: "旧记录"
-                    )
-                ))
+            // Builds that predate Entry words stored the term as
+            // `canonicalTerm` beside an `isEnabled` flag.
+            let record = """
+                {"sessionID":"\(sessionID.rawValue.uuidString)","startedAt":100000,\
+                "transcription":"旧记录","finalText":"旧记录",\
+                "dictionarySnapshotEntries":[{"aliases":["豆宝"],"canonicalTerm":"豆包",\
+                "id":"\(entryID.uuidString)","isEnabled":true}],\
+                "outcome":{"kind":"delivered","sessionID":"\(sessionID.rawValue.uuidString)",\
+                "text":"旧记录"}}
+                """
+            try writeLegacyHistoryFixture(
+                Data(legacyHistoryDocument(records: [record]).utf8),
+                to: legacyURL
+            )
 
             guard
-                var document = try JSONSerialization.jsonObject(
-                    with: Data(contentsOf: legacyURL)
-                ) as? [String: Any],
-                var records = document["records"] as? [[String: Any]],
-                !records.isEmpty,
-                var entries = records[0]["dictionarySnapshotEntries"]
-                    as? [[String: Any]],
-                !entries.isEmpty
+                case .records(let importedRecords) = LegacyHistoryReader(fileURL: legacyURL)
+                    .read()
             else {
-                throw SpecFailure(message: "legacy history fixture was not encoded")
+                throw SpecFailure(message: "legacy history fixture did not load")
             }
-            entries[0]["canonicalTerm"] = entries[0].removeValue(forKey: "word")
-            entries[0]["isEnabled"] = true
-            records[0]["dictionarySnapshotEntries"] = entries
-            document["records"] = records
-            try JSONSerialization.data(withJSONObject: document).write(to: legacyURL)
-
-            let legacy = VersionedLocalSessionHistory(fileURL: legacyURL)
-            let importedRecords = await legacy.allRecords()
             let sqlite = SQLiteSessionHistory(fileURL: sqliteURL)
             let imported = await sqlite.importLegacyRecords(importedRecords)
             let rewritten = await sqlite.record(sessionID: sessionID)
@@ -979,7 +952,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "corrupt history is preserved with a recoverable notice", failures: &failures
+            "corrupt legacy history is preserved and reported instead of read",
+            failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -990,77 +964,73 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let fileURL = directory.appendingPathComponent("history.json")
             try Data("not-json".utf8).write(to: fileURL)
 
-            let store = VersionedLocalSessionHistory(fileURL: fileURL)
-            let status = await store.persistenceStatus()
-            if case .corruptedDataPreserved(let backupURL, _) = status.notice {
-                try expect(FileManager.default.fileExists(atPath: backupURL.path))
-                let cleared = await store.clear()
-                try expect(cleared)
-                try expect(!FileManager.default.fileExists(atPath: backupURL.path))
-                let clearedStatus = await store.persistenceStatus()
-                try expect(clearedStatus.notice == nil)
-            } else {
+            guard
+                case .corruptedPreserved(let backupURL) = LegacyHistoryReader(fileURL: fileURL)
+                    .read()
+            else {
                 throw SpecFailure(
-                    message: "corrupt history did not produce a preserved recovery notice")
+                    message: "corrupt history did not produce a preserved recovery outcome")
             }
-            let recoveredRecords = await store.allRecords()
-            try expect(recoveredRecords.isEmpty)
+            try expect(FileManager.default.fileExists(atPath: backupURL.path))
+            try expect((try? Data(contentsOf: backupURL)) == Data("not-json".utf8))
+            try expect(!FileManager.default.fileExists(atPath: fileURL.path))
         }
 
         await runAsync(
-            "history retention prunes by age and enforces a hard safety cap", failures: &failures
+            "history clear removes legacy archives without following symbolic links",
+            failures: &failures
         ) {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-history-retention-\(UUID().uuidString)")
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let capped = VersionedLocalSessionHistory(
-                fileURL: directory.appendingPathComponent("capped.json"),
-                maximumRecordCount: 3
-            )
-            let now = Date()
-            for offset in 0..<4 {
-                let id = VoiceInputSessionID()
-                await capped.save(
-                    .init(
-                        sessionID: id,
-                        startedAt: now.addingTimeInterval(Double(offset)),
-                        applicationName: nil,
-                        transcription: "record-\(offset)",
-                        finalText: "record-\(offset)",
-                        outcome: .pendingCopy(id, text: "record-\(offset)", reason: .missingTarget)
-                    ))
-            }
-            let cappedRecords = await capped.allRecords()
-            try expect(cappedRecords.count == 3)
-            try expect(cappedRecords.first?.finalText == "record-3")
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-history-legacy-artifacts-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let directory = root.appendingPathComponent("Speaker", isDirectory: true)
+            let outside = root.appendingPathComponent("outside", isDirectory: true)
+            let outsideNested = outside.appendingPathComponent("nested", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: outsideNested, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            let outsideFile = outside.appendingPathComponent("keep.txt")
+            let outsideNestedFile = outsideNested.appendingPathComponent("keep.txt")
+            try Data("outside".utf8).write(to: outsideFile)
+            try Data("outside-nested".utf8).write(to: outsideNestedFile)
 
-            let aged = VersionedLocalSessionHistory(
-                fileURL: directory.appendingPathComponent("aged.json")
+            let store = SQLiteSessionHistory(
+                fileURL: directory.appendingPathComponent("history.sqlite3"))
+            try Data("{}".utf8).write(to: directory.appendingPathComponent("history.json"))
+            try Data("old".utf8).write(
+                to: directory.appendingPathComponent("history.corrupt-1-a.json"))
+            try Data("old".utf8).write(
+                to: directory.appendingPathComponent("history.migrated-1.json"))
+            let preserved = directory.appendingPathComponent(
+                "history.corrupt-1-b", isDirectory: true)
+            let preservedNested = preserved.appendingPathComponent("nested", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: preservedNested, withIntermediateDirectories: true)
+            try Data("damaged".utf8).write(
+                to: preserved.appendingPathComponent("history.sqlite3"))
+            try FileManager.default.createSymbolicLink(
+                at: preserved.appendingPathComponent("file-link"),
+                withDestinationURL: outsideFile
             )
-            let oldID = VoiceInputSessionID()
-            let currentID = VoiceInputSessionID()
-            await aged.save(
-                .init(
-                    sessionID: oldID,
-                    startedAt: now.addingTimeInterval(-100 * 86_400),
-                    applicationName: nil,
-                    transcription: "old",
-                    finalText: "old",
-                    outcome: .pendingCopy(oldID, text: "old", reason: .missingTarget)
-                ))
-            await aged.save(
-                .init(
-                    sessionID: currentID,
-                    startedAt: now,
-                    applicationName: nil,
-                    transcription: "current",
-                    finalText: "current",
-                    outcome: .pendingCopy(currentID, text: "current", reason: .missingTarget)
-                ))
-            let appliedRetention = await aged.applyRetentionPolicy(.thirtyDays, now: now)
-            try expect(appliedRetention)
-            let agedRecords = await aged.allRecords()
-            try expect(agedRecords.map(\.sessionID) == [currentID])
+            try FileManager.default.createSymbolicLink(
+                at: preservedNested.appendingPathComponent("directory-link"),
+                withDestinationURL: outsideNested
+            )
+
+            let cleared = await store.clear()
+            try expect(cleared)
+            let remaining = try FileManager.default.contentsOfDirectory(
+                atPath: directory.path
+            ).filter { !$0.hasPrefix("history.sqlite3") }
+            try expect(remaining.isEmpty, "legacy artifacts remained: \(remaining)")
+            try expect((try? Data(contentsOf: outsideFile)) == Data("outside".utf8))
+            try expect(
+                (try? Data(contentsOf: outsideNestedFile)) == Data("outside-nested".utf8)
+            )
         }
 
         await runAsync(
@@ -1070,12 +1040,9 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .appendingPathComponent("speaker-history-disabled-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: directory) }
             let stores: [any LocalSessionHistoryStoring] = [
-                VersionedLocalSessionHistory(
-                    fileURL: directory.appendingPathComponent("history.json")
-                ),
                 SQLiteSessionHistory(
                     fileURL: directory.appendingPathComponent("history.sqlite3")
-                ),
+                )
             ]
 
             for store in stores {
@@ -1137,35 +1104,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "history delete and clear roll back when disk write fails", failures: &failures
-        ) {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("speaker-history-write-failure-\(UUID().uuidString)")
-            defer { try? FileManager.default.removeItem(at: directory) }
-            try Data("blocks-directory".utf8).write(to: directory)
-            let store = VersionedLocalSessionHistory(
-                fileURL: directory.appendingPathComponent("history.json")
-            )
-            let id = VoiceInputSessionID()
-            await store.save(
-                .init(
-                    sessionID: id,
-                    startedAt: Date(),
-                    applicationName: nil,
-                    transcription: "需要保留",
-                    finalText: "需要保留",
-                    outcome: .pendingCopy(id, text: "需要保留", reason: .missingTarget)
-                ))
-
-            let deleted = await store.delete(sessionID: id)
-            let cleared = await store.clear()
-            let records = await store.allRecords()
-            try expect(!deleted)
-            try expect(!cleared)
-            try expect(records.map(\.sessionID) == [id])
-        }
-
-        await runAsync(
             "legacy history refuses to load when owner-only protection fails", failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory
@@ -1175,35 +1113,25 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 )
             defer { try? FileManager.default.removeItem(at: directory) }
             let fileURL = directory.appendingPathComponent("history.json")
-            let writer = VersionedLocalSessionHistory(fileURL: fileURL)
-            let id = VoiceInputSessionID()
-            await writer.save(
-                .init(
-                    sessionID: id,
-                    startedAt: Date(),
-                    applicationName: nil,
-                    transcription: "private history",
-                    finalText: "private history",
-                    outcome: .pendingCopy(
-                        id,
-                        text: "private history",
-                        reason: .missingTarget
-                    )
-                ))
+            let document = Data(
+                legacyHistoryDocument(
+                    records: [SessionRecordPayloadFixtures.pendingCopy.payload]
+                ).utf8
+            )
+            try writeLegacyHistoryFixture(document, to: fileURL)
 
-            let protected = VersionedLocalSessionHistory(
+            let protected = LegacyHistoryReader(
                 fileURL: fileURL,
                 fileProtection: LocalFileProtection { _ in
                     throw FileProtectionFailure()
                 }
             )
-            let records = await protected.allRecords()
-            let status = await protected.persistenceStatus()
 
-            try expect(records.isEmpty)
-            guard case .privacyMigrationFailed = status.notice else {
-                throw SpecFailure(message: "history protection failure was hidden")
-            }
+            try expect(protected.read() == .protectionFailed)
+            try expect(
+                (try? Data(contentsOf: fileURL)) == document,
+                "a protection failure changed the legacy document"
+            )
         }
 
         await runAsync(
@@ -1237,12 +1165,21 @@ enum SessionHistorySpecs: CoreSpecDomain {
 
             let recent = await store.recentRecordsWithText(limit: 3)
             try expect(recent.map(\.sessionID) == Array(expected.prefix(3)))
-            let fallback = await VersionedLocalSessionHistory(
-                fileURL: directory.appendingPathComponent("legacy.json")
-            ).recentRecordsWithText(limit: 3)
-            try expect(fallback.isEmpty)
             let none = await store.recentRecordsWithText(limit: 0)
             try expect(none.isEmpty)
         }
     }
+}
+
+/// A legacy `history.json` document holding the given record payloads.
+private func legacyHistoryDocument(records: [String]) -> String {
+    #"{"records":["# + records.joined(separator: ",") + #"],"schemaVersion":1}"#
+}
+
+private func writeLegacyHistoryFixture(_ document: Data, to fileURL: URL) throws {
+    try FileManager.default.createDirectory(
+        at: fileURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try document.write(to: fileURL)
 }
