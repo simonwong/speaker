@@ -133,6 +133,33 @@ public struct SpeechRecognitionProfile: Codable, Equatable, Sendable {
     }
 }
 
+/// What a new installation knows about this Mac when it picks its first Speech
+/// Recognition Provider. Each input is injectable so specifications can pin it.
+public struct SpeechRecognitionInstallationEnvironment: Equatable, Sendable {
+    public var operatingSystemMajorVersion: Int
+    /// Whether Apple on-device recognition can run on this Mac.
+    public var isOnDeviceRecognitionAvailable: Bool
+    /// The user's preferred languages, most preferred first.
+    public var preferredLanguages: [String]
+
+    public init(
+        operatingSystemMajorVersion: Int, isOnDeviceRecognitionAvailable: Bool,
+        preferredLanguages: [String]
+    ) {
+        self.operatingSystemMajorVersion = operatingSystemMajorVersion
+        self.isOnDeviceRecognitionAvailable = isOnDeviceRecognitionAvailable
+        self.preferredLanguages = preferredLanguages
+    }
+
+    public static var current: Self {
+        Self(
+            operatingSystemMajorVersion: ProcessInfo.processInfo.operatingSystemVersion
+                .majorVersion,
+            isOnDeviceRecognitionAvailable: AppleSpeechRecognizer.isSupported,
+            preferredLanguages: Locale.preferredLanguages)
+    }
+}
+
 /// Older builds decode `selectedProvider` with a closed enum and treat an unknown
 /// value as corrupted settings. On-device selection therefore lives in its own
 /// key, `selectedProvider` always holds the last cloud provider, and on-device
@@ -177,6 +204,32 @@ public struct SpeechRecognitionProviderSettings: Codable, Equatable, Sendable {
         if selectedProvider.isOnDevice {
             try values.encode(selectedProvider.rawValue, forKey: .onDeviceProvider)
         }
+    }
+
+    /// The settings a new installation starts with, chosen so the first Voice
+    /// Input Session needs the least account setup: Apple on-device recognition
+    /// where macOS 26 can run it, otherwise Doubao for a Chinese system language
+    /// and OpenAI for any other. The cloud choice is also `cloudProvider`, the
+    /// fallback when on-device recognition is unavailable. Existing settings,
+    /// including those that predate this field, keep decoding to Doubao.
+    public static func newInstallation(
+        in environment: SpeechRecognitionInstallationEnvironment
+    ) -> Self {
+        var settings = Self(
+            selectedProvider: cloudDefault(for: environment.preferredLanguages))
+        if environment.operatingSystemMajorVersion >= 26,
+            environment.isOnDeviceRecognitionAvailable
+        {
+            settings.selectedProvider = .apple
+        }
+        return settings
+    }
+
+    /// Doubao stays the default for a Chinese system language, and when no
+    /// preferred language is known.
+    private static func cloudDefault(for languages: [String]) -> SpeechRecognitionProviderID {
+        guard let first = languages.first else { return .doubao }
+        return Locale.Language(identifier: first).languageCode == .chinese ? .doubao : .openAI
     }
 
     public func profile(for provider: SpeechRecognitionProviderID) -> SpeechRecognitionProfile {

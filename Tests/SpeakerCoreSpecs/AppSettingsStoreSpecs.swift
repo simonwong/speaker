@@ -111,6 +111,104 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             }
         }
 
+        run(
+            "a new installation starts with on-device recognition, else a cloud provider for its language",
+            failures: &failures
+        ) {
+            func newInstallation(
+                macOS: Int, onDevice: Bool, languages: [String]
+            ) -> SpeechRecognitionProviderSettings {
+                .newInstallation(
+                    in: SpeechRecognitionInstallationEnvironment(
+                        operatingSystemMajorVersion: macOS,
+                        isOnDeviceRecognitionAvailable: onDevice,
+                        preferredLanguages: languages))
+            }
+            let english = newInstallation(macOS: 26, onDevice: true, languages: ["en-US"])
+            try expect(english.selectedProvider == .apple)
+            try expect(english.cloudProvider == .openAI, "the cloud fallback ignored the language")
+            try expect(english.profiles.isEmpty && (try? english.validated()) == english)
+            let chinese = newInstallation(macOS: 26, onDevice: true, languages: ["zh-Hans-CN"])
+            try expect(chinese.selectedProvider == .apple && chinese.cloudProvider == .doubao)
+
+            // Without SpeechTranscriber, or before macOS 26, Apple is never chosen.
+            try expect(
+                newInstallation(macOS: 26, onDevice: false, languages: ["en-GB"]).selectedProvider
+                    == .openAI)
+            try expect(
+                newInstallation(macOS: 15, onDevice: true, languages: ["fr-FR"]).selectedProvider
+                    == .openAI)
+            for chineseLanguage in ["zh-Hans-CN", "zh-Hant-TW", "zh-HK", "zh"] {
+                try expect(
+                    newInstallation(macOS: 15, onDevice: false, languages: [chineseLanguage])
+                        .selectedProvider == .doubao, "\(chineseLanguage) left Doubao")
+            }
+            // Only the most preferred language decides.
+            try expect(
+                newInstallation(macOS: 14, onDevice: false, languages: ["ja-JP", "zh-Hans"])
+                    .selectedProvider == .openAI)
+            try expect(
+                newInstallation(macOS: 14, onDevice: false, languages: ["zh-Hans", "en-US"])
+                    .selectedProvider == .doubao)
+            try expect(
+                newInstallation(macOS: 14, onDevice: false, languages: []).selectedProvider
+                    == .doubao)
+            // Decoding without saved recognition settings still means Doubao.
+            try expect(SpeechRecognitionProviderSettings().selectedProvider == .doubao)
+            try expect(
+                SpeakerAppSettings.default.speechRecognitionProviders.selectedProvider == .doubao)
+        }
+
+        await runAsync(
+            "only a missing settings file is seeded with new-installation defaults",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-new-installation-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("settings.json")
+            let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
+            func seed(macOS: Int, onDevice: Bool, languages: [String]) -> SpeakerAppSettings {
+                SpeakerAppSettings(
+                    speechRecognitionProviders: .newInstallation(
+                        in: SpeechRecognitionInstallationEnvironment(
+                            operatingSystemMajorVersion: macOS,
+                            isOnDeviceRecognitionAvailable: onDevice,
+                            preferredLanguages: languages)))
+            }
+            let first = seed(macOS: 26, onDevice: true, languages: ["en-US"])
+            let seeded = await store.load(seedingNewInstallation: first)
+            try expect(seeded == .defaults(first))
+            let reread = await VersionedLocalAppSettingsStore(fileURL: fileURL).load()
+            try expect(reread == .loaded(first), "the new-installation choice was not persisted")
+
+            // A later launch after the language or system changed keeps the first choice.
+            let changed = seed(macOS: 15, onDevice: false, languages: ["zh-Hans"])
+            let later = await store.load(seedingNewInstallation: changed)
+            try expect(later.settings.speechRecognitionProviders.selectedProvider == .apple)
+            try expect(later.settings.speechRecognitionProviders.cloudProvider == .openAI)
+
+            // Settings written before recognition providers existed stay on Doubao.
+            try Data(
+                #"{"schemaVersion":1,"settings":{"shortcut":{"kind":"functionKey"},"refinement":{"kind":"defaultSmooth"},"launchAtLogin":false}}"#
+                    .utf8
+            ).write(to: fileURL)
+            let legacy = await store.load(seedingNewInstallation: first)
+            guard case .loaded(let legacySettings) = legacy else {
+                throw SpecFailure(message: "legacy settings were not loaded as saved")
+            }
+            try expect(legacySettings.speechRecognitionProviders.selectedProvider == .doubao)
+
+            // A corrupt file is preserved and recovered with Doubao, never reseeded.
+            try Data("not json".utf8).write(to: fileURL)
+            let corrupt = await store.load(seedingNewInstallation: first)
+            guard case .recovered(let recovered, _) = corrupt else {
+                throw SpecFailure(message: "corrupt settings were not reported as recovered")
+            }
+            try expect(recovered.speechRecognitionProviders.selectedProvider == .doubao)
+            try expect(!FileManager.default.fileExists(atPath: fileURL.path))
+        }
+
         await runAsync(
             "speech recognition settings retain provider models and region across restarts",
             failures: &failures

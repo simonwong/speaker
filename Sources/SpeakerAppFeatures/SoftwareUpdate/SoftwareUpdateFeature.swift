@@ -121,7 +121,12 @@ package struct SoftwareUpdateDriverSnapshot: Equatable, Sendable {
 
 @MainActor
 package protocol SoftwareUpdateDriving: AnyObject {
+    /// Starts the updater. While the user has never decided about automatic
+    /// checks, the updater asks `requestsAutomaticCheckPermission` whether to
+    /// show its own one-time permission request now; once a decision is
+    /// recorded it never asks again.
     func start(
+        requestsAutomaticCheckPermission: @escaping @MainActor () -> Bool,
         observing:
             @escaping @MainActor @Sendable (
                 SoftwareUpdateDriverSnapshot
@@ -187,20 +192,31 @@ package struct SoftwareUpdateState: Equatable, Sendable {
 ///
 /// Callers only send semantic intent and observe product state. Sparkle types,
 /// KVO, scheduler behavior and update UI stay inside the live App adapter.
+///
+/// Automatic checks need one recorded user decision. First-time setup offers
+/// the choice, on by default, and finishing setup records it. An installation
+/// that finished or deferred setup without a decision gets the updater's own
+/// permission request once, at launch; a recorded decision, on or off, is
+/// never asked about again.
 @MainActor
 package final class SoftwareUpdateFeature: ObservableObject {
     package typealias MakeDriver =
         @MainActor () -> any SoftwareUpdateDriving
 
     @Published package private(set) var state: SoftwareUpdateState
+    /// The automatic-check switch on the last onboarding step.
+    @Published package var setupAutomaticChecksChoice = true
 
     private var driver: (any SoftwareUpdateDriving)?
     private var hasStarted = false
+    private let isFirstRunSetupPending: @MainActor () -> Bool
 
     package init(
         configuration: SoftwareUpdateConfiguration,
+        isFirstRunSetupPending: @escaping @MainActor () -> Bool = { false },
         makeDriver: MakeDriver
     ) {
+        self.isFirstRunSetupPending = isFirstRunSetupPending
         switch configuration.availability {
         case .unavailable(let statusCode):
             state = .unavailable(statusCode)
@@ -219,9 +235,13 @@ package final class SoftwareUpdateFeature: ObservableObject {
         guard !hasStarted, let driver else { return }
         hasStarted = true
         do {
-            let snapshot = try driver.start { [weak self] snapshot in
-                self?.state = .ready(snapshot)
-            }
+            let snapshot = try driver.start(
+                requestsAutomaticCheckPermission: { [weak self] in
+                    self?.requestsAutomaticCheckPermission ?? false
+                },
+                observing: { [weak self] snapshot in
+                    self?.state = .ready(snapshot)
+                })
             state = .ready(snapshot)
         } catch {
             self.driver = nil
@@ -240,4 +260,19 @@ package final class SoftwareUpdateFeature: ObservableObject {
             driver.setAutomaticallyChecksForUpdates(enabled)
         )
     }
+
+    /// Whether onboarding shows the automatic-check switch: only a build that
+    /// can update.
+    package var offersSetupAutomaticChecksChoice: Bool { state.isAvailable }
+
+    /// Records the onboarding switch as the user's decision. Called only when
+    /// first-time setup finishes; deferring setup records nothing, so the
+    /// updater asks on a later launch instead.
+    package func finishSetup() {
+        setAutomaticallyChecksForUpdates(setupAutomaticChecksChoice)
+    }
+
+    /// The updater's own request is for installations that will not see the
+    /// onboarding switch: setup is finished or deferred.
+    private var requestsAutomaticCheckPermission: Bool { !isFirstRunSetupPending() }
 }

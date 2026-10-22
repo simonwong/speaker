@@ -103,4 +103,6 @@ This specification records the requested final behavior. Implementation, determi
 
 Synthetic add and update checks against the local Keychain succeeded; the reported platform credential-replacement failure was not reproduced. The visible replacement and deletion flow is addressed, while real tester confirmation of the original report remains pending. This work does not claim a Keychain backend repair or prove live provider authentication.
 
+Later changes: the provider step became the Speech Recognition Provider step described in [Voice Input](voice-input.md). It lists Apple on-device recognition first where it is available, and a new installation's default provider depends on the Mac and its preferred language. In first-time setup the shortcut step also carries an “自动检查更新” switch, on by default, that “开始使用 Speaker” records. This supersedes the earlier exclusion of software-update semantics for that step only.
+
 Existing work on initial configuration and broader result handling remains related context. Publishing these records must not close or modify a parent decision or imply that broader scope is resolved.

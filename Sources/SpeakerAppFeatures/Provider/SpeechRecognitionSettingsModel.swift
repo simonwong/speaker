@@ -74,8 +74,12 @@ package final class SpeechRecognitionSettingsModel: ObservableObject {
         self.isOnDeviceSupported = isOnDeviceSupported
     }
 
+    /// The provider choices in display order: the on-device option, which needs
+    /// no Key, comes first where this Mac can run it and is absent otherwise.
     package var availableProviders: [SpeechRecognitionProviderID] {
-        SpeechRecognitionProviderID.allCases.filter { !$0.isOnDevice || isOnDeviceSupported }
+        let onDevice = SpeechRecognitionProviderID.allCases.filter(\.isOnDevice)
+        let cloud = SpeechRecognitionProviderID.allCases.filter { !$0.isOnDevice }
+        return (isOnDeviceSupported ? onDevice : []) + cloud
     }
 
     /// Whether the selected provider can transcribe now: a saved Key for a cloud

@@ -317,6 +317,11 @@ SPEAKER_BUILD_NUMBER=<同一 build> \
 --speaker-update-feed <staging-feed>` 启动旧版。参数只接受当前 GitHub 仓库与候选 SemVer
 完全匹配的 immutable prerelease appcast；普通启动不读取该 override，继续使用 stable feed。
 
+正式包的 Info.plist 不写 `SUEnableAutomaticChecks`，`verify_production_update_configuration`
+会拒绝带这个键的 App。旧版（0.9.x 及更早）把它写成 `false`，所以旧版从不询问；更新到
+不带该键的候选后，已完成引导、从未表态的安装首次启动会看到一次 Sparkle 的自动检查询问，
+回答后不再出现。`sparkle-update` 用例遇到这个询问时如实回答即可。
+
 候选必须来自首次 workflow 固定的 commit。完成实机矩阵后，只提交生成的报告；从
 候选 commit 到发布 commit 只能变更该报告。再次运行 production workflow，同时传入报告
 路径 `upgrade_evidence_file` 和首次 `candidate_run_id`。门禁验证 run 成功且 source commit

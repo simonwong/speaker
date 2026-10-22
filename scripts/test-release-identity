@@ -325,7 +325,6 @@ mkdir -p "$TEST_APP/Contents/Resources"
     -c 'Add :SUVerifyUpdateBeforeExtraction bool true' \
     -c 'Add :SURequireSignedFeed bool true' \
     -c 'Add :SUSignedFeedFailureExpirationInterval integer 0' \
-    -c 'Add :SUEnableAutomaticChecks bool false' \
     -c 'Add :SUAutomaticallyUpdate bool false' \
     -c 'Add :SUEnableSystemProfiling bool false' \
     -c 'Add :SUEnableJavaScript bool false' \
@@ -335,6 +334,20 @@ verify_production_update_configuration \
     "com.example.speaker" \
     "https://updates.example.com/speaker/appcast.xml" \
     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+for fixed_choice in false true; do
+    /usr/libexec/PlistBuddy \
+        -c "Add :SUEnableAutomaticChecks bool $fixed_choice" \
+        "$TEST_INFO"
+    if verify_production_update_configuration \
+        "$TEST_APP" \
+        "com.example.speaker" \
+        "https://updates.example.com/speaker/appcast.xml" \
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" 2>/dev/null; then
+        print -u2 "A production app that fixes automatic update checks in Info.plist was accepted."
+        exit 1
+    fi
+    /usr/libexec/PlistBuddy -c 'Delete :SUEnableAutomaticChecks' "$TEST_INFO"
+done
 /usr/libexec/PlistBuddy \
     -c 'Set :SUPublicEDKey BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=' \
     "$TEST_INFO"

@@ -8,6 +8,11 @@ import SpeakerCore
 final class OnboardingPresenter {
     static let completionKey = "hasCompletedOnboarding"
 
+    /// Whether first-time setup was finished or deferred on this installation.
+    static func hasCompletedSetup(in preferences: UserDefaults) -> Bool {
+        preferences.bool(forKey: completionKey)
+    }
+
     private let preferences: UserDefaults
     private let makeController:
         @MainActor (_ mode: OnboardingMode, _ completion: @escaping () -> Void) ->
@@ -84,6 +89,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     private let shortcut: VoiceShortcutFeature
     private let microphones: MicrophoneSelectionFeature
     private let onboarding: OnboardingPresenter
+    private let preferences: UserDefaults
     private let launchArguments: [String]
 
     init(
@@ -102,6 +108,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         shortcut: VoiceShortcutFeature,
         microphones: MicrophoneSelectionFeature,
         onboarding: OnboardingPresenter,
+        preferences: UserDefaults,
         launchArguments: [String]
     ) {
         self.settingsStore = settingsStore
@@ -119,11 +126,21 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         self.shortcut = shortcut
         self.microphones = microphones
         self.onboarding = onboarding
+        self.preferences = preferences
         self.launchArguments = launchArguments
     }
 
+    /// A new installation, one with no settings file that has never finished
+    /// or deferred setup, starts with the recognition provider that needs the
+    /// least setup on this Mac, written once so it stays put. An installation
+    /// that finished setup without ever writing settings keeps Doubao.
     func loadSettings() async -> AppSettingsLoadResult {
-        await settingsStore.load()
+        guard !OnboardingPresenter.hasCompletedSetup(in: preferences) else {
+            return await settingsStore.load()
+        }
+        return await settingsStore.load(
+            seedingNewInstallation: SpeakerAppSettings(
+                speechRecognitionProviders: .newInstallation(in: .current)))
     }
 
     func loadDoubaoResource(rawValue: String?) async {

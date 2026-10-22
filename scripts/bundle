@@ -265,7 +265,6 @@ if [[ "$SIGNING_IDENTITY" != "-" ]]; then
     /usr/libexec/PlistBuddy -c "Add :SUVerifyUpdateBeforeExtraction bool true" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SURequireSignedFeed bool true" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUSignedFeedFailureExpirationInterval integer 0" "$APP/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Add :SUEnableAutomaticChecks bool false" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUAutomaticallyUpdate bool false" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUEnableSystemProfiling bool false" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :SUEnableJavaScript bool false" "$APP/Contents/Info.plist"

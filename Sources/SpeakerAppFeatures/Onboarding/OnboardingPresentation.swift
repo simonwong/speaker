@@ -18,7 +18,7 @@ package enum OnboardingStep: Int, CaseIterable, Sendable {
     package var shortTitle: String {
         switch self {
         case .permissions: "权限"
-        case .apiKey: "API Key"
+        case .apiKey: "语音识别"
         case .shortcut: "快捷键"
         }
     }
