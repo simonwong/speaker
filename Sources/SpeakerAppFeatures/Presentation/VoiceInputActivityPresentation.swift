@@ -124,7 +124,8 @@ extension PendingCopyReason {
     package static let changedTargetTitle = "输入位置已经变化"
     package static let deliveryFailedTitle = "文字需要手动粘贴"
     package static let targetApplicationUnresponsiveTitle = "目标应用没有响应"
-    package static let deliveryUnconfirmedTitle = "可能已经输入，请先检查"
+    package static let deliveryUnconfirmedTitle = "可能未正确输入，请先检查"
+    package static let clipboardTooLargeTitle = "剪贴板内容过大，没有自动输入"
     package static let clipboardFailedTitle = "复制失败，请重试"
     /// Shown in place of a secure Input Target's text, which never appears
     /// on screen; the copy control still copies it.
@@ -142,6 +143,7 @@ extension PendingCopyReason {
         case .targetApplicationUnresponsive, .deliveryTimedOut:
             Self.targetApplicationUnresponsiveTitle
         case .deliveryUnconfirmed: Self.deliveryUnconfirmedTitle
+        case .clipboardTooLarge: Self.clipboardTooLargeTitle
         case .clipboardFailed, .secureTargetClipboardFailed: Self.clipboardFailedTitle
         }
     }

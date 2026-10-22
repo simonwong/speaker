@@ -10,6 +10,9 @@ export default defineConfig({
 		entrypoint: "./src/server.ts",
 		env: {
 			ASSETS: bindings.assets(),
+			// Cookie-free /download counts; see src/server.ts. Analytics Engine
+			// creates the dataset on the first write.
+			DOWNLOADS: bindings.analyticsEngineDataset({ name: "speaker_site_downloads" }),
 		},
 		// The retired domain must redirect static files too, so the Worker
 		// sees every request and serves assets itself through ASSETS.

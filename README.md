@@ -45,6 +45,13 @@ If Speaker cannot prove that the original input target is still safe and current
 2. Open the DMG and drag **Speaker** onto **Applications** in its window.
 3. Open Speaker from **Applications**.
 
+Or install with [Homebrew](https://brew.sh); this repository is the tap:
+
+```bash
+brew tap simonwong/speaker https://github.com/simonwong/speaker
+brew install --cask simonwong/speaker/speaker
+```
+
 Later releases install from inside Speaker: use **Check for Updates** in Settings → About, or turn on automatic update checks in General settings. Speaker verifies each update's Ed25519 signature before installing it.
 
 ### First run
@@ -73,7 +80,7 @@ See [Privacy](PRIVACY.md) for the complete data-handling contract, local storage
 
 ## Development
 
-Building Speaker requires Swift 6 and the macOS 26 SDK, normally provided by Xcode 26 or compatible Command Line Tools. The wrappers prefer `/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`; set `SPEAKER_SDKROOT` to use another macOS 26-or-later SDK.
+Building Speaker requires Swift 6 and the macOS 26 SDK, normally provided by Xcode 26 or compatible Command Line Tools. The wrappers take the active toolchain's macOS SDK from `xcrun` and refuse one older than macOS 26; no SDK path is hardcoded. Set `SPEAKER_SDKROOT` to use another macOS 26-or-later SDK.
 
 Use the repository wrappers so local builds match CI:
 

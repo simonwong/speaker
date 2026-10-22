@@ -117,6 +117,7 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
     private let doubao: any ContextualSpeechTranscribing & StreamingContextualSpeechTranscribing
     private let transport: any SpeechRecognitionTransport
     private let realtimeConnector: any RealtimeSpeechConnecting
+    private let realtimeLiveness: TransportLivenessProbe
     private let onDevice: any OnDeviceSpeechRecognizing
 
     public init(
@@ -124,12 +125,14 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         doubao: any ContextualSpeechTranscribing & StreamingContextualSpeechTranscribing,
         transport: any SpeechRecognitionTransport = URLSessionSpeechRecognitionTransport(),
         realtimeConnector: any RealtimeSpeechConnecting = URLSessionRealtimeSpeechConnector(),
+        realtimeLiveness: TransportLivenessProbe = .live,
         onDevice: any OnDeviceSpeechRecognizing = AppleSpeechRecognizer()
     ) {
         self.credentials = credentials
         self.doubao = doubao
         self.transport = transport
         self.realtimeConnector = realtimeConnector
+        self.realtimeLiveness = realtimeLiveness
         self.onDevice = onDevice
     }
 
@@ -257,7 +260,9 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
     ) async throws -> TranscriptionResult {
         let apiKey = try await apiKey(for: profile)
         try Task.checkCancellation()
-        return try await RealtimeSpeechTranscriber(connector: realtimeConnector).transcribe(
+        return try await RealtimeSpeechTranscriber(
+            connector: realtimeConnector, liveness: realtimeLiveness
+        ).transcribe(
             chunks, profile: profile, apiKey: apiKey, context: context)
     }
 

@@ -1884,6 +1884,69 @@ struct SpeakerAppScenarioSpecs {
             )
         }
 
+        await runAsync(
+            "an unconfirmed paste and an oversized clipboard each name their own reason",
+            failures: &failures
+        ) {
+            let cases: [(DeliveryOutcome, String, String)] = [
+                (
+                    .pendingCopyDiagnosed(
+                        .deliveryUnconfirmed,
+                        .init(stage: .pasteReceipt, cause: .changed)
+                    ),
+                    PendingCopyReason.deliveryUnconfirmedTitle,
+                    "确认未输入后复制"
+                ),
+                (
+                    .pendingCopyDiagnosed(
+                        .clipboardTooLarge,
+                        .init(stage: .clipboardSnapshot, cause: .tooLarge)
+                    ),
+                    PendingCopyReason.clipboardTooLargeTitle,
+                    "复制"
+                ),
+            ]
+            for (outcome, expectedTitle, expectedCopyTitle) in cases {
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
+                    ),
+                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    delivery: TextDeliveryFake(result: outcome),
+                    clipboard: ClipboardFake(),
+                    history: SessionHistoryFake()
+                )
+                let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
+                experience.start()
+
+                experience.shortcutTarget.receive(.pressed)
+                _ = await waitUntil { experience.state.isRecording }
+                experience.shortcutTarget.receive(.released)
+                experience.shortcutTarget.receive(.pressed)
+                experience.shortcutTarget.receive(.released)
+                _ = await waitUntil {
+                    if case .pendingCopy = experience.state.overlay { true } else { false }
+                }
+                let overlay = experience.state.overlay
+                await experience.shutdown()
+
+                guard
+                    case .pendingCopy(let title, let text, let copyTitle, _, _, _) = overlay
+                else {
+                    throw SpecFailure(message: "\(outcome) did not keep the result")
+                }
+                try expect(title == expectedTitle, "\(outcome) was titled \(title)")
+                try expect(text == "保留的文字")
+                try expect(copyTitle == expectedCopyTitle)
+            }
+            try expect(
+                PendingCopyReason.clipboardTooLarge.userTitle
+                    != PendingCopyReason.clipboardFailed.userTitle,
+                "an oversized clipboard read as a failed copy"
+            )
+        }
+
         run(
             "diagnostic report renders audio capture environment and unknown fallbacks",
             failures: &failures
@@ -2816,6 +2879,73 @@ struct SpeakerAppScenarioSpecs {
             let applied = await service.resource
             try expect(saved == DoubaoStreamingResource.model1Concurrent.rawValue)
             try expect(applied == .model1Concurrent)
+            await model.shutdown()
+        }
+
+        await runAsync(
+            "Doubao connection check against a failing handshake fails fast with its transport classification",
+            failures: &failures
+        ) {
+            // The onboarding UI specification's service, with the live
+            // liveness probe the production default supplies.
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-doubao-handshake-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let credentials = LocalFileProviderCredentialStore(
+                fileURL: directory.appendingPathComponent("credentials.json")
+            )
+            let service = CredentialedDoubaoTranscriber(
+                credentials: credentials,
+                connector: DoubaoFailingWebSocketConnectorFake(
+                    error: URLError(.userAuthenticationRequired)
+                )
+            )
+            let model = SpeechRecognitionSettingsModel(
+                credentials: credentials,
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: VersionedLocalAppSettingsStore(
+                    fileURL: directory.appendingPathComponent("settings.json")
+                ),
+                doubao: service
+            )
+            await model.load()
+            model.apiKeyDraft = "initial-test-key"
+            await model.saveAPIKey()
+            try expect(
+                model.hasStoredKey && model.apiKeyDraft.isEmpty,
+                "the first save did not store the Key")
+            try expect(
+                model.doubaoStatus == .configured,
+                "first save left status \(model.doubaoStatus)")
+
+            let started = ContinuousClock.now
+            do {
+                _ = try await service.checkConnection()
+                throw SpecFailure(message: "a rejected handshake passed the connection check")
+            } catch let failure as DoubaoASRFailure {
+                try expect(
+                    failure.kind == .network
+                        && failure.providerStatusCode == "url.-1013",
+                    "handshake failure classified as \(failure)")
+            }
+            try expect(
+                ContinuousClock.now - started < .milliseconds(500),
+                "the connection check waited after the handshake failed")
+
+            model.checkConnection()
+            let failed = await eventually(before: .seconds(1)) {
+                if case .failure = model.doubaoStatus { true } else { false }
+            }
+            try expect(failed, "the model never reported the failed connection check")
+            try expect(model.hasStoredKey)
+            model.apiKeyDraft = "replacement-test-key"
+            await model.saveAPIKey()
+            try expect(model.doubaoStatus == .configured && model.apiKeyDraft.isEmpty)
+            let storedKey = try await credentials.apiKey(for: .doubao)
+            try expect(storedKey == "replacement-test-key")
             await model.shutdown()
         }
 

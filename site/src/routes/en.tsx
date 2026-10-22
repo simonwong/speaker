@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { PRIVACY_URL, RELEASE_NOTES_URL, SITE_URL } from '../components'
-import { DOWNLOAD_URL, type HomeCopy, HomePage, homeHead } from '../home'
+import { BREW_INSTALL, DOWNLOAD_URL, type HomeCopy, HomePage, homeHead } from '../home'
 
 const copy: HomeCopy = {
   lang: 'en',
@@ -111,16 +111,22 @@ const copy: HomeCopy = {
       id: 'install',
       title: 'Download and install',
       body: (
-        <ol className="install">
-          <li>
-            <a href={DOWNLOAD_URL}>Download the latest DMG</a>. Older versions are on{' '}
-            <a href={RELEASE_NOTES_URL}>GitHub Releases</a>.
-          </li>
-          <li>Drag Speaker to Applications and open it.</li>
-          <li>Follow the setup to grant Microphone and Accessibility access.</li>
-          <li>Choose a recognition service and paste its API key, or download the model for Apple speech recognition.</li>
-          <li>Try it in the practice field on the last setup step. Later versions update from inside the app.</li>
-        </ol>
+        <>
+          <ol className="install">
+            <li>
+              <a href={DOWNLOAD_URL}>Download the latest DMG</a>. Older versions are on{' '}
+              <a href={RELEASE_NOTES_URL}>GitHub Releases</a>.
+            </li>
+            <li>Drag Speaker to Applications and open it.</li>
+            <li>Follow the setup to grant Microphone and Accessibility access.</li>
+            <li>Choose a recognition service and paste its API key, or download the model for Apple speech recognition.</li>
+            <li>Try it in the practice field on the last setup step. Later versions update from inside the app.</li>
+          </ol>
+          <p>Or install with Homebrew:</p>
+          <pre>
+            <code>{BREW_INSTALL}</code>
+          </pre>
+        </>
       ),
     },
   ],

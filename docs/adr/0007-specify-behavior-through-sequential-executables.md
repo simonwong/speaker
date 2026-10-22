@@ -41,3 +41,9 @@ Adding a case means adding one `run` or `await runAsync` block, with a descripti
 - Because the process is sequential, a case that hangs blocks the suite; waits go through `eventually` with a bounded deadline rather than an unbounded sleep or await.
 - Suites grow long as single files. That is accepted in exchange for a readable top-to-bottom specification and one reproducible command per suite.
 - Adopting XCTest or Swift Testing later would mean re-establishing ordering guarantees, the filter contract, and the exit-status contract that `./scripts/test` depends on; it requires a new ADR.
+
+## Update (2026-10-22)
+
+The decision is unchanged. The paragraph above on adding a case, and the consequence that suites grow long as single files, describe the original layout and no longer match `SpeakerCoreSpecs`.
+
+`SpeakerCoreSpecs` is split by domain, as [`docs/agents/development.md`](../agents/development.md) describes. `Tests/SpeakerCoreSpecs/SpeakerCoreSpecs.swift` is the `@main` driver; each `<Domain>Specs.swift` exposes `enum <Domain>Specs: CoreSpecDomain` with one `run(failures:)`. A new case is one `run` or `await runAsync` block in the domain file it belongs to, and a new domain is registered in the driver. Doubles that only this executable needs live in its `Fakes+<Area>.swift`, `Fixtures.swift`, and `Helpers+SQLite.swift` files; a double that more than one executable needs belongs in `SpeakerCoreSpecFakes`. The workflow is still: iterate with a name filter, run the whole executable, then run the checks `docs/agents/development.md` lists for the touched paths.

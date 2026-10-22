@@ -178,8 +178,15 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func migrateLegacyHistory() async -> LegacyHistoryMigrationOutcome {
-        guard FileManager.default.fileExists(atPath: legacyHistoryFileURL.path) else {
-            return .notNeeded
+        do {
+            guard try OwnerOnlyFilePersistence.regularFileExists(at: legacyHistoryFileURL)
+            else {
+                return .notNeeded
+            }
+        } catch {
+            // A link or other non-regular entry at the legacy path is left
+            // untouched instead of being read through.
+            return .legacyProtectionFailed
         }
         let legacy = VersionedLocalSessionHistory(fileURL: legacyHistoryFileURL)
         if let notice = await legacy.persistenceStatus().notice {
@@ -201,7 +208,7 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
             return .importRefused
         }
         do {
-            try FileManager.default.removeItem(at: legacyHistoryFileURL)
+            try OwnerOnlyFilePersistence.removeRegularFile(at: legacyHistoryFileURL)
         } catch {
             return .migratedLegacyFileRemains
         }
