@@ -1,18 +1,22 @@
 import Combine
 import Foundation
 import SpeakerCore
+import os
 
-private final class VoiceTriggerIntakeGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var accepting = true
-    private var allowsSessionTriggers = true
+private final class VoiceTriggerIntakeGate: Sendable {
+    private struct State: Sendable {
+        var accepting = true
+        var allowsSessionTriggers = true
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     func accepts(_ trigger: GlobalVoiceTrigger) -> Bool {
-        lock.withLock {
-            guard accepting else { return false }
+        state.withLock { state in
+            guard state.accepting else { return false }
             return switch trigger {
             case .pressed, .released:
-                allowsSessionTriggers
+                state.allowsSessionTriggers
             case .cancel, .monitorRecovered:
                 true
             }
@@ -20,17 +24,17 @@ private final class VoiceTriggerIntakeGate: @unchecked Sendable {
     }
 
     var isAcceptingEscapeEvents: Bool {
-        lock.withLock { accepting }
+        state.withLock { $0.accepting }
     }
 
     func setAllowsSessionTriggers(_ allowed: Bool) {
-        lock.withLock { allowsSessionTriggers = allowed }
+        state.withLock { $0.allowsSessionTriggers = allowed }
     }
 
     func close() {
-        lock.withLock {
-            accepting = false
-            allowsSessionTriggers = false
+        state.withLock { state in
+            state.accepting = false
+            state.allowsSessionTriggers = false
         }
     }
 }

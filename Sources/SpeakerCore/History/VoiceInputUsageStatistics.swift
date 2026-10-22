@@ -31,17 +31,21 @@ public struct VoiceInputUsageSummary: Equatable, Sendable {
     public let totalSpeakingMilliseconds: Int
     public let totalSessionCount: Int
     public let daily: [VoiceInputDailyUsage]
+    /// Usage per provider service and release-to-delivery samples.
+    public let services: VoiceInputServiceUsage
 
     public init(
         totalRecognizedCharacterCount: Int,
         totalSpeakingMilliseconds: Int,
         totalSessionCount: Int,
-        daily: [VoiceInputDailyUsage]
+        daily: [VoiceInputDailyUsage],
+        services: VoiceInputServiceUsage = .empty
     ) {
         self.totalRecognizedCharacterCount = totalRecognizedCharacterCount
         self.totalSpeakingMilliseconds = totalSpeakingMilliseconds
         self.totalSessionCount = totalSessionCount
         self.daily = daily
+        self.services = services
     }
 
     public static let empty = VoiceInputUsageSummary(
@@ -70,6 +74,8 @@ package struct VoiceInputUsageAccumulator {
     private var totalCharacters = 0
     private var totalMilliseconds = 0
     private var totalSessions = 0
+    /// Per-service usage and latency samples, folded alongside the day buckets.
+    package var services = VoiceInputServiceUsageAccumulator()
 
     package init(calendar: Calendar = .current) {
         self.calendar = calendar
@@ -126,6 +132,7 @@ package struct VoiceInputUsageAccumulator {
             recognizedCharacterCount: record.recognizedCharacterCount,
             speakingMilliseconds: record.speakingMilliseconds
         )
+        services.add(record)
     }
 
     package func summary() -> VoiceInputUsageSummary {
@@ -142,7 +149,8 @@ package struct VoiceInputUsageAccumulator {
             totalRecognizedCharacterCount: totalCharacters,
             totalSpeakingMilliseconds: totalMilliseconds,
             totalSessionCount: totalSessions,
-            daily: daily
+            daily: daily,
+            services: services.usage()
         )
     }
 }

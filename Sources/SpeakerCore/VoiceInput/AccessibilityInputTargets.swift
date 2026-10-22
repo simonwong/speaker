@@ -1,12 +1,14 @@
 import AppKit
 import Foundation
+import os
 
-private final class AccessibilityReleaseCaptureCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var captures: [UUID: AccessibilityReleaseCapture] = [:]
+private final class AccessibilityReleaseCaptureCache: Sendable {
+    private let captures = OSAllocatedUnfairLock(
+        initialState: [UUID: AccessibilityReleaseCapture]()
+    )
 
     func store(_ capture: AccessibilityReleaseCapture) -> UUID {
-        lock.withLock {
+        captures.withLock { captures in
             // There can only be one active voice session. Purging abandoned
             // hints bounds retained AX objects if a monitor is interrupted.
             captures.removeAll(keepingCapacity: true)
@@ -17,7 +19,7 @@ private final class AccessibilityReleaseCaptureCache: @unchecked Sendable {
     }
 
     func take(_ token: UUID) -> AccessibilityReleaseCapture? {
-        lock.withLock { captures.removeValue(forKey: token) }
+        captures.withLock { $0.removeValue(forKey: token) }
     }
 }
 

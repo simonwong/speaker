@@ -96,7 +96,217 @@ package struct OverviewDashboard: View {
                 reduceMotion: reduceMotion
             )
             .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
+            OverviewCostCard(
+                estimate: OverviewServicePresentation.costEstimate(summary.services)
+            )
+            .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
+            OverviewLatencyCard(
+                lines: OverviewServicePresentation.latencyLines(summary.services),
+                reduceMotion: reduceMotion
+            )
+            .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
         }
+    }
+}
+
+/// A card title on the left and its qualifier on the right, the qualifier
+/// wrapping under the title when the window is narrow.
+private struct OverviewCardHeader: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                titleText
+                Spacer(minLength: 0)
+                detailText
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                titleText
+                detailText
+            }
+        }
+    }
+
+    private var titleText: some View {
+        Text(title)
+            .font(SpeakerTypography.sectionHeader)
+            .tracking(1)
+            .foregroundStyle(.secondary)
+    }
+
+    private var detailText: some View {
+        Text(detail)
+            .font(SpeakerTypography.footnote)
+            .foregroundStyle(.tertiary)
+    }
+}
+
+/// Estimated cost per currency, then per service. Each currency is totalled
+/// on its own; nothing is converted.
+private struct OverviewCostCard: View {
+    let estimate: ServiceCostEstimate
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.cardHeaderSpacing) {
+            OverviewCardHeader(
+                title: OverviewServicePresentation.costTitle,
+                detail: OverviewServicePresentation.costDisclaimer
+            )
+            if estimate.lines.isEmpty {
+                Text(OverviewServicePresentation.noUsageText)
+                    .font(SpeakerTypography.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                if !estimate.totalTexts.isEmpty {
+                    HStack(alignment: .firstTextBaseline, spacing: 20) {
+                        ForEach(estimate.totalTexts, id: \.self) { total in
+                            Text(total)
+                                .font(SpeakerTypography.metricNumber)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(OverviewServicePresentation.costTitle)
+                }
+                VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
+                    ForEach(Array(estimate.lines.enumerated()), id: \.offset) { _, line in
+                        OverviewCostRow(line: line)
+                    }
+                }
+            }
+            Text(OverviewServicePresentation.priceDateText)
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .speakerCard()
+    }
+}
+
+private struct OverviewCostRow: View {
+    let line: ServiceCostLine
+
+    private var markerColor: Color {
+        switch line.amount {
+        case .free: SpeakerVisualIdentity.settledGreen
+        case .unknown: Color.primary.opacity(0.18)
+        case .estimate: SpeakerVisualIdentity.warmGoldDeep
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Circle()
+                .fill(markerColor)
+                .frame(width: 7, height: 7)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(line.service)
+                    .font(SpeakerTypography.body)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(line.usage)
+                    .font(SpeakerTypography.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            Text(line.amountText)
+                .font(SpeakerTypography.bodyEmphasis.monospacedDigit())
+                .foregroundStyle(line.amount == .unknown ? .secondary : .primary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Release-to-delivery time per Speech Recognition Provider. The coral bar
+/// reaches the median and the gold bar behind it the 90th percentile, both
+/// on one scale shared by every provider.
+private struct OverviewLatencyCard: View {
+    let lines: [ServiceLatencyLine]
+    let reduceMotion: Bool
+
+    private var scaleMilliseconds: Int {
+        max(
+            1,
+            lines.compactMap { $0.ninetiethPercentileMilliseconds ?? $0.medianMilliseconds }
+                .max() ?? 1
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.cardHeaderSpacing) {
+            OverviewCardHeader(
+                title: OverviewServicePresentation.latencyTitle,
+                detail: OverviewServicePresentation.latencyDefinition
+            )
+            if lines.isEmpty {
+                Text(OverviewServicePresentation.noLatencyText)
+                    .font(SpeakerTypography.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
+                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                        OverviewLatencyRow(
+                            line: line,
+                            scaleMilliseconds: scaleMilliseconds,
+                            reduceMotion: reduceMotion
+                        )
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .speakerCard()
+    }
+}
+
+private struct OverviewLatencyRow: View {
+    let line: ServiceLatencyLine
+    let scaleMilliseconds: Int
+    let reduceMotion: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(line.service)
+                    .font(SpeakerTypography.body)
+                    .lineLimit(1)
+                Spacer(minLength: 12)
+                Text(line.summary)
+                    .font(SpeakerTypography.footnote.monospacedDigit())
+                    .foregroundStyle(line.medianMilliseconds == nil ? .tertiary : .secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            if let median = line.medianMilliseconds {
+                GeometryReader { geometry in
+                    let width = geometry.size.width
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.06))
+                        if let tail = line.ninetiethPercentileMilliseconds {
+                            Capsule()
+                                .fill(SpeakerVisualIdentity.warmGold)
+                                .frame(width: barWidth(tail, in: width))
+                        }
+                        Capsule()
+                            .fill(SpeakerVisualIdentity.warmCoral(for: colorScheme))
+                            .frame(width: barWidth(median, in: width))
+                    }
+                    .animation(reduceMotion ? nil : SpeakerMotion.change, value: median)
+                }
+                .frame(height: 6)
+                .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func barWidth(_ milliseconds: Int, in width: CGFloat) -> CGFloat {
+        max(6, width * CGFloat(milliseconds) / CGFloat(scaleMilliseconds))
     }
 }
 
