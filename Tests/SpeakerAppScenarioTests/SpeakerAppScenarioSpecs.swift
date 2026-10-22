@@ -1742,7 +1742,7 @@ struct SpeakerAppScenarioSpecs {
             )
             events.send(())
 
-            let restored = await waitUntil {
+            let restored = await eventually(before: .seconds(2)) {
                 permissions.snapshot.accessibility == .granted
                     && functionMonitor.isRunning
             }
@@ -2162,7 +2162,7 @@ struct SpeakerAppScenarioSpecs {
             )
 
             router.shortcutTarget.receive(.pressed)
-            let confirmed = await waitUntil { confirmations == 1 }
+            let confirmed = await eventually(before: .seconds(2)) { confirmations == 1 }
             router.shortcutTarget.receive(.released)
 
             try expect(confirmed)
@@ -2188,12 +2188,12 @@ struct SpeakerAppScenarioSpecs {
             )
 
             router.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { attempts == 1 }
+            _ = await eventually(before: .seconds(2)) { attempts == 1 }
             router.shortcutTarget.receive(.released)
             try expect(router.hasExclusiveInteraction)
 
             router.shortcutTarget.receive(.pressed)
-            let accepted = await waitUntil { attempts == 2 }
+            let accepted = await eventually(before: .seconds(2)) { attempts == 2 }
             router.shortcutTarget.receive(.released)
 
             try expect(accepted)
@@ -2224,7 +2224,7 @@ struct SpeakerAppScenarioSpecs {
             try expect(router.shortcutTarget.shouldConsumeEscape())
             router.shortcutTarget.receive(.cancel)
             router.shortcutTarget.receive(.released)
-            let cancelled = await waitUntil { cancellationCount == 1 }
+            let cancelled = await eventually(before: .seconds(2)) { cancellationCount == 1 }
 
             try expect(cancelled)
             try expect(!router.hasExclusiveInteraction)
@@ -2856,25 +2856,24 @@ struct SpeakerAppScenarioSpecs {
             await model.refresh()
 
             model.checkConnection()
-            let checking = await waitUntil {
+            let checking = await eventually(before: .seconds(2)) {
                 if case .checking = model.status { true } else { false }
             }
-            var checkStarted = false
-            for _ in 0..<50 {
-                if await service.isCheckPending {
-                    checkStarted = true
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(2))
+            let checkStarted = await eventually(before: .seconds(2)) {
+                await service.isCheckPending
             }
             await model.delete()
             await service.finishCheck(.success("stale-request"))
-            try? await Task.sleep(for: .milliseconds(30))
+            // The model drops a stale result without any visible step, so
+            // there is no later event to await before asserting it changed
+            // nothing.
+            let ignored = await neverHolds(within: .milliseconds(30)) {
+                model.hasStoredKey || model.status != .unconfigured
+            }
 
             try expect(checking)
             try expect(checkStarted)
-            try expect(!model.hasStoredKey)
-            try expect(model.status == .unconfigured)
+            try expect(ignored, "a stale check result revived the deleted key")
         }
 
         await runAsync(
@@ -2896,16 +2895,18 @@ struct SpeakerAppScenarioSpecs {
             await model.refresh()
 
             model.checkConnection()
-            for _ in 0..<50 {
-                if await service.isCheckPending { break }
-                try? await Task.sleep(for: .milliseconds(2))
+            let checkStarted = await eventually(before: .seconds(2)) {
+                await service.isCheckPending
             }
             await model.selectResource(.model1Concurrent)
             await service.finishCheck(.success("old-resource-request"))
-            try? await Task.sleep(for: .milliseconds(30))
+            // As above: a stale result leaves no step to await.
+            let ignored = await neverHolds(within: .milliseconds(30)) {
+                model.resource != .model1Concurrent || model.status != .configured
+            }
 
-            try expect(model.resource == .model1Concurrent)
-            try expect(model.status == .configured)
+            try expect(checkStarted)
+            try expect(ignored, "the old resource's check result replaced the new status")
         }
 
         await runAsync(
@@ -2933,10 +2934,10 @@ struct SpeakerAppScenarioSpecs {
                 (.invalidCredential, "不要填 APP ID 或 Access Token"),
             ] {
                 model.checkConnection()
-                for _ in 0..<50 {
-                    if await service.isCheckPending { break }
-                    try? await Task.sleep(for: .milliseconds(2))
+                let checkStarted = await eventually(before: .seconds(2)) {
+                    await service.isCheckPending
                 }
+                try expect(checkStarted, "\(kind) check never reached the service")
                 await service.finishCheck(.failure(DoubaoASRFailure(kind: kind)))
                 let reported = await eventually(before: .seconds(1)) {
                     if case .failure(let message) = model.status {
@@ -3987,6 +3988,58 @@ struct SpeakerAppScenarioSpecs {
             try expect(copied == ["嗯那个明天开会", "明天开会。"], "\(copied.count) copies")
         }
 
+        await runAsync(
+            "history feedback clears after its duration and a newer result restarts it",
+            failures: &failures
+        ) {
+            let id = VoiceInputSessionID()
+            let record = VoiceInputHistoryRecord(
+                sessionID: id,
+                startedAt: Date(),
+                applicationName: "备忘录",
+                transcription: "明天开会",
+                finalText: "明天开会。",
+                outcome: .delivered(id, applicationName: "备忘录", text: "明天开会。")
+            )
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-history-feedback-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let clock = ManualVoiceInputClock()
+            let model = HistoryModel(
+                store: SQLiteSessionHistory(
+                    fileURL: directory.appendingPathComponent("history.sqlite3")),
+                clipboard: ClipboardFake(),
+                announce: { _ in },
+                clock: clock
+            )
+
+            await model.copy(record)
+            let first = model.feedback
+            try await clock.waitUntilPendingSleepCount(1)
+            clock.advance(by: HistoryModel.feedbackDuration - .milliseconds(1))
+            // The deadline has not passed, so no sleeper resumed.
+            let keptBeforeDeadline = model.feedback == first && clock.pendingSleepCount == 1
+
+            await model.copy(record)
+            let second = model.feedback
+            // The newer result cancels the first timer at once.
+            let restarted = clock.cancelledSleepCount == 1
+            try await clock.waitUntilPendingSleepCount(1)
+            clock.advance(by: HistoryModel.feedbackDuration)
+            let cleared = await eventually(before: .seconds(2)) { model.feedback == nil }
+
+            try expect(first != nil && second != nil && first != second)
+            try expect(keptBeforeDeadline, "the feedback cleared before its duration")
+            try expect(restarted, "a newer result did not restart the feedback timer")
+            try expect(
+                clock.sleepRequests == [
+                    HistoryModel.feedbackDuration, HistoryModel.feedbackDuration,
+                ],
+                "requested \(clock.sleepRequests)")
+            try expect(cleared, "the feedback stayed after its duration")
+        }
+
         run(
             "menu bar presents only compact contextual shortcuts in exact order",
             failures: &failures
@@ -4323,7 +4376,7 @@ struct SpeakerAppScenarioSpecs {
                 "Esc was not owned synchronously with the physical press"
             )
             experience.shortcutTarget.receive(.cancel)
-            _ = await waitUntil {
+            _ = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "cancelled"
                     || experience.state.diagnosticCode == "idle"
             }
@@ -4359,21 +4412,22 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
 
-            let processingStarted = await waitUntil {
+            let processingStarted = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "processing.transcribing"
             }
             let consumesEscape = experience.shortcutTarget.shouldConsumeEscape()
             experience.shortcutTarget.receive(.cancel)
-            let cancelled = await waitUntil {
+            let cancelled = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "cancelled"
             }
-            try? await Task.sleep(for: .milliseconds(30))
-            let processorCancelled = await processor.cancellationCount == 1
+            let processorCancelled = await eventually(before: .seconds(2)) {
+                await processor.cancellationCount == 1
+            }
             await experience.shutdown()
 
             try expect(processingStarted)
@@ -4412,12 +4466,12 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
 
-            let delivered = await waitUntil {
+            let delivered = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "delivered"
             }
             let overlayIsHidden =
@@ -4473,12 +4527,12 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
 
-            let ended = await waitUntil {
+            let ended = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode
                     == "failed.providerReturnedNoText"
             }
@@ -4532,11 +4586,11 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
-            _ = await waitUntil {
+            _ = await eventually(before: .seconds(2)) {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
             guard
@@ -4555,7 +4609,7 @@ struct SpeakerAppScenarioSpecs {
             let announcementCountBeforeCopy = announcements.messages.count
 
             experience.perform(copyAction)
-            let clipboardFailurePresented = await waitUntil {
+            let clipboardFailurePresented = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "pendingCopy.clipboardFailed"
             }
             let copyAnnouncements = Array(
@@ -4582,11 +4636,11 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
-            _ = await waitUntil {
+            _ = await eventually(before: .seconds(2)) {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
             guard
@@ -4604,7 +4658,7 @@ struct SpeakerAppScenarioSpecs {
             }
 
             experience.perform(copyAction)
-            let copied = await waitUntil {
+            let copied = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "idle"
                     && fixture.announcements.messages.last
                         == SpeakerCopy.Clipboard.textCopied
@@ -4632,27 +4686,37 @@ struct SpeakerAppScenarioSpecs {
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
+            let clock = ManualVoiceInputClock()
             let experience = VoiceInputExperience(
                 sessions: sessions,
-                noticeDuration: .milliseconds(200),
+                clock: clock,
                 announce: { _ in }
             )
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
-            let noticed = await waitUntil {
+            let noticed = await eventually(before: .seconds(2)) {
                 experience.state.overlay
                     == .notice(title: VoiceInputNotice.refinementFallbackHUDTitle)
             }
-            let closed = await waitUntil { experience.state.overlay == .hidden }
+            try await clock.waitUntilPendingSleepCount(1)
+            let shownForItsDuration =
+                clock.sleepRequests.last == VoiceInputExperience.defaultNoticeDuration
+            // A later presentation re-arms the timer, so keep passing the
+            // deadline until the notice closes.
+            let closed = await eventually(before: .seconds(2)) {
+                clock.advance(by: VoiceInputExperience.defaultNoticeDuration)
+                return experience.state.overlay == .hidden
+            }
             let menuNotice = experience.state.menu.notice
             await experience.shutdown()
 
             try expect(noticed, "the fallback was delivered without a HUD notice")
+            try expect(shownForItsDuration, "the notice timer asked for \(clock.sleepRequests)")
             try expect(closed, "the notice stayed on screen")
             try expect(
                 menuNotice == VoiceInputNotice.refinementNetworkFallbackMessage,
@@ -4685,11 +4749,11 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
-            let historyFailurePresented = await waitUntil {
+            let historyFailurePresented = await eventually(before: .seconds(2)) {
                 experience.state.menu.notice?
                     .contains("会话历史写入失败") == true
             }
@@ -4743,7 +4807,7 @@ struct SpeakerAppScenarioSpecs {
                 )
                 experience.start()
                 experience.shortcutTarget.receive(.pressed)
-                let started = await waitUntil { experience.state.isRecording }
+                let started = await eventually(before: .seconds(2)) { experience.state.isRecording }
                 try expect(started)
                 if latched { experience.shortcutTarget.receive(.released) }
                 guard case .recording(_, _, let finishAction, _) = experience.state.overlay else {
@@ -4752,7 +4816,9 @@ struct SpeakerAppScenarioSpecs {
                 experience.perform(finishAction)
                 experience.perform(finishAction)
                 experience.shortcutTarget.receive(.released)
-                let delivered = await waitUntil { experience.state.diagnosticCode == "delivered" }
+                let delivered = await eventually(before: .seconds(2)) {
+                    experience.state.diagnosticCode == "delivered"
+                }
                 try expect(delivered)
                 let captureHints = await targetCapture.captureHints
                 let deliveredTexts = await delivery.deliveredTexts
@@ -4760,14 +4826,18 @@ struct SpeakerAppScenarioSpecs {
                 try expect(deliveredTexts == ["保留的文字"], "HUD completion delivered more than once")
 
                 experience.shortcutTarget.receive(.pressed)
-                let restarted = await waitUntil { experience.state.isRecording }
+                let restarted = await eventually(before: .seconds(2)) {
+                    experience.state.isRecording
+                }
                 try expect(restarted, "HUD completion left the shortcut latched")
                 experience.perform(finishAction)
                 guard let cancel = experience.state.menu.cancelAction else {
                     throw SpecFailure(message: "new recording has no cancel action")
                 }
                 experience.perform(cancel)
-                let cancelled = await waitUntil { experience.state.diagnosticCode == "cancelled" }
+                let cancelled = await eventually(before: .seconds(2)) {
+                    experience.state.diagnosticCode == "cancelled"
+                }
                 try expect(cancelled)
                 let stopCount = await audio.stopCount
                 try expect(stopCount == 1, "a stale finish action stopped the next session")
@@ -4795,7 +4865,7 @@ struct SpeakerAppScenarioSpecs {
                 let experience = VoiceInputExperience(sessions: sessions, announce: { _ in })
                 experience.start()
                 experience.shortcutTarget.receive(.pressed)
-                let started = await waitUntil { experience.state.isRecording }
+                let started = await eventually(before: .seconds(2)) { experience.state.isRecording }
                 try expect(started)
                 guard case .recording(_, let cancel, let finish, _) = experience.state.overlay
                 else {
@@ -4803,7 +4873,9 @@ struct SpeakerAppScenarioSpecs {
                 }
                 experience.perform(cancelFirst ? cancel : finish)
                 experience.perform(cancelFirst ? finish : cancel)
-                let cancelled = await waitUntil { experience.state.diagnosticCode == "cancelled" }
+                let cancelled = await eventually(before: .seconds(2)) {
+                    experience.state.diagnosticCode == "cancelled"
+                }
                 try expect(cancelled)
                 await experience.shutdown()
                 let delivered = await delivery.deliveredTexts
@@ -4830,13 +4902,13 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
             for shouldCopy in [false, true] {
                 experience.shortcutTarget.receive(.pressed)
-                let started = await waitUntil { experience.state.isRecording }
+                let started = await eventually(before: .seconds(2)) { experience.state.isRecording }
                 try expect(started)
                 guard case .recording(_, _, let finish, _) = experience.state.overlay else {
                     throw SpecFailure(message: "recording controls unavailable")
                 }
                 experience.perform(finish)
-                let retained = await waitUntil {
+                let retained = await eventually(before: .seconds(2)) {
                     if case .pendingCopy = experience.state.overlay { true } else { false }
                 }
                 try expect(retained)
@@ -4848,7 +4920,9 @@ struct SpeakerAppScenarioSpecs {
                 }
                 try expect(retainedText == text)
                 experience.perform(shouldCopy ? copy : dismiss)
-                let closed = await waitUntil { experience.state.diagnosticCode == "idle" }
+                let closed = await eventually(before: .seconds(2)) {
+                    experience.state.diagnosticCode == "idle"
+                }
                 try expect(closed)
                 let copies = await clipboard.copiedTexts
                 try expect(copies == (shouldCopy ? [text] : []))
@@ -4865,7 +4939,7 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            let firstRecordingStarted = await waitUntil {
+            let firstRecordingStarted = await eventually(before: .seconds(2)) {
                 experience.state.isRecording
             }
             try expect(firstRecordingStarted, "first recording never started")
@@ -4874,7 +4948,7 @@ struct SpeakerAppScenarioSpecs {
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
 
-            let retainedTextPresented = await waitUntil {
+            let retainedTextPresented = await eventually(before: .seconds(2)) {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
             try expect(retainedTextPresented, "pending copy never presented")
@@ -4894,7 +4968,7 @@ struct SpeakerAppScenarioSpecs {
 
             // 留存提示不挡快捷键:再按一次会丢弃留存文字并直接开新会话。
             experience.shortcutTarget.receive(.pressed)
-            let secondRecordingStarted = await waitUntil {
+            let secondRecordingStarted = await eventually(before: .seconds(2)) {
                 experience.state.isRecording
             }
             try expect(
@@ -4907,12 +4981,21 @@ struct SpeakerAppScenarioSpecs {
                 )
             }
 
+            guard case .recording(_, _, let finishAction, _) = experience.state.overlay else {
+                throw SpecFailure(message: "the new recording exposed no finish action")
+            }
             experience.perform(staleCopyAction)
-            try? await Task.sleep(for: .milliseconds(30))
+            // Experience commands run in order, so the new session finishing
+            // through its own action proves the stale action, had it been
+            // accepted, already ran without interrupting the recording.
+            experience.perform(finishAction)
+            let secondResultRetained = await eventually(before: .seconds(2)) {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
+            }
 
             try expect(
-                experience.state.isRecording,
-                "stale copy action interrupted the new recording"
+                secondResultRetained,
+                "stale copy action interrupted the new recording; ended in \(experience.state.diagnosticCode)"
             )
             let copyCount = await fixture.clipboard.copiedTexts.count
             try expect(copyCount == 0, "stale copy action reached the clipboard")
@@ -4923,11 +5006,6 @@ struct SpeakerAppScenarioSpecs {
                 recordingAnnouncements.count == 2,
                 "the second session's recording phase was incorrectly deduplicated"
             )
-
-            guard let cancelAction = experience.state.menu.cancelAction else {
-                throw SpecFailure(message: "recording did not expose cancellation")
-            }
-            experience.perform(cancelAction)
             await experience.shutdown()
         }
 
@@ -4943,12 +5021,12 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             experience.shortcutTarget.receive(.released)
             experience.shortcutTarget.receive(.pressed)
             experience.shortcutTarget.receive(.released)
 
-            let noticePresented = await waitUntil {
+            let noticePresented = await eventually(before: .seconds(2)) {
                 experience.state.menu.notice?
                     .contains("会话历史写入失败") == true
             }
@@ -4967,7 +5045,7 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
             guard let staleCancelAction = experience.state.menu.cancelAction else {
                 throw SpecFailure(message: "first session had no cancel action")
             }
@@ -4979,7 +5057,7 @@ struct SpeakerAppScenarioSpecs {
             // `isRecording` still describes the first session until the
             // Experience observes the cancellation, so wait for the second
             // session's own capability.
-            let secondRecordingStarted = await waitUntil(timeout: .seconds(5)) {
+            let secondRecordingStarted = await eventually(before: .seconds(5)) {
                 experience.state.isRecording
                     && experience.state.menu.cancelAction != staleCancelAction
             }
@@ -4996,7 +5074,7 @@ struct SpeakerAppScenarioSpecs {
             // session runs after the stale cancel. It retains the text only if
             // the second session was still recording at that point.
             experience.perform(finishAction)
-            let secondSessionFinished = await waitUntil(timeout: .seconds(5)) {
+            let secondSessionFinished = await eventually(before: .seconds(5)) {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
             try expect(
@@ -5012,7 +5090,7 @@ struct SpeakerAppScenarioSpecs {
         ) {
             @MainActor final class AnnouncementLog { var messages: [String] = [] }
             let log = AnnouncementLog()
-            let clock = ScenarioVoiceInputClock()
+            let clock = ManualVoiceInputClock()
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
@@ -5033,10 +5111,10 @@ struct SpeakerAppScenarioSpecs {
             experience.start()
 
             experience.shortcutTarget.receive(.pressed)
-            _ = await waitUntil { experience.state.isRecording }
-            await clock.waitUntilSleeping(count: 1)
+            _ = await eventually(before: .seconds(2)) { experience.state.isRecording }
+            try await clock.waitUntilPendingSleepCount(1)
             clock.advance(by: .seconds(600))
-            let retained = await waitUntil {
+            let retained = await eventually(before: .seconds(2)) {
                 if case .pendingCopy = experience.state.overlay { true } else { false }
             }
 
@@ -5088,13 +5166,15 @@ struct SpeakerAppScenarioSpecs {
                 )
                 experience.start()
                 experience.shortcutTarget.receive(.pressed)
-                let recording = await waitUntil { experience.state.isRecording }
+                let recording = await eventually(before: .seconds(2)) {
+                    experience.state.isRecording
+                }
                 try expect(recording)
                 experience.shortcutTarget.receive(.released)
                 experience.shortcutTarget.receive(.pressed)
                 experience.shortcutTarget.receive(.released)
 
-                let failurePresented = await waitUntil {
+                let failurePresented = await eventually(before: .seconds(2)) {
                     if case .problem = experience.state.overlay { true } else { false }
                 }
                 try expect(failurePresented)
@@ -5125,13 +5205,15 @@ struct SpeakerAppScenarioSpecs {
                     presentedTargets == [.section(destination)],
                     "a recoverable problem opened the wrong settings section"
                 )
-                let dismissed = await waitUntil {
+                let dismissed = await eventually(before: .seconds(2)) {
                     experience.state.diagnosticCode == "idle"
                 }
                 try expect(dismissed)
                 try expect(experience.perform(recoveryAction) == nil)
                 experience.shortcutTarget.receive(.pressed)
-                let nextRecording = await waitUntil { experience.state.isRecording }
+                let nextRecording = await eventually(before: .seconds(2)) {
+                    experience.state.isRecording
+                }
                 try expect(nextRecording)
                 let revision = navigation.presentationRevision
                 if let staleEffect = experience.perform(recoveryAction) {
@@ -5204,20 +5286,6 @@ private func makeVoiceExperienceFixture(
 }
 
 @MainActor
-private func waitUntil(
-    timeout: Duration = .seconds(1),
-    condition: @escaping @MainActor () -> Bool
-) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: timeout)
-    while clock.now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    return condition()
-}
-
-@MainActor
 private final class AnnouncementRecorder {
     var messages: [String] = []
 }
@@ -5238,71 +5306,6 @@ private func refinementFallbackProcessor() -> VoiceTextProcessorFake {
         ),
         reportedStages: [.refining]
     )
-}
-
-/// A clock the scenario advances by hand. Sleepers resume only when the
-/// clock passes their deadline, so a recording limit fires exactly when the
-/// scenario says it does.
-private final class ScenarioVoiceInputClock: VoiceInputClock, @unchecked Sendable {
-    private struct Sleeper {
-        let deadline: Duration
-        let continuation: CheckedContinuation<Void, Error>
-    }
-
-    private let lock = NSLock()
-    private var now: Duration = .zero
-    private var sleepers: [Sleeper] = []
-
-    var monotonicNow: Duration {
-        lock.withLock { now }
-    }
-
-    var date: Date {
-        Date(timeIntervalSinceReferenceDate: 0)
-            .addingTimeInterval(monotonicNow.timeInterval)
-    }
-
-    func sleep(for duration: Duration) async throws {
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                lock.withLock {
-                    sleepers.append(
-                        Sleeper(deadline: now + duration, continuation: continuation)
-                    )
-                }
-            }
-        } onCancel: {
-            let cancelled = lock.withLock {
-                let cancelled = sleepers
-                sleepers.removeAll()
-                return cancelled
-            }
-            for sleeper in cancelled {
-                sleeper.continuation.resume(throwing: CancellationError())
-            }
-        }
-    }
-
-    func advance(by duration: Duration) {
-        let due = lock.withLock {
-            now += duration
-            let due = sleepers.filter { $0.deadline <= now }
-            sleepers.removeAll { $0.deadline <= now }
-            return due
-        }
-        for sleeper in due { sleeper.continuation.resume() }
-    }
-
-    func waitUntilSleeping(count: Int) async {
-        while lock.withLock({ sleepers.count }) < count { await Task.yield() }
-    }
-}
-
-extension Duration {
-    fileprivate var timeInterval: TimeInterval {
-        let (seconds, attoseconds) = components
-        return TimeInterval(seconds) + TimeInterval(attoseconds) / 1e18
-    }
 }
 
 private actor ScenarioDoubaoSettingsService: DoubaoSettingsServicing {

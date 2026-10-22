@@ -160,6 +160,23 @@ private struct VoiceInputPanelHost<Content: View>: View {
     }
 #endif
 
+/// How the HUD presenter waits out a dismissal fade before it orders the
+/// panel out. The presenter takes the schedule as a closure so a
+/// specification can complete a dismissal synchronously; the production
+/// schedule sleeps on a `VoiceInputClock` like every other HUD timer.
+package enum VoiceInputPanelDismissalSchedule {
+    package static func after(
+        _ clock: any VoiceInputClock
+    ) -> @MainActor (Duration, @escaping @MainActor () -> Void) -> Void {
+        { delay, completion in
+            Task { @MainActor in
+                try? await clock.sleep(for: delay)
+                completion()
+            }
+        }
+    }
+}
+
 /// Presents every Voice Input HUD state through one AppKit lifecycle.
 ///
 /// Callers provide SwiftUI content for the semantic presentation. Panel
@@ -192,12 +209,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
             @escaping @MainActor (
                 Duration,
                 @escaping @MainActor () -> Void
-            ) -> Void = { delay, completion in
-                Task { @MainActor in
-                    try? await Task.sleep(for: delay)
-                    completion()
-                }
-            },
+            ) -> Void = VoiceInputPanelDismissalSchedule.after(ContinuousVoiceInputClock()),
         @ViewBuilder content:
             @escaping (VoiceInputOverlayPresentation) -> Content
     ) {

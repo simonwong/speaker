@@ -389,6 +389,12 @@ CI 的 verify job 用的是正常打包、签名有效、UUID 匹配的 App，�
 **C. 修掉 3 条时序不稳的 CoreSpecs 规格，加上 main 上的 stale cancel 规格。**
 
 - 范围：涉及的是测试代码，按约束这一步不动，单独开任务。
+- 进展（2026-10-22）：先去掉了规格里依赖真实时间的等待，根因是 Features 层直接调用 `Task.sleep`。上面四个用例本身没有逐条改。
+  - `VoiceInputExperience`、`HistoryModel` 和 HUD 浮窗默认的消失计时都改为在注入的 `VoiceInputClock` 上睡眠，规格注入 `ManualVoiceInputClock` 手动推进。
+  - `ManualVoiceInputClock` 移进 `SpeakerCoreSpecFakes`，CoreSpecs 和 ScenarioSpecs 共用；删掉 ScenarioSpecs 里重复的时钟和私有 `waitUntil`，改用 `eventually`，期限从 1 秒放宽到 2 秒。
+  - "先 sleep 再断言没发生"改为推进时钟加顺序同步点：时钟的挂起或取消计数、被测路径之后必然发生的事件、`drainMainActor()`。墙钟断言（回调 20 ms 内返回、80 ms 内出现终态）改为让慢的协作方卡在闸门上，证明调用方在它放行前就返回。
+  - 找不到同步点的反向等待只剩 5 处，都用 `neverHolds(within:)` 并在调用处写明原因：两处 Doubao 过期检查结果、两处"采集确认前不上传/不提交"、一处"需要操作的提示不挂计时器"。它们最多漏掉慢于窗口的回归，不会让正确实现失败。
+  - 做法写进了 `docs/agents/development.md`。
 - 收益：42 次失败里有 22 次 flaky，集中在 hold and release、recording deadlines、audio device changes 和 stale cancel 四个用例。每次 flaky 至少多一轮约 10 分钟。
 - 对四个方面都没有影响。
 

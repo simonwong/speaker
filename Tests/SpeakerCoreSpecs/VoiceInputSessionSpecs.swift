@@ -957,9 +957,14 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             failures: &failures
         ) {
             let audio = AudioCaptureFake()
+            // The focused-input capture answers only after the case opens
+            // this gate, so the release callback can return first only if it
+            // leaves that capture to the session.
+            let captureGate = OneShotGate()
             let targetSystem = AccessibilityTargetSystemFake(
                 processID: 41,
-                valueResponses: []
+                valueResponses: [],
+                captureGate: captureGate
             )
             let targets = AccessibilityInputTargets(
                 system: targetSystem,
@@ -980,23 +985,25 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             dispatcher.send(.pressed, at: 0)
             while await audio.startCount == 0 { await Task.yield() }
-            let clock = ContinuousClock()
-            let started = clock.now
-            dispatcher.send(
-                .released,
-                at: VoiceShortcutGestureStateMachine
-                    .defaultLongPressNanoseconds
-            )
-            let callbackDuration = started.duration(to: clock.now)
+            let release = Task.detached { () throws in
+                dispatcher.send(
+                    .released,
+                    at: VoiceShortcutGestureStateMachine
+                        .defaultLongPressNanoseconds
+                )
+            }
+            let callbackReturned = await finishes(release, before: .seconds(2))
+            let captureStarted = await eventually(before: .seconds(2)) {
+                await targetSystem.captureFocusedCallCount == 1
+            }
+            await captureGate.open()
+            await dispatcher.shutdown()
 
             try expect(
-                callbackDuration < .milliseconds(20),
-                "release callback blocked on target capture for \(callbackDuration)"
+                callbackReturned,
+                "release callback waited for the focused-input capture"
             )
-            while await targetSystem.captureFocusedCallCount == 0 {
-                await Task.yield()
-            }
-            await dispatcher.shutdown()
+            try expect(captureStarted, "the session never captured the focused input")
         }
 
         await runAsync(

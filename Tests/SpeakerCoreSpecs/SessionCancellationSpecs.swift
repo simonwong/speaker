@@ -124,9 +124,11 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let release = Task { await sessions.send(.released) }
             while await delivery.isBlocking == false { await Task.yield() }
             await sessions.send(.cancel)
+            // The delivery stays blocked until the case finishes it below, so
+            // a cancelled presentation seen now did not wait for delivery.
             let cancelledPresentation = await firstTerminalPresentation(
                 from: stream,
-                before: .milliseconds(80)
+                before: .seconds(2)
             )
             await delivery.finish(with: .delivered)
             await release.value

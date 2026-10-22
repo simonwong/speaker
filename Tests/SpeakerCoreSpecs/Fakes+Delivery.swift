@@ -277,6 +277,7 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     private var focusResponses: [AccessibilityOperationResult<Bool>]
     private let frontmost: Bool
     private let pasteResult: AccessibilityPasteResult
+    private let captureGate: OneShotGate?
     private(set) var pasteCallCount = 0
     private(set) var captureFocusedCallCount = 0
     private(set) var captureTargetCallCount = 0
@@ -292,8 +293,10 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
         subroleResponses: [AccessibilityOperationResult<String?>] = [],
         roleResponses: [AccessibilityOperationResult<String?>] = [],
         focusResponses: [AccessibilityOperationResult<Bool>] = [],
-        pasteResult: AccessibilityPasteResult = .posted
+        pasteResult: AccessibilityPasteResult = .posted,
+        captureGate: OneShotGate? = nil
     ) {
+        self.captureGate = captureGate
         evidence = AccessibilityTargetEvidence(
             reference: AccessibilityTargetReference(scope: referenceScope),
             selection: selection,
@@ -310,8 +313,11 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
         self.focusResponses = focusResponses
     }
 
+    /// With a `captureGate`, the capture is counted at once but answers only
+    /// after the case opens the gate.
     func captureFocusedTarget() async -> AccessibilityTargetCapture {
         captureFocusedCallCount += 1
+        await captureGate?.wait()
         return .writable(evidence)
     }
 

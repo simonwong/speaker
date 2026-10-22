@@ -27,19 +27,25 @@ package final class HistoryModel: ObservableObject {
     private let clipboard: any ClipboardWriting
     private let announce: (String) -> Void
     private let now: () -> Date
+    private let clock: any VoiceInputClock
     private var refreshID = UUID()
     private var feedbackTask: Task<Void, Never>?
+
+    /// How long a copy, delete, or clear result stays on the History page.
+    package static let feedbackDuration: Duration = .seconds(4)
 
     package init(
         store: any LocalSessionHistoryStoring,
         clipboard: any ClipboardWriting,
         announce: @escaping (String) -> Void,
-        now: @escaping () -> Date = { Date() }
+        now: @escaping () -> Date = { Date() },
+        clock: any VoiceInputClock = ContinuousVoiceInputClock()
     ) {
         self.store = store
         self.clipboard = clipboard
         self.announce = announce
         self.now = now
+        self.clock = clock
         referenceDate = now()
     }
 
@@ -157,8 +163,9 @@ package final class HistoryModel: ObservableObject {
         self.feedback = feedback
         announce(feedback.message)
         feedbackTask?.cancel()
+        let clock = clock
         feedbackTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(4))
+            try? await clock.sleep(for: Self.feedbackDuration)
             guard !Task.isCancelled,
                 self?.feedback?.id == feedback.id
             else { return }
