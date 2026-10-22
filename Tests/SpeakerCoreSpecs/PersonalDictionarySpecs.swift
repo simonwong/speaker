@@ -350,5 +350,63 @@ enum PersonalDictionarySpecs: CoreSpecDomain {
                 "failed migration left a primary dictionary"
             )
         }
+
+        await runAsync(
+            "personal dictionary migration never follows a symbolic-link legacy or stable file",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-dictionary-migration-link-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let targetURL = directory.appendingPathComponent("outside.json")
+            let dictionary = try PersonalDictionary(entries: [.init(word: "外部词条")])
+            try await VersionedJSONPersonalDictionaryStore(fileURL: targetURL)
+                .save(dictionary)
+            let targetBytes = try Data(contentsOf: targetURL)
+
+            // A linked legacy file is neither read through nor removed.
+            let linkedLegacyURL = directory.appendingPathComponent("linked-legacy.json")
+            let primaryURL = directory.appendingPathComponent("primary.json")
+            try FileManager.default.createSymbolicLink(
+                at: linkedLegacyURL,
+                withDestinationURL: targetURL
+            )
+            let legacyOutcome =
+                await VersionedJSONPersonalDictionaryStore
+                .migrateLegacyFileIfNeeded(from: linkedLegacyURL, to: primaryURL)
+            try expect(legacyOutcome == .failed, "linked legacy outcome \(legacyOutcome)")
+            let legacyDestination = try FileManager.default.destinationOfSymbolicLink(
+                atPath: linkedLegacyURL.path
+            )
+            try expect(legacyDestination == targetURL.path, "the linked legacy file was removed")
+            try expect(
+                !FileManager.default.fileExists(atPath: primaryURL.path),
+                "a linked legacy file was migrated"
+            )
+
+            // A linked stable location is never treated as absent and written.
+            let legacyURL = directory.appendingPathComponent("legacy.json")
+            let legacyDictionary = try PersonalDictionary(entries: [.init(word: "旧词条")])
+            try await VersionedJSONPersonalDictionaryStore(fileURL: legacyURL)
+                .save(legacyDictionary)
+            let linkedPrimaryURL = directory.appendingPathComponent("linked-primary.json")
+            try FileManager.default.createSymbolicLink(
+                at: linkedPrimaryURL,
+                withDestinationURL: targetURL
+            )
+            let primaryOutcome =
+                await VersionedJSONPersonalDictionaryStore
+                .migrateLegacyFileIfNeeded(from: legacyURL, to: linkedPrimaryURL)
+            try expect(primaryOutcome == .failed, "linked primary outcome \(primaryOutcome)")
+            try expect(
+                FileManager.default.fileExists(atPath: legacyURL.path),
+                "the legacy dictionary was removed"
+            )
+            let retainedTarget = try Data(contentsOf: targetURL)
+            try expect(retainedTarget == targetBytes, "the link target was rewritten")
+        }
     }
 }

@@ -615,8 +615,8 @@ public actor VoiceInputSessions {
         historyTextPolicy =
             switch target {
             case .unavailable(.secureTarget): .redacted
-            case .writable: .allowed
-            case .unavailable: .unclassified
+            case .writable(let snapshot) where snapshot.isSecurityClassConfirmed: .allowed
+            case .writable, .unavailable: .unclassified
             }
         var sessionStageDurations = ["targetCapture": targetCaptureMilliseconds]
         let audio: CapturedAudio

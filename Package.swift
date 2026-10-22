@@ -9,14 +9,6 @@ let package = Package(
     ],
     products: [
         .library(name: "SpeakerCore", targets: ["SpeakerCore"]),
-        .library(
-            name: "SpeakerProviderEvidence",
-            targets: ["SpeakerProviderEvidence"]
-        ),
-        .library(
-            name: "SpeakerAccuracyMetrics",
-            targets: ["SpeakerAccuracyMetrics"]
-        ),
         .executable(name: "SpeakerApp", targets: ["SpeakerApp"]),
         .executable(
             name: "SpeakerBrandAssetGenerator",
