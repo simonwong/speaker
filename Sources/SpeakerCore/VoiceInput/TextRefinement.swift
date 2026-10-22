@@ -169,6 +169,9 @@ public enum TextRefinementModeValidationError: String, Error, Equatable, Sendabl
     case customNameTooLong
     case emptyCustomPrompt
     case customPromptTooLong
+    /// The Custom Mode list already holds `CustomRefinementMode.maximumCount`
+    /// modes.
+    case tooManyCustomModes
 }
 
 public struct TextRefinementResult: Equatable, Sendable {

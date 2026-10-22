@@ -270,8 +270,14 @@ package final class VoiceInputExperience: ObservableObject {
     private var noticeHideTask: Task<Void, Never>?
     private let secureInputHolderName: @MainActor () -> String?
     private let secureInputNoticeDuration: Duration
-    private var secureInputNoticeTitle: String?
-    private var secureInputNoticeHideTask: Task<Void, Never>?
+    /// A note shown while no session is on screen: the Secure Event Input
+    /// note or the Refinement Mode notice. It keeps its own timer.
+    private var idleNoticeTitle: String? {
+        didSet { showsSecureInputNotice = false }
+    }
+    private var idleNoticeHideTask: Task<Void, Never>?
+    /// The idle note on screen is the Secure Event Input note.
+    private var showsSecureInputNotice = false
 
     /// How long a delivery notice stays before the HUD closes.
     package static let defaultNoticeDuration: Duration = .seconds(2)
@@ -505,7 +511,7 @@ package final class VoiceInputExperience: ObservableObject {
         isShuttingDown = true
         cancelProblemAutoDismiss()
         noticeHideTask?.cancel()
-        secureInputNoticeHideTask?.cancel()
+        idleNoticeHideTask?.cancel()
         triggerIntakeGate.close()
         escapeGate.setActive(false)
         let commandTask = commandTask
@@ -574,40 +580,57 @@ package final class VoiceInputExperience: ObservableObject {
     /// neither restart it nor announce it again, and a retained result or
     /// problem on screen keeps its place.
     private func showSecureInputNotice() {
-        guard !isShuttingDown, secureInputNoticeTitle == nil else { return }
+        guard !isShuttingDown, canShowIdleNotice, !showsSecureInputNotice else { return }
+        let title = SecureInputBlockedNotice.title(holderName: secureInputHolderName())
+        showIdleNotice(title, for: secureInputNoticeDuration)
+        showsSecureInputNotice = true
+    }
+
+    /// Names the Refinement Mode new sessions use after a press of the
+    /// Refinement Mode shortcut. It shows only while no session is on screen,
+    /// so it never covers a recording, processing, retained result, or
+    /// problem; a later press replaces it and restarts its timer.
+    package func showRefinementModeNotice(_ title: String) {
+        guard !isShuttingDown, canShowIdleNotice else { return }
+        showIdleNotice(title, for: noticeDuration)
+    }
+
+    private var canShowIdleNotice: Bool {
         switch state.overlay {
         case .hidden, .notice:
-            break
+            true
         case .recording, .processing, .pendingCopy, .problem:
-            return
+            false
         }
-        let title = SecureInputBlockedNotice.title(holderName: secureInputHolderName())
-        secureInputNoticeTitle = title
+    }
+
+    private func showIdleNotice(_ title: String, for duration: Duration) {
+        idleNoticeHideTask?.cancel()
+        idleNoticeTitle = title
         noticeHideTask?.cancel()
         noticeHideTask = nil
         state = state.showingOverlay(.notice(title: title))
         announce(title)
-        let duration = secureInputNoticeDuration
-        secureInputNoticeHideTask = Task { [weak self] in
+        idleNoticeHideTask = Task { [weak self] in
             try? await Task.sleep(for: duration)
-            guard !Task.isCancelled, let self, self.secureInputNoticeTitle != nil else { return }
-            self.secureInputNoticeTitle = nil
-            self.secureInputNoticeHideTask = nil
+            guard !Task.isCancelled, let self, self.idleNoticeTitle == title else { return }
+            self.idleNoticeTitle = nil
+            self.idleNoticeHideTask = nil
             self.state = self.state.hidingOverlay()
         }
     }
 
-    /// An idle presentation keeps the Secure Event Input note on screen;
-    /// anything the session shows replaces it.
-    private func keepSecureInputNoticeIfIdle() {
-        guard let title = secureInputNoticeTitle else { return }
+    /// An idle presentation keeps the idle note on screen; anything the
+    /// session shows replaces it.
+    private func keepIdleNoticeIfIdle() {
+        guard let title = idleNoticeTitle else { return }
         if case .hidden = state.overlay {
             state = state.showingOverlay(.notice(title: title))
             return
         }
-        secureInputNoticeTitle = nil
-        secureInputNoticeHideTask?.cancel()
-        secureInputNoticeHideTask = nil
+        idleNoticeTitle = nil
+        idleNoticeHideTask?.cancel()
+        idleNoticeHideTask = nil
     }
 
     private func apply(_ presentation: VoiceInputPresentation) {
@@ -628,7 +651,7 @@ package final class VoiceInputExperience: ObservableObject {
             }
         triggerIntakeGate.setAllowsSessionTriggers(allowsSessionTriggers)
         state = Self.makeState(from: presentation)
-        keepSecureInputNoticeIfIdle()
+        keepIdleNoticeIfIdle()
         escapeGate.setActive(presentation.activity.isActive || state.menu.dismissAction != nil)
         announceTransitionIfNeeded(presentation.activity)
         announceNoticeIfNeeded(presentation)
@@ -641,8 +664,8 @@ package final class VoiceInputExperience: ObservableObject {
     private func scheduleNoticeHideIfNeeded() {
         noticeHideTask?.cancel()
         noticeHideTask = nil
-        // The Secure Event Input note keeps its own timer.
-        guard secureInputNoticeTitle == nil, case .notice = state.overlay else { return }
+        // An idle note keeps its own timer.
+        guard idleNoticeTitle == nil, case .notice = state.overlay else { return }
         let revision = state.revision
         let duration = noticeDuration
         noticeHideTask = Task { [weak self] in

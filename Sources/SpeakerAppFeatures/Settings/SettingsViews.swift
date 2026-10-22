@@ -155,6 +155,7 @@ private struct SettingsOverviewView: View {
         case .shortcut:
             ShortcutSettingsPage(
                 shortcut: workspace.shortcut,
+                refinementModeShortcut: workspace.refinementModeShortcut,
                 shortcutRecorder: shortcutRecorder,
                 openPermissionSettings: {
                     navigation.open(.permissions)

@@ -315,7 +315,9 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             let store = VersionedLocalAppSettingsStore(fileURL: fileURL)
             let settings = SpeakerAppSettings(
                 shortcut: .custom(keyCode: 49, modifiers: 2_048, displayName: "⌥ Space"),
-                refinement: .custom(name: "短句", prompt: "只清理重复"),
+                refinement: .custom(CustomRefinementMode(name: "短句", prompt: "只清理重复")),
+                refinementModeShortcut: CustomHotKey(
+                    keyCode: 46, modifiers: 6_144, displayName: "⌃⌥M"),
                 launchAtLogin: true,
                 doubaoResourceID: DoubaoStreamingResource.model1Concurrent.rawValue,
                 historyRetention: .thirtyDays
@@ -352,14 +354,12 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             )
             try expect(atomicallyUpdated.historyRetention == .oneYear)
 
-            let savedCustom = RefinementPreference(
-                mode: .custom(name: "邮件", prompt: "整理成简洁邮件")
-            )
-            try await store.updateSavedCustomRefinement(savedCustom)
+            let savedCustom = CustomRefinementMode(name: "邮件", prompt: "整理成简洁邮件")
+            try await store.saveCustomRefinementMode(savedCustom)
             try await store.updateRefinement(.defaultSmooth)
             let afterBuiltInSwitch = await store.load().settings
             try expect(afterBuiltInSwitch.refinement == .defaultSmooth)
-            try expect(afterBuiltInSwitch.savedCustomRefinement == savedCustom)
+            try expect(afterBuiltInSwitch.customRefinementModes.contains(savedCustom))
         }
 
         await runAsync(
