@@ -65,6 +65,50 @@ public struct VoiceTextProcessingResult: Equatable, Sendable {
     }
 }
 
+/// Removes C0 and C1 control characters, and DEL, from provider text. Line
+/// feeds and tabs stay; CR LF and a lone CR become a line feed. An escape
+/// sequence such as `ESC [201~` from a model would otherwise end a terminal's
+/// bracketed paste and run the rest of the text as typed commands.
+package enum ProviderTextSanitizer {
+    package static func removingControlCharacters(from text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        var previousWasCarriageReturn = false
+        for scalar in text.unicodeScalars {
+            defer { previousWasCarriageReturn = scalar == "\r" }
+            switch scalar.value {
+            case 0x0D:
+                scalars.append("\n")
+            case 0x0A:
+                if !previousWasCarriageReturn { scalars.append(scalar) }
+            case 0x09:
+                scalars.append(scalar)
+            case 0x00...0x1F, 0x7F...0x9F:
+                continue
+            default:
+                scalars.append(scalar)
+            }
+        }
+        return String(scalars)
+    }
+}
+
+extension VoiceTextProcessingResult {
+    package func removingControlCharacters() -> Self {
+        let clean = ProviderTextSanitizer.removingControlCharacters(from:)
+        return VoiceTextProcessingResult(
+            doubaoText: clean(doubaoText),
+            normalizedText: clean(normalizedText),
+            deepSeekText: deepSeekText.map(clean),
+            finalText: clean(finalText),
+            doubaoRequestID: doubaoRequestID,
+            deepSeekRequestID: deepSeekRequestID,
+            refinementStatus: refinementStatus,
+            refinementFailure: refinementFailure,
+            stageDurationsMilliseconds: stageDurationsMilliseconds
+        )
+    }
+}
+
 public struct VoiceTextProcessingProgress: Equatable, Sendable {
     public let stage: VoiceInputProcessingStage
     public let confirmedDoubaoResult: TranscriptionResult?

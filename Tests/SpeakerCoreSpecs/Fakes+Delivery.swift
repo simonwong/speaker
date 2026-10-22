@@ -18,8 +18,12 @@ final class ClipboardPasteboardFake {
     private(set) var changeCount = 0
     private(set) var clearCount = 0
     private(set) var itemTypesReadCount = 0
+    /// The purpose of every text write, in order.
+    private(set) var writePurposes: [PasteboardWritePurpose] = []
+    /// Whether each clear kept the next value off Universal Clipboard.
+    private(set) var clearsKeptOnCurrentHost: [Bool] = []
     private var currentString: String?
-    private var currentMarker: String?
+    private var currentMarker: (type: String, value: String)?
     private let replacementWriteSucceeds: Bool
     private let replacementReadback: String?
     private let failedReplacementItems: [[String: Data]]?
@@ -71,26 +75,28 @@ final class ClipboardPasteboardFake {
                 }
                 return self.items[itemIndex][type]
             },
-            clearContents: {
+            clearContents: { currentHostOnly in
                 self.items = []
                 self.currentString = nil
                 self.currentMarker = nil
                 self.changeCount += 1
                 self.clearCount += 1
+                self.clearsKeptOnCurrentHost.append(currentHostOnly)
                 return self.changeCount
             },
-            writeText: { text, marker in
+            writeText: { text, marker, purpose in
+                self.writePurposes.append(purpose)
                 guard self.replacementWriteSucceeds else {
                     if let failedReplacementItems = self.failedReplacementItems {
                         self.currentString = text
-                        self.currentMarker = marker
+                        self.currentMarker = (purpose.markerType.rawValue, marker)
                         self.items = failedReplacementItems
                         self.changeCount += 1
                     }
                     return false
                 }
                 self.currentString = self.replacementReadback ?? text
-                self.currentMarker = marker
+                self.currentMarker = (purpose.markerType.rawValue, marker)
                 self.items = [["public.utf8-plain-text": Data(text.utf8)]]
                 self.changeCount += 1
                 if let externalItems = self.externalItemsAfterReplacement {
@@ -102,7 +108,12 @@ final class ClipboardPasteboardFake {
                 return true
             },
             readString: { self.currentString },
-            readMarker: { self.currentMarker },
+            readMarker: { purpose in
+                guard let currentMarker = self.currentMarker,
+                    currentMarker.type == purpose.markerType.rawValue
+                else { return nil }
+                return currentMarker.value
+            },
             writeItems: { items in
                 self.items = items
                 self.currentString = nil
@@ -117,6 +128,14 @@ final class ClipboardPasteboardFake {
         self.items = items
         currentString = nil
         currentMarker = nil
+        changeCount += 1
+    }
+
+    /// A value an earlier Speaker process wrote and never restored.
+    func leaveSpeakerValue(_ text: String, purpose: PasteboardWritePurpose) {
+        items = [["public.utf8-plain-text": Data(text.utf8)]]
+        currentString = text
+        currentMarker = (purpose.markerType.rawValue, "earlier-process")
         changeCount += 1
     }
 }

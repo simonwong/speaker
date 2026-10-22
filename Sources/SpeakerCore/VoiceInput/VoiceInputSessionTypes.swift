@@ -56,6 +56,19 @@ public enum PendingCopyReason: String, Equatable, Sendable {
     case deliveryTimedOut
     case deliveryUnconfirmed
     case clipboardFailed
+    /// Copying a secure Input Target's result failed. It stays a secure
+    /// result, so a retry is still concealed.
+    case secureTargetClipboardFailed
+
+    /// The result was meant for a secure Input Target.
+    public var isSecureTarget: Bool {
+        self == .secureTarget || self == .secureTargetClipboardFailed
+    }
+
+    /// The last explicit copy of the result failed.
+    public var isClipboardFailure: Bool {
+        self == .clipboardFailed || self == .secureTargetClipboardFailed
+    }
 }
 
 public enum VoiceInputActivity: Equatable, Sendable {

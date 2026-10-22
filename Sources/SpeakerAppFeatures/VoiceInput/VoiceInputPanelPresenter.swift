@@ -75,6 +75,9 @@ private enum VoiceInputPanelFactory {
         panel.isFloatingPanel = true
         panel.worksWhenModal = true
         panel.animationBehavior = .none
+        // The HUD can show transcript text, so screen sharing and recording
+        // leave it out.
+        panel.sharingType = .none
         return panel
     }
 
@@ -133,6 +136,7 @@ private struct VoiceInputPanelHost<Content: View>: View {
         package let hidesOnDeactivate: Bool
         package let joinsAllSpaces: Bool
         package let appearsOverFullScreen: Bool
+        package let isExcludedFromScreenCapture: Bool
         package let hostingSurfaceIsLayerBacked: Bool
         package let hostingSurfaceIsOpaque: Bool?
         package let hostingSurfaceBackgroundAlpha: CGFloat?
@@ -250,6 +254,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
                 appearsOverFullScreen: panel.collectionBehavior.contains(
                     .fullScreenAuxiliary
                 ),
+                isExcludedFromScreenCapture: panel.sharingType == .none,
                 hostingSurfaceIsLayerBacked: hostingView.wantsLayer,
                 hostingSurfaceIsOpaque: hostingView.layer?.isOpaque,
                 hostingSurfaceBackgroundAlpha:

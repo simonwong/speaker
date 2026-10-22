@@ -35,6 +35,7 @@ public actor TextDeliveryFake: TextDelivering {
 /// A clipboard double that records every copied text and reports the configured outcome.
 public actor ClipboardFake: ClipboardWriting {
     public private(set) var copiedTexts: [String] = []
+    public private(set) var copiedPrivacies: [ClipboardCopyPrivacy] = []
     private var succeeds: Bool
 
     public init(succeeds: Bool = true) {
@@ -45,8 +46,9 @@ public actor ClipboardFake: ClipboardWriting {
         self.succeeds = succeeds
     }
 
-    public func copy(_ text: String) async -> Bool {
+    public func copy(_ text: String, privacy: ClipboardCopyPrivacy) async -> Bool {
         copiedTexts.append(text)
+        copiedPrivacies.append(privacy)
         return succeeds
     }
 }

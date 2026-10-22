@@ -34,6 +34,9 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
         },
         shouldConsumeEscape: { [weak self] in
             self?.shouldConsumeEscape ?? false
+        },
+        secureInputBlockedPress: { [voiceTarget] in
+            voiceTarget.secureInputBlockedPress()
         }
     )
 

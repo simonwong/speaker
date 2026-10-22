@@ -217,6 +217,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let copiedAfter = await clipboard.copiedTexts
             let didHideAfterCopy = await hiddenAfterCopy.value
             try expect(copiedAfter == ["请手动复制。"])
+            let privacies = await clipboard.copiedPrivacies
+            try expect(privacies == [.ordinary], "an ordinary result was copied concealed")
             try expect(didHideAfterCopy)
         }
 
@@ -638,6 +640,115 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 record?.outcome.pendingText == "",
                 "secure pending text was persisted"
             )
+        }
+
+        await runAsync(
+            "a secure target's retained result is copied as concealed text, even after a failed copy",
+            failures: &failures
+        ) {
+            let clipboard = ClipboardFake(succeeds: false)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
+                transcriber: SpeechTranscriberFake(text: "密码框的文字"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: clipboard,
+                history: SessionHistoryFake()
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            _ = await terminal.value
+
+            let failedCopy = Task<VoiceInputPresentation?, Never> {
+                for await presentation in await sessions.observe() {
+                    if presentation.activity.pendingCopyReason?.isClipboardFailure == true {
+                        return presentation
+                    }
+                }
+                return nil
+            }
+            await sessions.send(.copyPendingResult)
+            let failed = await failedCopy.value
+            try expect(
+                failed?.activity.pendingCopyReason == .secureTargetClipboardFailed,
+                "a failed copy lost the secure classification"
+            )
+
+            await clipboard.setSucceeds(true)
+            await sessions.send(.copyPendingResult)
+            let privacies = await clipboard.copiedPrivacies
+            try expect(privacies == [.concealed, .concealed], "\(privacies)")
+        }
+
+        await runAsync(
+            "provider and refinement text loses control characters before delivery and history",
+            failures: &failures
+        ) {
+            let delivery = TextDeliveryFake(result: .delivered)
+            let history = SessionHistoryFake()
+            let refined = "echo hi\u{1B}[201~\r\nrm -rf ~\u{07}\u{9B}\tend\rnext\u{7F}"
+            let processor = DefaultVoiceTextProcessor(
+                configuration: VoiceInputConfigurationController(
+                    refinementMode: .conciseCleanup()
+                ),
+                transcriber: ContextualTranscriberFake(text: "识别\u{1B}结果\u{0}"),
+                refinement: OptionalTextRefinementPipeline(
+                    refiner: DeepSeekRefinerFake(result: .success(.init(text: refined)))
+                )
+            )
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "Terminal"))
+                ),
+                textProcessor: processor,
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: history
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            let result = await terminal.value
+
+            let expected = "echo hi[201~\nrm -rf ~\tend\nnext"
+            let delivered = await delivery.deliveredTexts
+            try expect(result?.activity.isDelivered == true)
+            try expect(delivered == [expected], "\(delivered)")
+            _ = await eventually(before: .seconds(2)) {
+                await history.records.first?.finalText == expected
+            }
+            let record = await history.records.first
+            try expect(record?.finalText == expected, "\(String(describing: record?.finalText))")
+            try expect(record?.transcription == "识别结果")
+        }
+
+        await runAsync(
+            "text made only of control characters ends quietly without delivery",
+            failures: &failures
+        ) {
+            let delivery = TextDeliveryFake(result: .delivered)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "Terminal"))
+                ),
+                transcriber: SpeechTranscriberFake(text: "\u{1B}\u{07}\r\n"),
+                delivery: delivery,
+                clipboard: ClipboardFake(),
+                history: SessionHistoryFake()
+            )
+            let terminal = terminalPresentation(from: await sessions.observe())
+            await sessions.send(.pressed)
+            await sessions.send(.released)
+            let result = await terminal.value
+
+            let delivered = await delivery.deliveredTexts
+            try expect(delivered.isEmpty)
+            guard case .failed(_, .providerReturnedNoText) = result?.activity else {
+                throw SpecFailure(message: "unexpected outcome: \(String(describing: result))")
+            }
         }
 
         await runAsync(

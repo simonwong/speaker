@@ -126,6 +126,9 @@ extension PendingCopyReason {
     package static let targetApplicationUnresponsiveTitle = "目标应用没有响应"
     package static let deliveryUnconfirmedTitle = "可能已经输入，请先检查"
     package static let clipboardFailedTitle = "复制失败，请重试"
+    /// Shown in place of a secure Input Target's text, which never appears
+    /// on screen; the copy control still copies it.
+    package static let secureTargetConcealedText = "文字已隐藏，可直接复制"
 
     package var userTitle: String {
         switch self {
@@ -139,7 +142,7 @@ extension PendingCopyReason {
         case .targetApplicationUnresponsive, .deliveryTimedOut:
             Self.targetApplicationUnresponsiveTitle
         case .deliveryUnconfirmed: Self.deliveryUnconfirmedTitle
-        case .clipboardFailed: Self.clipboardFailedTitle
+        case .clipboardFailed, .secureTargetClipboardFailed: Self.clipboardFailedTitle
         }
     }
 }

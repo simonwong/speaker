@@ -281,6 +281,157 @@ enum VoiceInputFeedbackSpecs {
             try expect(finalActivity == .idle)
             await sessions.shutdown()
         }
+
+        await runAsync(
+            "voice feedback keeps a secure target's text off the HUD and still copies it",
+            failures: &failures
+        ) {
+            let clipboard = ClipboardFake(succeeds: false)
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
+                transcriber: SpeechTranscriberFake(text: "Secret sentinel"),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: clipboard,
+                history: SessionHistoryFake()
+            )
+            var announcements: [String] = []
+            let experience = VoiceInputExperience(
+                sessions: sessions, announce: { announcements.append($0) })
+            experience.start()
+            try await finishRecording(experience)
+            let retained = await eventually(before: .seconds(2)) {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
+            }
+            try expect(retained, "the secure result was not retained")
+            guard
+                case .pendingCopy(_, let shownText, _, let copy, _, _) = experience.state.overlay
+            else { throw SpecFailure(message: "pending copy overlay missing") }
+            experience.perform(copy)
+            let failedOnce = await eventually(before: .seconds(2)) {
+                if case .pendingCopy(_, _, _, _, _, true) = experience.state.overlay {
+                    true
+                } else {
+                    false
+                }
+            }
+            guard
+                case .pendingCopy(_, let retryText, let retryTitle, let retry, _, _) =
+                    experience.state.overlay
+            else { throw SpecFailure(message: "retry overlay missing") }
+            await clipboard.setSucceeds(true)
+            experience.perform(retry)
+            let copied = await eventually(before: .seconds(2)) {
+                await clipboard.copiedTexts.count == 2
+            }
+            let copiedTexts = await clipboard.copiedTexts
+            let privacies = await clipboard.copiedPrivacies
+            await experience.shutdown()
+
+            try expect(
+                shownText == PendingCopyReason.secureTargetConcealedText
+                    && retryText == PendingCopyReason.secureTargetConcealedText,
+                "the HUD showed a secure target's text")
+            try expect(failedOnce && retryTitle == "重试复制", "the failed copy offered no retry")
+            try expect(
+                copied && copiedTexts == ["Secret sentinel", "Secret sentinel"],
+                "the copy button did not copy the retained text")
+            try expect(
+                privacies == [.concealed, .concealed],
+                "a secure target's copy was not concealed")
+            try expect(
+                !announcements.contains { $0.contains("Secret sentinel") },
+                "a secure target's text reached an announcement")
+        }
+
+        await runAsync(
+            "voice feedback names the App holding Secure Event Input once per note",
+            failures: &failures
+        ) {
+            var announcements: [String] = []
+            var lookups = 0
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                secureInputNoticeDuration: .milliseconds(300),
+                secureInputHolderName: {
+                    lookups += 1
+                    return "Terminal"
+                },
+                announce: { announcements.append($0) })
+            experience.start()
+            for _ in 0..<5 {
+                experience.shortcutTarget.secureInputBlockedPress()
+            }
+            let expected = SecureInputBlockedNotice.title(holderName: "Terminal")
+            let shown = await eventually(before: .seconds(2)) {
+                experience.state.overlay == .notice(title: expected)
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            let announcedWhileShown = announcements
+            let lookupsWhileShown = lookups
+            let hidden = await eventually(before: .seconds(2)) {
+                experience.state.overlay == .hidden
+            }
+            experience.shortcutTarget.secureInputBlockedPress()
+            let shownAgain = await eventually(before: .seconds(2)) {
+                experience.state.overlay == .notice(title: expected)
+            }
+            let announcedAfter = announcements
+            await experience.shutdown()
+
+            try expect(expected.contains("Terminal"), "the note did not name the App")
+            try expect(shown, "a refused press showed no note")
+            try expect(
+                announcedWhileShown == [expected] && lookupsWhileShown == 1,
+                "repeated presses repeated the note")
+            try expect(hidden, "the note stayed on screen")
+            try expect(
+                shownAgain && announcedAfter == [expected, expected],
+                "a press after the note closed showed nothing")
+        }
+
+        await runAsync(
+            "voice feedback uses a general note when the holding App is unknown",
+            failures: &failures
+        ) {
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                announce: { _ in })
+            experience.start()
+            experience.shortcutTarget.secureInputBlockedPress()
+            let shown = await eventually(before: .seconds(2)) {
+                experience.state.overlay
+                    == .notice(title: SecureInputBlockedNotice.genericTitle)
+            }
+            await experience.shutdown()
+            try expect(shown, "the general note did not appear")
+            try expect(
+                SecureInputBlockedNotice.title(holderName: "  ")
+                    == SecureInputBlockedNotice.genericTitle,
+                "a blank App name produced a broken note")
+        }
+
+        await runAsync(
+            "voice feedback keeps a retained result over the Secure Event Input note",
+            failures: &failures
+        ) {
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                secureInputHolderName: { "Terminal" },
+                announce: { _ in })
+            experience.start()
+            try await finishRecording(experience)
+            let retained = await eventually(before: .seconds(2)) {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
+            }
+            try expect(retained, "the result was not retained")
+            let before = experience.state.overlay
+            experience.shortcutTarget.secureInputBlockedPress()
+            try await Task.sleep(for: .milliseconds(200))
+            let after = experience.state.overlay
+            await experience.shutdown()
+            try expect(after == before, "the note replaced the retained result")
+        }
     }
 
     private static func activity(of sessions: VoiceInputSessions) async -> VoiceInputActivity {

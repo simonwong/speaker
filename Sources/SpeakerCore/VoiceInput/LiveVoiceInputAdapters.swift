@@ -894,10 +894,12 @@ package struct ClipboardPasteboardAccess: Sendable {
     let itemCount: @MainActor @Sendable () -> Int?
     let itemTypes: @MainActor @Sendable (Int) -> [String]?
     let data: @MainActor @Sendable (Int, String) -> Data?
-    let clearContents: @MainActor @Sendable () -> Int
-    let writeText: @MainActor @Sendable (String, String) -> Bool
+    /// Empties the clipboard; `true` keeps the next value on this Mac only.
+    let clearContents: @MainActor @Sendable (_ currentHostOnly: Bool) -> Int
+    /// Writes text, its ownership marker, and the purpose's privacy types.
+    let writeText: @MainActor @Sendable (String, String, PasteboardWritePurpose) -> Bool
     let readString: @MainActor @Sendable () -> String?
-    let readMarker: @MainActor @Sendable () -> String?
+    let readMarker: @MainActor @Sendable (PasteboardWritePurpose) -> String?
     let writeItems: @MainActor @Sendable ([[String: Data]]) -> Bool
 
     package init(
@@ -905,10 +907,11 @@ package struct ClipboardPasteboardAccess: Sendable {
         itemCount: @escaping @MainActor @Sendable () -> Int?,
         itemTypes: @escaping @MainActor @Sendable (Int) -> [String]?,
         data: @escaping @MainActor @Sendable (Int, String) -> Data?,
-        clearContents: @escaping @MainActor @Sendable () -> Int,
-        writeText: @escaping @MainActor @Sendable (String, String) -> Bool,
+        clearContents: @escaping @MainActor @Sendable (_ currentHostOnly: Bool) -> Int,
+        writeText:
+            @escaping @MainActor @Sendable (String, String, PasteboardWritePurpose) -> Bool,
         readString: @escaping @MainActor @Sendable () -> String?,
-        readMarker: @escaping @MainActor @Sendable () -> String?,
+        readMarker: @escaping @MainActor @Sendable (PasteboardWritePurpose) -> String?,
         writeItems: @escaping @MainActor @Sendable ([[String: Data]]) -> Bool
     ) {
         self.changeCount = changeCount
@@ -937,21 +940,26 @@ package struct ClipboardPasteboardAccess: Sendable {
             guard items.indices.contains(itemIndex) else { return nil }
             return items[itemIndex].data(forType: .init(type))
         },
-        clearContents: {
-            NSPasteboard.general.clearContents()
+        clearContents: { currentHostOnly in
+            currentHostOnly
+                ? NSPasteboard.general.prepareForNewContents(with: .currentHostOnly)
+                : NSPasteboard.general.clearContents()
         },
-        writeText: { text, marker in
+        writeText: { text, marker, purpose in
             let item = NSPasteboardItem()
             guard item.setString(text, forType: .string),
-                item.setString(marker, forType: PasteboardTransactionMarker.type)
+                item.setString(marker, forType: purpose.markerType)
             else { return false }
+            for type in purpose.privacyTypes {
+                guard item.setData(Data(), forType: type) else { return false }
+            }
             return NSPasteboard.general.writeObjects([item])
         },
         readString: {
             NSPasteboard.general.string(forType: .string)
         },
-        readMarker: {
-            NSPasteboard.general.string(forType: PasteboardTransactionMarker.type)
+        readMarker: { purpose in
+            NSPasteboard.general.string(forType: purpose.markerType)
         },
         writeItems: { snapshots in
             let items = snapshots.compactMap { representations -> NSPasteboardItem? in
@@ -986,11 +994,17 @@ public struct SystemClipboardWriter: ClipboardWriting {
         self.snapshotBudget = snapshotBudget
     }
 
-    public func copy(_ text: String) async -> Bool {
-        await MainActor.run {
+    public func copy(_ text: String, privacy: ClipboardCopyPrivacy) async -> Bool {
+        let purpose: PasteboardWritePurpose =
+            switch privacy {
+            case .ordinary: .explicitCopy
+            case .concealed: .concealedCopy
+            }
+        return await MainActor.run {
             guard
                 let transaction = PasteboardReplacementTransaction.prepare(
                     text: text,
+                    purpose: purpose,
                     pasteboard: pasteboard,
                     budget: snapshotBudget
                 )

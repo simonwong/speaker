@@ -378,7 +378,7 @@ private actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
 
 private struct DashboardClipboardFake: ClipboardWriting {
     @discardableResult
-    func copy(_ text: String) async -> Bool {
+    func copy(_ text: String, privacy: ClipboardCopyPrivacy) async -> Bool {
         true
     }
 }

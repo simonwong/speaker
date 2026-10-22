@@ -76,9 +76,25 @@ extension TextDelivering {
     public func shutdown() async {}
 }
 
+/// How clipboard managers and Universal Clipboard may treat a copied value.
+public enum ClipboardCopyPrivacy: Equatable, Sendable {
+    /// An ordinary copy the user asked for.
+    case ordinary
+    /// Text meant for a secure Input Target: marked concealed so clipboard
+    /// managers do not record it, and kept on this Mac.
+    case concealed
+}
+
 public protocol ClipboardWriting: Sendable {
     @discardableResult
-    func copy(_ text: String) async -> Bool
+    func copy(_ text: String, privacy: ClipboardCopyPrivacy) async -> Bool
+}
+
+extension ClipboardWriting {
+    @discardableResult
+    public func copy(_ text: String) async -> Bool {
+        await copy(text, privacy: .ordinary)
+    }
 }
 
 public protocol SessionHistoryRecording: Sendable {

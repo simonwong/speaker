@@ -152,6 +152,11 @@ final class SpeakerRuntime: ObservableObject {
             releaseCaptureHint: {
                 targets.releaseCaptureHint()
             },
+            secureInputHolderName: {
+                SecureEventInputHolder.processID().flatMap {
+                    NSRunningApplication(processIdentifier: $0)?.localizedName
+                }
+            },
             announce: announce
         )
         self.voiceInput = voiceInput
@@ -406,6 +411,10 @@ final class SpeakerRuntime: ObservableObject {
                 return
             }
         #endif
+        // A crash or force quit inside a paste's restore window leaves the
+        // dictated text on the clipboard; take it off before the shortcut
+        // can start a new session.
+        AbandonedPasteTransaction.clear()
         permissions.refresh()
         softwareUpdate.start()
         let activations = dependencies.workspace.applicationActivations
