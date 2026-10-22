@@ -3,6 +3,10 @@ import Foundation
 public protocol RealtimeSpeechConnection: Sendable {
     func send(_ text: String) async throws
     func receive() async throws -> String
+    /// Sends one WebSocket ping and returns when its pong arrives. Throws when
+    /// the transport reports the connection failed, and returns promptly when
+    /// the calling task is cancelled even if no pong ever arrives.
+    func ping() async throws
     func close() async
 }
 
@@ -52,6 +56,10 @@ private actor URLSessionRealtimeSpeechConnection: RealtimeSpeechConnection {
         case .data: throw RealtimeSpeechTransportError.invalidMessage
         @unknown default: throw RealtimeSpeechTransportError.invalidMessage
         }
+    }
+
+    func ping() async throws {
+        do { try await task.livenessPing() } catch { throw transportError(error) }
     }
 
     private func transportError(_ error: any Error) -> any Error {

@@ -1,7 +1,7 @@
 import AppKit
-import ApplicationServices
 import Combine
 import QuartzCore
+import SpeakerCore
 import SwiftUI
 
 @MainActor
@@ -172,6 +172,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
     private let content: (VoiceInputOverlayPresentation) -> Content
     private let animationState: VoiceInputPanelAnimationState
     private let reduceMotion: () -> Bool
+    private let frontWindowBounds: @MainActor () -> CGRect?
     private let scheduleDismissal:
         @MainActor (
             Duration,
@@ -183,6 +184,9 @@ package final class VoiceInputPanelPresenter<Content: View> {
     package init(
         reduceMotion: @escaping () -> Bool = {
             NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        },
+        frontWindowBounds: @escaping @MainActor () -> CGRect? = {
+            FrontmostWindowLocator.frontmostWindowBounds()
         },
         scheduleDismissal:
             @escaping @MainActor (
@@ -199,6 +203,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
     ) {
         self.content = content
         self.reduceMotion = reduceMotion
+        self.frontWindowBounds = frontWindowBounds
         self.scheduleDismissal = scheduleDismissal
 
         let animationState = VoiceInputPanelAnimationState()
@@ -377,7 +382,7 @@ package final class VoiceInputPanelPresenter<Content: View> {
     }
 
     private func repositionVisiblePanel() {
-        guard let frame = Self.presentationScreen()?.visibleFrame else { return }
+        guard let frame = presentationScreen()?.visibleFrame else { return }
         panel.setFrameOrigin(
             NSPoint(
                 x: frame.midX - panel.frame.width / 2,
@@ -385,95 +390,26 @@ package final class VoiceInputPanelPresenter<Content: View> {
             ))
     }
 
-    private static func presentationScreen() -> NSScreen? {
-        if let focusedWindowScreen = focusedWindowScreen() {
-            return focusedWindowScreen
-        }
-        let pointer = NSEvent.mouseLocation
-        return NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) }
-            ?? NSScreen.main
-    }
-
-    private static func focusedWindowScreen() -> NSScreen? {
-        guard AXIsProcessTrusted(),
-            let application = NSWorkspace.shared.frontmostApplication,
-            application.bundleIdentifier != Bundle.main.bundleIdentifier
-        else { return nil }
-
-        let applicationElement = AXUIElementCreateApplication(
-            application.processIdentifier
-        )
-        _ = AXUIElementSetMessagingTimeout(applicationElement, 0.25)
-        var windowValue: CFTypeRef?
-        guard
-            AXUIElementCopyAttributeValue(
-                applicationElement,
-                kAXFocusedWindowAttribute as CFString,
-                &windowValue
-            ) == .success,
-            let windowValue,
-            CFGetTypeID(windowValue) == AXUIElementGetTypeID()
-        else { return nil }
-        let window = unsafeDowncast(windowValue, to: AXUIElement.self)
-
-        var positionValue: CFTypeRef?
-        var sizeValue: CFTypeRef?
-        guard
-            AXUIElementCopyAttributeValue(
-                window,
-                kAXPositionAttribute as CFString,
-                &positionValue
-            ) == .success,
-            AXUIElementCopyAttributeValue(
-                window,
-                kAXSizeAttribute as CFString,
-                &sizeValue
-            ) == .success,
-            let positionValue,
-            let sizeValue,
-            CFGetTypeID(positionValue) == AXValueGetTypeID(),
-            CFGetTypeID(sizeValue) == AXValueGetTypeID()
-        else { return nil }
-
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        guard
-            AXValueGetValue(
-                unsafeDowncast(positionValue, to: AXValue.self),
-                .cgPoint,
-                &position
-            ),
-            AXValueGetValue(
-                unsafeDowncast(sizeValue, to: AXValue.self),
-                .cgSize,
-                &size
-            )
-        else { return nil }
-
-        let windowBounds = CGRect(origin: position, size: size)
-        return NSScreen.screens.max { lhs, rhs in
-            intersectionArea(of: lhs, with: windowBounds)
-                < intersectionArea(of: rhs, with: windowBounds)
-        }.flatMap { screen in
-            intersectionArea(of: screen, with: windowBounds) > 0 ? screen : nil
-        }
-    }
-
-    private static func intersectionArea(
-        of screen: NSScreen,
-        with quartzWindowBounds: CGRect
-    ) -> CGFloat {
+    /// Runs on every placement, on the main thread. The window list comes
+    /// from the window server, never from the frontmost App, so a hung App
+    /// cannot stall the HUD.
+    private func presentationScreen() -> NSScreen? {
+        let screens = NSScreen.screens
         let screenNumberKey = NSDeviceDescriptionKey("NSScreenNumber")
-        guard
-            let screenNumber = screen.deviceDescription[screenNumberKey]
-                as? NSNumber
-        else { return 0 }
-        let displayBounds = CGDisplayBounds(
-            CGDirectDisplayID(screenNumber.uint32Value)
+        let displays = screens.map { screen in
+            let displayID = (screen.deviceDescription[screenNumberKey] as? NSNumber)
+                .map { CGDirectDisplayID($0.uint32Value) }
+            return VoiceInputPanelScreenSelection.Display(
+                quartzBounds: displayID.map(CGDisplayBounds) ?? .null,
+                frame: screen.frame
+            )
+        }
+        let index = VoiceInputPanelScreenSelection.displayIndex(
+            frontWindowBounds: frontWindowBounds(),
+            pointer: NSEvent.mouseLocation,
+            displays: displays
         )
-        let intersection = displayBounds.intersection(quartzWindowBounds)
-        guard !intersection.isNull else { return 0 }
-        return intersection.width * intersection.height
+        return index.map { screens[$0] } ?? NSScreen.main
     }
 
     #if DEBUG

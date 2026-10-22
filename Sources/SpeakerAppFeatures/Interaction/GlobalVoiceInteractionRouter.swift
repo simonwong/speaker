@@ -40,6 +40,9 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
         }
     )
 
+    /// The live monitors watch `Esc` only after a shortcut press arms their
+    /// key tap. An interaction begun while Speaker is idle therefore cannot
+    /// be cancelled with `Esc` until a shortcut press arms it.
     @MainActor
     @discardableResult
     package func beginExclusiveInteraction(

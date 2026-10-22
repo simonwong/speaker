@@ -146,18 +146,21 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
         from legacyURL: URL,
         to primaryURL: URL
     ) async -> PersonalDictionaryMigrationOutcome {
-        let legacyPath = legacyURL.standardizedFileURL.path
-        let primaryPath = primaryURL.standardizedFileURL.path
-        guard legacyPath != primaryPath,
-            FileManager.default.fileExists(atPath: legacyPath)
+        guard legacyURL.standardizedFileURL.path != primaryURL.standardizedFileURL.path
         else {
             return .notNeeded
         }
-        guard !FileManager.default.fileExists(atPath: primaryPath) else {
-            return .primaryAlreadyExists
-        }
 
         do {
+            // Either location holding a link or another non-regular entry
+            // fails the migration and leaves both untouched.
+            guard try OwnerOnlyFilePersistence.regularFileExists(at: legacyURL) else {
+                return .notNeeded
+            }
+            guard try !OwnerOnlyFilePersistence.regularFileExists(at: primaryURL) else {
+                return .primaryAlreadyExists
+            }
+
             let legacyStore = VersionedJSONPersonalDictionaryStore(
                 fileURL: legacyURL
             )
@@ -174,7 +177,7 @@ public actor VersionedJSONPersonalDictionaryStore: PersonalDictionaryStoring {
                 return .failed
             }
             do {
-                try FileManager.default.removeItem(at: legacyURL)
+                try OwnerOnlyFilePersistence.removeRegularFile(at: legacyURL)
                 return .migrated
             } catch {
                 return .migratedLegacyCleanupFailed

@@ -13,6 +13,12 @@ import {
 // Redirects to the newest DMG; see src/server.ts.
 export const DOWNLOAD_URL = `${SITE_URL}download`
 
+// The repository doubles as the tap; the cask is Casks/speaker.rb.
+export const BREW_INSTALL = [
+  'brew tap simonwong/speaker https://github.com/simonwong/speaker',
+  'brew install --cask simonwong/speaker/speaker',
+].join('\n')
+
 export type Faq = { question: string; answer: string }
 
 export type HomeCopy = {

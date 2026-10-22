@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { PRIVACY_URL, RELEASE_NOTES_URL, SITE_URL } from '../components'
-import { DOWNLOAD_URL, type HomeCopy, HomePage, homeHead } from '../home'
+import { BREW_INSTALL, DOWNLOAD_URL, type HomeCopy, HomePage, homeHead } from '../home'
 
 const copy: HomeCopy = {
   lang: 'zh-CN',
@@ -84,18 +84,24 @@ const copy: HomeCopy = {
       id: 'install',
       title: '下载与安装',
       body: (
-        <ol className="install">
-          <li>
-            <a href={DOWNLOAD_URL}>下载最新的 DMG</a>，历史版本在 <a href={RELEASE_NOTES_URL}>GitHub Releases</a>。
-          </li>
-          <li>把 Speaker 拖到“应用程序”，然后打开。</li>
-          <li>按引导授权麦克风和辅助功能。</li>
-          <li>
-            选择识别服务，填入 API Key；用 Apple 语音识别则下载语言模型。没有 Key 的话，先看
-            <a href="/doubao">申请豆包 API Key</a>。
-          </li>
-          <li>在引导最后一步的练习框里试一次。之后的新版本可以在 App 内更新。</li>
-        </ol>
+        <>
+          <ol className="install">
+            <li>
+              <a href={DOWNLOAD_URL}>下载最新的 DMG</a>，历史版本在 <a href={RELEASE_NOTES_URL}>GitHub Releases</a>。
+            </li>
+            <li>把 Speaker 拖到“应用程序”，然后打开。</li>
+            <li>按引导授权麦克风和辅助功能。</li>
+            <li>
+              选择识别服务，填入 API Key；用 Apple 语音识别则下载语言模型。没有 Key 的话，先看
+              <a href="/doubao">申请豆包 API Key</a>。
+            </li>
+            <li>在引导最后一步的练习框里试一次。之后的新版本可以在 App 内更新。</li>
+          </ol>
+          <p>也可以用 Homebrew 安装：</p>
+          <pre>
+            <code>{BREW_INSTALL}</code>
+          </pre>
+        </>
       ),
     },
   ],

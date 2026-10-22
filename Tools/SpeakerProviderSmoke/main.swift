@@ -496,11 +496,9 @@ private struct SpeakerProviderSmoke {
             guard try await credentials.apiKey(for: .deepSeek) != nil else {
                 return result(.deepSeekConnection, .skip, .notConfigured)
             }
-            let service = CredentialedDeepSeekTextRefiner(
-                credentials: credentials
-            )
+            let service = CredentialedTextRefiner(credentials: credentials)
             announceStarted(.deepSeekConnection)
-            let requestID = try await service.checkConnection()
+            let requestID = try await service.checkConnection(profile: deepSeekProfile)
             return result(.deepSeekConnection, .pass, .passed, requestID: requestID)
         } catch {
             return deepSeekFailureResult(error, caseID: .deepSeekConnection)
@@ -536,14 +534,14 @@ private struct SpeakerProviderSmoke {
                 )
             ),
         ]
-        let service = CredentialedDeepSeekTextRefiner(credentials: credentials)
+        let service = CredentialedTextRefiner(credentials: credentials)
         var results: [SmokeResult] = []
         for (name, caseID, source, mode) in modes {
             do {
                 announceStarted(caseID)
                 let refined = try await service.refine(
                     source,
-                    using: TextRefinementContext(mode: mode)
+                    using: TextRefinementContext(mode: mode, provider: deepSeekProfile)
                 )
                 guard
                     deepSeekOracle(
@@ -573,12 +571,12 @@ private struct SpeakerProviderSmoke {
         guard (try? await credentials.apiKey(for: .deepSeek)) != nil else {
             return result(.deepSeekCancelInFlight, .skip, .notConfigured)
         }
-        let service = CredentialedDeepSeekTextRefiner(credentials: credentials)
+        let service = CredentialedTextRefiner(credentials: credentials)
         announceStarted(.deepSeekCancelInFlight)
         let request = Task {
             try await service.refine(
                 String(repeating: "这是等待中取消的固定非敏感测试文本。", count: 120),
-                using: TextRefinementContext(mode: .fullRewrite())
+                using: TextRefinementContext(mode: .fullRewrite(), provider: deepSeekProfile)
             )
         }
         await Task.yield()
@@ -603,14 +601,17 @@ private struct SpeakerProviderSmoke {
     }
 
     private static func checkDeepSeekInvalidCredential() async -> SmokeResult {
-        let service = CredentialedDeepSeekTextRefiner(
+        let service = CredentialedTextRefiner(
             credentials: FixedCredentialStore(values: [.deepSeek: "speaker-invalid-key"])
         )
         do {
             announceStarted(.deepSeekInvalidCredential)
             _ = try await service.refine(
                 "凭据边界检查。",
-                using: TextRefinementContext(mode: .conciseCleanup())
+                using: TextRefinementContext(
+                    mode: .conciseCleanup(),
+                    provider: deepSeekProfile
+                )
             )
             return result(.deepSeekInvalidCredential, .fail, .unexpected)
         } catch let failure as TextRefinementFailure
@@ -686,7 +687,7 @@ private struct SpeakerProviderSmoke {
                 provider: .deepSeek,
                 credentialSource: credentialSource,
                 resource: nil,
-                model: "deepseek-flash"
+                model: deepSeekProfile.modelID
             ),
         ]
         let validationFixture = ProviderMatrixEvidence(
@@ -807,6 +808,13 @@ private struct SpeakerProviderSmoke {
             .doubaoCancelStreaming,
         ]
     }
+
+    /// The DeepSeek profile Speaker offers by default. Every DeepSeek case goes
+    /// through `CredentialedTextRefiner` with it, the same seam a Voice Input
+    /// Session uses, so the evidence covers the production request path.
+    private static let deepSeekProfile = RefinementProviderProfile.defaultProfile(
+        for: .deepSeek
+    )
 
     private static var deepSeekModeCaseIDs: [ProviderMatrixCaseID] {
         [.deepSeekModeConcise, .deepSeekModeRewrite, .deepSeekModeCustom]
