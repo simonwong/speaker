@@ -16,17 +16,20 @@ package struct DoubaoStreamingExchange: Sendable {
     private let connection: any DoubaoWebSocketConnection
     private let requestID: String
     private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
+    private let liveness: TransportLivenessProbe
     private let closeGate: DoubaoWebSocketCloseGate
     private let failurePriority = DoubaoExchangeFailurePriority()
 
     package init(
         connection: any DoubaoWebSocketConnection,
         requestID: String,
-        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
+        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?,
+        liveness: TransportLivenessProbe = .live
     ) {
         self.connection = connection
         self.requestID = requestID
         self.runtimeDiagnostics = runtimeDiagnostics
+        self.liveness = liveness
         closeGate = DoubaoWebSocketCloseGate(connection: connection)
     }
 
@@ -93,7 +96,8 @@ package struct DoubaoStreamingExchange: Sendable {
     }
 
     /// Runs the sender and receiver together and returns once both have
-    /// finished: audio fully sent and a final result received.
+    /// finished: audio fully sent and a final result received. After the
+    /// final audio frame, a liveness probe runs beside the receiver.
     private func exchangeAudio(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
         try await withThrowingTaskGroup(
             of: Event.self,
@@ -145,15 +149,41 @@ package struct DoubaoStreamingExchange: Sendable {
                 switch event {
                 case .audioSent:
                     didFinishSending = true
+                    if finalResult == nil {
+                        group.addTask { try await watchLiveness() }
+                    }
                 case .finalResult(let result):
                     finalResult = result
                 }
                 if didFinishSending, let finalResult {
+                    // A normal return awaits remaining children without
+                    // cancelling them; the liveness probe never ends alone.
+                    group.cancelAll()
                     return finalResult
                 }
             }
             throw DoubaoASRFailure(kind: .invalidResponse, providerRequestID: requestID)
         }
+    }
+
+    /// Only a failed ping reports connection loss; an unanswered one keeps
+    /// the session Waiting For Result.
+    private func watchLiveness() async throws -> Event {
+        do {
+            try await liveness.watch { try await connection.ping() }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let failure = DoubaoFailureClassifier.transportFailure(
+                error,
+                metadata: await connection.metadata(),
+                fallbackRequestID: requestID
+            )
+            await failurePriority.recordReceiverFailure(failure)
+            await closeGate.close()
+            throw failure
+        }
+        throw CancellationError()
     }
 
     private func sendAudio(_ chunks: AsyncStream<Data>) async throws {

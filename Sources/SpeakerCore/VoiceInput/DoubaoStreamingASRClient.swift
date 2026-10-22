@@ -127,6 +127,10 @@ public struct DoubaoWebSocketMetadata: Equatable, Sendable {
 public protocol DoubaoWebSocketConnection: Sendable {
     func send(_ data: Data) async throws
     func receive() async throws -> Data
+    /// Sends one WebSocket ping and returns when its pong arrives. Throws when
+    /// the transport reports the connection failed, and returns promptly when
+    /// the calling task is cancelled even if no pong ever arrives.
+    func ping() async throws
     func metadata() async -> DoubaoWebSocketMetadata
     func close() async
 }
@@ -174,6 +178,10 @@ private actor URLSessionDoubaoWebSocketConnection: DoubaoWebSocketConnection {
         @unknown default:
             throw DoubaoASRFailure(kind: .invalidResponse)
         }
+    }
+
+    func ping() async throws {
+        try await task.livenessPing()
     }
 
     func metadata() -> DoubaoWebSocketMetadata {
@@ -255,19 +263,22 @@ package actor DoubaoStreamingASRClient {
     private let requestIDGenerator: @Sendable () -> UUID
     private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
     private let runtimeOperation: VoiceProviderRuntimeOperation
+    private let liveness: TransportLivenessProbe
 
     package init(
         configuration: DoubaoStreamingASRConfiguration,
         connector: any DoubaoWebSocketConnecting = URLSessionDoubaoWebSocketConnector(),
         requestIDGenerator: @escaping @Sendable () -> UUID = UUID.init,
         runtimeDiagnostics: VoiceProviderRuntimeDiagnostics? = nil,
-        runtimeOperation: VoiceProviderRuntimeOperation = .voiceInput
+        runtimeOperation: VoiceProviderRuntimeOperation = .voiceInput,
+        liveness: TransportLivenessProbe = .live
     ) {
         self.configuration = configuration
         self.connector = connector
         self.requestIDGenerator = requestIDGenerator
         self.runtimeDiagnostics = runtimeDiagnostics
         self.runtimeOperation = runtimeOperation
+        self.liveness = liveness
     }
 
     package func transcribe(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
@@ -285,7 +296,8 @@ package actor DoubaoStreamingASRClient {
         let exchange = DoubaoStreamingExchange(
             connection: connection,
             requestID: requestID,
-            runtimeDiagnostics: runtimeDiagnostics
+            runtimeDiagnostics: runtimeDiagnostics,
+            liveness: liveness
         )
         return try await exchange.run(requestPayload: requestPayload, audio: chunks)
     }

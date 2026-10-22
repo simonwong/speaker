@@ -2,8 +2,14 @@ import Foundation
 
 package struct RealtimeSpeechTranscriber: Sendable {
     private let connector: any RealtimeSpeechConnecting
+    private let liveness: TransportLivenessProbe
 
-    package init(connector: any RealtimeSpeechConnecting) { self.connector = connector }
+    package init(
+        connector: any RealtimeSpeechConnecting, liveness: TransportLivenessProbe = .live
+    ) {
+        self.connector = connector
+        self.liveness = liveness
+    }
 
     package func transcribe(
         _ chunks: AsyncStream<Data>, profile: SpeechRecognitionProfile,
@@ -58,7 +64,8 @@ package struct RealtimeSpeechTranscriber: Sendable {
         chunks: AsyncStream<Data>, profile: SpeechRecognitionProfile,
         context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
-        try await withThrowingTaskGroup(of: Event.self) { group in
+        let liveness = liveness
+        return try await withThrowingTaskGroup(of: Event.self) { group in
             group.addTask {
                 do {
                     try await state.waitForCreation()
@@ -98,13 +105,47 @@ package struct RealtimeSpeechTranscriber: Sendable {
             var sent = false
             while let event = try await group.next() {
                 switch event {
-                case .sent: sent = true
+                case .sent:
+                    sent = true
+                    if result == nil {
+                        group.addTask {
+                            try await Self.watchLiveness(
+                                connection, state: state, provider: profile.provider,
+                                probe: liveness)
+                        }
+                    }
                 case .result(let value): result = value
                 }
-                if sent, let result { return result }
+                if sent, let result {
+                    // A normal return awaits remaining children without
+                    // cancelling them; the liveness probe never ends alone.
+                    group.cancelAll()
+                    return result
+                }
             }
             throw SpeechRecognitionFailure(provider: profile.provider, kind: .invalidResponse)
         }
+    }
+
+    /// Probes the connection after the final commit. Only a failed ping
+    /// reports connection loss; an unanswered one keeps the session Waiting
+    /// For Result.
+    private static func watchLiveness(
+        _ connection: any RealtimeSpeechConnection, state: RealtimeSpeechState,
+        provider: SpeechRecognitionProviderID, probe: TransportLivenessProbe
+    ) async throws -> Event {
+        do {
+            try await probe.watch { try await connection.ping() }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let failure = SpeechRecognitionFailure(
+                provider: provider, kind: .transport, code: "connection_lost")
+            await state.record(failure)
+            await connection.close()
+            throw failure
+        }
+        throw CancellationError()
     }
 
     private static func sendAudio(

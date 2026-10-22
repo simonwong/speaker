@@ -124,6 +124,7 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
     private let blockingSendFailureIndex: Int?
     private let blocksReceiveUntilClose: Bool
     private let onClose: (@Sendable () -> Void)?
+    nonisolated let pings: PingScriptFake
     private var responseIndex = 0
     private var isClosed = false
     private var blockedReceive: CheckedContinuation<Data, Error>?
@@ -140,8 +141,10 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         failingSendIndex: Int? = nil,
         blockingSendFailureIndex: Int? = nil,
         blocksReceiveUntilClose: Bool = false,
-        onClose: (@Sendable () -> Void)? = nil
+        onClose: (@Sendable () -> Void)? = nil,
+        pings: PingScriptFake = PingScriptFake()
     ) {
+        self.pings = pings
         self.responses = responses
         self.receiveError = receiveError
         metadataValue = metadata
@@ -188,6 +191,10 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         }
         defer { responseIndex += 1 }
         return responses[responseIndex]
+    }
+
+    func ping() async throws {
+        try await pings.ping()
     }
 
     func metadata() -> DoubaoWebSocketMetadata { metadataValue }
