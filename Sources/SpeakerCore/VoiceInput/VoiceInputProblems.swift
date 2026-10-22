@@ -87,42 +87,6 @@ public struct VoiceInputProblem: Error, Equatable, Sendable {
         self.diagnostic = diagnostic
     }
 
-    public init(doubaoFailure: DoubaoASRFailure) {
-        failure =
-            switch doubaoFailure.kind {
-            case .invalidCredential: .providerAuthenticationFailed
-            case .silence: .noSpeechDetected
-            case .emptyAudio: .providerReceivedNoAudio
-            case .emptyTranscript: .providerReturnedNoText
-            case .resourceNotActivated: .providerResourceUnavailable
-            case .rateLimited: .providerRateLimited
-            case .network: .networkUnavailable
-            case .serverBusy, .serviceUnavailable: .providerUnavailable
-            case .cancelled, .invalidRequest, .invalidAudioFormat, .invalidResponse:
-                .transcriptionFailed
-            }
-        diagnostic = VoiceProviderDiagnostic(
-            provider: "doubao",
-            operation: .transcription,
-            requestID: doubaoFailure.providerRequestID,
-            code: doubaoFailure.kind.rawValue,
-            statusCode: doubaoFailure.providerStatusCode,
-            message: doubaoFailure.message
-        )
-    }
-
-    public init(doubaoCredentialFailure: ProviderCredentialStoreError) {
-        failure =
-            doubaoCredentialFailure == .emptyAPIKey
-            ? .providerNotConfigured
-            : .providerCredentialUnavailable
-        diagnostic = VoiceProviderDiagnostic(
-            provider: "doubao",
-            operation: .credentialAccess,
-            code: "credential.\(doubaoCredentialFailure.diagnosticCode)"
-        )
-    }
-
     public init(audioCaptureError: AudioCaptureError) {
         switch audioCaptureError {
         case .streamBufferExhausted:

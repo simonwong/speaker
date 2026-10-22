@@ -37,6 +37,8 @@ public actor AudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
         prepareOperation = prepareStart
     }
 
+    public func audioChunks() async -> AsyncStream<Data>? { nil }
+
     public nonisolated func prepareStart() -> AudioCaptureStart {
         let id = UUID()
         let operation = prepareOperation?()

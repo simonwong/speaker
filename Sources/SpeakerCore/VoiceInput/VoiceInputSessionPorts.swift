@@ -26,10 +26,9 @@ public protocol AudioCapturing: Sendable {
     func start() async throws
     func stop() async throws -> CapturedAudio
     func cancel() async
-}
-
-public protocol AudioChunkStreaming: Sendable {
-    func audioChunks() async -> AsyncStream<Data>
+    /// Opens the stream of audio for the next recording while it is captured,
+    /// or returns `nil` when this capture delivers only the complete recording.
+    func audioChunks() async -> AsyncStream<Data>?
 }
 
 package protocol AudioCaptureTelemetryProviding: Sendable {

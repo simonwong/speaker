@@ -1913,7 +1913,8 @@ struct SpeakerAppScenarioSpecs {
                     targetCapture: TargetCaptureFake(
                         result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                     ),
-                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    textProcessor: BasicVoiceTextProcessor(
+                        transcriber: SpeechTranscriberFake(text: "保留的文字")),
                     delivery: TextDeliveryFake(result: outcome),
                     clipboard: ClipboardFake(),
                     history: SessionHistoryFake()
@@ -2016,7 +2017,6 @@ struct SpeakerAppScenarioSpecs {
             let record = VoiceInputHistoryRecord(
                 sessionID: VoiceInputSessionID(),
                 startedAt: Date(),
-                applicationName: "Private Client App",
                 transcription: "SECRET TRANSCRIPT",
                 finalText: "SECRET FINAL TEXT",
                 transcriptionProvider: "doubao",
@@ -2027,8 +2027,8 @@ struct SpeakerAppScenarioSpecs {
                 providerMessage: "SECRET PROVIDER MESSAGE",
                 deliveryDiagnosticCode:
                     "pasteReceipt.unconfirmed",
-                deepSeekText: "SECRET DEEPSEEK TEXT",
-                deepSeekRequestID: "deepseek-safe-id",
+                refinedText: "SECRET DEEPSEEK TEXT",
+                refinementRequestID: "deepseek-safe-id",
                 refinementModeName: "SECRET CUSTOM NAME",
                 refinementPrompt: "SECRET PROMPT",
                 refinementStatus: "fellBack",
@@ -3824,8 +3824,7 @@ struct SpeakerAppScenarioSpecs {
         {
             let activity = VoiceInputActivity.processing(
                 VoiceInputSessionID(),
-                .transcribing,
-                applicationName: nil
+                .transcribing
             )
             let granted = PermissionSnapshot(
                 accessibility: .granted,
@@ -4160,7 +4159,6 @@ struct SpeakerAppScenarioSpecs {
                 .init(
                     sessionID: olderID,
                     startedAt: calendar.date(byAdding: .day, value: -2, to: now)!,
-                    applicationName: nil,
                     transcription: "前天的文字",
                     finalText: nil,
                     outcome: .cancelled(olderID)
@@ -4169,7 +4167,6 @@ struct SpeakerAppScenarioSpecs {
                 .init(
                     sessionID: secureID,
                     startedAt: now.addingTimeInterval(-120),
-                    applicationName: nil,
                     transcription: nil,
                     finalText: nil,
                     outcome: .pendingCopy(secureID, text: "", reason: .secureTarget)
@@ -4178,10 +4175,9 @@ struct SpeakerAppScenarioSpecs {
                 .init(
                     sessionID: todayID,
                     startedAt: now.addingTimeInterval(-60),
-                    applicationName: nil,
                     transcription: "初稿",
                     finalText: longText,
-                    outcome: .delivered(todayID, applicationName: "备忘录", text: longText)
+                    outcome: .delivered(todayID, text: longText)
                 ))
             let clipboard = ClipboardFake()
             var announcements: [String] = []
@@ -4221,25 +4217,22 @@ struct SpeakerAppScenarioSpecs {
             let refined = VoiceInputHistoryRecord(
                 sessionID: refinedID,
                 startedAt: Date(),
-                applicationName: "备忘录",
                 transcription: "嗯那个明天开会",
                 finalText: "明天开会。",
-                outcome: .delivered(refinedID, applicationName: "备忘录", text: "明天开会。")
+                outcome: .delivered(refinedID, text: "明天开会。")
             )
             let unchangedID = VoiceInputSessionID()
             let unchanged = VoiceInputHistoryRecord(
                 sessionID: unchangedID,
                 startedAt: Date(),
-                applicationName: "备忘录",
                 transcription: "明天开会。",
                 finalText: "明天开会。",
-                outcome: .delivered(unchangedID, applicationName: "备忘录", text: "明天开会。")
+                outcome: .delivered(unchangedID, text: "明天开会。")
             )
             let secureID = VoiceInputSessionID()
             let secure = VoiceInputHistoryRecord(
                 sessionID: secureID,
                 startedAt: Date(),
-                applicationName: nil,
                 transcription: nil,
                 finalText: nil,
                 outcome: .pendingCopy(secureID, text: "", reason: .secureTarget)
@@ -4464,8 +4457,7 @@ struct SpeakerAppScenarioSpecs {
             let id = VoiceInputSessionID()
             let transcribing = VoiceInputActivity.processing(
                 id,
-                .transcribing,
-                applicationName: "TextEdit"
+                .transcribing
             )
             try expect(transcribing.isActive)
             try expect(
@@ -4480,7 +4472,6 @@ struct SpeakerAppScenarioSpecs {
 
             let delivered = VoiceInputActivity.delivered(
                 id,
-                applicationName: "TextEdit",
                 text: "完成"
             )
             try expect(
@@ -4680,7 +4671,8 @@ struct SpeakerAppScenarioSpecs {
                         .init(id: UUID(), applicationName: "TextEdit")
                     )
                 ),
-                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留的文字")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -4797,7 +4789,8 @@ struct SpeakerAppScenarioSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留的文字")),
                 delivery: TextDeliveryFake(
                     result: .pendingCopy(.deliveryFailed),
                     commitsBeforeDelivering: false
@@ -5011,7 +5004,8 @@ struct SpeakerAppScenarioSpecs {
                 let sessions = VoiceInputSessions(
                     audioCapture: audio,
                     targetCapture: targetCapture,
-                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    textProcessor: BasicVoiceTextProcessor(
+                        transcriber: SpeechTranscriberFake(text: "保留的文字")),
                     delivery: delivery,
                     clipboard: ClipboardFake(),
                     history: SessionHistoryFake()
@@ -5100,7 +5094,8 @@ struct SpeakerAppScenarioSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: text),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: text)),
                 delivery: TextDeliveryFake(
                     result: .pendingCopy(.deliveryFailed), commitsBeforeDelivering: false),
                 clipboard: clipboard,
@@ -5296,7 +5291,8 @@ struct SpeakerAppScenarioSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留的文字")),
                 delivery: TextDeliveryFake(
                     result: .pendingCopy(.deliveryFailed),
                     commitsBeforeDelivering: false
@@ -5464,7 +5460,7 @@ private func makeVoiceExperienceFixture(
     let sessions = VoiceInputSessions(
         audioCapture: audio,
         targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-        transcriber: SpeechTranscriberFake(text: "保留的文字"),
+        textProcessor: BasicVoiceTextProcessor(transcriber: SpeechTranscriberFake(text: "保留的文字")),
         delivery: TextDeliveryFake(
             result: .pendingCopy(.deliveryFailed),
             commitsBeforeDelivering: false
@@ -5508,12 +5504,12 @@ private final class AnnouncementRecorder {
 private func refinementFallbackProcessor() -> VoiceTextProcessorFake {
     VoiceTextProcessorFake(
         result: VoiceTextProcessingResult(
-            doubaoText: "豆包结果",
+            recognitionText: "豆包结果",
             normalizedText: "豆包结果",
-            deepSeekText: nil,
+            refinedText: nil,
             finalText: "豆包结果",
-            doubaoRequestID: "doubao-request",
-            deepSeekRequestID: nil,
+            recognitionRequestID: "doubao-request",
+            refinementRequestID: nil,
             refinementStatus: .fellBack,
             refinementFailure: .init(kind: .network)
         ),

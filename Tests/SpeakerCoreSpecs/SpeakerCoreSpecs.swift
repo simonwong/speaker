@@ -15,6 +15,7 @@ struct SpeakerCoreSpecs {
         await VoiceInputSessionSpecs.run(failures: &failures)
         await RecordingLimitSpecs.run(failures: &failures)
         await SessionCancellationSpecs.run(failures: &failures)
+        await SessionResetSpecs.run(failures: &failures)
         await SkipRefinementSpecs.run(failures: &failures)
         await PasteboardTransactionSpecs.run(failures: &failures)
         await DoubaoClientSpecs.run(failures: &failures)

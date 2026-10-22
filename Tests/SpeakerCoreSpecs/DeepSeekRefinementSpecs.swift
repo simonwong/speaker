@@ -788,12 +788,12 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 history: history
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await configuration.replaceDictionary(.empty)
             try await configuration.selectRecognitionProvider(.defaultProfile(for: .qwen))
             try await configuration.selectRefinementProvider(
                 .defaultProfile(for: .kimi), mode: .fullRewrite())
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             await sessions.shutdown()
 
             let hotwordCalls = await doubao.hotwordCalls
@@ -814,7 +814,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(record?.transcriptionProvider == "openai")
             try expect(record?.transcriptionModelID == "gpt-transcribe")
             try expect(record?.transcription == "Use swift-lang")
-            try expect(record?.deepSeekText == "Use Swift.")
+            try expect(record?.refinedText == "Use Swift.")
             try expect(record?.refinementProviderID == .openAI)
             try expect(record?.refinementModelID == "gpt-5.6-luna")
             try expect(record?.refinementModeName == "精简清理")
@@ -848,11 +848,11 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                 textProcessor: processor, delivery: delivery,
                 clipboard: ClipboardFake(), history: history
             )
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await configuration.selectRecognitionProvider(qwen)
-            await sessions.send(.released)
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             await sessions.shutdown()
             let contexts = await transcriber.contexts
             try expect(contexts.map(\.recognitionProvider) == [openAI, qwen])
@@ -891,8 +891,8 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     textProcessor: processor, delivery: TextDeliveryFake(result: .delivered),
                     clipboard: ClipboardFake(), history: history
                 )
-                await sessions.send(.pressed)
-                await sessions.send(.released)
+                await sessions.dispatchPress()
+                await sessions.releaseAndAwaitTerminal()
                 await sessions.shutdown()
                 let record = await history.records.last
                 try expect(record?.transcriptionProvider == provider.rawValue)
@@ -929,8 +929,8 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     textProcessor: processor, delivery: TextDeliveryFake(result: .delivered),
                     clipboard: ClipboardFake(), history: history
                 )
-                await sessions.send(.pressed)
-                await sessions.send(.released)
+                await sessions.dispatchPress()
+                await sessions.releaseAndAwaitTerminal()
                 await sessions.shutdown()
                 let record = await history.records.last
                 try expect(record?.transcriptionProvider == provider.rawValue)
@@ -965,15 +965,15 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
                     textProcessor: processor, delivery: delivery,
                     clipboard: ClipboardFake(), history: history
                 )
-                await sessions.send(.pressed)
-                let release = Task { await sessions.send(.released) }
+                await sessions.dispatchPress()
+                let release = Task { await sessions.releaseAndAwaitTerminal() }
                 let didStart = await eventually(before: .seconds(2)) {
                     await transcriber.callCount == 1
                 }
                 try expect(didStart)
-                await sessions.send(.cancel)
+                await sessions.dispatchEscape()
                 await transcriber.resume()
-                await release.value
+                _ = await release.value
                 await sessions.shutdown()
                 let record = await history.records.last
                 try expect(record?.outcome.isCancelled == true)

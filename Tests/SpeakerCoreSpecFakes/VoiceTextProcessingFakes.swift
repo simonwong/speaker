@@ -75,6 +75,8 @@ public struct VoiceTextProcessorFake: VoiceTextProcessing {
         snapshotOperation = captureSnapshot
     }
 
+    public var streaming: (any StreamingVoiceTextProcessing)? { nil }
+
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot {
         await snapshotOperation()
     }
@@ -98,6 +100,8 @@ public struct FailingVoiceTextProcessor: VoiceTextProcessing {
     public init(failure: VoiceTextProcessingFailure) {
         self.failure = failure
     }
+
+    public var streaming: (any StreamingVoiceTextProcessing)? { nil }
 
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
@@ -127,6 +131,8 @@ public actor HangingVoiceTextProcessor: VoiceTextProcessing {
         self.confirmedText = confirmedText
     }
 
+    public nonisolated var streaming: (any StreamingVoiceTextProcessing)? { nil }
+
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
     public func process(
@@ -137,7 +143,7 @@ public actor HangingVoiceTextProcessor: VoiceTextProcessing {
         await progress(
             .init(
                 stage: reportedStage,
-                confirmedDoubaoResult: confirmedText.map {
+                confirmedRecognitionResult: confirmedText.map {
                     TranscriptionResult(text: $0, providerRequestID: nil)
                 }
             ))

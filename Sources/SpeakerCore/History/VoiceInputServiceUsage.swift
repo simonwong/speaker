@@ -134,7 +134,7 @@ package struct VoiceInputServiceUsageAccumulator {
                 dictionaryWords: record.dictionarySnapshotEntries.map(\.word)
             )
             let output = ChatCompletionRefinementClient.responseCharacterCount(
-                text: record.deepSeekText ?? record.finalText ?? ""
+                text: record.refinedText ?? record.finalText ?? ""
             )
             refinement[key, default: .init()].requests += 1
             refinement[key, default: .init()].inputCharacters += input

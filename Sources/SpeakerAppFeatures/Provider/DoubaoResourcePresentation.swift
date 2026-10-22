@@ -37,7 +37,7 @@ package enum DoubaoResourcePresentation {
         case .invalidCredential:
             "API Key 无效。请复制豆包控制台里的 API Key，不要填 APP ID 或 Access Token。"
         default:
-            VoiceInputProblem(doubaoFailure: failure).failure.userTitle
+            SpeechRecognitionFailure(doubaoFailure: failure).userFailure.userTitle
         }
     }
 }
