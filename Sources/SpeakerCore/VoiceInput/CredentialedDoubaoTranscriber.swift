@@ -7,6 +7,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     private let connector: any DoubaoWebSocketConnecting
     private let requestUserID: @Sendable () -> String
     private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
+    private let liveness: TransportLivenessProbe
     private var resource: DoubaoStreamingResource
 
     public init(
@@ -15,6 +16,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         connector: any DoubaoWebSocketConnecting =
             URLSessionDoubaoWebSocketConnector(),
         runtimeDiagnostics: VoiceProviderRuntimeDiagnostics? = nil,
+        liveness: TransportLivenessProbe = .live,
         requestUserID: @escaping @Sendable () -> String = {
             UUID().uuidString
         }
@@ -23,6 +25,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
         self.resource = resource
         self.connector = connector
         self.runtimeDiagnostics = runtimeDiagnostics
+        self.liveness = liveness
         self.requestUserID = requestUserID
     }
 
@@ -76,7 +79,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
             ),
             connector: connector,
             runtimeDiagnostics: runtimeDiagnostics,
-            runtimeOperation: runtimeOperation
+            runtimeOperation: runtimeOperation,
+            liveness: liveness
         )
         return try await client.transcribe(audioChunks)
     }
