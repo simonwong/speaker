@@ -1379,6 +1379,239 @@ enum InputTargetSpecs: CoreSpecDomain {
                     == "pastePost.rejected"
             )
         }
+
+        await runBoundedEvidenceSpecs(failures: &failures)
+        runEditableSignalSpecs(failures: &failures)
+    }
+
+    @MainActor
+    private static func runBoundedEvidenceSpecs(failures: inout [String]) async {
+        let limit = AccessibilityValueEvidenceLimits.maximumCharacterCount
+        let context = AccessibilityValueEvidenceLimits.contextCharacterCount
+
+        run("value evidence reads a bounded window around the selection", failures: &failures) {
+            try expect(
+                AccessibilityValueEvidence.sampleRange(
+                    around: NSRange(location: 5_000, length: 10),
+                    length: 10_000
+                ) == NSRange(location: 5_000 - context, length: 10 + 2 * context)
+            )
+            try expect(
+                AccessibilityValueEvidence.sampleRange(
+                    around: NSRange(location: 3, length: 0),
+                    length: 10
+                ) == NSRange(location: 0, length: 10)
+            )
+            try expect(
+                AccessibilityValueEvidence.sampleRange(around: nil, length: 10_000)
+                    == NSRange(location: 0, length: 2 * context),
+                "a target without a selection read more than the start of its value"
+            )
+            try expect(
+                AccessibilityValueEvidence.sampleRange(
+                    around: NSRange(location: 0, length: 0),
+                    length: limit + 1
+                ) == nil,
+                "a value over the limit was used as evidence"
+            )
+            try expect(
+                AccessibilityTextSample.evidence(
+                    fromValue: String(repeating: "a", count: limit + 1),
+                    selection: nil
+                ) == nil
+            )
+            try expect(
+                AccessibilityTextSample.evidence(
+                    fromValue: String(repeating: "a", count: limit),
+                    selection: nil
+                ) != nil
+            )
+        }
+
+        run("a paste expectation tells the result from the original", failures: &failures) {
+            let original = AccessibilityTextSample(
+                value: "Hello world",
+                range: NSRange(location: 0, length: 11)
+            )
+            guard
+                let expectation = AccessibilityPasteExpectation(
+                    original: original,
+                    selection: NSRange(location: 6, length: 5),
+                    inserting: "w"
+                )
+            else {
+                throw SpecFailure(message: "a selection inside the window had no expectation")
+            }
+            let range = expectation.receiptRange
+            try expect(range == NSRange(location: 0, length: 11))
+            try expect(
+                expectation.classify(.init(value: "Hello w", range: range)) == .expected
+            )
+            try expect(
+                expectation.classify(.init(value: "Hello world", range: range)) == .original,
+                "the unchanged value was taken as the pasted result"
+            )
+            try expect(
+                expectation.classify(.init(value: "Hello x", range: range)) == .other
+            )
+            try expect(
+                AccessibilityPasteExpectation(
+                    original: original,
+                    selection: nil,
+                    inserting: "w"
+                ) == nil,
+                "a target without a selection claimed a receipt"
+            )
+        }
+
+        run("an edit outside the window that changes the length is seen", failures: &failures) {
+            let value = String(repeating: "a", count: 2_000)
+            let selection = NSRange(location: 1_000, length: 0)
+            guard
+                let evidence = AccessibilityTextSample.evidence(
+                    fromValue: value,
+                    selection: selection
+                )
+            else { throw SpecFailure(message: "evidence was not built") }
+            let edited = value + "b"
+            try expect(
+                !AccessibilityTextSample(value: edited, range: evidence.range).shows(evidence)
+            )
+            try expect(
+                AccessibilityTextSample(value: value, range: evidence.range).shows(evidence)
+            )
+        }
+
+        await runAsync(
+            "a long value is checked through bounded windows and still confirms",
+            failures: &failures
+        ) {
+            let value = String(repeating: "a", count: 10_000)
+            let selection = NSRange(location: 5_000, length: 0)
+            let pasted = (value as NSString).replacingCharacters(in: selection, with: " world")
+            let system = AccessibilityTargetSystemFake(
+                originalValue: value,
+                selection: selection,
+                valueResponses: [.success(value), .success(value), .success(pasted)]
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "fake AX target was not captured")
+            }
+
+            let outcome = await targets.deliver(
+                " world",
+                to: target,
+                commitGate: DeliveryCommitGate()
+            )
+            let ranges = await system.sampleRangesRead
+
+            try expect(outcome == .delivered)
+            try expect(ranges.count == 3)
+            try expect(
+                ranges.allSatisfy { $0.length <= 2 * context + " world".utf16.count },
+                "delivery read more than a bounded window: \(ranges)"
+            )
+        }
+
+        await runAsync(
+            "a length change outside the window stops delivery before paste",
+            failures: &failures
+        ) {
+            let value = String(repeating: "a", count: 2_000)
+            let system = AccessibilityTargetSystemFake(
+                originalValue: value,
+                selection: NSRange(location: 1_000, length: 0),
+                valueResponses: [.success(value + "b")]
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "fake AX target was not captured")
+            }
+
+            let outcome = await targets.deliver(
+                " world",
+                to: target,
+                commitGate: DeliveryCommitGate()
+            )
+
+            try expect(
+                outcome
+                    == .pendingCopyDiagnosed(
+                        .changedTarget,
+                        .init(stage: .valueRead, cause: .changed)
+                    )
+            )
+            let pastePosts = await system.pasteCallCount
+            try expect(pastePosts == 0)
+        }
+
+        await runAsync(
+            "a value over the evidence limit is pasted without a receipt",
+            failures: &failures
+        ) {
+            let value = String(repeating: "a", count: limit + 1)
+            let system = AccessibilityTargetSystemFake(
+                originalValue: value,
+                selection: NSRange(location: 0, length: 0),
+                valueResponses: []
+            )
+            let targets = AccessibilityInputTargets(system: system)
+            guard case .writable(let target) = await targets.capture() else {
+                throw SpecFailure(message: "an over-limit target was not captured")
+            }
+
+            let outcome = await targets.deliver(
+                " world",
+                to: target,
+                commitGate: DeliveryCommitGate()
+            )
+            let receipts = await system.pasteReceipts
+            let ranges = await system.sampleRangesRead
+
+            guard case .pasteCommandPosted(let diagnostic) = outcome else {
+                throw SpecFailure(message: "an over-limit target did not reach paste")
+            }
+            try expect(diagnostic.code == "pasteReceipt.unconfirmed")
+            try expect(receipts.map(\.currentConclusion) == [.unconfirmed])
+            try expect(ranges.isEmpty, "an over-limit value was read during delivery")
+        }
+    }
+
+    @MainActor
+    private static func runEditableSignalSpecs(failures: inout [String]) {
+        func isEditable(
+            role: String?,
+            subrole: String? = nil,
+            selection: Bool = false,
+            settable: Bool = false,
+            ancestor: Bool = false
+        ) -> Bool {
+            AccessibilityEditableSignal.isEditable(
+                role: role,
+                subrole: subrole,
+                hasSelectedTextRange: selection,
+                isValueSettable: { settable },
+                hasEditableAncestor: { ancestor }
+            )
+        }
+
+        run("automatic paste needs a positive editable signal", failures: &failures) {
+            for role in ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"] {
+                try expect(isEditable(role: role), "\(role) was not editable")
+            }
+            try expect(isEditable(role: "AXGroup", subrole: "AXSearchField"))
+            try expect(isEditable(role: "AXGroup", selection: true))
+            try expect(isEditable(role: "AXGroup", settable: true))
+            try expect(isEditable(role: "AXGroup", ancestor: true))
+            try expect(isEditable(role: nil, ancestor: true))
+            try expect(
+                !isEditable(role: "AXButton"),
+                "a control with no editable signal accepted a paste"
+            )
+            try expect(!isEditable(role: "AXGroup"))
+            try expect(!isEditable(role: nil))
+        }
     }
 
     /// Advances `clock` through every receipt poll until the receipt

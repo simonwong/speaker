@@ -250,7 +250,7 @@ struct LifecycleAccessibilityTargetSystem: AccessibilityTargetSystem {
     private let evidence = AccessibilityTargetEvidence(
         reference: AccessibilityTargetReference(),
         selection: nil,
-        originalValue: nil,
+        valueSample: nil,
         processID: 42,
         applicationName: "Editor"
     )
@@ -282,9 +282,10 @@ struct LifecycleAccessibilityTargetSystem: AccessibilityTargetSystem {
         .success("AXTextArea")
     }
 
-    func value(
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<String?> {
+    func textSample(
+        of target: AccessibilityTargetReference,
+        in range: NSRange
+    ) async -> AccessibilityOperationResult<AccessibilityTextSample?> {
         .success(nil)
     }
 
@@ -319,6 +320,7 @@ struct LifecycleAccessibilityTargetSystem: AccessibilityTargetSystem {
 
 actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     private let evidence: AccessibilityTargetEvidence
+    private let originalValue: String?
     private var valueResponses: [AccessibilityOperationResult<String?>]
     private var selectionResponses: [AccessibilityOperationResult<NSRange?>]
     private var subroleResponses: [AccessibilityOperationResult<String?>]
@@ -332,8 +334,11 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     private(set) var pasteReceipts: [PasteReceipt] = []
     private(set) var captureFocusedCallCount = 0
     private(set) var captureTargetCallCount = 0
+    /// The ranges asked of `textSample(of:in:)`, in order.
+    private(set) var sampleRangesRead: [NSRange] = []
 
-    /// `valueAfterResponses` answers every value read once
+    /// Value responses are whole values; each read returns the asked window
+    /// of one. `valueAfterResponses` answers every value read once
     /// `valueResponses` runs out; by default the original value.
     /// `pasteHandler`, when given, performs the paste instead of returning
     /// `pasteResult`.
@@ -354,10 +359,13 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
     ) {
         self.valueAfterResponses = valueAfterResponses
         self.pasteHandler = pasteHandler
+        self.originalValue = originalValue
         evidence = AccessibilityTargetEvidence(
             reference: AccessibilityTargetReference(scope: referenceScope),
             selection: selection,
-            originalValue: originalValue,
+            valueSample: originalValue.flatMap {
+                AccessibilityTextSample.evidence(fromValue: $0, selection: selection)
+            },
             processID: processID,
             applicationName: "Editor"
         )
@@ -403,13 +411,24 @@ actor AccessibilityTargetSystemFake: AccessibilityTargetSystem {
         return roleResponses.removeFirst()
     }
 
-    func value(
-        of target: AccessibilityTargetReference
-    ) async -> AccessibilityOperationResult<String?> {
-        guard !valueResponses.isEmpty else {
-            return valueAfterResponses ?? .success(evidence.originalValue)
+    func textSample(
+        of target: AccessibilityTargetReference,
+        in range: NSRange
+    ) async -> AccessibilityOperationResult<AccessibilityTextSample?> {
+        sampleRangesRead.append(range)
+        let response =
+            valueResponses.isEmpty
+            ? valueAfterResponses ?? .success(originalValue)
+            : valueResponses.removeFirst()
+        switch response {
+        case .success(let value?)
+        where value.utf16.count <= AccessibilityValueEvidenceLimits.maximumCharacterCount:
+            return .success(AccessibilityTextSample(value: value, range: range))
+        case .success:
+            return .success(nil)
+        case .failure(let failure):
+            return .failure(failure)
         }
-        return valueResponses.removeFirst()
     }
 
     func focusedState(
