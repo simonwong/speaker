@@ -1,6 +1,7 @@
 import Foundation
 import SpeakerCore
 import SpeakerSpecSupport
+import os
 
 let specAudio = CapturedAudio(
     data: Data([0x52, 0x49, 0x46, 0x46]),
@@ -8,16 +9,15 @@ let specAudio = CapturedAudio(
     peakPower: -10
 )
 
-final class LockedCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
+final class LockedCounter: Sendable {
+    private let count = OSAllocatedUnfairLock(initialState: 0)
 
     func increment() {
-        lock.withLock { count += 1 }
+        count.withLock { $0 += 1 }
     }
 
     var value: Int {
-        lock.withLock { count }
+        count.withLock { $0 }
     }
 }
 

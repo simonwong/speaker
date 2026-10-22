@@ -122,6 +122,11 @@ enum SQLiteHistoryCorruptionRecovery {
     /// Removes the legacy JSON history and every preserved recovery set once
     /// the user has cleared their history: nothing they asked to erase may
     /// survive in an archive.
+    ///
+    /// Removal crosses `OwnerOnlyFilePersistence`. A preserved database is a
+    /// `history.corrupt-…` directory and is removed without following any
+    /// symbolic link inside it; every other artifact must be a regular file
+    /// owned by the user, and anything else is refused and left for diagnosis.
     static func removeLegacyArtifacts(around fileURL: URL) throws {
         let directory = fileURL.deletingLastPathComponent()
         let candidates = try FileManager.default.contentsOfDirectory(
@@ -131,12 +136,23 @@ enum SQLiteHistoryCorruptionRecovery {
         )
         for candidate in candidates {
             let name = candidate.lastPathComponent
-            if name == "history.json"
-                || name.hasPrefix("history.corrupt-")
-                || name.hasPrefix("history.migrated-")
-            {
-                try FileManager.default.removeItem(at: candidate)
+            guard
+                name == "history.json"
+                    || name.hasPrefix("history.corrupt-")
+                    || name.hasPrefix("history.migrated-")
+            else { continue }
+            if isDirectory(candidate) {
+                try OwnerOnlyFilePersistence.removeDirectoryTree(at: candidate)
+            } else {
+                try OwnerOnlyFilePersistence.removeRegularFile(at: candidate)
             }
         }
+    }
+
+    /// Whether the entry itself, not a link's destination, is a directory.
+    private static func isDirectory(_ url: URL) -> Bool {
+        var status = stat()
+        return url.path.withCString { Darwin.lstat($0, &status) } == 0
+            && (status.st_mode & S_IFMT) == S_IFDIR
     }
 }

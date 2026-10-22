@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import AppKit
 import Foundation
+import os
 
 public enum AudioCaptureError: Error, Equatable, Sendable {
     case alreadyRecording
@@ -479,7 +480,9 @@ package struct AudioCaptureHardwareFactory: Sendable {
     )
 }
 
-// The owning capture actor serializes lifecycle calls; tap metrics synchronize separately.
+// `@unchecked` because it owns `AVAudioEngine` and its tap objects, which are not
+// `Sendable`. The owning capture actor serializes lifecycle calls; tap metrics
+// synchronize separately.
 private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var captureFormat: AVAudioFormat?
@@ -597,22 +600,25 @@ private final class LiveAudioCaptureHardware: AudioCaptureHardware, @unchecked S
     }
 }
 
-private final class AudioCaptureLevelMeter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var currentPower: Float = -160
-    private var isFinished = false
+private final class AudioCaptureLevelMeter: Sendable {
+    private struct State: Sendable {
+        var currentPower: Float = -160
+        var isFinished = false
+    }
 
-    var power: Float { lock.withLock { currentPower } }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var power: Float { state.withLock { $0.currentPower } }
 
     func consume(_ buffer: AVAudioPCMBuffer) {
         let power = PCMStreamingBridge.power(of: buffer)
-        lock.withLock {
-            guard !isFinished else { return }
-            currentPower = power
+        state.withLock { state in
+            guard !state.isFinished else { return }
+            state.currentPower = power
         }
     }
 
-    func finish() { lock.withLock { isFinished = true } }
+    func finish() { state.withLock { $0.isFinished = true } }
 }
 
 package enum AudioChunkYieldResult: Equatable, Sendable {
@@ -624,14 +630,17 @@ package enum AudioChunkYieldResult: Equatable, Sendable {
 /// A bounded handoff between the real-time audio tap and async provider I/O.
 /// Once exhausted it terminates rather than silently dropping part of an
 /// utterance or allowing a stalled network path to grow memory indefinitely.
-package final class BoundedAudioChunkStream: @unchecked Sendable {
+package final class BoundedAudioChunkStream: Sendable {
+    private struct State: Sendable {
+        var isFinished = false
+        var exhausted = false
+    }
+
     package let stream: AsyncStream<Data>
 
-    private let lock = NSLock()
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let continuation: AsyncStream<Data>.Continuation
     private let onBufferExhausted: @Sendable () -> Void
-    private var isFinished = false
-    private var exhausted = false
 
     package init(
         maximumBufferedBytes: Int,
@@ -651,52 +660,55 @@ package final class BoundedAudioChunkStream: @unchecked Sendable {
 
     @discardableResult
     package func yield(_ chunk: Data) -> AudioChunkYieldResult {
-        lock.lock()
-        guard !isFinished else {
-            lock.unlock()
-            return .terminated
+        // The yield stays inside the lock so no chunk is enqueued after
+        // `finish()` has claimed the stream. Finishing and the exhaustion
+        // callback run outside it.
+        let (result, finishesStream) = state.withLock {
+            [continuation] state -> (AudioChunkYieldResult, Bool) in
+            guard !state.isFinished else { return (.terminated, false) }
+            switch continuation.yield(chunk) {
+            case .enqueued:
+                return (.accepted, false)
+            case .dropped:
+                state.exhausted = true
+                state.isFinished = true
+                return (.bufferExhausted, true)
+            case .terminated:
+                state.isFinished = true
+                return (.terminated, false)
+            @unknown default:
+                state.isFinished = true
+                return (.terminated, true)
+            }
         }
-        switch continuation.yield(chunk) {
-        case .enqueued:
-            lock.unlock()
-            return .accepted
-        case .dropped:
-            exhausted = true
-            isFinished = true
-            lock.unlock()
+        if finishesStream {
             continuation.finish()
+        }
+        if result == .bufferExhausted {
             onBufferExhausted()
-            return .bufferExhausted
-        case .terminated:
-            isFinished = true
-            lock.unlock()
-            return .terminated
-        @unknown default:
-            isFinished = true
-            lock.unlock()
-            continuation.finish()
-            return .terminated
         }
+        return result
     }
 
     package func finish() {
-        lock.lock()
-        guard !isFinished else {
-            lock.unlock()
-            return
+        let claimed = state.withLock { state -> Bool in
+            guard !state.isFinished else { return false }
+            state.isFinished = true
+            return true
         }
-        isFinished = true
-        lock.unlock()
-        continuation.finish()
+        if claimed {
+            continuation.finish()
+        }
     }
 
     package var didExhaustBuffer: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return exhausted
+        state.withLock { $0.exhausted }
     }
 }
 
+/// `@unchecked` because it owns an `AVAudioConverter`, which is not
+/// `Sendable`. Only the engine tap, which delivers buffers serially, touches
+/// the converter; every other mutable value lives in `state`.
 private final class PCMStreamingBridge: @unchecked Sendable {
     struct Metrics: Sendable {
         let currentPower: Float
@@ -705,16 +717,19 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         let didFailConversion: Bool
     }
 
-    private let lock = NSLock()
+    private struct State: Sendable {
+        var chunkBuffer = PCMChunkBuffer(chunkSize: 6_400)
+        var currentPower: Float = -160
+        var peakPower: Float = -160
+        var didFailConversion = false
+        var isFinished = false
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let converter: AVAudioConverter
     private let outputFormat: AVAudioFormat
     private let audioStream: BoundedAudioChunkStream
     private let onConversionFailure: @Sendable () -> Void
-    private var chunkBuffer = PCMChunkBuffer(chunkSize: 6_400)
-    private var currentPower: Float = -160
-    private var peakPower: Float = -160
-    private var didFailConversion = false
-    private var isFinished = false
 
     init(
         converter: AVAudioConverter,
@@ -728,41 +743,36 @@ private final class PCMStreamingBridge: @unchecked Sendable {
         self.onConversionFailure = onConversionFailure
     }
 
-    /// The engine tap delivers buffers serially, so the converter and the
-    /// chunk buffer are only ever touched from one thread at a time. The lock
-    /// protects the metrics and the finished flag that `metrics()` and
-    /// `finish()` read from other threads; format conversion happens outside
-    /// it so a slow conversion never blocks a meter read.
+    /// The engine tap delivers buffers serially, so the converter is only
+    /// ever touched from one thread at a time. The lock protects the metrics,
+    /// the chunk buffer, and the finished flag that `metrics()` and `finish()`
+    /// reach from other threads; format conversion happens outside it so a
+    /// slow conversion never blocks a meter read.
     func consume(_ input: AVAudioPCMBuffer) {
         let power = Self.power(of: input)
 
-        lock.lock()
-        guard !isFinished else {
-            lock.unlock()
-            return
+        let accepting = state.withLock { state -> Bool in
+            guard !state.isFinished else { return false }
+            state.currentPower = power
+            state.peakPower = max(state.peakPower, power)
+            return true
         }
-        currentPower = power
-        peakPower = max(peakPower, power)
-        lock.unlock()
+        guard accepting else { return }
 
         guard let converted = convert(input) else {
-            lock.lock()
-            didFailConversion = true
-            lock.unlock()
+            state.withLock { $0.didFailConversion = true }
             onConversionFailure()
             return
         }
 
-        var chunks: [Data] = []
-        lock.lock()
-        guard !isFinished else {
-            lock.unlock()
-            return
+        let chunks = state.withLock { state -> [Data] in
+            guard !state.isFinished else { return [] }
+            var chunks: [Data] = []
+            for data in converted {
+                chunks.append(contentsOf: state.chunkBuffer.append(data))
+            }
+            return chunks
         }
-        for data in converted {
-            chunks.append(contentsOf: chunkBuffer.append(data))
-        }
-        lock.unlock()
 
         for chunk in chunks {
             guard audioStream.yield(chunk) == .accepted else { return }
@@ -811,14 +821,12 @@ private final class PCMStreamingBridge: @unchecked Sendable {
     }
 
     func finish() {
-        lock.lock()
-        guard !isFinished else {
-            lock.unlock()
-            return
+        let remainder = state.withLock { state -> Data? in
+            guard !state.isFinished else { return nil }
+            state.isFinished = true
+            return state.chunkBuffer.finish()
         }
-        isFinished = true
-        let remainder = chunkBuffer.finish()
-        lock.unlock()
+        guard let remainder else { return }
 
         if !remainder.isEmpty {
             audioStream.yield(remainder)
@@ -827,14 +835,15 @@ private final class PCMStreamingBridge: @unchecked Sendable {
     }
 
     func metrics() -> Metrics {
-        lock.lock()
-        defer { lock.unlock() }
-        return Metrics(
-            currentPower: currentPower,
-            peakPower: peakPower,
-            didExhaustStreamBuffer: audioStream.didExhaustBuffer,
-            didFailConversion: didFailConversion
-        )
+        let didExhaustStreamBuffer = audioStream.didExhaustBuffer
+        return state.withLock { state in
+            Metrics(
+                currentPower: state.currentPower,
+                peakPower: state.peakPower,
+                didExhaustStreamBuffer: didExhaustStreamBuffer,
+                didFailConversion: state.didFailConversion
+            )
+        }
     }
 
     fileprivate static func power(of buffer: AVAudioPCMBuffer) -> Float {

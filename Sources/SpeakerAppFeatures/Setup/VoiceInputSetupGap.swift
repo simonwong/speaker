@@ -2,8 +2,9 @@ import SpeakerCore
 
 /// What still stops the next Voice Input Session before the user presses
 /// the shortcut: a missing runtime permission, or a selected Speech
-/// Recognition Provider with no saved Key, or on-device recognition whose
-/// language model is not installed.
+/// Recognition Provider whose readiness is `.needsSetup` — no saved Key, an
+/// on-device language model that is not installed, or a profile Speaker
+/// cannot run.
 ///
 /// The menu bar icon, the menu's first row, and the Overview banner all read
 /// this one value, so an unconfigured Speaker never looks ready on any of
@@ -14,42 +15,27 @@ package enum VoiceInputSetupGap: Equatable, Sendable {
     case speechRecognitionKey(SpeechRecognitionProviderID)
 
     /// Permissions come first because recording cannot start without them.
-    /// A Key whose presence has not been read yet is not reported, so a
-    /// configured Speaker does not flash a warning while it launches.
+    /// An unread Key or language model is not reported, so a configured
+    /// Speaker does not flash a warning while it launches.
     package static func resolve(
         permissions: PermissionSnapshot,
         recognitionProvider: SpeechRecognitionProviderID,
-        hasRecognitionKey: Bool?
+        recognitionReadiness: SpeechRecognitionReadiness
     ) -> Self? {
         if !permissions.allGranted { return .permissions }
-        if hasRecognitionKey == false { return .speechRecognitionKey(recognitionProvider) }
+        if recognitionReadiness == .needsSetup { return .speechRecognitionKey(recognitionProvider) }
         return nil
     }
 
-    /// Doubao's Key belongs to `DoubaoSettingsModel`; the other providers'
-    /// Keys belong to `SpeechRecognitionSettingsModel`. Each reports `nil`
-    /// until it has read its credential.
     @MainActor
     package static func current(
         permissions: PermissionSnapshot,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel
     ) -> Self? {
-        let provider = recognition.selectedProvider
-        let hasKey: Bool?
-        if !recognition.hasLoaded {
-            hasKey = nil
-        } else if provider == .doubao {
-            hasKey = doubao.status == .loading ? nil : doubao.hasConfiguredKey
-        } else if provider.isOnDevice {
-            hasKey = recognition.onDeviceModelStatus.map { $0 == .installed }
-        } else {
-            hasKey = recognition.hasStoredKey
-        }
-        return resolve(
+        resolve(
             permissions: permissions,
-            recognitionProvider: provider,
-            hasRecognitionKey: hasKey
+            recognitionProvider: recognition.selectedProvider,
+            recognitionReadiness: recognition.readiness
         )
     }
 

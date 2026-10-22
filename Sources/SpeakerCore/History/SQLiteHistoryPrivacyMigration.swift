@@ -123,10 +123,7 @@ enum SQLiteHistoryPrivacyMigration {
                     withJSONObject: object,
                     options: [.sortedKeys]
                 ),
-                let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
-                    HistoryRecordV1.self,
-                    from: sanitizedPayload
-                ), let record = try? stored.domainRecord
+                let record = try? SessionRecordPayloadCodec.decode(sanitizedPayload)
             else {
                 plan.deletions.append(sessionID)
                 plan.corruptedDeletionCount += 1

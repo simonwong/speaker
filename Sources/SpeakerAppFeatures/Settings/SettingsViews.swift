@@ -170,7 +170,6 @@ private struct SettingsOverviewView: View {
         case .speechRecognition:
             SpeechRecognitionSettingsCard(
                 model: workspace.recognition,
-                doubao: workspace.doubao,
                 showsHeader: false
             )
         case .refinement:

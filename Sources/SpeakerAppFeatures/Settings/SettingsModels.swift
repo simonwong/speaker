@@ -48,7 +48,6 @@ package final class SettingsWorkspace {
     let microphones: MicrophoneSelectionFeature
     let loginItemSettings: LoginItemSettingsModel
     let historyRetention: HistoryRetentionSettingsModel
-    let doubao: DoubaoSettingsModel
     let recognition: SpeechRecognitionSettingsModel
     let refinement: RefinementSettingsModel
     let dictionary: DictionarySettingsModel
@@ -68,7 +67,6 @@ package final class SettingsWorkspace {
         microphones: MicrophoneSelectionFeature,
         loginItemSettings: LoginItemSettingsModel,
         historyRetention: HistoryRetentionSettingsModel,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel,
         refinement: RefinementSettingsModel,
         dictionary: DictionarySettingsModel,
@@ -86,7 +84,6 @@ package final class SettingsWorkspace {
         self.microphones = microphones
         self.loginItemSettings = loginItemSettings
         self.historyRetention = historyRetention
-        self.doubao = doubao
         self.recognition = recognition
         self.refinement = refinement
         self.dictionary = dictionary
@@ -103,7 +100,6 @@ package final class SettingsWorkspace {
         guard dataErasure.state == .idle else { return }
         refreshPermissions()
         microphones.refresh()
-        await doubao.refresh()
         await recognition.refresh()
         await loginItemSettings.refresh()
         await historyRetention.refresh()
@@ -191,34 +187,41 @@ package final class RefinementSettingsModel: ObservableObject {
         .baseURL
     @Published package var isEditingModelID = false
     @Published package private(set) var providerNotice: String?
-    @Published package var apiKeyDraft = ""
     @Published package var customName = "我的模式"
     @Published package var customPrompt = ""
     @Published package var promptDraft = ""
     @Published package private(set) var promptOverrides = RefinementPromptOverrides()
     @Published package private(set) var inspectedPromptMode: BuiltInRefinementMode?
     @Published private(set) var isEditingCustomMode = false
-    @Published package private(set) var hasStoredKey = false
-    @Published package private(set) var isUpdatingKey = false
-    @Published package private(set) var isConnectionVerified = false
-    @Published package private(set) var isCheckingConnection = false
-    @Published package private(set) var connectionFailure: String?
-    @Published private(set) var credentialNotice: String?
     @Published private(set) var notice: String?
 
     private let service: any RefinementProviderServicing
     private let configuration: VoiceInputConfigurationController
     private let settingsStore: any AppSettingsStoring
-    private var connectionGeneration = 0
-    private var connectionTask: Task<Void, Never>?
+    /// The selected profile's Key, retargeted whenever the profile changes.
+    private let credential: ProviderCredentialEditor
+    private var credentialChanges: AnyCancellable?
     private var deferredMode: TextRefinementMode?
-    private var cancelledConnectionTasks: [Task<Void, Never>] = []
     private var providerDrafts:
         [RefinementProviderID: (modelID: String, baseURL: String, manual: Bool)] = [:]
 
     package var selectedProvider: RefinementProviderID { providers.selectedProvider }
     package var selectedProfile: RefinementProviderProfile { providers.selectedProfile }
     package var providerName: String { selectedProvider.displayName }
+    package var hasStoredKey: Bool { credential.hasStoredKey }
+    package var isUpdatingKey: Bool { credential.isUpdating }
+    package var apiKeyDraft: String {
+        get { credential.draft }
+        set { credential.draft = newValue }
+    }
+    package var isConnectionVerified: Bool {
+        if case .verified = credential.connection { true } else { false }
+    }
+    package var isCheckingConnection: Bool { credential.connection == .checking }
+    package var connectionFailure: String? {
+        if case .failed(let message) = credential.connection { message } else { nil }
+    }
+    var credentialNotice: String? { credential.failure }
     package var isMutating: Bool { isUpdatingKey || isUpdatingProvider }
     private var suggestedModelIDs: [String] {
         RefinementProviderCatalog.modelIDs(for: selectedProvider)
@@ -274,7 +277,7 @@ package final class RefinementSettingsModel: ObservableObject {
     private func updateProviderSettings(_ updated: RefinementProviderSettings) async {
         isUpdatingProvider = true
         defer { isUpdatingProvider = false }
-        invalidateConnectionCheck()
+        credential.invalidateConnection()
         do {
             let desiredMode = deferredMode ?? mode
             let profile = updated.selectedProfile
@@ -294,9 +297,9 @@ package final class RefinementSettingsModel: ObservableObject {
             providers = updated
             mode = activation.activeMode
             deferredMode = activation.deferredMode
-            hasStoredKey = configured
-            apiKeyDraft = ""
-            credentialNotice = nil
+            credential.retarget(
+                to: Self.credentialNamespace(for: profile, service: service),
+                hasStoredKey: configured)
             providerNotice = nil
             if switched, let draft = providerDrafts[selectedProvider] {
                 modelIDDraft = draft.modelID
@@ -317,18 +320,6 @@ package final class RefinementSettingsModel: ObservableObject {
         isEditingModelID = selectedProvider == .custom || !suggestedModelIDs.contains(modelIDDraft)
     }
 
-    private func invalidateConnectionCheck() {
-        connectionGeneration &+= 1
-        if let task = connectionTask {
-            task.cancel()
-            cancelledConnectionTasks.append(task)
-        }
-        connectionTask = nil
-        isCheckingConnection = false
-        isConnectionVerified = false
-        connectionFailure = nil
-    }
-
     package init(
         service: any RefinementProviderServicing,
         configuration: VoiceInputConfigurationController,
@@ -337,6 +328,25 @@ package final class RefinementSettingsModel: ObservableObject {
         self.service = service
         self.configuration = configuration
         self.settingsStore = settingsStore
+        credential = ProviderCredentialEditor(
+            namespace: Self.credentialNamespace(
+                for: RefinementProviderSettings().selectedProfile, service: service))
+        credentialChanges = credential.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+
+    /// A valid profile's credential namespace. Custom Keys are bound to the
+    /// profile's base URL by the service.
+    private static func credentialNamespace(
+        for profile: RefinementProviderProfile,
+        service: any RefinementProviderServicing
+    ) -> ProviderCredentialNamespace? {
+        guard (try? profile.validated()) != nil else { return nil }
+        return ProviderCredentialNamespace(
+            hasKey: { try await service.hasAPIKey(for: profile) },
+            save: { try await service.saveAPIKey($0, for: profile) },
+            delete: { try await service.deleteAPIKey(for: profile.provider) })
     }
 
     var choice: RefinementChoice {
@@ -378,13 +388,9 @@ package final class RefinementSettingsModel: ObservableObject {
         let loadedSettings = await settingsStore.load().settings
         providers = loadedSettings.refinementProviders
         syncProviderDrafts()
-        do {
-            if hasValidProfile {
-                hasStoredKey = try await service.hasAPIKey(for: selectedProfile)
-            }
-        } catch {
-            credentialNotice = SpeakerCopy.Failure.message(for: error)
-        }
+        credential.retarget(
+            to: Self.credentialNamespace(for: selectedProfile, service: service))
+        await credential.refresh()
         promptOverrides = loadedSettings.refinementPromptOverrides
         let loadedMode = loadedSettings.refinement.textRefinementMode
             .applyingPromptOverrides(loadedSettings.refinementPromptOverrides)
@@ -421,18 +427,8 @@ package final class RefinementSettingsModel: ObservableObject {
 
     package func saveAPIKey() async {
         guard !isMutating, hasValidProfile, !hasProfileChanges else { return }
-        isUpdatingKey = true
-        defer { isUpdatingKey = false }
-        let draft = apiKeyDraft
-        invalidateConnectionCheck()
+        guard await credential.save() else { return }
         do {
-            try await service.saveAPIKey(draft, for: selectedProfile)
-            connectionGeneration &+= 1
-            if apiKeyDraft == draft { apiKeyDraft = "" }
-            hasStoredKey = true
-            isConnectionVerified = false
-            connectionFailure = nil
-            credentialNotice = nil
             if let deferredMode {
                 let restoredMode = deferredMode.applyingPromptOverrides(
                     promptOverrides
@@ -445,80 +441,35 @@ package final class RefinementSettingsModel: ObservableObject {
             }
             notice = nil
         } catch {
-            connectionGeneration &+= 1
-            credentialNotice = SpeakerCopy.Failure.message(for: error)
+            notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
     package func deleteAPIKey() async {
         guard !isMutating else { return }
-        isUpdatingKey = true
-        defer { isUpdatingKey = false }
-        let draft = apiKeyDraft
-        invalidateConnectionCheck()
-        do {
-            try await service.deleteAPIKey(for: selectedProvider)
-            connectionGeneration &+= 1
-            hasStoredKey = false
-            isConnectionVerified = false
-            connectionFailure = nil
-            credentialNotice = nil
-            if apiKeyDraft == draft { apiKeyDraft = "" }
-            deferredMode = nil
-            await select(.defaultSmooth)
-        } catch {
-            connectionGeneration &+= 1
-            credentialNotice = SpeakerCopy.Failure.message(for: error)
-        }
+        guard await credential.delete() else { return }
+        deferredMode = nil
+        await select(.defaultSmooth)
     }
 
     package func checkConnection() {
         guard !isMutating, hasStoredKey, hasValidProfile, !hasProfileChanges else { return }
-        connectionGeneration &+= 1
-        let generation = connectionGeneration
-        let previousTask = connectionTask
         let service = service
         let profile = selectedProfile
-        isCheckingConnection = true
-        connectionFailure = nil
-        connectionTask = Task { @MainActor [weak self] in
-            previousTask?.cancel()
-            await previousTask?.value
-            guard !Task.isCancelled else { return }
-
-            let result: Result<String?, Error>
-            do {
-                result = .success(try await service.checkConnection(profile: profile))
-            } catch {
-                result = .failure(error)
-            }
-
-            guard let self,
-                generation == connectionGeneration,
-                !Task.isCancelled
-            else { return }
-            connectionTask = nil
-            isCheckingConnection = false
-            switch result {
-            case .success:
-                isConnectionVerified = true
-                connectionFailure = nil
-            case .failure(let failure as TextRefinementFailure):
-                isConnectionVerified = false
-                connectionFailure = connectionMessage(
-                    for: failure.kind
-                )
-            case .failure(let error):
-                isConnectionVerified = false
-                connectionFailure = SpeakerCopy.Failure.message(for: error)
-            }
-        }
+        let providerName = providerName
+        credential.checkConnection(
+            { try await service.checkConnection(profile: profile) },
+            describeFailure: { error in
+                if let failure = error as? TextRefinementFailure {
+                    Self.connectionMessage(for: failure.kind, providerName: providerName)
+                } else {
+                    SpeakerCopy.Failure.message(for: error)
+                }
+            })
     }
 
     package func shutdown() async {
-        invalidateConnectionCheck()
-        for task in cancelledConnectionTasks { await task.value }
-        cancelledConnectionTasks.removeAll()
+        await credential.shutdown()
     }
 
     package func select(
@@ -689,7 +640,9 @@ package final class RefinementSettingsModel: ObservableObject {
         )
     }
 
-    private func connectionMessage(for kind: TextRefinementFailureKind) -> String {
+    private static func connectionMessage(
+        for kind: TextRefinementFailureKind, providerName: String
+    ) -> String {
         switch kind {
         case .invalidCredential, .authentication:
             "\(providerName) Key 无效，请重新保存后检查连接。"

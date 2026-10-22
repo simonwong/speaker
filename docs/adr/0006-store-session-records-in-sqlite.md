@@ -14,7 +14,7 @@ The first implementation, `VersionedLocalSessionHistory`, rewrote one versioned 
 
 Session Records live in SQLite through `SQLiteSessionHistory`, an actor in `SpeakerCore`. The file crosses `OwnerOnlyFilePersistence` ([ADR-0004](0004-protect-local-sensitive-data.md)), and the database, `-wal`, `-shm`, and `-journal` companions are re-protected after every write.
 
-`VersionedLocalSessionHistory` is kept only as a legacy source. `SpeakerRuntime` reads it once at startup, imports its records through `importLegacyRecords`, and removes the old document only after the import verifies. A legacy file that reports corruption, a permission problem, or a write failure is left untouched and reported as a diagnostic. The migration is one-way; nothing writes the JSON document again.
+The JSON document is kept only as a legacy source, read through `LegacyHistoryReader`, which has no write, delete, clear, or retention path. `SpeakerRuntime` reads it once at startup, imports its records through `importLegacyRecords`, and removes the old document through `OwnerOnlyFilePersistence` only after the import verifies. A legacy file that cannot be protected or read is left untouched and reported as a diagnostic; one that cannot be decoded is preserved as a `history.corrupt-…json` sibling. The migration is one-way; nothing writes the JSON document again. Each element of its `records` array and each SQLite row payload are the same JSON object, encoded and decoded by `SessionRecordPayloadCodec`; the core specifications pin those bytes, so moving or renaming the codec cannot change what existing rows decode to.
 
 The connection opens with `journal_mode=WAL`, `synchronous=FULL`, and `secure_delete=ON`. WAL keeps readers off the writer's path; `secure_delete` overwrites freed pages so removed content does not survive in the file. Every mutation runs as `BEGIN IMMEDIATE` and either commits or rolls back.
 
@@ -35,6 +35,6 @@ Transcript text is persisted only after the Input Target's security class is con
 - History is transactional and incrementally written; save cost no longer scales with the size of the archive.
 - A committed deletion is final. Callers observe eviction, clear, and scrub through the store's status and notice, never by inferring rollback from a checkpoint error.
 - Checkpoint convergence is part of the store's contract: pending truncation must be retried on later writes and at the next clean open, and shutdown or erasure closes the database only after a successful checkpoint.
-- Recovery artifacts and legacy documents are Speaker-owned files with their own privacy rules; a clear removes them, and pruning bounds how many corruption archives accumulate.
+- Recovery artifacts and legacy documents are Speaker-owned files with their own privacy rules; a clear removes them through `OwnerOnlyFilePersistence` without following symbolic links, and pruning bounds how many corruption archives accumulate.
 - Persistence specifications exercise temporary on-disk databases through the same interface as production callers, covering schema handling, retention, deletion, secure-target redaction, scrub, and corruption recovery.
 - Replacing the storage engine again would have to reproduce transactional eviction, physical deletion, checkpoint convergence, and corruption preservation; it is not an implementation detail behind the history interface.

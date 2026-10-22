@@ -1,8 +1,9 @@
 import Foundation
+import os
 
 /// Serializes synchronous global-event callbacks into one ordered async
 /// consumer so a quick release can never overtake its preceding press.
-package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
+package final class VoiceInputTriggerDispatcher: Sendable {
     private struct SequencedTrigger: Sendable {
         let trigger: GlobalVoiceTrigger
         let sequence: UInt64
@@ -120,32 +121,35 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
         consumer.cancel()
     }
 
-    private final class GestureController: @unchecked Sendable {
-        private let lock = NSLock()
-        private var nextSequence: UInt64 = 0
-        private var ownerSequence: UInt64?
-        private var physicalKeyIsDown = false
-        private var gesture = VoiceShortcutGestureStateMachine()
+    private final class GestureController: Sendable {
+        private struct State: Sendable {
+            var nextSequence: UInt64 = 0
+            var ownerSequence: UInt64?
+            var physicalKeyIsDown = false
+            var gesture = VoiceShortcutGestureStateMachine()
+        }
+
+        private let state = OSAllocatedUnfairLock(initialState: State())
 
         func handle(
             _ trigger: GlobalVoiceTrigger,
             at uptimeNanoseconds: UInt64
         ) -> [SequencedTrigger] {
-            lock.withLock {
-                nextSequence &+= 1
-                let sequence = nextSequence
-                let existingOwnerSequence = ownerSequence
+            state.withLock { state in
+                state.nextSequence &+= 1
+                let sequence = state.nextSequence
+                let existingOwnerSequence = state.ownerSequence
                 switch trigger {
                 case .pressed:
-                    physicalKeyIsDown = true
+                    state.physicalKeyIsDown = true
                 case .released, .cancel, .monitorRecovered:
-                    physicalKeyIsDown = false
+                    state.physicalKeyIsDown = false
                 }
-                let semanticTriggers = gesture.handle(trigger, at: uptimeNanoseconds)
+                let semanticTriggers = state.gesture.handle(trigger, at: uptimeNanoseconds)
                 if trigger == .pressed, semanticTriggers.contains(.pressed) {
-                    ownerSequence = sequence
+                    state.ownerSequence = sequence
                 } else if trigger == .cancel {
-                    ownerSequence = nil
+                    state.ownerSequence = nil
                 }
                 return semanticTriggers.map {
                     SequencedTrigger(
@@ -162,24 +166,24 @@ package final class VoiceInputTriggerDispatcher: @unchecked Sendable {
         }
 
         func recoverStalePress(sequence: UInt64, at uptimeNanoseconds: UInt64) -> Bool {
-            lock.withLock {
-                gesture = VoiceShortcutGestureStateMachine()
-                guard gesture.handle(.pressed, at: uptimeNanoseconds) == [.pressed] else {
+            state.withLock { state in
+                state.gesture = VoiceShortcutGestureStateMachine()
+                guard state.gesture.handle(.pressed, at: uptimeNanoseconds) == [.pressed] else {
                     return false
                 }
-                if !physicalKeyIsDown {
-                    _ = gesture.handle(.released, at: uptimeNanoseconds)
+                if !state.physicalKeyIsDown {
+                    _ = state.gesture.handle(.released, at: uptimeNanoseconds)
                 }
-                ownerSequence = sequence
+                state.ownerSequence = sequence
                 return true
             }
         }
 
         func sessionTerminated(sequence: UInt64) {
-            lock.withLock {
-                guard ownerSequence == sequence else { return }
-                gesture = VoiceShortcutGestureStateMachine()
-                ownerSequence = nil
+            state.withLock { state in
+                guard state.ownerSequence == sequence else { return }
+                state.gesture = VoiceShortcutGestureStateMachine()
+                state.ownerSequence = nil
             }
         }
     }
