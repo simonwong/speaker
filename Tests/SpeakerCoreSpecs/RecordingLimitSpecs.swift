@@ -66,7 +66,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 return await iterator.next()
             }
 
-            await sessions.send(.pressed, triggerSequence: 41)
+            await sessions.press(triggerSequence: 41)
             try await clock.waitUntilSleepRequestCount(1)
             let requestedDuration = clock.sleepRequests.last
             try expect(
@@ -83,7 +83,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             // the limit ended recording is still the current one.
             var limitStream = await sessions.observe().makeAsyncIterator()
             let limitPresentation = await limitStream.next()
-            guard case .processing(_, .capturingTarget, _) = limitPresentation?.activity else {
+            guard case .processing(_, .capturingTarget) = limitPresentation?.activity else {
                 throw SpecFailure(
                     message:
                         "the limit published \(String(describing: limitPresentation?.activity))"
@@ -153,9 +153,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clock: clock
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(1)
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             try await clock.waitUntilCancelledSleepCount(1)
 
             let deliveredTexts = await delivery.deliveredTexts
@@ -202,7 +202,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await processor.waitUntilStarted()
             // Streaming can begin before the deadline is armed; firing an
             // unarmed deadline is a no-op and the case would wait forever.
@@ -216,10 +216,10 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             // later release belongs to a session that is no longer recording.
             // A release waits for the finishing session, so it runs alongside
             // the provider result that lets that session finish.
-            let release = Task { await sessions.send(.released) }
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             await processor.complete()
             let presentation = await terminal.value
-            await release.value
+            _ = await release.value
             await sessions.shutdown()
 
             let records = await history.records
@@ -257,9 +257,9 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 from: await cancellationSessions.observe()
             )
 
-            await cancellationSessions.send(.pressed)
+            await cancellationSessions.dispatchPress()
             try await cancellationClock.waitUntilSleepRequestCount(1)
-            await cancellationSessions.send(.cancel)
+            await cancellationSessions.dispatchEscape()
             let cancelledPresentation = await cancelledTerminal.value
             try await cancellationClock.waitUntilCancelledSleepCount(1)
             cancellationClock.advance(by: .seconds(600))
@@ -305,7 +305,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 from: await providerSessions.observe()
             )
 
-            await providerSessions.send(.pressed)
+            await providerSessions.dispatchPress()
             try await providerClock.waitUntilSleepRequestCount(1)
             await provider.waitUntilStarted()
             await provider.fail()
@@ -359,15 +359,15 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clock: clock
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(1)
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let firstRecordReady = await eventually(before: .seconds(2)) {
                 await history.records.count == 1
             }
             try expect(firstRecordReady, "first session did not finish normally")
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(2)
             let secondTerminal = terminalPresentation(from: await sessions.observe())
 
@@ -429,7 +429,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clock: clock
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await processor.waitUntilStarted()
             try await clock.waitUntilSleepRequestCount(1)
             clock.advance(by: .seconds(600))
@@ -501,7 +501,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let shutdownSessions = VoiceInputSessions(
                 audioCapture: shutdownAudio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
@@ -509,7 +510,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clock: shutdownClock
             )
 
-            await shutdownSessions.send(.pressed)
+            await shutdownSessions.dispatchPress()
             try await shutdownClock.waitUntilSleepRequestCount(1)
             await shutdownSessions.shutdown()
             try await shutdownClock.waitUntilCancelledSleepCount(1)
@@ -532,7 +533,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 from: await failureSessions.observe()
             )
 
-            await failureSessions.send(.pressed)
+            await failureSessions.dispatchPress()
             try await failureClock.waitUntilSleepRequestCount(1)
             await failureAudio.emitFailure(.deviceConfigurationChanged)
             let failurePresentation = await failureTerminal.value
@@ -559,7 +560,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: target,
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history,
@@ -568,7 +569,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(1)
             clock.advance(by: .seconds(600))
             let presentation = await terminal.value
@@ -622,7 +623,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 clock: clock
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(1)
             let requested = clock.sleepRequests.last
             await sessions.shutdown()
@@ -641,7 +642,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
@@ -656,7 +658,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 return nil
             }
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(1)
             clock.advance(by: .seconds(585))
             await audio.emit(RecordingTelemetry(elapsedMilliseconds: 585_000, peakPower: -20))
@@ -692,7 +694,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let terminal = terminalPresentation(from: await sessions.observe())
             let shutdownCompletion = CompletionFlag()
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             try await clock.waitUntilSleepRequestCount(1)
             await provider.waitUntilStarted()
             await provider.fail()
@@ -734,7 +736,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -793,14 +796,15 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "hello"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "hello")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             try await clock.waitUntilSleepRequestCount(1)
             let shutdownCompletion = CompletionFlag()
             let shutdown = Task {
@@ -832,7 +836,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "保留"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -844,12 +849,14 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             dispatcher.send(.released, at: 1_050_000_000)
             dispatcher.send(.pressed, at: 2_000_000_000)
             dispatcher.send(.released, at: 2_050_000_000)
-            _ = await terminal.value
+            let retained = await terminal.value
 
             dispatcher.send(.pressed, at: 3_000_000_000)
             dispatcher.send(.released, at: 3_050_000_000)
             await settle()
-            await sessions.send(.dismissResult)
+            if let id = retained?.activity.sessionID {
+                await sessions.dismissResult(expectedSessionID: id)
+            }
 
             dispatcher.send(.pressed, at: 4_000_000_000)
             let restarted = await eventually(before: .seconds(2)) {
@@ -867,14 +874,15 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
 
             await sessions.shutdown()
-            await sessions.send(.pressed, triggerSequence: 1)
+            await sessions.press(triggerSequence: 1)
 
             let startCount = await audio.startCount
             try expect(
@@ -895,7 +903,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -914,7 +922,6 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let record = await history.records.last
             try expect(deliveredTexts.isEmpty)
             try expect(record?.outcome.isCancelled == true)
-            try expect(record?.applicationName == nil)
             try expect(record?.stageDurationsMilliseconds["doubao"] != nil)
         }
 
@@ -925,7 +932,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -965,23 +973,22 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
             )
 
             // Session one completes while every history write stays blocked.
-            await sessions.send(.pressed)
-            let firstRelease = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let firstRelease = Task { await sessions.releaseAndAwaitTerminal() }
             while await transcriber.callCount == 0 { await Task.yield() }
             await transcriber.resume()
-            await firstRelease.value
-            await sessions.send(.dismissResult)
+            _ = await firstRelease.value
 
             // Session two is still with the provider when shutdown begins.
-            await sessions.send(.pressed)
-            let secondRelease = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let secondRelease = Task { await sessions.releaseAndAwaitTerminal() }
             while await transcriber.callCount < 2 { await Task.yield() }
 
             let completion = CompletionFlag()
@@ -996,7 +1003,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             }
             try expect(providerCancelled, "shutdown did not cancel the in-flight provider request")
             await transcriber.resume()
-            await secondRelease.value
+            _ = await secondRelease.value
             await settle()
             let completedBeforeFlush = await completion.isComplete
 
@@ -1034,7 +1041,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -1063,15 +1070,16 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "后续会话"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "后续会话")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed, triggerSequence: 2)
-            await sessions.cancel(triggeredAtSequence: 1)
-            await sessions.send(.released)
+            await sessions.press(triggerSequence: 2)
+            await sessions.handleEscape(triggeredAtSequence: 1)
+            await sessions.releaseAndAwaitTerminal()
 
             let deliveredTexts = await delivery.deliveredTexts
             try expect(deliveredTexts == ["后续会话"])
@@ -1094,6 +1102,8 @@ private actor TelemetryAudioCaptureFake: AudioCapturing, AudioCaptureTelemetryPr
     func stop() async throws -> CapturedAudio { specAudio }
 
     func cancel() async {}
+
+    func audioChunks() async -> AsyncStream<Data>? { nil }
 
     func observeTelemetry() -> AsyncStream<RecordingTelemetry> {
         let (stream, continuation) = AsyncStream<RecordingTelemetry>.makeStream()

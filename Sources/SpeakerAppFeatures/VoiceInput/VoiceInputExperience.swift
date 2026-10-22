@@ -1,18 +1,22 @@
 import Combine
 import Foundation
 import SpeakerCore
+import os
 
-private final class VoiceTriggerIntakeGate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var accepting = true
-    private var allowsSessionTriggers = true
+private final class VoiceTriggerIntakeGate: Sendable {
+    private struct State: Sendable {
+        var accepting = true
+        var allowsSessionTriggers = true
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     func accepts(_ trigger: GlobalVoiceTrigger) -> Bool {
-        lock.withLock {
-            guard accepting else { return false }
+        state.withLock { state in
+            guard state.accepting else { return false }
             return switch trigger {
             case .pressed, .released:
-                allowsSessionTriggers
+                state.allowsSessionTriggers
             case .cancel, .monitorRecovered:
                 true
             }
@@ -20,17 +24,17 @@ private final class VoiceTriggerIntakeGate: @unchecked Sendable {
     }
 
     var isAcceptingEscapeEvents: Bool {
-        lock.withLock { accepting }
+        state.withLock { $0.accepting }
     }
 
     func setAllowsSessionTriggers(_ allowed: Bool) {
-        lock.withLock { allowsSessionTriggers = allowed }
+        state.withLock { $0.allowsSessionTriggers = allowed }
     }
 
     func close() {
-        lock.withLock {
-            accepting = false
-            allowsSessionTriggers = false
+        state.withLock { state in
+            state.accepting = false
+            state.allowsSessionTriggers = false
         }
     }
 }
@@ -548,7 +552,7 @@ package final class VoiceInputExperience: ObservableObject {
             (.finishRecording, .recording),
             (.cancel, .recording),
             (.cancel, .processing),
-            (.useRecognitionResult, .processing(_, .refining, _)),
+            (.useRecognitionResult, .processing(_, .refining)),
             (.copyRetainedText, .pendingCopy),
             (.dismissResult, .pendingCopy),
             (.dismissResult, .failed):
@@ -867,7 +871,7 @@ package final class VoiceInputExperience: ObservableObject {
                     remainingMilliseconds: telemetry?.remainingMilliseconds
                 )
             )
-        case .processing(let id, let stage, _):
+        case .processing(let id, let stage):
             .processing(
                 title: activity.compactTitle,
                 cancelAction: .init(sessionID: id, operation: .cancel),
@@ -913,7 +917,7 @@ package final class VoiceInputExperience: ObservableObject {
         case .idle: "idle"
         case .preparing: "preparing"
         case .recording: "recording"
-        case .processing(_, let stage, _): "processing.\(stage)"
+        case .processing(_, let stage): "processing.\(stage)"
         case .delivered: "delivered"
         case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
         case .cancelled: "cancelled"
@@ -928,7 +932,7 @@ package final class VoiceInputExperience: ObservableObject {
         switch activity {
         case .preparing:
             return nil
-        case .processing(_, let stage, _)
+        case .processing(_, let stage)
         where stage == .capturingTarget || stage == .delivering:
             return nil
         case .idle, .recording, .processing, .delivered, .pendingCopy,
@@ -940,7 +944,7 @@ package final class VoiceInputExperience: ObservableObject {
             case .idle: "idle"
             case .preparing: "preparing"
             case .recording: "recording"
-            case .processing(_, let stage, _): "processing.\(stage)"
+            case .processing(_, let stage): "processing.\(stage)"
             case .delivered: "delivered"
             case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
             case .cancelled: "cancelled"

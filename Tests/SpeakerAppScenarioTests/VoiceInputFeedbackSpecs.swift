@@ -176,7 +176,8 @@ enum VoiceInputFeedbackSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history)
@@ -196,7 +197,7 @@ enum VoiceInputFeedbackSpecs {
                 experience.state.diagnosticCode == "idle"
             }
             let cleanupStillPending = await audio.hasPendingCancel
-            await sessions.send(.pressed, triggerSequence: 100)
+            await sessions.press(triggerSequence: 100)
             let startsBeforeCleanup = await audio.startCount
             await audio.resumeCancel()
             let recorded = await eventually(before: .seconds(2)) {
@@ -206,7 +207,7 @@ enum VoiceInputFeedbackSpecs {
             }
             let afterCleanup = await activity(of: sessions)
             let staysDismissed = experience.state.overlay == .hidden
-            await sessions.send(.pressed, triggerSequence: 101)
+            await sessions.press(triggerSequence: 101)
             let startsAfterCleanup = await audio.startCount
             let newActivity = await activity(of: sessions)
             await experience.shutdown()
@@ -282,8 +283,8 @@ enum VoiceInputFeedbackSpecs {
             failures: &failures
         ) {
             let sessions = makeSessions()
-            await sessions.send(.pressed, triggerSequence: 10)
-            await sessions.send(.released)
+            await sessions.press(triggerSequence: 10)
+            await sessions.releaseAndAwaitTerminal()
             guard case .pendingCopy = await activity(of: sessions) else {
                 throw SpecFailure(message: "first retained result missing")
             }
@@ -291,12 +292,12 @@ enum VoiceInputFeedbackSpecs {
             let dismissed = await activity(of: sessions)
             try expect(dismissed == .idle)
 
-            await sessions.send(.pressed, triggerSequence: 20)
+            await sessions.press(triggerSequence: 20)
             await sessions.handleEscape(triggeredAtSequence: 11)
             guard case .recording = await activity(of: sessions) else {
                 throw SpecFailure(message: "late Escape cancelled the new recording")
             }
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             await sessions.handleEscape(triggeredAtSequence: 11)
             guard case .pendingCopy = await activity(of: sessions) else {
                 throw SpecFailure(message: "late Escape dismissed the new retained result")
@@ -315,7 +316,8 @@ enum VoiceInputFeedbackSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
-                transcriber: SpeechTranscriberFake(text: "Secret sentinel"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "Secret sentinel")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
@@ -562,7 +564,8 @@ enum VoiceInputFeedbackSpecs {
         VoiceInputSessions(
             audioCapture: AudioCaptureFake(stopError: error),
             targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-            transcriber: SpeechTranscriberFake(text: "Retained text"),
+            textProcessor: BasicVoiceTextProcessor(
+                transcriber: SpeechTranscriberFake(text: "Retained text")),
             delivery: TextDeliveryFake(
                 result: .pendingCopy(.deliveryFailed), commitsBeforeDelivering: false),
             clipboard: ClipboardFake(),

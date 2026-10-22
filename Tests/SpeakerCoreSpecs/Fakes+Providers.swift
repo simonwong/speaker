@@ -449,6 +449,8 @@ actor ProviderCredentialStoreFake: ProviderCredentialStoring {
 }
 
 actor EarlyFailingStreamingProcessor: VoiceTextProcessing, StreamingVoiceTextProcessing {
+    nonisolated var streaming: (any StreamingVoiceTextProcessing)? { self }
+
     func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
     func process(
@@ -483,6 +485,8 @@ actor EarlyFailingStreamingProcessor: VoiceTextProcessing, StreamingVoiceTextPro
 }
 
 actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextProcessing {
+    nonisolated var streaming: (any StreamingVoiceTextProcessing)? { self }
+
     private(set) var receivedChunkCount = 0
     private(set) var cancellationCount = 0
     private let snapshot: VoiceTextProcessingSnapshot
@@ -514,12 +518,12 @@ actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextPr
             throw CancellationError()
         }
         return VoiceTextProcessingResult(
-            doubaoText: "流式结果",
+            recognitionText: "流式结果",
             normalizedText: "流式结果",
-            deepSeekText: nil,
+            refinedText: nil,
             finalText: "流式结果",
-            doubaoRequestID: "streaming-spec",
-            deepSeekRequestID: nil,
+            recognitionRequestID: "streaming-spec",
+            refinementRequestID: nil,
             refinementStatus: .notRequested,
             refinementFailure: nil
         )
@@ -529,6 +533,8 @@ actor StreamingVoiceTextProcessorFake: VoiceTextProcessing, StreamingVoiceTextPr
 actor LateCompletingStreamingProcessor: VoiceTextProcessing,
     StreamingVoiceTextProcessing
 {
+    nonisolated var streaming: (any StreamingVoiceTextProcessing)? { self }
+
     private var continuation: CheckedContinuation<Void, Never>?
     private var started = false
     private(set) var cancellationCount = 0
@@ -557,12 +563,12 @@ actor LateCompletingStreamingProcessor: VoiceTextProcessing,
             Task { await self.markCancelled() }
         }
         return VoiceTextProcessingResult(
-            doubaoText: "late provider text",
+            recognitionText: "late provider text",
             normalizedText: "late provider text",
-            deepSeekText: nil,
+            refinedText: nil,
             finalText: "late provider text",
-            doubaoRequestID: "late-provider",
-            deepSeekRequestID: nil,
+            recognitionRequestID: "late-provider",
+            refinementRequestID: nil,
             refinementStatus: .notRequested,
             refinementFailure: nil
         )
@@ -585,6 +591,8 @@ actor LateCompletingStreamingProcessor: VoiceTextProcessing,
 actor ManuallyFailingStreamingProcessor: VoiceTextProcessing,
     StreamingVoiceTextProcessing
 {
+    nonisolated var streaming: (any StreamingVoiceTextProcessing)? { self }
+
     private var continuation: CheckedContinuation<Void, Never>?
     private var started = false
 
@@ -627,7 +635,9 @@ actor ManuallyFailingStreamingProcessor: VoiceTextProcessing,
     }
 }
 
-struct DoubaoFailureTranscriber: ContextualSpeechTranscribing {
+struct DoubaoFailureTranscriber: ContextualSpeechTranscribing,
+    StreamingContextualSpeechTranscribing
+{
     let failure: DoubaoASRFailure
 
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
@@ -640,9 +650,18 @@ struct DoubaoFailureTranscriber: ContextualSpeechTranscribing {
     ) async throws -> TranscriptionResult {
         throw failure
     }
+
+    func transcribe(
+        _ audioChunks: AsyncStream<Data>,
+        context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        throw failure
+    }
 }
 
-struct CredentialFailureTranscriber: ContextualSpeechTranscribing {
+struct CredentialFailureTranscriber: ContextualSpeechTranscribing,
+    StreamingContextualSpeechTranscribing
+{
     let error: ProviderCredentialStoreError
 
     func transcribe(_ audio: CapturedAudio) async throws -> TranscriptionResult {
@@ -651,6 +670,13 @@ struct CredentialFailureTranscriber: ContextualSpeechTranscribing {
 
     func transcribe(
         _ audio: CapturedAudio,
+        context: SpeechTranscriptionContext
+    ) async throws -> TranscriptionResult {
+        throw error
+    }
+
+    func transcribe(
+        _ audioChunks: AsyncStream<Data>,
         context: SpeechTranscriptionContext
     ) async throws -> TranscriptionResult {
         throw error

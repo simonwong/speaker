@@ -297,7 +297,7 @@ extension VoiceInputHistoryRecord {
 
     package var refinementProviderLabel: String {
         if let refinementProviderID { return refinementProviderID.displayName }
-        return deepSeekText != nil || deepSeekRequestID != nil
+        return refinedText != nil || refinementRequestID != nil
             || refinementStatus == "succeeded" || refinementStatus == "fellBack"
             ? "DeepSeek" : "文字整理"
     }

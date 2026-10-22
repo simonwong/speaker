@@ -1,57 +1,35 @@
 import Foundation
 
 /// Elapsed-time accounting for the stages one Voice Input Session passes
-/// through, driven by the monotonic readings the caller passes in. The audit
-/// belongs to a single session at a time; calls carrying another session's
-/// identifier are ignored so a late event from a finished session cannot
-/// pollute the next one.
+/// through, driven by the monotonic readings the caller passes in. Each
+/// session owns its audit, so a finished session's audit ends with it.
 struct VoiceInputStageAudit {
-    private var sessionID: VoiceInputSessionID?
     private var stageName: String?
     private var stageStartedAt: Duration?
     private var stageDurations: [String: Int] = [:]
-    private var applicationName: String?
+
+    init(stage: String, now: Duration) {
+        stageName = stage
+        stageStartedAt = now
+    }
 
     /// The stage currently being timed, if any.
     var currentStage: String? { stageName }
 
-    mutating func begin(id: VoiceInputSessionID, stage: String, now: Duration) {
-        sessionID = id
-        stageName = stage
-        stageStartedAt = now
-        stageDurations = [:]
-        applicationName = nil
-    }
-
-    mutating func advance(
-        id: VoiceInputSessionID,
-        stage: String,
-        applicationName: String? = nil,
-        now: Duration
-    ) {
-        guard sessionID == id else { return }
+    mutating func advance(stage: String, now: Duration) {
         accumulateCurrentStage(now: now)
         stageName = stage
         stageStartedAt = now
-        if let applicationName {
-            self.applicationName = applicationName
-        }
     }
 
-    /// Closes the audit for `id` and returns what was measured. Returns empty
-    /// results for any other session.
-    mutating func finish(
-        id: VoiceInputSessionID,
-        now: Duration
-    ) -> (applicationName: String?, stageDurations: [String: Int]) {
-        guard sessionID == id else { return (nil, [:]) }
+    /// Closes the audit and returns what was measured. A closed audit
+    /// measures nothing more.
+    mutating func finish(now: Duration) -> [String: Int] {
         accumulateCurrentStage(now: now)
-        let result = (applicationName, stageDurations)
-        sessionID = nil
+        let result = stageDurations
         stageName = nil
         stageStartedAt = nil
         stageDurations = [:]
-        applicationName = nil
         return result
     }
 

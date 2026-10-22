@@ -7,6 +7,7 @@ import SpeakerAppFeatures
 import SpeakerCore
 import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
+import os
 
 @main
 struct SpeakerAppScenarioSpecs {
@@ -1912,7 +1913,8 @@ struct SpeakerAppScenarioSpecs {
                     targetCapture: TargetCaptureFake(
                         result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                     ),
-                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    textProcessor: BasicVoiceTextProcessor(
+                        transcriber: SpeechTranscriberFake(text: "保留的文字")),
                     delivery: TextDeliveryFake(result: outcome),
                     clipboard: ClipboardFake(),
                     history: SessionHistoryFake()
@@ -2015,7 +2017,6 @@ struct SpeakerAppScenarioSpecs {
             let record = VoiceInputHistoryRecord(
                 sessionID: VoiceInputSessionID(),
                 startedAt: Date(),
-                applicationName: "Private Client App",
                 transcription: "SECRET TRANSCRIPT",
                 finalText: "SECRET FINAL TEXT",
                 transcriptionProvider: "doubao",
@@ -2026,8 +2027,8 @@ struct SpeakerAppScenarioSpecs {
                 providerMessage: "SECRET PROVIDER MESSAGE",
                 deliveryDiagnosticCode:
                     "pasteReceipt.unconfirmed",
-                deepSeekText: "SECRET DEEPSEEK TEXT",
-                deepSeekRequestID: "deepseek-safe-id",
+                refinedText: "SECRET DEEPSEEK TEXT",
+                refinementRequestID: "deepseek-safe-id",
                 refinementModeName: "SECRET CUSTOM NAME",
                 refinementPrompt: "SECRET PROMPT",
                 refinementStatus: "fellBack",
@@ -2260,6 +2261,75 @@ struct SpeakerAppScenarioSpecs {
             try expect(!began)
             try expect(!router.hasExclusiveInteraction)
             try expect(router.shortcutTarget.shouldConsumeEscape())
+        }
+
+        await runAsync(
+            "concurrent shortcut presses and clicks confirm an exclusive interaction once",
+            failures: &failures
+        ) {
+            let voice = RouterVoiceRecorder()
+            let router = GlobalVoiceInteractionRouter(
+                voiceTarget: voice.target
+            )
+            var confirmations = 0
+            router.beginExclusiveInteraction(
+                confirm: {
+                    confirmations += 1
+                    return true
+                },
+                cancel: {}
+            )
+
+            // The main actor stays blocked until every thread has finished,
+            // so the first confirmation cannot complete in between. Each
+            // thread reads `shortcutTarget` itself, so its first reads race.
+            DispatchQueue.concurrentPerform(iterations: 64) { index in
+                if index.isMultiple(of: 2) {
+                    router.shortcutTarget.receive(.pressed)
+                } else {
+                    router.confirmExclusiveInteraction()
+                }
+            }
+            let confirmed = await eventually(before: .seconds(2)) { confirmations == 1 }
+            try? await Task.sleep(for: .milliseconds(50))
+
+            try expect(confirmed)
+            try expect(confirmations == 1)
+            try expect(!router.hasExclusiveInteraction)
+            try expect(voice.triggers.isEmpty)
+        }
+
+        run(
+            "global interaction router consults voice input outside its own lock",
+            failures: &failures
+        ) {
+            // Voice input that asks the router about its own state while the
+            // router is asking it whether to consume Escape.
+            let routerSlot = OSAllocatedUnfairLock<GlobalVoiceInteractionRouter?>(
+                initialState: nil
+            )
+            let router = GlobalVoiceInteractionRouter(
+                voiceTarget: VoiceTriggerTarget(
+                    receive: { _ in },
+                    shouldConsumeEscape: {
+                        routerSlot.withLock { $0 }?.hasExclusiveInteraction ?? false
+                    }
+                )
+            )
+            routerSlot.withLock { $0 = router }
+            defer { routerSlot.withLock { $0 = nil } }
+
+            let answered = DispatchSemaphore(value: 0)
+            let target = router.shortcutTarget
+            DispatchQueue.global().async {
+                _ = target.shouldConsumeEscape()
+                answered.signal()
+            }
+
+            try expect(
+                answered.wait(timeout: .now() + 1) == .success,
+                "the Escape check never returned"
+            )
         }
 
         run(
@@ -3766,8 +3836,7 @@ struct SpeakerAppScenarioSpecs {
         {
             let activity = VoiceInputActivity.processing(
                 VoiceInputSessionID(),
-                .transcribing,
-                applicationName: nil
+                .transcribing
             )
             let granted = PermissionSnapshot(
                 accessibility: .granted,
@@ -4102,7 +4171,6 @@ struct SpeakerAppScenarioSpecs {
                 .init(
                     sessionID: olderID,
                     startedAt: calendar.date(byAdding: .day, value: -2, to: now)!,
-                    applicationName: nil,
                     transcription: "前天的文字",
                     finalText: nil,
                     outcome: .cancelled(olderID)
@@ -4111,7 +4179,6 @@ struct SpeakerAppScenarioSpecs {
                 .init(
                     sessionID: secureID,
                     startedAt: now.addingTimeInterval(-120),
-                    applicationName: nil,
                     transcription: nil,
                     finalText: nil,
                     outcome: .pendingCopy(secureID, text: "", reason: .secureTarget)
@@ -4120,10 +4187,9 @@ struct SpeakerAppScenarioSpecs {
                 .init(
                     sessionID: todayID,
                     startedAt: now.addingTimeInterval(-60),
-                    applicationName: nil,
                     transcription: "初稿",
                     finalText: longText,
-                    outcome: .delivered(todayID, applicationName: "备忘录", text: longText)
+                    outcome: .delivered(todayID, text: longText)
                 ))
             let clipboard = ClipboardFake()
             var announcements: [String] = []
@@ -4163,25 +4229,22 @@ struct SpeakerAppScenarioSpecs {
             let refined = VoiceInputHistoryRecord(
                 sessionID: refinedID,
                 startedAt: Date(),
-                applicationName: "备忘录",
                 transcription: "嗯那个明天开会",
                 finalText: "明天开会。",
-                outcome: .delivered(refinedID, applicationName: "备忘录", text: "明天开会。")
+                outcome: .delivered(refinedID, text: "明天开会。")
             )
             let unchangedID = VoiceInputSessionID()
             let unchanged = VoiceInputHistoryRecord(
                 sessionID: unchangedID,
                 startedAt: Date(),
-                applicationName: "备忘录",
                 transcription: "明天开会。",
                 finalText: "明天开会。",
-                outcome: .delivered(unchangedID, applicationName: "备忘录", text: "明天开会。")
+                outcome: .delivered(unchangedID, text: "明天开会。")
             )
             let secureID = VoiceInputSessionID()
             let secure = VoiceInputHistoryRecord(
                 sessionID: secureID,
                 startedAt: Date(),
-                applicationName: nil,
                 transcription: nil,
                 finalText: nil,
                 outcome: .pendingCopy(secureID, text: "", reason: .secureTarget)
@@ -4217,10 +4280,9 @@ struct SpeakerAppScenarioSpecs {
             let record = VoiceInputHistoryRecord(
                 sessionID: id,
                 startedAt: Date(),
-                applicationName: "备忘录",
                 transcription: "明天开会",
                 finalText: "明天开会。",
-                outcome: .delivered(id, applicationName: "备忘录", text: "明天开会。")
+                outcome: .delivered(id, text: "明天开会。")
             )
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent(
@@ -4458,8 +4520,7 @@ struct SpeakerAppScenarioSpecs {
             let id = VoiceInputSessionID()
             let transcribing = VoiceInputActivity.processing(
                 id,
-                .transcribing,
-                applicationName: "TextEdit"
+                .transcribing
             )
             try expect(transcribing.isActive)
             try expect(
@@ -4474,7 +4535,6 @@ struct SpeakerAppScenarioSpecs {
 
             let delivered = VoiceInputActivity.delivered(
                 id,
-                applicationName: "TextEdit",
                 text: "完成"
             )
             try expect(
@@ -4675,7 +4735,8 @@ struct SpeakerAppScenarioSpecs {
                         .init(id: UUID(), applicationName: "TextEdit")
                     )
                 ),
-                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留的文字")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -4792,7 +4853,8 @@ struct SpeakerAppScenarioSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留的文字")),
                 delivery: TextDeliveryFake(
                     result: .pendingCopy(.deliveryFailed),
                     commitsBeforeDelivering: false
@@ -5016,7 +5078,8 @@ struct SpeakerAppScenarioSpecs {
                 let sessions = VoiceInputSessions(
                     audioCapture: audio,
                     targetCapture: targetCapture,
-                    transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                    textProcessor: BasicVoiceTextProcessor(
+                        transcriber: SpeechTranscriberFake(text: "保留的文字")),
                     delivery: delivery,
                     clipboard: ClipboardFake(),
                     history: SessionHistoryFake()
@@ -5113,7 +5176,8 @@ struct SpeakerAppScenarioSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: text),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: text)),
                 delivery: TextDeliveryFake(
                     result: .pendingCopy(.deliveryFailed), commitsBeforeDelivering: false),
                 clipboard: clipboard,
@@ -5315,7 +5379,8 @@ struct SpeakerAppScenarioSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "保留的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留的文字")),
                 delivery: TextDeliveryFake(
                     result: .pendingCopy(.deliveryFailed),
                     commitsBeforeDelivering: false
@@ -5452,6 +5517,7 @@ struct SpeakerAppScenarioSpecs {
         await MicrophoneSelectionSpecs.run(failures: &failures)
         await RuntimeLifecycleSpecs.run(failures: &failures)
         await DashboardGroupingSpecs.run(failures: &failures)
+        await OverviewServiceSpecs.run(failures: &failures)
 
         SpecSummary.finish(failures: failures, label: "app scenario specs")
     }
@@ -5486,7 +5552,7 @@ private func makeVoiceExperienceFixture(
     let sessions = VoiceInputSessions(
         audioCapture: audio,
         targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-        transcriber: SpeechTranscriberFake(text: "保留的文字"),
+        textProcessor: BasicVoiceTextProcessor(transcriber: SpeechTranscriberFake(text: "保留的文字")),
         delivery: TextDeliveryFake(
             result: .pendingCopy(.deliveryFailed),
             commitsBeforeDelivering: false
@@ -5516,12 +5582,12 @@ private final class AnnouncementRecorder {
 private func refinementFallbackProcessor() -> VoiceTextProcessorFake {
     VoiceTextProcessorFake(
         result: VoiceTextProcessingResult(
-            doubaoText: "豆包结果",
+            recognitionText: "豆包结果",
             normalizedText: "豆包结果",
-            deepSeekText: nil,
+            refinedText: nil,
             finalText: "豆包结果",
-            doubaoRequestID: "doubao-request",
-            deepSeekRequestID: nil,
+            recognitionRequestID: "doubao-request",
+            refinementRequestID: nil,
             refinementStatus: .fellBack,
             refinementFailure: .init(kind: .network)
         ),
@@ -5952,28 +6018,27 @@ private actor ScenarioProviderCredentialStore: ProviderCredentialStoring {
     }
 }
 
-private final class RouterVoiceRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedTriggers: [GlobalVoiceTrigger] = []
+private final class RouterVoiceRecorder: Sendable {
+    private let storedTriggers = OSAllocatedUnfairLock(initialState: [GlobalVoiceTrigger]())
     private let escapeActive: Bool
 
     init(escapeActive: Bool = false) {
         self.escapeActive = escapeActive
     }
 
-    lazy var target = VoiceTriggerTarget(
-        receive: { [weak self] trigger in
-            self?.lock.withLock {
-                self?.storedTriggers.append(trigger)
+    var target: VoiceTriggerTarget {
+        VoiceTriggerTarget(
+            receive: { [storedTriggers] trigger in
+                storedTriggers.withLock { $0.append(trigger) }
+            },
+            shouldConsumeEscape: { [escapeActive] in
+                escapeActive
             }
-        },
-        shouldConsumeEscape: { [weak self] in
-            self?.escapeActive ?? false
-        }
-    )
+        )
+    }
 
     var triggers: [GlobalVoiceTrigger] {
-        lock.withLock { storedTriggers }
+        storedTriggers.withLock { $0 }
     }
 }
 

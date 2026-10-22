@@ -22,17 +22,17 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: targets,
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: clipboard,
                 history: history
             )
             let presentations = await sessions.observe()
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             // A release returns only after its session has finished, delivery
             // included.
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let deliveryCompleted = await delivery.deliveredTexts == ["你好，SwiftUI。"]
 
             let terminal = Task { () -> [VoiceInputPresentation] in
@@ -98,16 +98,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: targets,
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
-            let press = Task { await sessions.send(.pressed) }
+            let press = Task { await sessions.dispatchPress() }
             while await audio.startCount == 0 {
                 await Task.yield()
             }
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             await audio.resumeStart()
             await press.value
             await Task.yield()
@@ -125,17 +125,18 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "不应出现"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不应出现")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
 
-            let press = Task { await sessions.send(.pressed) }
+            let press = Task { await sessions.dispatchPress() }
             while await audio.startCount == 0 {
                 await Task.yield()
             }
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await audio.resumeStart()
             await press.value
 
@@ -152,7 +153,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                     startDelay: .milliseconds(20)
                 ),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history,
@@ -160,7 +162,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 clock: clock
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await sessions.shutdown()
 
             let record = await history.records.last
@@ -176,15 +178,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "请手动复制。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "请手动复制。")),
                 delivery: delivery,
                 clipboard: clipboard,
                 history: history
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
 
             let result = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
@@ -213,7 +216,10 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 }
                 return false
             }
-            await sessions.send(.copyPendingResult)
+            guard let id = result?.activity.sessionID else {
+                throw SpecFailure(message: "the pending copy result had no session")
+            }
+            await sessions.copyPendingResult(expectedSessionID: id)
             let copiedAfter = await clipboard.copiedTexts
             let didHideAfterCopy = await hiddenAfterCopy.value
             try expect(copiedAfter == ["请手动复制。"])
@@ -227,14 +233,15 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "旧的留存文字。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "旧的留存文字。")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
             )
             let terminal = terminalPresentation(from: await sessions.observe())
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             let retained = await terminal.value
             try expect(retained?.activity.pendingCopyReason == .missingTarget)
 
@@ -250,7 +257,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 }
                 return nil
             }
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             let next = await replaced.value
             try expect(
                 next?.activity.sessionID != nil,
@@ -262,7 +269,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
             let copied = await clipboard.copiedTexts
             try expect(copied.isEmpty, "replacing retained text touched the clipboard")
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
         }
 
         await runAsync("dismiss pending copy hides without changing clipboard", failures: &failures)
@@ -271,16 +278,19 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "不要复制。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不要复制。")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
-            _ = await terminal.value
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
+            guard let id = await terminal.value?.activity.sessionID else {
+                throw SpecFailure(message: "the pending copy result had no session")
+            }
 
             let hiddenAfterDismiss = Task {
                 for await presentation in await sessions.observe() {
@@ -288,7 +298,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 }
                 return false
             }
-            await sessions.send(.dismissResult)
+            await sessions.dismissResult(expectedSessionID: id)
             let didHideAfterDismiss = await hiddenAfterDismiss.value
             let copiedTexts = await clipboard.copiedTexts
             try expect(didHideAfterDismiss)
@@ -302,14 +312,18 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "必须保留。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "必须保留。")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            let retained = await sessions.releaseAndAwaitTerminal()
+            guard let id = retained?.activity.sessionID else {
+                throw SpecFailure(message: "the pending copy result had no session")
+            }
             let clipboardFailure = Task<VoiceInputPresentation?, Never> {
                 for await presentation in await sessions.observe() {
                     if presentation.activity.pendingCopyReason == .clipboardFailed {
@@ -318,7 +332,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 }
                 return nil
             }
-            await sessions.send(.copyPendingResult)
+            await sessions.copyPendingResult(expectedSessionID: id)
             let presentation = await clipboardFailure.value
 
             try expect(presentation?.activity.pendingCopyReason == .clipboardFailed)
@@ -599,15 +613,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                                 isSecurityClassConfirmed: isSecurityClassConfirmed
                             ))
                     ),
-                    transcriber: SpeechTranscriberFake(text: "窗口里的文字"),
+                    textProcessor: BasicVoiceTextProcessor(
+                        transcriber: SpeechTranscriberFake(text: "窗口里的文字")),
                     delivery: TextDeliveryFake(result: .delivered),
                     clipboard: ClipboardFake(),
                     history: history
                 )
                 let terminal = terminalPresentation(from: await sessions.observe())
 
-                await sessions.send(.pressed)
-                await sessions.send(.released)
+                await sessions.dispatchPress()
+                await sessions.releaseAndAwaitTerminal()
 
                 let result = await terminal.value
                 _ = await eventually(before: .seconds(2)) {
@@ -628,7 +643,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                         record?.transcription == nil && record?.finalText == nil,
                         "an unclassified target persisted transcript text"
                     )
-                    guard case .delivered(_, _, let storedText)? = record?.outcome else {
+                    guard case .delivered(_, let storedText)? = record?.outcome else {
                         throw SpecFailure(message: "the delivered outcome was not recorded")
                     }
                     try expect(
@@ -645,15 +660,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
-                transcriber: SpeechTranscriberFake(text: "敏感文本"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "敏感文本")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
 
             let result = await terminal.value
             let deliveredTexts = await delivery.deliveredTexts
@@ -686,7 +702,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 "secure provider request identity was persisted"
             )
             try expect(
-                record?.deepSeekRequestID == nil,
+                record?.refinementRequestID == nil,
                 "secure refinement request identity was persisted"
             )
             try expect(
@@ -694,7 +710,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 "secure text was persisted inside its outcome"
             )
             try expect(
-                record?.deepSeekText == nil,
+                record?.refinedText == nil,
                 "secure DeepSeek text was persisted"
             )
             try expect(
@@ -711,15 +727,18 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
-                transcriber: SpeechTranscriberFake(text: "密码框的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "密码框的文字")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
             )
             let terminal = terminalPresentation(from: await sessions.observe())
-            await sessions.send(.pressed)
-            await sessions.send(.released)
-            _ = await terminal.value
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
+            guard let id = await terminal.value?.activity.sessionID else {
+                throw SpecFailure(message: "the pending copy result had no session")
+            }
 
             let failedCopy = Task<VoiceInputPresentation?, Never> {
                 for await presentation in await sessions.observe() {
@@ -729,7 +748,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 }
                 return nil
             }
-            await sessions.send(.copyPendingResult)
+            await sessions.copyPendingResult(expectedSessionID: id)
             let failed = await failedCopy.value
             try expect(
                 failed?.activity.pendingCopyReason == .secureTargetClipboardFailed,
@@ -737,7 +756,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
 
             await clipboard.setSucceeds(true)
-            await sessions.send(.copyPendingResult)
+            await sessions.copyPendingResult(expectedSessionID: id)
             let privacies = await clipboard.copiedPrivacies
             try expect(privacies == [.concealed, .concealed], "\(privacies)")
         }
@@ -769,8 +788,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 history: history
             )
             let terminal = terminalPresentation(from: await sessions.observe())
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             let result = await terminal.value
 
             let expected = "echo hi[201~\nrm -rf ~\tend\nnext"
@@ -795,14 +814,15 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "Terminal"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "\u{1B}\u{07}\r\n"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "\u{1B}\u{07}\r\n")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
             let terminal = terminalPresentation(from: await sessions.observe())
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             let result = await terminal.value
 
             let delivered = await delivery.deliveredTexts
@@ -844,8 +864,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 history: history
             )
 
-            await sessions.send(.pressed)
-            let release = Task { await sessions.send(.released) }
+            await sessions.dispatchPress()
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await refiner.callCount == 0 { await Task.yield() }
 
             let inFlightRecords = await history.allRecords()
@@ -858,8 +878,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 "confirmed secure transcript reached SQLite or WAL bytes"
             )
 
-            await sessions.send(.cancel)
-            await release.value
+            await sessions.dispatchEscape()
+            _ = await release.value
             await sessions.shutdown()
             let cancelledRecords = await history.allRecords()
             try expect(
@@ -881,7 +901,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "Editor"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "只粘贴一次。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "只粘贴一次。")),
                 delivery: TextDeliveryFake(
                     result: .pasteCommandPosted(
                         .init(
@@ -895,8 +916,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
 
             let result = await terminal.value
             let persisted = await eventually(before: .seconds(2)) {
@@ -919,7 +940,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "结果不能丢。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "结果不能丢。")),
                 delivery: TextDeliveryFake(
                     result: .pendingCopyDiagnosed(
                         .deliveryUnconfirmed,
@@ -934,8 +956,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
 
             let result = await terminal.value
             let persisted = await eventually(
@@ -965,16 +987,17 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "只提交一次。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "只提交一次。")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
-            await sessions.send(.pressed)
-            await sessions.send(.released)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
+            await sessions.releaseAndAwaitTerminal()
 
             let startCount = await audio.startCount
             let stopCount = await audio.stopCount
@@ -992,19 +1015,20 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: target,
-                transcriber: SpeechTranscriberFake(text: "发往结束时的输入框"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "发往结束时的输入框")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await target.update(applicationName: "Focused at release")
-            let release = Task { await sessions.send(.released) }
+            let release = Task { await sessions.releaseAndAwaitTerminal() }
             while await target.captureCallCount == 0 { await Task.yield() }
             await target.update(applicationName: "Focused after release")
             await target.resume()
-            await release.value
+            _ = await release.value
 
             let deliveredApplicationNames = await delivery.applicationNames
             try expect(
@@ -1034,7 +1058,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "不会阻塞事件回调"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不会阻塞事件回调")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1078,7 +1103,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: target,
-                transcriber: SpeechTranscriberFake(text: "不会送到后来切换的应用"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不会送到后来切换的应用")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1119,7 +1145,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "顺序正确。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "顺序正确。")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1151,15 +1178,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "先把结果交给用户"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "先把结果交给用户")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
             )
             let terminal = terminalPresentation(from: await sessions.observe())
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.releaseAndAwaitTerminal()
             let presentation = await terminal.value
 
             try expect(
@@ -1183,7 +1211,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1205,7 +1233,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(startCountDuringProcessing == 1)
 
             await transcriber.resume()
-            _ = await terminal.value
+            let retained = await terminal.value
             await settle()
             let startCountAfterProcessing = await audio.startCount
             try expect(
@@ -1213,7 +1241,9 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 "a press made during processing started a delayed recording"
             )
 
-            await sessions.send(.dismissResult)
+            if let id = retained?.activity.sessionID {
+                await sessions.dismissResult(expectedSessionID: id)
+            }
             dispatcher.send(.pressed, at: 4_000_000_000)
             let restarted = await eventually(before: .seconds(2)) {
                 await audio.startCount == 2
@@ -1236,16 +1266,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
             )
             let releaseCompleted = CompletionFlag()
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             let release = Task {
-                await sessions.send(.released)
+                await sessions.releaseAndAwaitTerminal()
                 await releaseCompleted.markComplete()
             }
             while await transcriber.callCount == 0 { await Task.yield() }
@@ -1266,7 +1296,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 )
             }
 
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await transcriber.resume()
             await release.value
             let cancellationCount = await transcriber.cancellationCount
@@ -1282,7 +1312,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
@@ -1290,7 +1321,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 clock: clock
             )
 
-            let press = Task { await sessions.send(.pressed) }
+            let press = Task { await sessions.dispatchPress() }
             while await audio.startCount == 0 { await Task.yield() }
             await settle()
             let preparingRequestCount = clock.sleepRequestCount
@@ -1302,6 +1333,71 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let recordingRequestCount = clock.sleepRequestCount
             try expect(recordingRequestCount == 1)
             await sessions.shutdown()
+        }
+
+        await runAsync(
+            "release-to-delivery latency spans release to committed delivery for delivered sessions only",
+            failures: &failures
+        ) {
+            let clock = ManualVoiceInputClock()
+            let transcriber = SpeechTranscriberFake(text: "测一下延迟。", delaysResponse: true)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                clock: clock
+            )
+
+            await sessions.dispatchPress()
+            clock.advance(by: .milliseconds(1_500))
+            let release = Task { await sessions.dispatchRelease() }
+            guard
+                await eventually(
+                    before: .seconds(2), condition: { await transcriber.callCount == 1 })
+            else { throw SpecFailure(message: "the delivered session never reached recognition") }
+            clock.advance(by: .milliseconds(640))
+            await transcriber.resume()
+            await release.value
+            guard
+                await eventually(
+                    before: .seconds(2),
+                    condition: { await history.records.last?.outcome.isDelivered == true })
+            else { throw SpecFailure(message: "the session was not delivered") }
+            let delivered = await history.records.last
+
+            await sessions.dispatchPress()
+            clock.advance(by: .milliseconds(1_500))
+            let cancelledRelease = Task { await sessions.dispatchRelease() }
+            guard
+                await eventually(
+                    before: .seconds(2), condition: { await transcriber.callCount == 2 })
+            else { throw SpecFailure(message: "the cancelled session never reached recognition") }
+            clock.advance(by: .milliseconds(5_000))
+            await sessions.dispatchEscape()
+            await transcriber.resume()
+            await cancelledRelease.value
+            guard
+                await eventually(
+                    before: .seconds(2),
+                    condition: { await history.records.last?.outcome.isCancelled == true })
+            else { throw SpecFailure(message: "the second session was not cancelled") }
+            let cancelled = await history.records.last
+            await sessions.shutdown()
+
+            try expect(
+                delivered?.releaseToDeliveryMilliseconds == 640,
+                "measured \(String(describing: delivered?.releaseToDeliveryMilliseconds))"
+            )
+            try expect(
+                cancelled?.releaseToDeliveryMilliseconds == nil,
+                "cancelled \(String(describing: cancelled?.releaseToDeliveryMilliseconds))"
+            )
         }
     }
 }

@@ -254,11 +254,12 @@ enum DeliverySmokeRunner {
         targetProcessID: pid_t,
         frontmostProcessID: pid_t?
     ) async -> String {
+        let delivery = DeliverySmokeTargetRecorder(delivery: targets)
         let sessions = VoiceInputSessions(
             audioCapture: DeliverySmokeAudioCapture(),
             targetCapture: targets,
             textProcessor: DeliverySmokeTextProcessor(text: "Speaker smoke"),
-            delivery: targets,
+            delivery: delivery,
             clipboard: SystemClipboardWriter(),
             history: MemorySessionHistory()
         )
@@ -287,8 +288,8 @@ enum DeliverySmokeRunner {
             "targetPID=\(targetProcessID)",
         ]
         switch terminal {
-        case .delivered(_, let applicationName, let text)
-        where text == "Speaker smoke":
+        case .delivered(_, let text) where text == "Speaker smoke":
+            let applicationName = await delivery.deliveredApplicationName ?? "none"
             return
                 ([
                     "result=PASS",
@@ -430,10 +431,38 @@ private struct DeliverySmokeAudioCapture: AudioCapturing {
     }
 
     func cancel() async {}
+
+    func audioChunks() async -> AsyncStream<Data>? { nil }
+}
+
+/// Delivers through the real Input Target and remembers which application
+/// received the text, so the smoke report names it.
+private actor DeliverySmokeTargetRecorder: TextDelivering {
+    private let delivery: any TextDelivering
+    private(set) var deliveredApplicationName: String?
+
+    init(delivery: any TextDelivering) {
+        self.delivery = delivery
+    }
+
+    func deliver(
+        _ text: String,
+        to target: InputTargetSnapshot,
+        commitGate: DeliveryCommitGate
+    ) async -> DeliveryOutcome {
+        deliveredApplicationName = target.applicationName
+        return await delivery.deliver(text, to: target, commitGate: commitGate)
+    }
+
+    func shutdown() async {
+        await delivery.shutdown()
+    }
 }
 
 private struct DeliverySmokeTextProcessor: VoiceTextProcessing {
     let text: String
+
+    var streaming: (any StreamingVoiceTextProcessing)? { nil }
 
     func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
@@ -443,12 +472,12 @@ private struct DeliverySmokeTextProcessor: VoiceTextProcessing {
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
     ) async throws -> VoiceTextProcessingResult {
         VoiceTextProcessingResult(
-            doubaoText: text,
+            recognitionText: text,
             normalizedText: text,
-            deepSeekText: nil,
+            refinedText: nil,
             finalText: text,
-            doubaoRequestID: "delivery-smoke",
-            deepSeekRequestID: nil,
+            recognitionRequestID: "delivery-smoke",
+            refinementRequestID: nil,
             refinementStatus: .notRequested,
             refinementFailure: nil
         )

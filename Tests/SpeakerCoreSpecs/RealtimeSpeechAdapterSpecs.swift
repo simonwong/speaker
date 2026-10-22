@@ -389,7 +389,7 @@ extension RealtimeSpeechAdapterSpecs {
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
                 textProcessor: processor, delivery: delivery, clipboard: ClipboardFake(),
                 history: history)
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data(repeating: 1, count: 6_400))
             let streaming = await eventually(before: .seconds(2)) {
                 await socket.count("input_audio_buffer.append") > 0
@@ -399,7 +399,7 @@ extension RealtimeSpeechAdapterSpecs {
             try expect(beforeRelease.isEmpty)
             try await configuration.selectRecognitionProvider(
                 .init(provider: .openAI, method: .completeRecording))
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let firstDone = await eventually(before: .seconds(2)) {
                 await delivery.deliveredTexts.count == 1
             }
@@ -408,11 +408,11 @@ extension RealtimeSpeechAdapterSpecs {
             try expect(firstText == ["confirmed result"])
             let initialHTTP = await transport.requests
             try expect(initialHTTP.isEmpty)
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data(repeating: 1, count: 6_400))
             let prematureHTTP = await transport.requests
             try expect(prematureHTTP.isEmpty)
-            await sessions.send(.released)
+            await sessions.releaseAndAwaitTerminal()
             let secondDone = await eventually(before: .seconds(2)) {
                 await delivery.deliveredTexts.count == 2
             }
@@ -449,13 +449,17 @@ extension RealtimeSpeechAdapterSpecs {
                         result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
                     textProcessor: processor, delivery: delivery, clipboard: ClipboardFake(),
                     history: history)
-                await sessions.send(.pressed)
+                await sessions.dispatchPress()
                 await audio.emit(Data(repeating: 1, count: 6_400))
                 let sent = await eventually(before: .seconds(2)) {
                     await socket.count("input_audio_buffer.append") > 0
                 }
                 try expect(sent)
-                await sessions.send(cancel ? .cancel : .released)
+                if cancel {
+                    await sessions.dispatchEscape()
+                } else {
+                    await sessions.releaseAndAwaitTerminal()
+                }
                 await sessions.shutdown()
                 let commits = await socket.count("input_audio_buffer.commit")
                 let texts = await delivery.deliveredTexts
@@ -685,14 +689,13 @@ extension RealtimeSpeechAdapterSpecs {
                 textProcessor: processor, delivery: delivery, clipboard: ClipboardFake(),
                 history: history)
             let presentations = await sessions.observe()
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             await audio.emit(Data(repeating: 1, count: 6_400))
             let streaming = await eventually(before: .seconds(2)) {
                 await socket.count("input_audio_buffer.append") > 0
             }
             try expect(streaming)
-            // Release returns only when processing ends.
-            let release = Task { await sessions.send(.released) }
+            let release = Task { await sessions.dispatchRelease() }
             try await signals.waitUntilSubscribed()
             pings.answer(.fail(URLError(.networkConnectionLost)))
             signals.emit()
@@ -704,10 +707,10 @@ extension RealtimeSpeechAdapterSpecs {
             } else {
                 throw SpecFailure(message: "connection loss did not reach a Session Problem")
             }
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             let restarted = await eventually(before: .seconds(2)) { await audio.startCount == 2 }
             try expect(restarted, "the shortcut stayed blocked after connection loss")
-            await sessions.send(.cancel)
+            await sessions.dispatchEscape()
             await sessions.shutdown()
             let records = await history.records
             let texts = await delivery.deliveredTexts

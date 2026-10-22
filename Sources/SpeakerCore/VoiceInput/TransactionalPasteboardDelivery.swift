@@ -2,6 +2,7 @@
 @preconcurrency import Carbon
 import CoreGraphics
 import Foundation
+import os
 
 package enum PasteboardTransactionMarker {
     /// Marks the temporary value of one paste transaction. It is still on the
@@ -208,7 +209,7 @@ package enum PasteboardReplacementContent: Sendable {
 /// provider. The first request for it is the only content-free evidence that
 /// some App read the clipboard after Speaker wrote it.
 package final class PasteboardTextPromise: NSObject, NSPasteboardItemDataProvider,
-    @unchecked Sendable
+    Sendable
 {
     package let text: String
     private let clock: any VoiceInputClock
@@ -288,21 +289,24 @@ package final class PasteReceipt: Sendable {
 
 /// A value settled once that tasks can await. Cancelling a waiter ends its
 /// wait with `nil` instead of leaving it suspended.
-private final class PasteboardSettledValue<Value: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Value?
-    private var waiters: [UUID: CheckedContinuation<Value?, Never>] = [:]
+private final class PasteboardSettledValue<Value: Sendable>: Sendable {
+    private struct State: Sendable {
+        var value: Value?
+        var waiters: [UUID: CheckedContinuation<Value?, Never>] = [:]
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     var current: Value? {
-        lock.withLock { value }
+        state.withLock { $0.value }
     }
 
     func settle(_ newValue: Value) {
-        let resumed: [CheckedContinuation<Value?, Never>] = lock.withLock {
-            guard value == nil else { return [] }
-            value = newValue
-            defer { waiters.removeAll() }
-            return Array(waiters.values)
+        let resumed = state.withLock { state -> [CheckedContinuation<Value?, Never>] in
+            guard state.value == nil else { return [] }
+            state.value = newValue
+            defer { state.waiters.removeAll() }
+            return Array(state.waiters.values)
         }
         for waiter in resumed {
             waiter.resume(returning: newValue)
@@ -313,10 +317,10 @@ private final class PasteboardSettledValue<Value: Sendable>: @unchecked Sendable
         let id = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                let immediate: Value?? = lock.withLock {
-                    if let value { return .some(value) }
+                let immediate = state.withLock { state -> Value?? in
+                    if let value = state.value { return .some(value) }
                     if Task.isCancelled { return .some(nil) }
-                    waiters[id] = continuation
+                    state.waiters[id] = continuation
                     return nil
                 }
                 if let immediate {
@@ -324,7 +328,7 @@ private final class PasteboardSettledValue<Value: Sendable>: @unchecked Sendable
                 }
             }
         } onCancel: {
-            let waiter = lock.withLock { waiters.removeValue(forKey: id) }
+            let waiter = state.withLock { $0.waiters.removeValue(forKey: id) }
             waiter?.resume(returning: nil)
         }
     }

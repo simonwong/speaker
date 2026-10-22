@@ -277,19 +277,17 @@ enum DashboardGroupingSpecs {
         return VoiceInputHistoryRecord(
             sessionID: id,
             startedAt: startedAt,
-            applicationName: "备忘录",
             transcription: "测试文字",
             finalText: "测试文字",
             outcome: .delivered(
                 id,
-                applicationName: "备忘录",
                 text: "测试文字"
             )
         )
     }
 }
 
-private actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
+actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
     private var records: [VoiceInputHistoryRecord]
     enum Read { case records, status, usage }
 

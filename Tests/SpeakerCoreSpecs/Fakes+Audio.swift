@@ -12,9 +12,7 @@ func makeAudioStream(_ chunks: [Data]) -> AsyncStream<Data> {
     }
 }
 
-actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
-    AudioCaptureFailureProviding
-{
+actor StreamingAudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
     private var continuation: AsyncStream<Data>.Continuation?
     private var failureContinuation: AsyncStream<AudioCaptureError>.Continuation?
     private var activeFailure: AudioCaptureError?
@@ -50,7 +48,7 @@ actor StreamingAudioCaptureFake: AudioCapturing, AudioChunkStreaming,
 
     var isActive: Bool { activeStartID != nil }
 
-    func audioChunks() async -> AsyncStream<Data> {
+    func audioChunks() async -> AsyncStream<Data>? {
         audioChunksCount += 1
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         self.continuation = continuation
@@ -158,6 +156,8 @@ actor DelayedFailingStopAudioCapture: AudioCapturing {
 
     func cancel() async {}
 
+    func audioChunks() async -> AsyncStream<Data>? { nil }
+
     func failStop() {
         stopContinuation?.resume(throwing: SpecFailure(message: "late recorder failure"))
         stopContinuation = nil
@@ -187,15 +187,17 @@ actor DelayedFailingStartAudioCapture: AudioCapturing {
     func stop() async throws -> CapturedAudio { specAudio }
 
     func cancel() async {}
+
+    func audioChunks() async -> AsyncStream<Data>? { nil }
 }
 
-actor BlockingCancelAudioCapture: AudioCapturing, AudioChunkStreaming {
+actor BlockingCancelAudioCapture: AudioCapturing {
     private var cancelStarted = false
     private var cancelContinuation: CheckedContinuation<Void, Never>?
     private var audioContinuation: AsyncStream<Data>.Continuation?
     private var activeStartID: UUID?
 
-    func audioChunks() -> AsyncStream<Data> {
+    func audioChunks() -> AsyncStream<Data>? {
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         audioContinuation = continuation
         return stream

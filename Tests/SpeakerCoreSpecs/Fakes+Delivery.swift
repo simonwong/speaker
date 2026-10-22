@@ -2,6 +2,7 @@ import ApplicationServices
 import Foundation
 import SpeakerCore
 import SpeakerSpecSupport
+import os
 
 @MainActor
 final class AccessibilityStateFake {
@@ -505,24 +506,19 @@ actor ReleaseTimeTargetCaptureFake: InputTargetCapturing {
     }
 }
 
-final class LockedCaptureHintSource: @unchecked Sendable {
-    private let lock = NSLock()
-    private var processID: Int32
+final class LockedCaptureHintSource: Sendable {
+    private let processID: OSAllocatedUnfairLock<Int32>
 
     init(processID: Int32) {
-        self.processID = processID
+        self.processID = OSAllocatedUnfairLock(initialState: processID)
     }
 
     var hint: InputTargetCaptureHint {
-        lock.withLock {
-            InputTargetCaptureHint(processID: processID)
-        }
+        InputTargetCaptureHint(processID: processID.withLock { $0 })
     }
 
     func update(processID: Int32) {
-        lock.withLock {
-            self.processID = processID
-        }
+        self.processID.withLock { $0 = processID }
     }
 }
 

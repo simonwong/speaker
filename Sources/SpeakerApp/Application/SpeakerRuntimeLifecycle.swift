@@ -185,27 +185,23 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
             // untouched instead of being read through.
             return .legacyProtectionFailed
         }
-        let legacy = VersionedLocalSessionHistory(fileURL: legacyHistoryFileURL)
-        if let notice = await legacy.persistenceStatus().notice {
-            switch notice {
-            case .corruptedDataPreserved(let backupURL, _):
-                return .legacyCorrupted(backupName: backupURL.lastPathComponent)
-            case .privacyMigrationFailed:
-                return .legacyProtectionFailed
-            case .corruptedRecordsSkipped, .writeFailed:
-                return .legacyNotReady
-            case .recoveryArchivePruneFailed:
-                // Old evidence that refused to delete says nothing about the
-                // legacy records, which loaded normally; migration continues.
-                break
-            }
+        let legacy = LegacyHistoryReader(fileURL: legacyHistoryFileURL)
+        let records: [VoiceInputHistoryRecord]
+        switch legacy.read() {
+        case .records(let legacyRecords):
+            records = legacyRecords
+        case .corruptedPreserved(let backupURL):
+            return .legacyCorrupted(backupName: backupURL.lastPathComponent)
+        case .protectionFailed:
+            return .legacyProtectionFailed
+        case .unreadable:
+            return .legacyNotReady
         }
-        let records = await legacy.allRecords()
         guard await history.importLegacyRecords(records) else {
             return .importRefused
         }
         do {
-            try OwnerOnlyFilePersistence.removeRegularFile(at: legacyHistoryFileURL)
+            try legacy.removeDocument()
         } catch {
             return .migratedLegacyFileRemains
         }

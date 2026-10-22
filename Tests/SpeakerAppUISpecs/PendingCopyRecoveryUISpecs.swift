@@ -16,7 +16,8 @@ enum PendingCopyRecoveryUISpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: text),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: text)),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake())
@@ -29,8 +30,8 @@ enum PendingCopyRecoveryUISpecs {
             }
             defer { presenter.stop() }
             do {
-                await sessions.send(.pressed)
-                await sessions.send(.released)
+                await sessions.dispatchPress()
+                await sessions.releaseAndAwaitTerminal()
                 let pending = await eventually(before: .seconds(2)) {
                     experience.state.menu.copyRetainedTextAction != nil
                 }
