@@ -289,7 +289,7 @@ enum DashboardGroupingSpecs {
     }
 }
 
-private actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
+actor DashboardHistoryStoreFake: LocalSessionHistoryStoring {
     private var records: [VoiceInputHistoryRecord]
     enum Read { case records, status, usage }
 

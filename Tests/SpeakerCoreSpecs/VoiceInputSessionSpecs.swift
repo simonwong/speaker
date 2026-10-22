@@ -1235,5 +1235,70 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(recordingRequestCount == 1)
             await sessions.shutdown()
         }
+
+        await runAsync(
+            "release-to-delivery latency spans release to committed delivery for delivered sessions only",
+            failures: &failures
+        ) {
+            let clock = ManualVoiceInputClock()
+            let transcriber = SpeechTranscriberFake(text: "测一下延迟。", delaysResponse: true)
+            let history = SessionHistoryFake()
+            let sessions = VoiceInputSessions(
+                audioCapture: AudioCaptureFake(),
+                targetCapture: TargetCaptureFake(
+                    result: .writable(.init(id: UUID(), applicationName: "TextEdit"))),
+                transcriber: transcriber,
+                delivery: TextDeliveryFake(result: .delivered),
+                clipboard: ClipboardFake(),
+                history: history,
+                maximumRecordingDuration: .seconds(600),
+                clock: clock
+            )
+
+            await sessions.send(.pressed)
+            clock.advance(by: .milliseconds(1_500))
+            let release = Task { await sessions.send(.released) }
+            guard
+                await eventually(
+                    before: .seconds(2), condition: { await transcriber.callCount == 1 })
+            else { throw SpecFailure(message: "the delivered session never reached recognition") }
+            clock.advance(by: .milliseconds(640))
+            await transcriber.resume()
+            await release.value
+            guard
+                await eventually(
+                    before: .seconds(2),
+                    condition: { await history.records.last?.outcome.isDelivered == true })
+            else { throw SpecFailure(message: "the session was not delivered") }
+            let delivered = await history.records.last
+
+            await sessions.send(.pressed)
+            clock.advance(by: .milliseconds(1_500))
+            let cancelledRelease = Task { await sessions.send(.released) }
+            guard
+                await eventually(
+                    before: .seconds(2), condition: { await transcriber.callCount == 2 })
+            else { throw SpecFailure(message: "the cancelled session never reached recognition") }
+            clock.advance(by: .milliseconds(5_000))
+            await sessions.send(.cancel)
+            await transcriber.resume()
+            await cancelledRelease.value
+            guard
+                await eventually(
+                    before: .seconds(2),
+                    condition: { await history.records.last?.outcome.isCancelled == true })
+            else { throw SpecFailure(message: "the second session was not cancelled") }
+            let cancelled = await history.records.last
+            await sessions.shutdown()
+
+            try expect(
+                delivered?.releaseToDeliveryMilliseconds == 640,
+                "measured \(String(describing: delivered?.releaseToDeliveryMilliseconds))"
+            )
+            try expect(
+                cancelled?.releaseToDeliveryMilliseconds == nil,
+                "cancelled \(String(describing: cancelled?.releaseToDeliveryMilliseconds))"
+            )
+        }
     }
 }

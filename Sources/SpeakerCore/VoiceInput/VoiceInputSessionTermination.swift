@@ -107,12 +107,43 @@ enum VoiceInputTerminalRecordBuilder {
                 Int(now.timeIntervalSince(termination.startedAt) * 1_000)
             ),
             stageDurationsMilliseconds: stageDurations,
+            releaseToDeliveryMilliseconds: releaseToDelivery(
+                termination.activity,
+                auditedStageDurations: auditedStageDurations
+            ),
             outcome: historyOutcome(
                 termination.historyOutcome ?? termination.activity,
                 mayPersistBody: mayPersistBody
             )
         )
         return Output(record: record, notice: notice)
+    }
+
+    /// Stages the audit times before the shortcut is released.
+    private static let preReleaseStages: Set<String> = ["preparing", "recording"]
+
+    /// Time from shortcut release to committed delivery, read from the
+    /// monotonic stage audit alone.
+    ///
+    /// The audit starts `targetCapture` at release and closes `delivery` when
+    /// the session finishes, so every audited stage after recording spans
+    /// exactly that interval. Measured stage durations are not used: a
+    /// streaming provider's transcription time includes the recording. Only a
+    /// delivered session has this interval; cancellation, a Session Problem,
+    /// and a Pending Copy Result do not.
+    private static func releaseToDelivery(
+        _ activity: VoiceInputActivity,
+        auditedStageDurations: [String: Int]
+    ) -> Int? {
+        guard case .delivered = activity,
+            auditedStageDurations["targetCapture"] != nil,
+            auditedStageDurations["delivery"] != nil
+        else { return nil }
+        return
+            auditedStageDurations
+            .filter { !preReleaseStages.contains($0.key) }
+            .values
+            .reduce(0) { $0 + max(0, $1) }
     }
 
     /// A pending copy whose text may not be persisted is stored without it.

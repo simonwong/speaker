@@ -5149,6 +5149,7 @@ struct SpeakerAppScenarioSpecs {
         await MicrophoneSelectionSpecs.run(failures: &failures)
         await RuntimeLifecycleSpecs.run(failures: &failures)
         await DashboardGroupingSpecs.run(failures: &failures)
+        await OverviewServiceSpecs.run(failures: &failures)
 
         SpecSummary.finish(failures: failures, label: "app scenario specs")
     }
