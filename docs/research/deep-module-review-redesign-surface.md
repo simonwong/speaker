@@ -17,6 +17,7 @@ Last reviewed: 2026-08-14 · 镜头: codebase-design(depth / seam / deletion tes
 ## 缓议(实现期处理, 附理由)
 
 - **菜单文案仍在组合根**: `MenuBarContent` 的菜单文案仍位于 `SpeakerApp`; Settings 表现层已迁移。待菜单表面重做时把文案与 presentation policy 一并下沉，避免为未变化的薄 AppKit/SwiftUI 组合提前制造 seam。
+  - 状态(2026-10-22): 已完成。`MenuBarContent` 及其文案、SF Symbols 已在 `Sources/SpeakerAppFeatures/MenuBar/`，行顺序来自 `MenuBarPresentation`; `SpeakerApp` 只负责注入。
 - **UISpecs 渲染 fixture 而非真实视图**: MainWindowView/SettingsView/AboutView/HistoryView 无 spec 覆盖, Tab 结构漂移不会红测试。随 F1 解决(视图进 Features 后 spec 才能跨同一 seam)。
 - **ShortcutRecorderModel 无 seam**: seam 规则 = live+fake 双全才存在; 现在只有 live, 加 fake 属假想 seam。重做录制 UX 时再议。
 
