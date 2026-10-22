@@ -686,7 +686,7 @@ package struct HistoryExpandedRecord: View {
                 stageResult(title: "\(record.transcriptionProviderLabel) 识别", text: transcription)
             }
 
-            if let refinement = record.deepSeekText,
+            if let refinement = record.refinedText,
                 !refinement.isEmpty, refinement != presentation.text,
                 refinement != record.transcription
             {
@@ -755,11 +755,11 @@ package struct HistoryExpandedRecord: View {
                 )
             )
         }
-        if let deepSeekRequestID = record.deepSeekRequestID {
+        if let refinementRequestID = record.refinementRequestID {
             lines.append(
                 DiagnosticLine(
                     label: "\(record.refinementProviderLabel) 请求 ID：",
-                    identifier: deepSeekRequestID
+                    identifier: refinementRequestID
                 )
             )
         }

@@ -211,13 +211,22 @@ public protocol TextRefining: Sendable {
         _ text: String,
         using context: TextRefinementContext
     ) async throws -> TextRefinementResult
+    /// Prepares the connection a later `refine` to `provider` will use. It
+    /// reads no credential and sends no text.
+    func prepareConnection(to provider: RefinementProviderProfile) async
+}
+
+extension TextRefining {
+    public func prepareConnection(to provider: RefinementProviderProfile) async {}
 }
 
 public enum TextRefinementStatus: String, Equatable, Sendable {
     case notRequested
     case succeeded
     case fellBack
-    /// The user took the confirmed recognition Stage Result before refinement finished.
+    /// The confirmed recognition Stage Result was delivered without refinement:
+    /// the user took it before refinement finished, or the transcript was
+    /// short enough that Concise Cleanup had nothing to change.
     case skipped
 }
 
@@ -258,6 +267,27 @@ public actor OptionalTextRefinementPipeline {
         self.refiner = refiner
     }
 
+    /// Prepares the selected Refinement Provider's connection for a mode
+    /// that will refine. Default Smoothing never contacts that provider.
+    public nonisolated func prepareConnection(
+        mode: TextRefinementMode,
+        provider: RefinementProviderProfile
+    ) async {
+        guard mode.requiresRefinement else { return }
+        await refiner.prepareConnection(to: provider)
+    }
+
+    /// Whether `refine` will return the transcript as skipped without a
+    /// request. See `ShortTranscriptRefinementPolicy`.
+    public nonisolated func skipsRefinement(
+        of doubaoText: String,
+        mode: TextRefinementMode,
+        dictionaryWords: [String]
+    ) -> Bool {
+        ShortTranscriptRefinementPolicy.skipsRefinement(
+            of: doubaoText, mode: mode, dictionaryWords: dictionaryWords)
+    }
+
     public func refine(
         doubaoText: String,
         mode: TextRefinementMode,
@@ -271,6 +301,18 @@ public actor OptionalTextRefinementPipeline {
                 finalText: doubaoText,
                 mode: mode,
                 status: .notRequested,
+                failure: nil,
+                providerRequestID: nil
+            )
+        }
+        guard !skipsRefinement(of: doubaoText, mode: mode, dictionaryWords: dictionaryWords)
+        else {
+            return TextRefinementOutcome(
+                doubaoText: doubaoText,
+                deepSeekText: nil,
+                finalText: doubaoText,
+                mode: mode,
+                status: .skipped,
                 failure: nil,
                 providerRequestID: nil
             )

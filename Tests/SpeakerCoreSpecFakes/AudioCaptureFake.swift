@@ -7,14 +7,19 @@ import SpeakerCore
 /// between shortcut activation and an active recorder. Without it the recorder starts
 /// immediately, which is what a case that only needs a working recorder wants.
 /// `delaysCancel` holds cleanup until `resumeCancel()` so failure dismissal can be observed.
+/// `streamsAudio` opens a live chunk stream that `emit(_:)` feeds and stop or cancel ends,
+/// so streaming recognition can run beside a held start.
 public actor AudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
     public let delaysStart: Bool
+    private let streamsAudio: Bool
+    private var chunkContinuation: AsyncStream<Data>.Continuation?
     private let stopError: AudioCaptureError?
     private var delaysCancel: Bool
     private var cancelContinuation: CheckedContinuation<Void, Never>?
     private var failureContinuation: AsyncStream<AudioCaptureError>.Continuation?
     public var hasPendingCancel: Bool { cancelContinuation != nil }
     public var isObservingFailures: Bool { failureContinuation != nil }
+    public var hasPendingStart: Bool { startContinuation != nil }
     public private(set) var startCount = 0
     public private(set) var stopCount = 0
     public private(set) var cancelCount = 0
@@ -29,12 +34,25 @@ public actor AudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
         delaysStart: Bool = false,
         delaysCancel: Bool = false,
         stopError: AudioCaptureError? = nil,
+        streamsAudio: Bool = false,
         prepareStart: (@Sendable () -> AudioCaptureStart)? = nil
     ) {
         self.delaysStart = delaysStart
+        self.streamsAudio = streamsAudio
         self.delaysCancel = delaysCancel
         self.stopError = stopError
         prepareOperation = prepareStart
+    }
+
+    public func audioChunks() async -> AsyncStream<Data>? {
+        guard streamsAudio else { return nil }
+        let (stream, continuation) = AsyncStream<Data>.makeStream()
+        chunkContinuation = continuation
+        return stream
+    }
+
+    public func emit(_ chunk: Data) {
+        chunkContinuation?.yield(chunk)
     }
 
     public nonisolated func prepareStart() -> AudioCaptureStart {
@@ -76,6 +94,8 @@ public actor AudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
         activeStartID = nil
         activePreparedOperation = nil
         isActive = false
+        chunkContinuation?.finish()
+        chunkContinuation = nil
         if let stopError { throw stopError }
         return CapturedAudio(
             data: Data([0x52, 0x49, 0x46, 0x46]),
@@ -90,6 +110,8 @@ public actor AudioCaptureFake: AudioCapturing, AudioCaptureFailureProviding {
         activePreparedOperation = nil
         cancelCount += 1
         isActive = false
+        chunkContinuation?.finish()
+        chunkContinuation = nil
         await operation?.cancel()
         if delaysCancel {
             await withCheckedContinuation { cancelContinuation = $0 }

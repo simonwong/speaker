@@ -6,6 +6,14 @@ public enum SpeechRecognitionFailureKind: String, Sendable {
     case transport
     /// This Mac cannot run on-device recognition, or its language model is not installed.
     case onDeviceModelUnavailable
+    /// The provider heard no speech in the audio it received.
+    case noSpeech
+    /// The provider received no audio.
+    case emptyAudio
+    /// The credential is valid but the provider resource it needs is not enabled.
+    case resourceUnavailable
+    /// The provider is busy or temporarily out of service.
+    case unavailable
 }
 
 public struct SpeechRecognitionFailure: Error, Equatable, Sendable {
@@ -14,16 +22,21 @@ public struct SpeechRecognitionFailure: Error, Equatable, Sendable {
     public let code: String?
     public let requestID: String?
     public let httpStatusCode: Int?
+    /// A status the provider reports in its own protocol rather than as an
+    /// HTTP status, such as a streaming service's error code.
+    public let providerStatusCode: String?
 
     public init(
         provider: SpeechRecognitionProviderID, kind: SpeechRecognitionFailureKind,
-        code: String? = nil, requestID: String? = nil, httpStatusCode: Int? = nil
+        code: String? = nil, requestID: String? = nil, httpStatusCode: Int? = nil,
+        providerStatusCode: String? = nil
     ) {
         self.provider = provider
         self.kind = kind
         self.code = Self.safeIdentifier(code)
         self.requestID = Self.safeIdentifier(requestID)
         self.httpStatusCode = httpStatusCode
+        self.providerStatusCode = VoiceDiagnosticSanitizer.clean(providerStatusCode, limit: 80)
     }
 
     public var userFailure: VoiceInputFailure {
@@ -37,6 +50,10 @@ public struct SpeechRecognitionFailure: Error, Equatable, Sendable {
         case .emptyResponse: .providerReturnedNoText
         case .transport: .networkUnavailable
         case .onDeviceModelUnavailable: .onDeviceModelUnavailable
+        case .noSpeech: .noSpeechDetected
+        case .emptyAudio: .providerReceivedNoAudio
+        case .resourceUnavailable: .providerResourceUnavailable
+        case .unavailable: .providerUnavailable
         default: .transcriptionFailed
         }
     }
@@ -47,7 +64,7 @@ public struct SpeechRecognitionFailure: Error, Equatable, Sendable {
             operation: kind == .missingCredential || kind == .credentialUnavailable
                 ? .credentialAccess : .transcription,
             requestID: requestID, code: code ?? kind.rawValue,
-            statusCode: httpStatusCode.map(String.init)
+            statusCode: providerStatusCode ?? httpStatusCode.map(String.init)
         )
     }
 
@@ -155,7 +172,9 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         try Task.checkCancellation()
         let profile = try context.recognitionProvider.validated()
         if profile.provider == .doubao {
-            return try await doubao.transcribe(audio, context: context)
+            return try await Self.recognizingDoubaoFailures {
+                try await doubao.transcribe(audio, context: context)
+            }
         }
         if profile.provider.isOnDevice {
             let pcm: Data
@@ -197,7 +216,9 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         try Task.checkCancellation()
         let profile = try context.recognitionProvider.validated()
         if profile.provider == .doubao {
-            return try await doubao.transcribe(audioChunks, context: context)
+            return try await Self.recognizingDoubaoFailures {
+                try await doubao.transcribe(audioChunks, context: context)
+            }
         }
         if profile.provider.isOnDevice {
             return try await recognizeOnDevice(audioChunks, profile: profile, context: context)
@@ -218,6 +239,20 @@ public struct CredentialedSpeechTranscriber: ContextualSpeechTranscribing,
         try await context.audioCaptureCompletion?.wait()
         try Task.checkCancellation()
         return try await recognize(pcm, profile: profile, hotwords: context.hotwords)
+    }
+
+    /// Doubao reports its own failure and credential errors; every provider
+    /// leaves this transcriber with a `SpeechRecognitionFailure` instead.
+    private static func recognizingDoubaoFailures(
+        _ operation: () async throws -> TranscriptionResult
+    ) async throws -> TranscriptionResult {
+        do {
+            return try await operation()
+        } catch let failure as DoubaoASRFailure {
+            throw SpeechRecognitionFailure(doubaoFailure: failure)
+        } catch let failure as ProviderCredentialStoreError {
+            throw SpeechRecognitionFailure(doubaoCredentialFailure: failure)
+        }
     }
 
     private static func maximumPCMBytes(for provider: SpeechRecognitionProviderID) -> Int {
@@ -497,5 +532,42 @@ package enum SpeechRecognitionWAV {
         }
         guard let pcm, formatSeen else { throw SpeechRecognitionTransportError.invalidResponse }
         return pcm
+    }
+}
+
+extension SpeechRecognitionFailure {
+    /// The failure a Doubao streaming request reports, keeping Doubao's own
+    /// failure kind as the diagnostic code.
+    package init(doubaoFailure: DoubaoASRFailure) {
+        let kind: SpeechRecognitionFailureKind =
+            switch doubaoFailure.kind {
+            case .invalidCredential: .authentication
+            case .silence: .noSpeech
+            case .emptyAudio: .emptyAudio
+            case .emptyTranscript: .emptyResponse
+            case .resourceNotActivated: .resourceUnavailable
+            case .rateLimited: .rateLimited
+            case .network: .transport
+            case .serverBusy, .serviceUnavailable: .unavailable
+            case .invalidResponse: .invalidResponse
+            case .cancelled, .invalidRequest, .invalidAudioFormat: .rejected
+            }
+        self.init(
+            provider: .doubao,
+            kind: kind,
+            code: doubaoFailure.kind.rawValue,
+            requestID: doubaoFailure.providerRequestID,
+            providerStatusCode: doubaoFailure.providerStatusCode
+        )
+    }
+
+    /// The failure reading the Doubao API Key reports.
+    package init(doubaoCredentialFailure: ProviderCredentialStoreError) {
+        self.init(
+            provider: .doubao,
+            kind: doubaoCredentialFailure == .emptyAPIKey
+                ? .missingCredential : .credentialUnavailable,
+            code: "credential.\(doubaoCredentialFailure.diagnosticCode)"
+        )
     }
 }

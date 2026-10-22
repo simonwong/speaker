@@ -13,8 +13,8 @@ enum SkipRefinementSpecs: CoreSpecDomain {
             let fixture = makeFixture()
             let stream = await fixture.sessions.observe()
 
-            await fixture.sessions.send(.pressed)
-            let release = Task { await fixture.sessions.send(.released) }
+            await fixture.sessions.dispatchPress()
+            let release = Task { await fixture.sessions.releaseAndAwaitTerminal() }
             guard let id = await refiningSessionID(from: stream) else {
                 throw SpecFailure(message: "refinement never became pending")
             }
@@ -29,7 +29,7 @@ enum SkipRefinementSpecs: CoreSpecDomain {
 
             await fixture.sessions.useRecognitionResult(expectedSessionID: id)
             let terminal = await firstTerminalPresentation(from: stream, before: .seconds(2))
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await fixture.delivery.deliveredTexts
             let cancellationCount = await fixture.refiner.cancellationCount
@@ -44,7 +44,7 @@ enum SkipRefinementSpecs: CoreSpecDomain {
             try expect(record?.refinementStatus == TextRefinementStatus.skipped.rawValue)
             try expect(record?.transcription == "豆包已确认结果")
             try expect(record?.finalText == "豆包已确认结果")
-            try expect(record?.deepSeekText == nil)
+            try expect(record?.refinedText == nil)
         }
 
         await runAsync(
@@ -54,14 +54,14 @@ enum SkipRefinementSpecs: CoreSpecDomain {
             let fixture = makeFixture()
             let stream = await fixture.sessions.observe()
 
-            await fixture.sessions.send(.pressed)
-            let release = Task { await fixture.sessions.send(.released) }
+            await fixture.sessions.dispatchPress()
+            let release = Task { await fixture.sessions.releaseAndAwaitTerminal() }
             guard let id = await refiningSessionID(from: stream) else {
                 throw SpecFailure(message: "refinement never became pending")
             }
             await fixture.sessions.cancel(expectedSessionID: id)
             await fixture.sessions.useRecognitionResult(expectedSessionID: id)
-            await release.value
+            _ = await release.value
 
             let deliveredTexts = await fixture.delivery.deliveredTexts
             try expect(deliveredTexts.isEmpty)
@@ -109,7 +109,7 @@ enum SkipRefinementSpecs: CoreSpecDomain {
         from stream: AsyncStream<VoiceInputPresentation>
     ) async -> VoiceInputSessionID? {
         for await presentation in stream {
-            if case .processing(let id, .refining, _) = presentation.activity {
+            if case .processing(let id, .refining) = presentation.activity {
                 return id
             }
             if presentation.activity.isTerminal { return nil }

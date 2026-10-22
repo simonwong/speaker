@@ -211,21 +211,21 @@ enum RefinementModeSpecs: CoreSpecDomain {
                 history: SessionHistoryFake()
             )
 
-            await sessions.send(.pressed)
+            await sessions.dispatchPress()
             // The Refinement Mode shortcut steps to the next mode mid-session.
             let next = RefinementModeSelection.custom(mail.id).next(customModes: [mail, notes])
             let nextMode = try require(
                 next.refinementMode(
                     customModes: [mail, notes], promptOverrides: RefinementPromptOverrides()))
             try await configuration.selectRefinementMode(nextMode)
-            await sessions.send(.released)
+            await sessions.dispatchRelease()
             let delivered1 = await eventually(before: .seconds(5)) {
                 await delivery.deliveredTexts.count == 1
             }
             try expect(delivered1, "the first session did not deliver")
 
-            await sessions.send(.pressed)
-            await sessions.send(.released)
+            await sessions.dispatchPress()
+            await sessions.dispatchRelease()
             let delivered2 = await eventually(before: .seconds(5)) {
                 await delivery.deliveredTexts.count == 2
             }

@@ -261,19 +261,18 @@ enum ServiceUsageSpecs: CoreSpecDomain {
         let id = VoiceInputSessionID(rawValue: UUID())
         let activity: VoiceInputActivity =
             switch outcome {
-            case .delivered: .delivered(id, applicationName: "", text: "整理结果")
+            case .delivered: .delivered(id, text: "整理结果")
             case .cancelled: .cancelled(id)
             case .failed: .failed(id, .transcriptionFailed)
             }
         return VoiceInputHistoryRecord(
             sessionID: id,
             startedAt: startedAt,
-            applicationName: nil,
             transcription: "原始转录",
             finalText: "整理结果",
             transcriptionProvider: provider,
             transcriptionModelID: model,
-            deepSeekText: refinement == nil ? nil : "整理结果",
+            refinedText: refinement == nil ? nil : "整理结果",
             refinementProviderID: refinement?.0,
             refinementModelID: refinement?.1,
             refinementPrompt: refinement == nil ? nil : "只清理口语杂质",

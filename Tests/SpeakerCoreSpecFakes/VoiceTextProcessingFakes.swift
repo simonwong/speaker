@@ -75,6 +75,8 @@ public struct VoiceTextProcessorFake: VoiceTextProcessing {
         snapshotOperation = captureSnapshot
     }
 
+    public var streaming: (any StreamingVoiceTextProcessing)? { nil }
+
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot {
         await snapshotOperation()
     }
@@ -98,6 +100,8 @@ public struct FailingVoiceTextProcessor: VoiceTextProcessing {
     public init(failure: VoiceTextProcessingFailure) {
         self.failure = failure
     }
+
+    public var streaming: (any StreamingVoiceTextProcessing)? { nil }
 
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
@@ -127,6 +131,8 @@ public actor HangingVoiceTextProcessor: VoiceTextProcessing {
         self.confirmedText = confirmedText
     }
 
+    public nonisolated var streaming: (any StreamingVoiceTextProcessing)? { nil }
+
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
 
     public func process(
@@ -137,7 +143,7 @@ public actor HangingVoiceTextProcessor: VoiceTextProcessing {
         await progress(
             .init(
                 stage: reportedStage,
-                confirmedDoubaoResult: confirmedText.map {
+                confirmedRecognitionResult: confirmedText.map {
                     TranscriptionResult(text: $0, providerRequestID: nil)
                 }
             ))
@@ -148,5 +154,103 @@ public actor HangingVoiceTextProcessor: VoiceTextProcessing {
             throw CancellationError()
         }
         throw VoiceTextProcessingFailure(userFailure: .transcriptionFailed)
+    }
+}
+
+/// A streaming text-processing double whose recognition is confirmed as soon
+/// as the session accepts the capture. It then reports `.refining` with
+/// `confirmedText` and stays in refinement until cancelled, counting the
+/// cancellations it observed.
+public actor ConfirmedStreamingVoiceTextProcessor: VoiceTextProcessing,
+    StreamingVoiceTextProcessing
+{
+    public let confirmedText: String
+    public private(set) var hasReportedRefining = false
+    public private(set) var cancellationCount = 0
+
+    public init(confirmedText: String) {
+        self.confirmedText = confirmedText
+    }
+
+    public nonisolated var streaming: (any StreamingVoiceTextProcessing)? { self }
+
+    public func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    public func process(
+        _ audio: CapturedAudio,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        throw VoiceTextProcessingFailure(userFailure: .transcriptionFailed)
+    }
+
+    public func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        throw VoiceTextProcessingFailure(userFailure: .transcriptionFailed)
+    }
+
+    public func processStreaming(
+        _ audioChunks: AsyncStream<Data>,
+        snapshot: VoiceTextProcessingSnapshot,
+        audioCaptureCompletion: AudioCaptureCompletionGate,
+        progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
+    ) async throws -> VoiceTextProcessingResult {
+        for await _ in audioChunks {}
+        try await audioCaptureCompletion.wait()
+        await progress(
+            .init(
+                stage: .refining,
+                confirmedRecognitionResult: TranscriptionResult(
+                    text: confirmedText, providerRequestID: "confirmed-streaming-spec")
+            ))
+        hasReportedRefining = true
+        do {
+            try await Task.sleep(for: .seconds(3_600))
+        } catch is CancellationError {
+            cancellationCount += 1
+            throw CancellationError()
+        }
+        throw VoiceTextProcessingFailure(userFailure: .transcriptionFailed)
+    }
+}
+
+/// A Refinement Provider double that answers every request with `refinedText`
+/// and records, in order, each connection preparation and each request.
+public actor TextRefinerFake: TextRefining {
+    public enum Event: Equatable, Sendable {
+        case preparedConnection(RefinementProviderProfile)
+        case refined(String)
+    }
+
+    public let refinedText: String
+    public private(set) var events: [Event] = []
+
+    public init(refinedText: String) {
+        self.refinedText = refinedText
+    }
+
+    public var refineCount: Int {
+        events.filter { if case .refined = $0 { true } else { false } }.count
+    }
+
+    public var preparedProviders: [RefinementProviderProfile] {
+        events.compactMap {
+            if case .preparedConnection(let provider) = $0 { provider } else { nil }
+        }
+    }
+
+    public func prepareConnection(to provider: RefinementProviderProfile) async {
+        events.append(.preparedConnection(provider))
+    }
+
+    public func refine(
+        _ text: String,
+        using context: TextRefinementContext
+    ) async throws -> TextRefinementResult {
+        events.append(.refined(text))
+        return TextRefinementResult(text: refinedText, providerRequestID: "refiner-fake")
     }
 }

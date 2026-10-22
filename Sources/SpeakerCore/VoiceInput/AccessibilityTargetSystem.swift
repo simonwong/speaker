@@ -609,9 +609,9 @@ package struct LiveAccessibilityTargetSystem: AccessibilityTargetSystem {
             ))
     }
 
-    /// Stored in Session Records as the Input Target's application name when
-    /// macOS reports none, so it is a persisted label rather than copy.
-    static let unknownApplicationName = "未知应用"
+    /// The Input Target's application name when macOS reports none. It only
+    /// appears in adapter diagnostics, never in product copy or history.
+    static let unknownApplicationName = "unknown"
 
     package func secureInputEnabled() async -> Bool {
         IsSecureEventInputEnabled()

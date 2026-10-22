@@ -217,7 +217,7 @@ package enum SpeakerDiagnosticReport {
             }
             append(
                 "latestRefinementRequestID",
-                value: record.deepSeekRequestID,
+                value: record.refinementRequestID,
                 to: &lines
             )
             append(
@@ -276,7 +276,7 @@ package enum SpeakerDiagnosticReport {
         case .idle: "idle"
         case .preparing: "preparing"
         case .recording: "recording"
-        case .processing(_, let stage, _): "processing.\(stage)"
+        case .processing(_, let stage): "processing.\(stage)"
         case .delivered: "delivered"
         case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
         case .cancelled: "cancelled"
