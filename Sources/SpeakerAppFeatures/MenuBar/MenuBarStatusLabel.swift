@@ -9,18 +9,15 @@ import SwiftUI
 package struct MenuBarStatusLabel: View {
     @ObservedObject var voiceInput: VoiceInputExperience
     @ObservedObject var permissions: PermissionModel
-    @ObservedObject var doubao: DoubaoSettingsModel
     @ObservedObject var recognition: SpeechRecognitionSettingsModel
 
     package init(
         voiceInput: VoiceInputExperience,
         permissions: PermissionModel,
-        doubao: DoubaoSettingsModel,
         recognition: SpeechRecognitionSettingsModel
     ) {
         self.voiceInput = voiceInput
         self.permissions = permissions
-        self.doubao = doubao
         self.recognition = recognition
     }
 
@@ -30,7 +27,6 @@ package struct MenuBarStatusLabel: View {
                 isRecording: voiceInput.state.isRecording,
                 setupGap: VoiceInputSetupGap.current(
                     permissions: permissions.snapshot,
-                    doubao: doubao,
                     recognition: recognition
                 )
             )

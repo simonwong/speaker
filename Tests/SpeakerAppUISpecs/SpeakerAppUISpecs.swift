@@ -32,14 +32,17 @@ struct SpeakerAppUISpecs {
                         error: URLError(.userAuthenticationRequired)
                     )
                 )
-                let model = DoubaoSettingsModel(
-                    service: service,
+                let model = SpeechRecognitionSettingsModel(
+                    credentials: credentials,
+                    configuration: VoiceInputConfigurationController(),
                     settingsStore: VersionedLocalAppSettingsStore(
                         fileURL: directory.appendingPathComponent("settings.json")
-                    )
+                    ),
+                    doubao: service
                 )
+                await model.load()
                 model.apiKeyDraft = "initial-test-key"
-                await model.save()
+                await model.saveAPIKey()
                 let permissions = PermissionModel(
                     access: PermissionAccessFake(
                         snapshot: .init(accessibility: .granted, microphone: .granted)
@@ -48,13 +51,7 @@ struct SpeakerAppUISpecs {
                 let hostingView = NSHostingView(
                     rootView: SpeakerOnboardingView(
                         permissions: permissions,
-                        doubao: model,
-                        recognition: SpeechRecognitionSettingsModel(
-                            credentials: LocalFileProviderCredentialStore(
-                                fileURL: directory.appendingPathComponent("recognition-keys.json")),
-                            configuration: VoiceInputConfigurationController(),
-                            settingsStore: VersionedLocalAppSettingsStore(
-                                fileURL: directory.appendingPathComponent("settings.json"))),
+                        recognition: model,
                         requestPermission: { _ in },
                         refreshPermissions: {},
                         announce: { _ in },
@@ -95,9 +92,10 @@ struct SpeakerAppUISpecs {
 
                 model.checkConnection()
                 let failed = await eventually(before: .seconds(1)) {
-                    if case .failure = model.status { true } else { false }
+                    if case .failure = model.doubaoStatus { true } else { false }
                 }
-                try expect(failed, "the failed connection check never reported \(model.status)")
+                try expect(
+                    failed, "the failed connection check never reported \(model.doubaoStatus)")
                 try expect(model.hasStoredKey, "a failed check forgot the stored Key")
                 pumpUIRunLoop()
                 try expect(
@@ -116,16 +114,17 @@ struct SpeakerAppUISpecs {
                     }
                 }
                 try expect(replacementVisible, "the replacement field did not update")
-                await model.save()
+                await model.saveAPIKey()
                 let replacementStored = await eventually(before: .seconds(1)) {
                     pumpUIRunLoop()
-                    return model.status == .configured && model.apiKeyDraft.isEmpty
+                    return model.doubaoStatus == .configured && model.apiKeyDraft.isEmpty
                         && onboardingSecureFields(in: hostingView).contains {
                             $0.stringValue.isEmpty && $0.isEditable
                                 && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
                         }
                 }
-                try expect(replacementStored, "the replacement Key did not store: \(model.status)")
+                try expect(
+                    replacementStored, "the replacement Key did not store: \(model.doubaoStatus)")
                 let storedKey = try await credentials.apiKey(for: .doubao)
                 try expect(storedKey == "replacement-test-key", "the stored Key was not replaced")
                 let back = accessibilityButtons(in: hostingView).first { $0.label == "上一步" }

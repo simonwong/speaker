@@ -50,7 +50,6 @@ package final class OverviewModel: ObservableObject {
 package struct OverviewView: View {
     @ObservedObject var model: OverviewModel
     @ObservedObject private var permissions: PermissionModel
-    @ObservedObject private var doubao: DoubaoSettingsModel
     @ObservedObject private var recognition: SpeechRecognitionSettingsModel
     @ObservedObject private var whatsNew: WhatsNewModel
     private let openSetup: (VoiceInputSetupGap) -> Void
@@ -66,7 +65,6 @@ package struct OverviewView: View {
         self.model = model
         self.whatsNew = whatsNew
         permissions = workspace.permissions
-        doubao = workspace.doubao
         recognition = workspace.recognition
         let navigation = workspace.navigation
         openSetup = { gap in
@@ -80,7 +78,6 @@ package struct OverviewView: View {
             state: model.dashboardState,
             setupGap: VoiceInputSetupGap.current(
                 permissions: permissions.snapshot,
-                doubao: doubao,
                 recognition: recognition
             ),
             openSetup: openSetup,

@@ -23,12 +23,9 @@ enum APIKeySettingsUISpecs {
             let model = SpeechRecognitionSettingsModel(
                 credentials: credentials, configuration: VoiceInputConfigurationController(),
                 settingsStore: settings)
-            let doubao = DoubaoSettingsModel(
-                service: CredentialedDoubaoTranscriber(credentials: credentials),
-                settingsStore: settings)
             await model.load()
             let hosting = NSHostingView(
-                rootView: SpeechRecognitionSettingsCard(model: model, doubao: doubao).padding(12)
+                rootView: SpeechRecognitionSettingsCard(model: model).padding(12)
                     .frame(width: 400))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 400, height: 700), styleMask: [.titled],
@@ -150,7 +147,6 @@ enum APIKeySettingsUISpecs {
                 "Qwen streaming controls or retained region missing")
 
             await model.shutdown()
-            await doubao.shutdown()
         }
 
         await runAsync(
@@ -163,24 +159,20 @@ enum APIKeySettingsUISpecs {
                 fileURL: directory.appendingPathComponent("keys.json"))
             let settings = VersionedLocalAppSettingsStore(
                 fileURL: directory.appendingPathComponent("settings.json"))
-            let doubao = DoubaoSettingsModel(
-                service: CredentialedDoubaoTranscriber(credentials: credentials),
+            let doubao = SpeechRecognitionSettingsModel(
+                credentials: credentials, configuration: VoiceInputConfigurationController(),
                 settingsStore: settings)
             let refinement = RefinementSettingsModel(
                 service: CredentialedTextRefiner(credentials: credentials),
                 configuration: VoiceInputConfigurationController(), settingsStore: settings)
+            await doubao.load()
             doubao.apiKeyDraft = "synthetic-doubao-old"
-            await doubao.save()
+            await doubao.saveAPIKey()
             refinement.apiKeyDraft = "synthetic-deepseek-old"
             await refinement.saveAPIKey()
             let hosting = NSHostingView(
                 rootView: VStack {
-                    SpeechRecognitionSettingsCard(
-                        model: SpeechRecognitionSettingsModel(
-                            credentials: credentials,
-                            configuration: VoiceInputConfigurationController(),
-                            settingsStore: settings),
-                        doubao: doubao)
+                    SpeechRecognitionSettingsCard(model: doubao)
                     RefinementProviderSettingsCard(model: refinement)
                 })
             let window = NSWindow(
