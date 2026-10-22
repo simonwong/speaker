@@ -37,14 +37,19 @@ enum PendingCopyRecoveryUISpecs {
                 }
                 try expect(pending, "the result never became available to copy")
                 presenter.present(experience.state.overlay)
-                try await Task.sleep(for: .milliseconds(80))
+                let copyShown = await eventually(before: .seconds(2)) {
+                    presenter.accessibilityButtonEvidence.contains { $0.label == "复制" }
+                }
+                try expect(copyShown, "the HUD never exposed its copy control")
                 try expect(presenter.pressAccessibilityButton(label: "复制"))
                 let failed = await eventually(before: .seconds(2)) {
                     experience.state.diagnosticCode == "pendingCopy.clipboardFailed"
                 }
                 try expect(failed)
                 presenter.present(experience.state.overlay)
-                try await Task.sleep(for: .milliseconds(80))
+                let retryShown = await eventually(before: .seconds(2)) {
+                    presenter.accessibilityButtonEvidence.contains { $0.label == "重试复制" }
+                }
                 if let path = ProcessInfo.processInfo.environment["SPEAKER_HUD_CAPTURE_DIR"] {
                     let directory = URL(fileURLWithPath: path, isDirectory: true)
                     try FileManager.default.createDirectory(
@@ -54,6 +59,8 @@ enum PendingCopyRecoveryUISpecs {
                             $0.isVisible && $0.frame.size == presenter.evidence.windowSize
                         })
                     else { throw SpecFailure(message: "pending-copy window is unavailable") }
+                    // Manual capture only: the window server composites the
+                    // glass on its own schedule and reports no completion.
                     try await Task.sleep(for: .milliseconds(300))
                     let capture = Process()
                     capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -65,9 +72,7 @@ enum PendingCopyRecoveryUISpecs {
                     capture.waitUntilExit()
                     try expect(capture.terminationStatus == 0)
                 }
-                try expect(
-                    presenter.accessibilityButtonEvidence.contains { $0.label == "重试复制" },
-                    "copy failure left the HUD without a retry control")
+                try expect(retryShown, "copy failure left the HUD without a retry control")
                 try expect(presenter.evidence.windowSize == CGSize(width: 370, height: 44))
                 try expect(!presenter.evidence.isKeyWindow)
                 await clipboard.setSucceeds(true)

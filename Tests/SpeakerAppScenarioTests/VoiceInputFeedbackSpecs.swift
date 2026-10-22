@@ -50,21 +50,26 @@ enum VoiceInputFeedbackSpecs {
             "voice feedback dismisses an informational problem on its own", failures: &failures
         ) {
             let sessions = makeSessions(error: .conversionFailed)
+            let clock = ManualVoiceInputClock()
             let experience = VoiceInputExperience(
                 sessions: sessions,
-                problemAutoDismissDelay: .milliseconds(200),
+                problemAutoDismissDelay: .seconds(5),
+                clock: clock,
                 announce: { _ in })
             experience.start()
             try await finishRecording(experience)
             let shown = await eventually(before: .seconds(2)) {
                 if case .problem = experience.state.overlay { true } else { false }
             }
+            try await clock.waitUntilPendingSleepCount(1)
+            clock.advance(by: .seconds(5))
             let dismissed = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "idle"
             }
             let releasesEscape = !experience.shortcutTarget.shouldConsumeEscape()
             await experience.shutdown()
             try expect(shown, "the problem never became visible")
+            try expect(clock.sleepRequests == [.seconds(5)], "requested \(clock.sleepRequests)")
             try expect(dismissed && releasesEscape, "the problem stayed on screen")
         }
 
@@ -73,24 +78,33 @@ enum VoiceInputFeedbackSpecs {
             failures: &failures
         ) {
             let sessions = makeSessions(error: .conversionFailed)
+            let clock = ManualVoiceInputClock()
             let experience = VoiceInputExperience(
                 sessions: sessions,
-                problemAutoDismissDelay: .milliseconds(200),
+                problemAutoDismissDelay: .seconds(5),
+                clock: clock,
                 announce: { _ in })
             experience.start()
             try await finishRecording(experience)
             let shown = await eventually(before: .seconds(2)) {
                 if case .problem = experience.state.overlay { true } else { false }
             }
+            try await clock.waitUntilPendingSleepCount(1)
             experience.holdProblem(true)
-            try await Task.sleep(for: .milliseconds(500))
+            // Holding cancels the armed timer at once, so no deadline is left
+            // for the clock to pass.
+            let disarmed = clock.pendingSleepCount == 0 && clock.cancelledSleepCount == 1
+            clock.advance(by: .seconds(60))
             let held = if case .problem = experience.state.overlay { true } else { false }
             experience.holdProblem(false)
+            try await clock.waitUntilPendingSleepCount(1)
+            clock.advance(by: .seconds(5))
             let dismissed = await eventually(before: .seconds(2)) {
                 experience.state.diagnosticCode == "idle"
             }
             await experience.shutdown()
             try expect(shown, "the problem never became visible")
+            try expect(disarmed, "holding the problem left its dismissal timer armed")
             try expect(held, "the problem dismissed under the pointer")
             try expect(dismissed, "the problem stayed after the pointer left")
         }
@@ -101,19 +115,30 @@ enum VoiceInputFeedbackSpecs {
                 failures: &failures
             ) {
                 let sessions = makeSessions(error: error)
+                let clock = ManualVoiceInputClock()
                 let experience = VoiceInputExperience(
                     sessions: sessions,
                     problemAutoDismissDelay: .milliseconds(50),
+                    clock: clock,
                     announce: { _ in })
                 experience.start()
                 try await finishRecording(experience)
                 let shown = await eventually(before: .seconds(2)) {
                     experience.state.menu.dismissAction != nil
                 }
-                try await Task.sleep(for: .milliseconds(400))
+                // A dismissal timer would register its sleep a few executor
+                // hops after the prompt appears, and nothing the experience
+                // does follows the absence of that registration. So this case
+                // keeps one bounded reverse wait, on the clock rather than on
+                // the whole dismissal path.
+                await drainMainActor()
+                let unarmed = await neverHolds(within: .milliseconds(50)) {
+                    clock.sleepRequestCount > 0
+                }
                 let stillShown = experience.state.menu.dismissAction != nil
                 await experience.shutdown()
                 try expect(shown && stillShown, "an actionable prompt dismissed itself")
+                try expect(unarmed, "an actionable prompt armed a dismissal timer")
             }
         }
 
@@ -440,13 +465,14 @@ enum VoiceInputFeedbackSpecs {
         ) {
             var announcements: [String] = []
             var lookups = 0
+            let clock = ManualVoiceInputClock()
             let experience = VoiceInputExperience(
                 sessions: makeSessions(),
-                secureInputNoticeDuration: .milliseconds(300),
                 secureInputHolderName: {
                     lookups += 1
                     return "Terminal"
                 },
+                clock: clock,
                 announce: { announcements.append($0) })
             experience.start()
             for _ in 0..<5 {
@@ -456,12 +482,17 @@ enum VoiceInputFeedbackSpecs {
             let shown = await eventually(before: .seconds(2)) {
                 experience.state.overlay == .notice(title: expected)
             }
-            try await Task.sleep(for: .milliseconds(100))
+            // Each refused press reaches the experience as its own main-actor
+            // job; once they have all run, every repeat has been judged.
+            await drainMainActor()
             let announcedWhileShown = announcements
             let lookupsWhileShown = lookups
+            try await clock.waitUntilPendingSleepCount(1)
+            clock.advance(by: VoiceInputExperience.defaultSecureInputNoticeDuration)
             let hidden = await eventually(before: .seconds(2)) {
                 experience.state.overlay == .hidden
             }
+            let noteTimers = clock.sleepRequests
             experience.shortcutTarget.secureInputBlockedPress()
             let shownAgain = await eventually(before: .seconds(2)) {
                 experience.state.overlay == .notice(title: expected)
@@ -475,6 +506,9 @@ enum VoiceInputFeedbackSpecs {
                 announcedWhileShown == [expected] && lookupsWhileShown == 1,
                 "repeated presses repeated the note")
             try expect(hidden, "the note stayed on screen")
+            try expect(
+                noteTimers == [VoiceInputExperience.defaultSecureInputNoticeDuration],
+                "repeated presses restarted the note's timer: \(noteTimers)")
             try expect(
                 shownAgain && announcedAfter == [expected, expected],
                 "a press after the note closed showed nothing")
@@ -517,7 +551,8 @@ enum VoiceInputFeedbackSpecs {
             try expect(retained, "the result was not retained")
             let before = experience.state.overlay
             experience.shortcutTarget.secureInputBlockedPress()
-            try await Task.sleep(for: .milliseconds(200))
+            // The refused press reaches the experience as a main-actor job.
+            await drainMainActor()
             let after = experience.state.overlay
             await experience.shutdown()
             try expect(after == before, "the note replaced the retained result")

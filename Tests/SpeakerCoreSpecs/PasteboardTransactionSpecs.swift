@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 /// Automatic delivery borrows the user's clipboard for one Command-V and must

@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
 func makeAudioStream(_ chunks: [Data]) -> AsyncStream<Data> {

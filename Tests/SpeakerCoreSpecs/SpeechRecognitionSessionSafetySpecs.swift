@@ -27,13 +27,11 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                         await target.hasPendingCapture
                     }
                     try expect(captured)
-                    let prematurelyUploaded = await eventually(before: .milliseconds(40)) {
-                        await !transport.requests.isEmpty
-                    }
                     await target.resumeFirstCapture()
                     _ = await release.value
                     await sessions.shutdown()
-                    try expect(!prematurelyUploaded)
+                    // The transport keeps every request, so an upload at any
+                    // point, before or after the target resumed, shows here.
                     let requests = await transport.requests
                     try expect(requests.isEmpty)
                     let record = await history.records.last
@@ -61,10 +59,12 @@ enum SpeechRecognitionSessionSafetySpecs: CoreSpecDomain {
                 let release = Task { await sessions.releaseAndAwaitTerminal() }
                 let stopped = await eventually(before: .seconds(2)) { await audio.hasPendingStop }
                 try expect(stopped)
-                let premature = await eventually(before: .milliseconds(40)) {
+                // The session is suspended in the held stop; a premature upload
+                // would run beside it, so no event orders after it.
+                let waited = await neverHolds(within: .milliseconds(40)) {
                     await !transport.requests.isEmpty
                 }
-                try expect(!premature)
+                try expect(waited, "uploaded before the capture was accepted")
                 await audio.resumeFirstStop()
                 let uploaded = await eventually(before: .seconds(2)) {
                     await transport.requests.count == 1

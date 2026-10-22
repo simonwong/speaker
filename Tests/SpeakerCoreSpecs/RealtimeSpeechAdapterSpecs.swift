@@ -50,10 +50,12 @@ enum RealtimeSpeechAdapterSpecs: CoreSpecDomain {
                 }
                 try expect(sent)
                 continuation.finish()
-                let premature = await eventually(before: .milliseconds(40)) {
+                // The client is suspended on the completion gate; a premature
+                // commit would run beside it, so no event orders after it.
+                let waited = await neverHolds(within: .milliseconds(40)) {
                     await socket.count("input_audio_buffer.commit") > 0
                 }
-                try expect(!premature)
+                try expect(waited, "committed before the capture was accepted")
                 await gate.accept()
                 let result = try await task.value
                 try expect(result.text == "confirmed result")

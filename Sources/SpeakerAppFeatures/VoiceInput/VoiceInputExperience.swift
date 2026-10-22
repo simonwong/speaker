@@ -278,6 +278,9 @@ package final class VoiceInputExperience: ObservableObject {
     private var idleNoticeHideTask: Task<Void, Never>?
     /// The idle note on screen is the Secure Event Input note.
     private var showsSecureInputNotice = false
+    /// Every HUD timer sleeps on this clock, so a specification advances the
+    /// notice and problem deadlines by hand instead of waiting for them.
+    private let clock: any VoiceInputClock
 
     /// How long a delivery notice stays before the HUD closes.
     package static let defaultNoticeDuration: Duration = .seconds(2)
@@ -299,9 +302,11 @@ package final class VoiceInputExperience: ObservableObject {
         noticeDuration: Duration = defaultNoticeDuration,
         secureInputNoticeDuration: Duration = defaultSecureInputNoticeDuration,
         secureInputHolderName: @escaping @MainActor () -> String? = { nil },
+        clock: any VoiceInputClock = ContinuousVoiceInputClock(),
         announce: @escaping Announce
     ) {
         self.sessions = sessions
+        self.clock = clock
         self.problemAutoDismissDelay = problemAutoDismissDelay
         self.noticeDuration = noticeDuration
         self.secureInputNoticeDuration = secureInputNoticeDuration
@@ -611,8 +616,9 @@ package final class VoiceInputExperience: ObservableObject {
         noticeHideTask = nil
         state = state.showingOverlay(.notice(title: title))
         announce(title)
+        let clock = clock
         idleNoticeHideTask = Task { [weak self] in
-            try? await Task.sleep(for: duration)
+            try? await clock.sleep(for: duration)
             guard !Task.isCancelled, let self, self.idleNoticeTitle == title else { return }
             self.idleNoticeTitle = nil
             self.idleNoticeHideTask = nil
@@ -668,8 +674,9 @@ package final class VoiceInputExperience: ObservableObject {
         guard idleNoticeTitle == nil, case .notice = state.overlay else { return }
         let revision = state.revision
         let duration = noticeDuration
+        let clock = clock
         noticeHideTask = Task { [weak self] in
-            try? await Task.sleep(for: duration)
+            try? await clock.sleep(for: duration)
             guard !Task.isCancelled, let self,
                 self.state.revision == revision,
                 case .notice = self.state.overlay
@@ -695,8 +702,9 @@ package final class VoiceInputExperience: ObservableObject {
         problemAutoDismissSessionID = id
         guard !problemHeld else { return }
         let delay = problemAutoDismissDelay
+        let clock = clock
         problemAutoDismissTask = Task { [weak self] in
-            try? await Task.sleep(for: delay)
+            try? await clock.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.perform(.init(sessionID: id, operation: .dismissResult))
         }

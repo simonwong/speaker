@@ -194,6 +194,46 @@ public func eventually(
     return await condition()
 }
 
+/// Returns once every main-actor job enqueued before the call has run.
+///
+/// The main actor runs its jobs in the order they were enqueued, so after this returns,
+/// work the code under specification had already scheduled on the main actor (an
+/// unstructured `Task` started by a state change, say) has run up to its first suspension.
+/// It is an ordering point, not a wait: it never sleeps. It says nothing about work that
+/// first hops to another executor, such as a `VoiceInputClock` sleep.
+@MainActor
+public func drainMainActor() async {
+    await Task { @MainActor in }.value
+}
+
+/// Polls `condition` for the whole of `window` and returns true when it never held.
+///
+/// This is the only sanctioned real-time wait before asserting that something did NOT
+/// happen, and it is a last resort. Prefer an ordering point: advance a
+/// `ManualVoiceInputClock`, then await an event the code under specification is known to
+/// produce after the path in question, and assert on the state at that point. Use this
+/// only when the code offers no such event, for example when the wrong behavior would run
+/// concurrently with a suspension the case is holding open. It cannot fail a correct
+/// implementation; a regression slower than `window` passes unnoticed, and every call
+/// costs `window` of wall time, so keep the window short and say at the call site why no
+/// ordering point exists.
+@MainActor
+public func neverHolds(
+    within window: Duration,
+    pollEvery interval: Duration = .milliseconds(5),
+    condition: @MainActor () async -> Bool
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: window)
+    while clock.now < deadline {
+        if await condition() {
+            return false
+        }
+        try? await Task.sleep(for: interval)
+    }
+    return !(await condition())
+}
+
 /// End-of-run reporting shared by every specification executable.
 @MainActor
 public enum SpecSummary {
