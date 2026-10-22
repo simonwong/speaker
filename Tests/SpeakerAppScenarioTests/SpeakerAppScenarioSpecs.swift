@@ -2909,6 +2909,68 @@ struct SpeakerAppScenarioSpecs {
         }
 
         await runAsync(
+            "Doubao connection check against a failing handshake fails fast with its transport classification",
+            failures: &failures
+        ) {
+            // The onboarding UI specification's service, with the live
+            // liveness probe the production default supplies.
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-doubao-handshake-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let credentials = LocalFileProviderCredentialStore(
+                fileURL: directory.appendingPathComponent("credentials.json")
+            )
+            let service = CredentialedDoubaoTranscriber(
+                credentials: credentials,
+                connector: DoubaoFailingWebSocketConnectorFake(
+                    error: URLError(.userAuthenticationRequired)
+                )
+            )
+            let model = DoubaoSettingsModel(
+                service: service,
+                settingsStore: VersionedLocalAppSettingsStore(
+                    fileURL: directory.appendingPathComponent("settings.json")
+                )
+            )
+            model.apiKeyDraft = "initial-test-key"
+            await model.save()
+            try expect(
+                model.hasStoredKey && model.apiKeyDraft.isEmpty,
+                "the first save did not store the Key")
+            try expect(model.status == .configured, "first save left status \(model.status)")
+
+            let started = ContinuousClock.now
+            do {
+                _ = try await service.checkConnection()
+                throw SpecFailure(message: "a rejected handshake passed the connection check")
+            } catch let failure as DoubaoASRFailure {
+                try expect(
+                    failure.kind == .network
+                        && failure.providerStatusCode == "url.-1013",
+                    "handshake failure classified as \(failure)")
+            }
+            try expect(
+                ContinuousClock.now - started < .milliseconds(500),
+                "the connection check waited after the handshake failed")
+
+            model.checkConnection()
+            let failed = await eventually(before: .seconds(1)) {
+                if case .failure = model.status { true } else { false }
+            }
+            try expect(failed, "the model never reported the failed connection check")
+            try expect(model.hasStoredKey)
+            model.apiKeyDraft = "replacement-test-key"
+            await model.save()
+            try expect(model.status == .configured && model.apiKeyDraft.isEmpty)
+            let storedKey = try await credentials.apiKey(for: .doubao)
+            try expect(storedKey == "replacement-test-key")
+            await model.shutdown()
+        }
+
+        await runAsync(
             "Doubao connection failure names the checked resource and its fix",
             failures: &failures
         ) {
