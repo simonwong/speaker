@@ -11,22 +11,26 @@ package struct DoubaoStreamingExchange: Sendable {
     private enum Event: Sendable {
         case audioSent
         case finalResult(TranscriptionResult)
+        case probeEnded
     }
 
     private let connection: any DoubaoWebSocketConnection
     private let requestID: String
     private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
+    private let liveness: TransportLivenessProbe
     private let closeGate: DoubaoWebSocketCloseGate
     private let failurePriority = DoubaoExchangeFailurePriority()
 
     package init(
         connection: any DoubaoWebSocketConnection,
         requestID: String,
-        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
+        runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?,
+        liveness: TransportLivenessProbe = .live
     ) {
         self.connection = connection
         self.requestID = requestID
         self.runtimeDiagnostics = runtimeDiagnostics
+        self.liveness = liveness
         closeGate = DoubaoWebSocketCloseGate(connection: connection)
     }
 
@@ -93,7 +97,8 @@ package struct DoubaoStreamingExchange: Sendable {
     }
 
     /// Runs the sender and receiver together and returns once both have
-    /// finished: audio fully sent and a final result received.
+    /// finished: audio fully sent and a final result received. After the
+    /// final audio frame, a liveness probe runs beside the receiver.
     private func exchangeAudio(_ chunks: AsyncStream<Data>) async throws -> TranscriptionResult {
         try await withThrowingTaskGroup(
             of: Event.self,
@@ -127,12 +132,19 @@ package struct DoubaoStreamingExchange: Sendable {
                     await closeGate.close()
                     throw failure
                 } catch {
-                    let metadata = await connection.metadata()
-                    let failure = DoubaoFailureClassifier.transportFailure(
-                        error,
-                        metadata: metadata,
-                        fallbackRequestID: requestID
-                    )
+                    // When the liveness probe closed the socket, the receive
+                    // ended without a final result because the connection
+                    // was lost, not because of the close it inflicted.
+                    let failure: DoubaoASRFailure
+                    if let loss = await failurePriority.connectionLoss() {
+                        failure = loss
+                    } else {
+                        failure = DoubaoFailureClassifier.transportFailure(
+                            error,
+                            metadata: await connection.metadata(),
+                            fallbackRequestID: requestID
+                        )
+                    }
                     await failurePriority.recordReceiverFailure(failure)
                     await closeGate.close()
                     throw failure
@@ -145,15 +157,45 @@ package struct DoubaoStreamingExchange: Sendable {
                 switch event {
                 case .audioSent:
                     didFinishSending = true
+                    if finalResult == nil {
+                        group.addTask { try await watchLiveness() }
+                    }
                 case .finalResult(let result):
                     finalResult = result
+                case .probeEnded:
+                    break
                 }
                 if didFinishSending, let finalResult {
+                    // A normal return awaits remaining children without
+                    // cancelling them; the liveness probe never ends alone.
+                    group.cancelAll()
                     return finalResult
                 }
             }
             throw DoubaoASRFailure(kind: .invalidResponse, providerRequestID: requestID)
         }
+    }
+
+    /// A failed ping closes the socket and leaves the verdict to the
+    /// receiver: a final result or error frame already queued still wins, and
+    /// only a receive that ends without one is connection loss. An unanswered
+    /// ping keeps the session Waiting For Result.
+    private func watchLiveness() async throws -> Event {
+        do {
+            try await liveness.watch { try await connection.ping() }
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if !(error is CancellationError) {
+                await failurePriority.recordConnectionLoss(
+                    DoubaoFailureClassifier.transportFailure(
+                        error,
+                        metadata: await connection.metadata(),
+                        fallbackRequestID: requestID
+                    ))
+                await closeGate.close()
+            }
+        }
+        return .probeEnded
     }
 
     private func sendAudio(_ chunks: AsyncStream<Data>) async throws {
@@ -281,6 +323,18 @@ private actor DoubaoWebSocketCloseGate {
 /// the transport error that closing the socket inflicts on the sender.
 private actor DoubaoExchangeFailurePriority {
     private var receiverFailure: DoubaoASRFailure?
+    private var lostConnection: DoubaoASRFailure?
+
+    /// A failed liveness ping. It names the failure only if the receiver then
+    /// ends without a final result or an error frame.
+    func recordConnectionLoss(_ failure: DoubaoASRFailure) {
+        guard lostConnection == nil else { return }
+        lostConnection = failure
+    }
+
+    func connectionLoss() -> DoubaoASRFailure? {
+        lostConnection
+    }
 
     func recordReceiverFailure(_ failure: DoubaoASRFailure) {
         guard receiverFailure == nil else { return }

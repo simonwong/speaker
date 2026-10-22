@@ -4,7 +4,7 @@ import SwiftUI
 /// The Doubao rows inside the speech recognition card, laid out like the
 /// other providers: its option, then its key.
 struct DoubaoRecognitionSettings: View {
-    @ObservedObject var model: DoubaoSettingsModel
+    @ObservedObject var model: SpeechRecognitionSettingsModel
 
     var body: some View {
         resourceRow
@@ -14,15 +14,15 @@ struct DoubaoRecognitionSettings: View {
         ProviderKeyEditor(
             draft: $model.apiKeyDraft,
             providerName: "豆包语音",
-            hasStoredKey: model.hasConfiguredKey,
+            hasStoredKey: model.hasStoredKey,
             isUpdating: model.isUpdatingKey,
             status: ProviderKeyStatus(
                 text: status.text,
                 icon: status.symbolName,
                 color: status.tint,
-                help: model.summary
+                help: model.doubaoStatus.summary
             ),
-            connectionCheck: model.hasConfiguredKey
+            connectionCheck: model.hasStoredKey
                 ? ProviderConnectionCheck(
                     isChecking: isChecking,
                     isEnabled: !isChecking && !model.isUpdatingKey,
@@ -31,12 +31,12 @@ struct DoubaoRecognitionSettings: View {
                 ) : nil,
             links: [.doubaoGuide, .doubaoConsole],
             deletionMessage: "删除后将无法进行新的语音识别，历史记录不会受影响。",
-            save: { await model.save() },
-            delete: { await model.delete() }
+            save: { await model.saveAPIKey() },
+            delete: { await model.deleteAPIKey() }
         )
 
-        if case .failure(let message) = model.status {
-            SettingsNotice(text: message, color: .red)
+        if let problem = model.doubaoProblem {
+            SettingsNotice(text: problem, color: .red)
         }
     }
 
@@ -46,8 +46,8 @@ struct DoubaoRecognitionSettings: View {
             Picker(
                 "流式资源",
                 selection: Binding(
-                    get: { model.resource },
-                    set: { resource in Task { await model.selectResource(resource) } }
+                    get: { model.doubaoResource },
+                    set: { resource in Task { await model.selectDoubaoResource(resource) } }
                 )
             ) {
                 ForEach(DoubaoStreamingResource.allCases, id: \.rawValue) { resource in
@@ -57,18 +57,18 @@ struct DoubaoRecognitionSettings: View {
             .settingsTrailingMenu()
             .disabled(model.isUpdatingKey)
         }
-        Text(DoubaoResourcePresentation.costNote(for: model.resource))
+        Text(DoubaoResourcePresentation.costNote(for: model.doubaoResource))
             .font(SpeakerTypography.footnote)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private var isChecking: Bool {
-        if case .checking = model.status { true } else { false }
+        if case .checking = model.doubaoStatus { true } else { false }
     }
 
     private var status: DoubaoStatusPresentation {
-        DoubaoStatusPresentation(status: model.status)
+        DoubaoStatusPresentation(status: model.doubaoStatus)
     }
 }
 

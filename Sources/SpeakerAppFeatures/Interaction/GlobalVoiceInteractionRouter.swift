@@ -1,5 +1,6 @@
 import Foundation
 import SpeakerCore
+import os
 
 /// Routes the one physical global shortcut between mutually exclusive Speaker
 /// interactions.
@@ -8,37 +9,48 @@ import SpeakerCore
 /// can claim shortcut press/release and Escape without changing either live
 /// shortcut monitor. Mouse confirmation crosses the same one-shot state
 /// machine, so simultaneous inputs cannot commit twice.
-package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
+///
+/// The router's state lives in one lock. The voice target and every
+/// interaction callback are called outside it, so a target that consults the
+/// router while answering cannot deadlock it.
+package final class GlobalVoiceInteractionRouter: Sendable {
     package typealias Confirm = @MainActor @Sendable () async -> Bool
     package typealias Cancel = @MainActor @Sendable () -> Void
 
-    private struct ExclusiveInteraction {
+    private struct ExclusiveInteraction: Sendable {
         let id: UUID
         let confirm: Confirm
         let cancel: Cancel
         var isConfirming: Bool
     }
 
-    private let lock = NSLock()
+    private struct State: Sendable {
+        var exclusive: ExclusiveInteraction?
+        var suppressNextRelease = false
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let voiceTarget: VoiceTriggerTarget
-    private var exclusive: ExclusiveInteraction?
-    private var suppressNextRelease = false
 
     package init(voiceTarget: VoiceTriggerTarget) {
         self.voiceTarget = voiceTarget
     }
 
-    package lazy var shortcutTarget = VoiceTriggerTarget(
-        receive: { [weak self] trigger in
-            self?.receive(trigger)
-        },
-        shouldConsumeEscape: { [weak self] in
-            self?.shouldConsumeEscape ?? false
-        },
-        secureInputBlockedPress: { [voiceTarget] in
-            voiceTarget.secureInputBlockedPress()
-        }
-    )
+    /// The target the live shortcut monitors call. Each read builds a new
+    /// value; every copy routes through this router's one state.
+    package var shortcutTarget: VoiceTriggerTarget {
+        VoiceTriggerTarget(
+            receive: { [weak self] trigger in
+                self?.receive(trigger)
+            },
+            shouldConsumeEscape: { [weak self] in
+                self?.shouldConsumeEscape ?? false
+            },
+            secureInputBlockedPress: { [voiceTarget] in
+                voiceTarget.secureInputBlockedPress()
+            }
+        )
+    }
 
     /// The live monitors watch `Esc` only after a shortcut press arms their
     /// key tap. An interaction begun while Speaker is idle therefore cannot
@@ -49,22 +61,19 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
         confirm: @escaping Confirm,
         cancel: @escaping Cancel
     ) -> Bool {
-        let transition = lock.withLock { () -> (Bool, Cancel?) in
-            guard !voiceTarget.shouldConsumeEscape() else {
-                return (false, nil)
-            }
-            let displaced = exclusive?.cancel
-            exclusive = ExclusiveInteraction(
+        guard !voiceTarget.shouldConsumeEscape() else { return false }
+        let displaced = state.withLock { state -> Cancel? in
+            let displaced = state.exclusive?.cancel
+            state.exclusive = ExclusiveInteraction(
                 id: UUID(),
                 confirm: confirm,
                 cancel: cancel,
                 isConfirming: false
             )
-            suppressNextRelease = false
-            return (true, displaced)
+            state.suppressNextRelease = false
+            return displaced
         }
-        guard transition.0 else { return false }
-        transition.1?()
+        displaced?()
         return true
     }
 
@@ -85,21 +94,19 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
     }
 
     package var hasExclusiveInteraction: Bool {
-        lock.withLock { exclusive != nil }
+        state.withLock { $0.exclusive != nil }
     }
 
     private var shouldConsumeEscape: Bool {
-        lock.withLock {
-            exclusive != nil || voiceTarget.shouldConsumeEscape()
-        }
+        hasExclusiveInteraction || voiceTarget.shouldConsumeEscape()
     }
 
     private func receive(_ trigger: GlobalVoiceTrigger) {
         switch trigger {
         case .pressed:
-            let isExclusive = lock.withLock { () -> Bool in
-                guard exclusive != nil else { return false }
-                suppressNextRelease = true
+            let isExclusive = state.withLock { state -> Bool in
+                guard state.exclusive != nil else { return false }
+                state.suppressNextRelease = true
                 return true
             }
             if isExclusive {
@@ -108,9 +115,9 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
                 voiceTarget.receive(.pressed)
             }
         case .released:
-            let suppressed = lock.withLock { () -> Bool in
-                guard suppressNextRelease else { return false }
-                suppressNextRelease = false
+            let suppressed = state.withLock { state -> Bool in
+                guard state.suppressNextRelease else { return false }
+                state.suppressNextRelease = false
                 return true
             }
             if !suppressed {
@@ -135,12 +142,12 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
 
     @discardableResult
     private func beginConfirmation() -> Bool {
-        let request = lock.withLock { () -> (UUID, Confirm)? in
-            guard var interaction = exclusive,
+        let request = state.withLock { state -> (UUID, Confirm)? in
+            guard var interaction = state.exclusive,
                 !interaction.isConfirming
             else { return nil }
             interaction.isConfirming = true
-            exclusive = interaction
+            state.exclusive = interaction
             return (interaction.id, interaction.confirm)
         }
         guard let (id, confirm) = request else { return false }
@@ -153,23 +160,23 @@ package final class GlobalVoiceInteractionRouter: @unchecked Sendable {
     }
 
     private func finishConfirmation(id: UUID, accepted: Bool) {
-        lock.withLock {
-            guard var interaction = exclusive,
+        state.withLock { state in
+            guard var interaction = state.exclusive,
                 interaction.id == id
             else { return }
             if accepted {
-                exclusive = nil
+                state.exclusive = nil
             } else {
                 interaction.isConfirming = false
-                exclusive = interaction
+                state.exclusive = interaction
             }
         }
     }
 
     private func removeExclusiveInteraction() -> Cancel? {
-        lock.withLock {
-            let cancel = exclusive?.cancel
-            exclusive = nil
+        state.withLock { state in
+            let cancel = state.exclusive?.cancel
+            state.exclusive = nil
             // A shortcut press already owned by the displaced interaction must
             // keep its matching release out of the voice gesture state machine.
             return cancel

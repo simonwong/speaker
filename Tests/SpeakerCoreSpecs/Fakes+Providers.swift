@@ -124,6 +124,7 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
     private let blockingSendFailureIndex: Int?
     private let blocksReceiveUntilClose: Bool
     private let onClose: (@Sendable () -> Void)?
+    nonisolated let pings: PingScriptFake
     private var responseIndex = 0
     private var isClosed = false
     private var blockedReceive: CheckedContinuation<Data, Error>?
@@ -140,8 +141,10 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         failingSendIndex: Int? = nil,
         blockingSendFailureIndex: Int? = nil,
         blocksReceiveUntilClose: Bool = false,
-        onClose: (@Sendable () -> Void)? = nil
+        onClose: (@Sendable () -> Void)? = nil,
+        pings: PingScriptFake = PingScriptFake()
     ) {
+        self.pings = pings
         self.responses = responses
         self.receiveError = receiveError
         metadataValue = metadata
@@ -177,7 +180,13 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
 
     func receive() async throws -> Data {
         if blocksReceiveUntilClose {
-            if isClosed { throw URLError(.cancelled) }
+            // Responses stay unread until the socket closes; then the ones
+            // already queued are still delivered before the close error.
+            if isClosed {
+                guard responseIndex < responses.count else { throw URLError(.cancelled) }
+                defer { responseIndex += 1 }
+                return responses[responseIndex]
+            }
             return try await withCheckedThrowingContinuation { continuation in
                 blockedReceive = continuation
             }
@@ -190,6 +199,10 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
         return responses[responseIndex]
     }
 
+    func ping() async throws {
+        try await pings.ping()
+    }
+
     func metadata() -> DoubaoWebSocketMetadata { metadataValue }
 
     func close() async {
@@ -200,8 +213,15 @@ actor DoubaoWebSocketConnectionFake: DoubaoWebSocketConnection {
             throwing: URLError(.networkConnectionLost)
         )
         blockedSend = nil
-        blockedReceive?.resume(throwing: URLError(.cancelled))
-        blockedReceive = nil
+        if let receive = blockedReceive {
+            blockedReceive = nil
+            if responseIndex < responses.count {
+                responseIndex += 1
+                receive.resume(returning: responses[responseIndex - 1])
+            } else {
+                receive.resume(throwing: URLError(.cancelled))
+            }
+        }
         onClose?()
         for _ in 0..<8 {
             await Task.yield()

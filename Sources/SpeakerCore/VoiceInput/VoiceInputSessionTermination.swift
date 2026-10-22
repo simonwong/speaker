@@ -115,14 +115,19 @@ enum VoiceInputTerminalRecordBuilder {
         return Output(record: record, notice: notice)
     }
 
-    /// A pending copy whose text may not be persisted is stored without it.
+    /// An outcome whose text may not be persisted is stored without it.
     private static func historyOutcome(
         _ activity: VoiceInputActivity,
         mayPersistBody: Bool
     ) -> VoiceInputActivity {
-        guard !mayPersistBody,
-            case .pendingCopy(let id, _, let reason) = activity
-        else { return activity }
-        return .pendingCopy(id, text: "", reason: reason)
+        guard !mayPersistBody else { return activity }
+        switch activity {
+        case .pendingCopy(let id, _, let reason):
+            return .pendingCopy(id, text: "", reason: reason)
+        case .delivered(let id, let applicationName, _):
+            return .delivered(id, applicationName: applicationName, text: "")
+        default:
+            return activity
+        }
     }
 }

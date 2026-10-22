@@ -9,6 +9,8 @@ This matrix separates deterministic contract evidence from behavior that only a 
 | Scenario | Expected contract |
 | --- | --- |
 | No editable target | Preserve final text as a Pending Copy Result without changing the clipboard |
+| Focused element with no editable signal (no text role, settable value, selected text range, or editable ancestor) | Preserve final text as a Pending Copy Result (`missingTarget`) without pasting |
+| Window-scope target (no focused element exposed) | Paste-only delivery; the Session Record keeps no transcript text because the security class is unknown |
 | Secure target | Reject automatic delivery and keep the Session Record free of text and provider request identifiers |
 | Closed or invalid target | Preserve final text as a Pending Copy Result |
 | Target content or selection changes while waiting | Fail closed instead of overwriting concurrent work |
@@ -25,6 +27,12 @@ This matrix separates deterministic contract evidence from behavior that only a 
 | Posted paste cannot be confirmed | Record a posted-unconfirmed outcome; never expose retryable Pending Copy after the command may have inserted text |
 | Voice Input Session to an isolated native editor | Run the real press/release, release-time target capture, processing, and transactional paste path; the target process must read back the exact expected text |
 | Pasteboard changes after Speaker prepares delivery | Preserve the newer clipboard value instead of restoring Speaker's stale snapshot |
+| Slow clipboard reader, such as a remote desktop or virtual machine | Keep the transcript on the clipboard until the target reads it; restore 100 ms after the first read, no sooner than 500 ms and no later than 3 s after Command-V |
+| Target value over 20,000 characters | Read only `AXNumberOfCharacters`; paste once without a receipt and record posted-unconfirmed |
+| Long target value within the limit | Read a window of 256 characters on each side of the selection with `AXStringForRange` for the pre-paste check and the receipt; fall back to a capped whole-value read when the range read is unavailable |
+| Edit outside the evidence window | Detected when it changes the value's length; an edit that keeps the length is not detected |
+| Readable target shows a third value after paste | Never paste again; keep the result as Pending Copy (`deliveryUnconfirmed`) for the user to check first |
+| Clipboard over the snapshot budget | Leave the clipboard untouched and keep the result as Pending Copy (`clipboardTooLarge`); an explicit copy replaces it |
 | Target application does not complete AX IPC | Preserve the exact read/write stage in a content-free diagnostic |
 | Explicit copy | Verify the clipboard value after writing; retain the Pending Copy Result if verification fails |
 | Event tap disabled by the system | Reset gesture ownership, re-enable the tap, and surface recovery state |

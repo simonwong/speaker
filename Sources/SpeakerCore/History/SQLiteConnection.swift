@@ -42,7 +42,7 @@ extension SQLiteHistoryError: PrivacySafeDescribing {
 /// statement preparation, transactions, WAL truncation, and file protection.
 /// Callers work with `SQLiteStatement` values and `SQLiteHistoryError`, so no
 /// caller has to know a status code or an `OpaquePointer`.
-final class SQLiteConnection: @unchecked Sendable {
+final class SQLiteConnection {
     private let fileURL: URL
     private var handle: OpaquePointer?
 

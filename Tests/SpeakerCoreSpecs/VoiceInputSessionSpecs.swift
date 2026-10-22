@@ -434,7 +434,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "unsafe system clipboard snapshots fail before mutation", failures: &failures
+            "explicit copy replaces an over-budget clipboard and refuses an unreadable one",
+            failures: &failures
         ) {
             let oneItem = [["type.a": Data([1, 2, 3, 4])]]
             let cases:
@@ -506,9 +507,19 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 )
 
                 let copied = await writer.copy("replacement")
-                try expect(!copied)
-                try expect(pasteboard.clearCount == 0)
-                try expect(pasteboard.items == testCase.items)
+                if testCase.unreadableTypes.isEmpty {
+                    // The user asked to replace this clipboard; one too large
+                    // to set aside is replaced without a rollback copy.
+                    try expect(copied, "an explicit copy refused an over-budget clipboard")
+                    try expect(
+                        pasteboard.items
+                            == [["public.utf8-plain-text": Data("replacement".utf8)]]
+                    )
+                } else {
+                    try expect(!copied)
+                    try expect(pasteboard.clearCount == 0)
+                    try expect(pasteboard.items == testCase.items)
+                }
             }
         }
 
@@ -520,18 +531,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 ["type.a": Data([1])],
                 ["type.b": Data([2])],
             ])
-            let itemBoundedWriter = SystemClipboardWriter(
-                pasteboard: tooManyItems.access,
-                snapshotBudget: .init(
+            let itemResult = PasteboardSnapshot.capture(
+                from: tooManyItems.access,
+                budget: .init(
                     maximumItemCount: 1,
                     maximumRepresentationCount: 2,
                     maximumBytesPerRepresentation: 1,
                     maximumTotalBytes: 2
                 )
             )
-
-            let itemResult = await itemBoundedWriter.copy("replacement")
-            try expect(!itemResult)
+            try expect(itemResult == .failure(.tooLarge))
             try expect(tooManyItems.itemTypesReadCount == 0)
 
             let tooManyRepresentations = ClipboardPasteboardFake(items: [
@@ -540,20 +549,16 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                     "type.b": Data([2]),
                 ]
             ])
-            let representationBoundedWriter = SystemClipboardWriter(
-                pasteboard: tooManyRepresentations.access,
-                snapshotBudget: .init(
+            let representationResult = PasteboardSnapshot.capture(
+                from: tooManyRepresentations.access,
+                budget: .init(
                     maximumItemCount: 1,
                     maximumRepresentationCount: 1,
                     maximumBytesPerRepresentation: 1,
                     maximumTotalBytes: 1
                 )
             )
-
-            let representationResult = await representationBoundedWriter.copy(
-                "replacement"
-            )
-            try expect(!representationResult)
+            try expect(representationResult == .failure(.tooLarge))
             try expect(tooManyRepresentations.itemTypesReadCount == 1)
             try expect(tooManyRepresentations.clearCount == 0)
         }
@@ -576,6 +581,62 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
 
             let copied = await writer.copy("replacement")
             try expect(copied)
+        }
+
+        await runAsync(
+            "a window-scope target delivers but keeps its text out of history",
+            failures: &failures
+        ) {
+            for isSecurityClassConfirmed in [false, true] {
+                let history = SessionHistoryFake()
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(
+                            InputTargetSnapshot(
+                                id: UUID(),
+                                applicationName: "Terminal",
+                                isSecurityClassConfirmed: isSecurityClassConfirmed
+                            ))
+                    ),
+                    transcriber: SpeechTranscriberFake(text: "窗口里的文字"),
+                    delivery: TextDeliveryFake(result: .delivered),
+                    clipboard: ClipboardFake(),
+                    history: history
+                )
+                let terminal = terminalPresentation(from: await sessions.observe())
+
+                await sessions.send(.pressed)
+                await sessions.send(.released)
+
+                let result = await terminal.value
+                _ = await eventually(before: .seconds(2)) {
+                    await history.records.first != nil
+                }
+                let record = await history.records.first
+                try expect(
+                    result?.activity.isDelivered == true,
+                    "the target did not receive the text"
+                )
+                if isSecurityClassConfirmed {
+                    try expect(
+                        record?.finalText == "窗口里的文字",
+                        "an element target lost its history text"
+                    )
+                } else {
+                    try expect(
+                        record?.transcription == nil && record?.finalText == nil,
+                        "an unclassified target persisted transcript text"
+                    )
+                    guard case .delivered(_, _, let storedText)? = record?.outcome else {
+                        throw SpecFailure(message: "the delivered outcome was not recorded")
+                    }
+                    try expect(
+                        storedText.isEmpty,
+                        "an unclassified target persisted text in its outcome"
+                    )
+                }
+            }
         }
 
         await runAsync("secure target never receives automatic text", failures: &failures) {
