@@ -174,4 +174,5 @@ Onboarding has a separate debug capture entry point that renders the production 
 - Shutdown stops trigger intake, closes session dispatch, and then waits for required local persistence.
 - A SwiftUI view observes only the feature objects whose state it draws and emits semantic intents to them; it never coordinates multiple platform adapters itself. A view that draws several features, such as `MenuBarContent`, observes each of them directly rather than an aggregate the runtime republishes.
 - Global event taps never run on the main run loop, and the main thread never waits on Accessibility IPC to another App.
+- Mutable state shared outside an actor lives in one `OSAllocatedUnfairLock` around a `Sendable` state struct. Code holding it never awaits, calls a callback, finishes a stream, or cancels a task; it returns what to call and calls it after unlocking. A type stays `@unchecked Sendable` only when it holds a non-`Sendable` system object, and a comment on the type names what keeps that object safe.
 - A seam has both a live adapter and a deterministic adapter. Pass-through protocols without real variation are removed by the deletion test.
