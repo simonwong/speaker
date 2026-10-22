@@ -12,13 +12,30 @@ package enum GlobalVoiceTrigger: Equatable, Sendable {
 package struct VoiceTriggerTarget: Sendable {
     package let receive: @Sendable (GlobalVoiceTrigger) -> Void
     package let shouldConsumeEscape: @Sendable () -> Bool
+    /// A shortcut press was refused because another process holds Secure
+    /// Event Input. The press is still consumed; this only reports it, and it
+    /// is called inside the event callback, so it must return quickly.
+    package let secureInputBlockedPress: @Sendable () -> Void
 
     package init(
         receive: @escaping @Sendable (GlobalVoiceTrigger) -> Void,
-        shouldConsumeEscape: @escaping @Sendable () -> Bool
+        shouldConsumeEscape: @escaping @Sendable () -> Bool,
+        secureInputBlockedPress: @escaping @Sendable () -> Void = {}
     ) {
         self.receive = receive
         self.shouldConsumeEscape = shouldConsumeEscape
+        self.secureInputBlockedPress = secureInputBlockedPress
+    }
+}
+
+/// The process that holds Secure Event Input, as the window server reports it.
+package enum SecureEventInputHolder {
+    package static func processID() -> pid_t? {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+            let value = session["kCGSSessionSecureInputPID"] as? NSNumber,
+            value.int32Value > 0
+        else { return nil }
+        return value.int32Value
     }
 }
 
@@ -229,7 +246,10 @@ private final class FnEventTapBox: @unchecked Sendable {
             guard case .consume(let trigger) = disposition else { return false }
             switch trigger {
             case .pressed:
-                guard !IsSecureEventInputEnabled() else { return true }
+                guard !IsSecureEventInputEnabled() else {
+                    target.secureInputBlockedPress()
+                    return true
+                }
                 didEmitPress = true
                 target.receive(.pressed)
                 startSecureInputMonitoring()

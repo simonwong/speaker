@@ -29,6 +29,8 @@ This matrix separates deterministic contract evidence from behavior that only a 
 | Explicit copy | Verify the clipboard value after writing; retain the Pending Copy Result if verification fails |
 | Event tap disabled by the system | Reset gesture ownership, re-enable the tap, and surface recovery state |
 | Secure Event Input appears during recording | Cancel the active session and stop shortcut capture safely |
+| Secure Event Input is on at shortcut press | Consume the press without starting a session; show one short note naming the holding App when known |
+| Keyboard layout moves V (for example Dvorak) | Post Command with the key that produces `v` on the current layout; fall back to the ANSI V key code |
 | Unicode, emoji, multiline text, and selection replacement | Preserve Swift string content and mutate only the revalidated selection |
 | Owner-only local files | Reject symlinks, foreign owners, non-regular files, and oversized documents without overwriting them |
 | Credential migration | Migrate only when every source is readable and all non-empty values agree |

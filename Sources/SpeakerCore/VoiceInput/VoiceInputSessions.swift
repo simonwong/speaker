@@ -277,22 +277,36 @@ public actor VoiceInputSessions {
     }
 
     package func copyPendingResult(expectedSessionID: VoiceInputSessionID) async {
-        guard case .pendingCopy(let id, let text, _) = presentation.activity,
+        guard case .pendingCopy(let id, let text, let reason) = presentation.activity,
             id == expectedSessionID
         else { return }
-        let copied = await clipboard.copy(text)
+        await copyRetainedResult(id: id, text: text, reason: reason)
+    }
+
+    /// A secure Input Target's result is copied as concealed clipboard
+    /// content, and a failed copy keeps it classified as secure.
+    private func copyRetainedResult(
+        id: VoiceInputSessionID,
+        text: String,
+        reason: PendingCopyReason
+    ) async {
+        let copied = await clipboard.copy(
+            text,
+            privacy: reason.isSecureTarget ? .concealed : .ordinary
+        )
         guard phase == .idle,
             case .pendingCopy(let currentID, _, _) = presentation.activity,
-            currentID == expectedSessionID
+            currentID == id
         else { return }
         if copied {
             publish(.idle, notice: .copied)
         } else {
             publish(
                 .pendingCopy(
-                    expectedSessionID,
+                    id,
                     text: text,
-                    reason: .clipboardFailed
+                    reason: reason.isSecureTarget
+                        ? .secureTargetClipboardFailed : .clipboardFailed
                 )
             )
         }
@@ -352,23 +366,9 @@ public actor VoiceInputSessions {
         case .cancel:
             await cancelSession()
         case .copyPendingResult:
-            guard case .pendingCopy(let id, let text, _) = presentation.activity else { return }
-            let copied = await clipboard.copy(text)
-            guard phase == .idle,
-                case .pendingCopy(let currentID, _, _) = presentation.activity,
-                currentID == id
+            guard case .pendingCopy(let id, let text, let reason) = presentation.activity
             else { return }
-            if copied {
-                publish(.idle, notice: .copied)
-            } else {
-                publish(
-                    .pendingCopy(
-                        id,
-                        text: text,
-                        reason: .clipboardFailed
-                    )
-                )
-            }
+            await copyRetainedResult(id: id, text: text, reason: reason)
         case .dismissResult:
             guard phase == .idle else { return }
             publish(.idle)
@@ -693,7 +693,10 @@ public actor VoiceInputSessions {
         }
         let processedText: VoiceTextProcessingResult
         do {
+            // Every provider's text crosses this one point before delivery,
+            // presentation, and history.
             processedText = try await Self.settle(task, through: resolution)
+                .removingControlCharacters()
         } catch let failure as VoiceTextProcessingFailure {
             guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else {
                 await discard(target)
@@ -735,6 +738,20 @@ public actor VoiceInputSessions {
         processingResolution = nil
         streamingCompletionTask?.cancel()
         streamingCompletionTask = nil
+        // Text made only of control characters has nothing left to deliver.
+        guard !processedText.finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            await discard(target)
+            guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
+            await finishWithFailure(
+                id: id,
+                startedAt: startedAt,
+                problem: VoiceInputProblem(failure: .providerReturnedNoText),
+                processingSnapshot: snapshot,
+                additionalStageDurations: sessionStageDurations
+            )
+            return
+        }
 
         switch target {
         case .writable(let targetSnapshot):
@@ -1350,7 +1367,10 @@ public actor VoiceInputSessions {
         guard phase == .processing(id, startedAt: startedAt, snapshot: snapshot) else { return }
         let stage = progress.stage
         if let confirmed = progress.confirmedDoubaoResult {
-            confirmedDoubaoResult = confirmed
+            confirmedDoubaoResult = TranscriptionResult(
+                text: ProviderTextSanitizer.removingControlCharacters(from: confirmed.text),
+                providerRequestID: confirmed.providerRequestID
+            )
         }
         let auditStage =
             switch stage {

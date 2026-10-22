@@ -333,7 +333,10 @@ private final class CustomHotKeyBox: @unchecked Sendable {
     }
 
     func pressed() {
-        guard !IsSecureEventInputEnabled() else { return }
+        guard !IsSecureEventInputEnabled() else {
+            target.secureInputBlockedPress()
+            return
+        }
         isDown = true
         didEmitPress = true
         target.receive(.pressed)

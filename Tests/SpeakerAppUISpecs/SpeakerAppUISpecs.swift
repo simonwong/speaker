@@ -233,6 +233,10 @@ struct SpeakerAppUISpecs {
             try expect(!evidence.hidesOnDeactivate)
             try expect(evidence.joinsAllSpaces)
             try expect(evidence.appearsOverFullScreen)
+            try expect(
+                evidence.isExcludedFromScreenCapture,
+                "screen sharing or recording could capture transcript text in the HUD"
+            )
         }
 
         run(

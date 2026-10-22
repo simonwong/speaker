@@ -664,6 +664,51 @@ enum InputTargetSpecs: CoreSpecDomain {
                 ])
         }
 
+        run(
+            "paste command presses V wherever the keyboard layout puts it",
+            failures: &failures
+        ) {
+            // 55 is Command; 47 is the ANSI Period key, which types "v" under Dvorak.
+            let events = PasteCommandEventPlan.standard.keyEvents(vKeyCode: 47)
+            try expect(events.map(\.keyCode) == [55, 47, 47, 55], "\(events)")
+            try expect(events.map(\.keyDown) == [true, true, false, false])
+            try expect(events.map(\.isCommandHeld) == [true, true, true, false])
+        }
+
+        run(
+            "paste key lookup falls back to the ANSI V position",
+            failures: &failures
+        ) {
+            try expect(PasteKeyCodeLookup { nil }.vKeyCode() == 9)
+            try expect(PasteKeyCodeLookup { 47 }.vKeyCode() == 47)
+        }
+
+        run(
+            "keyboard layout lookup finds V with Command held",
+            failures: &failures
+        ) {
+            try expect(
+                KeyboardLayoutKeyCodes.keyCode(
+                    producing: "v",
+                    inLayoutWithID: "com.apple.keylayout.US"
+                ) == 9
+            )
+            try expect(
+                KeyboardLayoutKeyCodes.keyCode(
+                    producing: "v",
+                    inLayoutWithID: "com.apple.keylayout.Dvorak"
+                ) == 47,
+                "Dvorak types v on the ANSI Period key"
+            )
+            try expect(
+                KeyboardLayoutKeyCodes.keyCode(
+                    producing: "v",
+                    inLayoutWithID: "com.apple.keylayout.DVORAK-QWERTYCMD"
+                ) == 9,
+                "Dvorak - QWERTY ⌘ keeps Command shortcuts on QWERTY positions"
+            )
+        }
+
         await runAsync(
             "event-post denial is reported before the pasteboard transaction starts",
             failures: &failures

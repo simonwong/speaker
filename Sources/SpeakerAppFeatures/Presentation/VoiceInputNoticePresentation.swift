@@ -1,3 +1,4 @@
+import Foundation
 import SpeakerCore
 
 /// The notice sentences the voice input surfaces announce. Each entry is
@@ -42,5 +43,19 @@ extension VoiceInputNotice {
         case .persistenceFailure(let notice):
             SpeakerCopy.History.urgentNotice(notice)
         }
+    }
+}
+
+/// The HUD note for a shortcut press refused because another App holds
+/// Secure Event Input, such as a password field or a terminal's secure
+/// keyboard entry.
+package enum SecureInputBlockedNotice {
+    package static let genericTitle = "安全输入已开启，暂时无法录音"
+
+    package static func title(holderName: String?) -> String {
+        guard let name = holderName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !name.isEmpty
+        else { return genericTitle }
+        return "\(name) 开启了安全输入，暂时无法录音"
     }
 }

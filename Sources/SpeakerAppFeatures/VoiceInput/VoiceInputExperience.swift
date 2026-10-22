@@ -35,6 +35,13 @@ private final class VoiceTriggerIntakeGate: @unchecked Sendable {
     }
 }
 
+/// Carries a refused press from the event callback to the experience, which
+/// does not exist yet when the shortcut target is built.
+@MainActor
+private final class SecureInputPressRelay {
+    var blockedPress: (() -> Void)?
+}
+
 package struct VoiceInputExperienceAction: Equatable, Sendable {
     fileprivate enum Operation: Equatable, Sendable {
         case cancel
@@ -176,10 +183,16 @@ package struct VoiceInputExperienceState: Equatable, Sendable {
     package let diagnosticCode: String
 
     fileprivate func hidingOverlay() -> VoiceInputExperienceState {
+        showingOverlay(.hidden)
+    }
+
+    fileprivate func showingOverlay(
+        _ overlay: VoiceInputOverlayPresentation
+    ) -> VoiceInputExperienceState {
         VoiceInputExperienceState(
             revision: revision,
             menu: menu,
-            overlay: .hidden,
+            overlay: overlay,
             isRecording: isRecording,
             diagnosticCode: diagnosticCode
         )
@@ -251,10 +264,18 @@ package final class VoiceInputExperience: ObservableObject {
     private var problemAutoDismissTask: Task<Void, Never>?
     private var problemHeld = false
     private var noticeHideTask: Task<Void, Never>?
+    private let secureInputHolderName: @MainActor () -> String?
+    private let secureInputNoticeDuration: Duration
+    private var secureInputNoticeTitle: String?
+    private var secureInputNoticeHideTask: Task<Void, Never>?
 
     /// How long a delivery notice stays before the HUD closes.
     package static let defaultNoticeDuration: Duration = .seconds(2)
     private let noticeDuration: Duration
+
+    /// How long the note about a press refused by Secure Event Input stays.
+    /// It names the App to leave, so it stays longer than a delivery notice.
+    package static let defaultSecureInputNoticeDuration: Duration = .seconds(4)
 
     /// How long a Session Problem without a settings recovery stays on screen
     /// before it dismisses itself.
@@ -266,11 +287,15 @@ package final class VoiceInputExperience: ObservableObject {
             @escaping @Sendable () -> InputTargetCaptureHint? = { nil },
         problemAutoDismissDelay: Duration = defaultProblemAutoDismissDelay,
         noticeDuration: Duration = defaultNoticeDuration,
+        secureInputNoticeDuration: Duration = defaultSecureInputNoticeDuration,
+        secureInputHolderName: @escaping @MainActor () -> String? = { nil },
         announce: @escaping Announce
     ) {
         self.sessions = sessions
         self.problemAutoDismissDelay = problemAutoDismissDelay
         self.noticeDuration = noticeDuration
+        self.secureInputNoticeDuration = secureInputNoticeDuration
+        self.secureInputHolderName = secureInputHolderName
         self.announce = announce
         self.releaseCaptureHint = releaseCaptureHint
         let dispatcher = VoiceInputTriggerDispatcher(
@@ -282,6 +307,7 @@ package final class VoiceInputExperience: ObservableObject {
         self.escapeGate = escapeGate
         let triggerIntakeGate = VoiceTriggerIntakeGate()
         self.triggerIntakeGate = triggerIntakeGate
+        let secureInputRelay = SecureInputPressRelay()
         shortcutTarget = VoiceTriggerTarget(
             receive: { trigger in
                 guard triggerIntakeGate.accepts(trigger) else { return }
@@ -295,8 +321,16 @@ package final class VoiceInputExperience: ObservableObject {
             shouldConsumeEscape: {
                 triggerIntakeGate.isAcceptingEscapeEvents
                     && escapeGate.shouldConsumeEscape
+            },
+            secureInputBlockedPress: {
+                // A press the session would refuse anyway gets no note.
+                guard triggerIntakeGate.accepts(.pressed) else { return }
+                Task { @MainActor in secureInputRelay.blockedPress?() }
             }
         )
+        secureInputRelay.blockedPress = { [weak self] in
+            self?.showSecureInputNotice()
+        }
     }
 
     package func start() {
@@ -467,6 +501,7 @@ package final class VoiceInputExperience: ObservableObject {
         isShuttingDown = true
         cancelProblemAutoDismiss()
         noticeHideTask?.cancel()
+        secureInputNoticeHideTask?.cancel()
         triggerIntakeGate.close()
         escapeGate.setActive(false)
         let commandTask = commandTask
@@ -529,6 +564,48 @@ package final class VoiceInputExperience: ObservableObject {
         }
     }
 
+    /// A shortcut press refused because another App holds Secure Event
+    /// Input. Speaker cannot record then, so it says why and names that App
+    /// when the system reports it. Presses repeated while the note is up
+    /// neither restart it nor announce it again, and a retained result or
+    /// problem on screen keeps its place.
+    private func showSecureInputNotice() {
+        guard !isShuttingDown, secureInputNoticeTitle == nil else { return }
+        switch state.overlay {
+        case .hidden, .notice:
+            break
+        case .recording, .processing, .pendingCopy, .problem:
+            return
+        }
+        let title = SecureInputBlockedNotice.title(holderName: secureInputHolderName())
+        secureInputNoticeTitle = title
+        noticeHideTask?.cancel()
+        noticeHideTask = nil
+        state = state.showingOverlay(.notice(title: title))
+        announce(title)
+        let duration = secureInputNoticeDuration
+        secureInputNoticeHideTask = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled, let self, self.secureInputNoticeTitle != nil else { return }
+            self.secureInputNoticeTitle = nil
+            self.secureInputNoticeHideTask = nil
+            self.state = self.state.hidingOverlay()
+        }
+    }
+
+    /// An idle presentation keeps the Secure Event Input note on screen;
+    /// anything the session shows replaces it.
+    private func keepSecureInputNoticeIfIdle() {
+        guard let title = secureInputNoticeTitle else { return }
+        if case .hidden = state.overlay {
+            state = state.showingOverlay(.notice(title: title))
+            return
+        }
+        secureInputNoticeTitle = nil
+        secureInputNoticeHideTask?.cancel()
+        secureInputNoticeHideTask = nil
+    }
+
     private func apply(_ presentation: VoiceInputPresentation) {
         guard !isShuttingDown else { return }
         currentPresentation = presentation
@@ -547,6 +624,7 @@ package final class VoiceInputExperience: ObservableObject {
             }
         triggerIntakeGate.setAllowsSessionTriggers(allowsSessionTriggers)
         state = Self.makeState(from: presentation)
+        keepSecureInputNoticeIfIdle()
         escapeGate.setActive(presentation.activity.isActive || state.menu.dismissAction != nil)
         announceTransitionIfNeeded(presentation.activity)
         announceNoticeIfNeeded(presentation)
@@ -559,7 +637,8 @@ package final class VoiceInputExperience: ObservableObject {
     private func scheduleNoticeHideIfNeeded() {
         noticeHideTask?.cancel()
         noticeHideTask = nil
-        guard case .notice = state.overlay else { return }
+        // The Secure Event Input note keeps its own timer.
+        guard secureInputNoticeTitle == nil, case .notice = state.overlay else { return }
         let revision = state.revision
         let duration = noticeDuration
         noticeHideTask = Task { [weak self] in
@@ -790,10 +869,11 @@ package final class VoiceInputExperience: ObservableObject {
         case .pendingCopy(let id, let text, let reason):
             .pendingCopy(
                 title: reason.userTitle,
-                text: text,
+                text: reason.isSecureTarget
+                    ? PendingCopyReason.secureTargetConcealedText : text,
                 copyButtonTitle: reason == .deliveryUnconfirmed
                     ? "确认未输入后复制"
-                    : (reason == .clipboardFailed ? "重试复制" : "复制"),
+                    : (reason.isClipboardFailure ? "重试复制" : "复制"),
                 copyAction: .init(
                     sessionID: id,
                     operation: .copyRetainedText
@@ -802,7 +882,7 @@ package final class VoiceInputExperience: ObservableObject {
                     sessionID: id,
                     operation: .dismissResult
                 ),
-                copyFailed: reason == .clipboardFailed
+                copyFailed: reason.isClipboardFailure
             )
         case .failed(let id, let failure):
             .problem(
