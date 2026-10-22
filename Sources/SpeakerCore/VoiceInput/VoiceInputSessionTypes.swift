@@ -333,6 +333,11 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let dictionaryReplacements: [DictionaryReplacement]
     public let durationMilliseconds: Int
     public let stageDurationsMilliseconds: [String: Int]
+    /// Monotonic time from shortcut release until delivery committed, for a
+    /// delivered session only. It is a duration, never text, so a record keeps
+    /// it whatever the Input Target's security class. Records written before
+    /// it existed have none.
+    public let releaseToDeliveryMilliseconds: Int?
     public let outcome: VoiceInputActivity
 
     public init(
@@ -366,6 +371,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         dictionaryReplacements: [DictionaryReplacement] = [],
         durationMilliseconds: Int = 0,
         stageDurationsMilliseconds: [String: Int] = [:],
+        releaseToDeliveryMilliseconds: Int? = nil,
         outcome: VoiceInputActivity
     ) {
         self.sessionID = sessionID
@@ -398,6 +404,7 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.dictionaryReplacements = dictionaryReplacements
         self.durationMilliseconds = durationMilliseconds
         self.stageDurationsMilliseconds = stageDurationsMilliseconds
+        self.releaseToDeliveryMilliseconds = releaseToDeliveryMilliseconds
         self.outcome = outcome
     }
 }
