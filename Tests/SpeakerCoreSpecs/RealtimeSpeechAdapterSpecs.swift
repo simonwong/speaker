@@ -551,6 +551,39 @@ extension RealtimeSpeechAdapterSpecs {
             }
         }
         await runAsync(
+            "realtime speech delivers a final result that arrives with a failed liveness ping",
+            failures: &failures
+        ) {
+            // The server sends the final result and closes at once, so the
+            // ping fails while that result is still unread.
+            for provider in [SpeechRecognitionProviderID.openAI, .qwen] {
+                let pings = PingScriptFake()
+                pings.answer(.fail(URLError(.networkConnectionLost)))
+                let socket = RealtimeSpeechSocketFake(
+                    provider: provider, pings: pings, holdsFinalUntilClose: true)
+                let clock = ManualVoiceInputClock()
+                let signals = TransportLivenessSignalsFake()
+                let client = makeClient(
+                    RealtimeSpeechConnectorFake(socket: socket),
+                    liveness: .scripted(clock: clock, signals: signals))
+                let gate = AudioCaptureCompletionGate()
+                let (stream, continuation) = AsyncStream<Data>.makeStream()
+                let completion = CompletionFlag()
+                let task = transcription(
+                    client, stream, context: context(provider, gate: gate), completion: completion)
+                continuation.yield(Data(repeating: 1, count: 6_400))
+                continuation.finish()
+                await gate.accept()
+                try await signals.waitUntilSubscribed()
+                signals.emit()
+                let result = try await task.value
+                try expect(result.text == "confirmed result", "\(provider) lost the queued result")
+                try expect(pings.pingCount == 1)
+                let closed = await socket.closed
+                try expect(closed)
+            }
+        }
+        await runAsync(
             "realtime speech probes at once on wake or network change and the event alone never fails",
             failures: &failures
         ) {
