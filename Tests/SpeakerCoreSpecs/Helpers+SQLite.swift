@@ -210,3 +210,48 @@ func readHistoryPayload(from fileURL: URL) throws -> String {
     let count = Int(sqlite3_column_bytes(statement, 0))
     return String(decoding: Data(bytes: bytes, count: count), as: UTF8.self)
 }
+
+/// Runs raw SQL against a database file, creating it when absent, so a case
+/// can build a database exactly as an older build left it.
+func executeSQLite(_ sql: String, at fileURL: URL) throws {
+    var database: OpaquePointer?
+    guard
+        sqlite3_open_v2(
+            fileURL.path,
+            &database,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+            nil
+        ) == SQLITE_OK, let database
+    else {
+        if let database { sqlite3_close(database) }
+        throw SpecFailure(message: "could not open SQLite database for raw SQL")
+    }
+    defer { sqlite3_close(database) }
+    guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+        throw SpecFailure(message: "raw SQL failed: \(String(cString: sqlite3_errmsg(database)))")
+    }
+}
+
+/// The first column of every row a query returns, as text.
+func sqliteTextColumn(_ sql: String, at fileURL: URL) throws -> [String] {
+    var database: OpaquePointer?
+    guard
+        sqlite3_open_v2(fileURL.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+        let database
+    else {
+        if let database { sqlite3_close(database) }
+        throw SpecFailure(message: "could not open SQLite database for a query")
+    }
+    defer { sqlite3_close(database) }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement
+    else {
+        throw SpecFailure(message: "could not prepare query")
+    }
+    defer { sqlite3_finalize(statement) }
+    var values: [String] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+        values.append(sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "")
+    }
+    return values
+}
