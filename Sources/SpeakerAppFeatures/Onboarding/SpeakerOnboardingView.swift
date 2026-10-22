@@ -17,6 +17,8 @@ package struct SpeakerOnboardingView: View {
     let announce: AccessibilityAnnounce
     let shortcutName: () -> String
     let mode: OnboardingMode
+    /// Offers the automatic-update choice on the last step of first-time setup.
+    let softwareUpdate: SoftwareUpdateFeature?
 
     package init(
         permissions: PermissionModel,
@@ -27,8 +29,10 @@ package struct SpeakerOnboardingView: View {
         announce: @escaping AccessibilityAnnounce,
         shortcutName: @escaping () -> String = { "Fn" },
         mode: OnboardingMode = .setup,
+        softwareUpdate: SoftwareUpdateFeature? = nil,
         completion: @escaping () -> Void
     ) {
+        self.softwareUpdate = softwareUpdate
         self.permissions = permissions
         self.doubao = doubao
         self.recognition = recognition
@@ -124,7 +128,7 @@ package struct SpeakerOnboardingView: View {
     private var stepDescription: String {
         switch step {
         case .permissions: "先让 Speaker 听见你，并将文字输入其他应用。"
-        case .apiKey: "选择语音识别服务，用自己的账号将语音转成文字。"
+        case .apiKey: "选择把语音转成文字的服务；云端服务使用你自己的 Key。"
         case .shortcut: "记住键盘上的快捷键，就能在任何输入框中开始。"
         }
     }
@@ -199,26 +203,33 @@ package struct SpeakerOnboardingView: View {
                     .environment(\.collapsesStoredProviderKeys, false)
             }
         case .shortcut:
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Text("当前键盘快捷键")
-                        .font(SpeakerTypography.bodyEmphasis)
-                    Spacer()
-                    ShortcutKeycap(name: shortcutName())
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text("当前键盘快捷键")
+                            .font(SpeakerTypography.bodyEmphasis)
+                        Spacer()
+                        ShortcutKeycap(name: shortcutName())
+                    }
+                    if shortcutName() == VoiceShortcutPreference.functionKey.displayName {
+                        FunctionKeyConflictHint()
+                    }
+                    tutorialRow(
+                        icon: "hand.tap", title: "短按键盘快捷键",
+                        detail: "按一下 \(shortcutName()) 开始录音，再按一下结束。"
+                    )
+                    tutorialRow(
+                        icon: "hand.point.up.left", title: "长按键盘快捷键",
+                        detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
+                    tutorialRow(
+                        icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
+                    practiceField
                 }
-                if shortcutName() == VoiceShortcutPreference.functionKey.displayName {
-                    FunctionKeyConflictHint()
+                .speakerCard()
+                if mode == .setup, let softwareUpdate {
+                    OnboardingAutomaticUpdateChoice(model: softwareUpdate)
                 }
-                tutorialRow(
-                    icon: "hand.tap", title: "短按键盘快捷键", detail: "按一下 \(shortcutName()) 开始录音，再按一下结束。"
-                )
-                tutorialRow(
-                    icon: "hand.point.up.left", title: "长按键盘快捷键",
-                    detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
-                tutorialRow(icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
-                practiceField
             }
-            .speakerCard()
         }
     }
 
@@ -352,7 +363,11 @@ package struct SpeakerOnboardingView: View {
         switch step {
         case .permissions: go(to: .apiKey)
         case .apiKey: go(to: .shortcut)
-        case .shortcut: completion()
+        case .shortcut:
+            // Finishing first-time setup confirms the automatic-update choice;
+            // 稍后配置 and review mode record nothing.
+            if mode == .setup { softwareUpdate?.finishSetup() }
+            completion()
         }
     }
 
@@ -376,5 +391,28 @@ package struct SpeakerOnboardingView: View {
             return "保存所选语音识别服务的 Key 后继续。"
         }
         return "保存豆包 Key，选择已开通的资源，再点击「检查连接」。连接成功后继续。"
+    }
+}
+
+/// The automatic-update switch on the last step of first-time setup. It starts
+/// on; 「开始使用 Speaker」 records it, and Settings changes it later.
+private struct OnboardingAutomaticUpdateChoice: View {
+    @ObservedObject var model: SoftwareUpdateFeature
+
+    var body: some View {
+        if model.offersSetupAutomaticChecksChoice {
+            SpeakerRow(
+                "自动检查更新",
+                detail: "每天检查一次新版本，有更新时提醒你安装。之后可在「设置 → 通用」中更改。",
+                icon: "arrow.triangle.2.circlepath",
+                iconTint: SpeakerVisualIdentity.controlTint
+            ) {
+                Toggle("自动检查更新", isOn: $model.setupAutomaticChecksChoice)
+                    .toggleStyle(.switch)
+                    .tint(SpeakerVisualIdentity.controlTint)
+                    .labelsHidden()
+            }
+            .speakerCard()
+        }
     }
 }

@@ -15,6 +15,7 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
     private let completion: () -> Void
     private let shortcutName: () -> String
     private let mode: OnboardingMode
+    private let softwareUpdate: SoftwareUpdateFeature
 
     init(
         permissions: PermissionModel,
@@ -25,8 +26,10 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
         announce: @escaping AccessibilityAnnounce,
         shortcutName: @escaping () -> String = { "Fn" },
         mode: OnboardingMode = .setup,
+        softwareUpdate: SoftwareUpdateFeature,
         completion: @escaping () -> Void
     ) {
+        self.softwareUpdate = softwareUpdate
         self.permissions = permissions
         self.doubao = doubao
         self.recognition = recognition
@@ -53,6 +56,7 @@ final class SpeakerOnboardingWindowController: NSObject, NSWindowDelegate {
             announce: announce,
             shortcutName: shortcutName,
             mode: mode,
+            softwareUpdate: softwareUpdate,
             completion: completion
         )
         let visibleFrame =

@@ -490,6 +490,21 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
         }
     }
 
+    /// Loads the settings and, when no settings file exists yet, first writes
+    /// `newInstallation` so the installation keeps the defaults it started with
+    /// even after the Mac's system version or language changes. An existing,
+    /// corrupt, or unreadable file is never replaced. If the write fails, the
+    /// unseeded defaults are returned, matching what later loads will read.
+    public func load(seedingNewInstallation newInstallation: SpeakerAppSettings)
+        -> AppSettingsLoadResult
+    {
+        let result = load()
+        guard case .defaults = result, (try? save(newInstallation)) != nil else {
+            return result
+        }
+        return .defaults(newInstallation)
+    }
+
     public func save(_ settings: SpeakerAppSettings) throws {
         do {
             let document = SettingsDocumentV1(

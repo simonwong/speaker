@@ -90,7 +90,8 @@ struct SpeakerAppScenarioSpecs {
                 settingsStore: VersionedLocalAppSettingsStore(fileURL: fileURL),
                 onDevice: onDevice, isOnDeviceSupported: true)
             await model.load()
-            try expect(model.availableProviders.contains(.apple))
+            try expect(
+                model.availableProviders.first == .apple, "the no-Key provider is not listed first")
             await model.selectProvider(.openAI)
             await model.selectProvider(.apple)
             try expect(model.selectedProfile.provider == .apple && model.notice == nil)
@@ -1464,6 +1465,112 @@ struct SpeakerAppScenarioSpecs {
             try expect(driver.checkCount == 1)
             try expect(feature.state.automaticallyChecksForUpdates)
             try expect(driver.automaticChecksEnabled)
+        }
+
+        await runAsync(
+            "finishing first-time setup records the automatic update choice, on by default",
+            failures: &failures
+        ) {
+            let configuration = SoftwareUpdateConfiguration(
+                signingMode: .developerID,
+                feedURLString: "https://updates.example.com/appcast.xml",
+                publicEDKey: Data(repeating: 9, count: 32).base64EncodedString())
+            var setupPending = true
+            @MainActor func launch(_ driver: SoftwareUpdateDriverFake) -> SoftwareUpdateFeature {
+                let feature = SoftwareUpdateFeature(
+                    configuration: configuration,
+                    isFirstRunSetupPending: { setupPending },
+                    makeDriver: { driver })
+                feature.start()
+                return feature
+            }
+
+            // A new installation is not asked by the updater while setup is
+            // pending; finishing setup with the default records "on".
+            let accepted = SoftwareUpdateDriverFake()
+            let first = launch(accepted)
+            try expect(accepted.permissionRequests == 0)
+            try expect(first.offersSetupAutomaticChecksChoice)
+            try expect(first.setupAutomaticChecksChoice, "the onboarding switch started off")
+            first.finishSetup()
+            setupPending = false
+            try expect(accepted.recordedDecisions == [true])
+            try expect(first.state.automaticallyChecksForUpdates)
+            _ = launch(accepted)
+            try expect(accepted.permissionRequests == 0, "a recorded choice was asked again")
+
+            // Turning the switch off before finishing records "off".
+            setupPending = true
+            let declined = SoftwareUpdateDriverFake()
+            let second = launch(declined)
+            second.setupAutomaticChecksChoice = false
+            second.finishSetup()
+            try expect(declined.recordedDecisions == [false])
+            try expect(!second.state.automaticallyChecksForUpdates)
+
+            // Deferring setup records nothing; the updater asks on the next launch.
+            let deferred = SoftwareUpdateDriverFake()
+            _ = launch(deferred)
+            setupPending = false
+            try expect(deferred.recordedDecisions.isEmpty)
+            _ = launch(deferred)
+            try expect(deferred.permissionRequests == 1)
+
+            // A development build offers no switch and records nothing.
+            setupPending = true
+            let development = SoftwareUpdateFeature(
+                configuration: SoftwareUpdateConfiguration(
+                    signingMode: .developmentSigned,
+                    feedURLString: "https://updates.example.com/appcast.xml",
+                    publicEDKey: Data(repeating: 9, count: 32).base64EncodedString()),
+                isFirstRunSetupPending: { setupPending },
+                makeDriver: { SoftwareUpdateDriverFake() })
+            try expect(!development.offersSetupAutomaticChecksChoice)
+            development.finishSetup()
+            try expect(!development.state.automaticallyChecksForUpdates)
+        }
+
+        await runAsync(
+            "an installation that finished setup is asked about automatic updates once, and a recorded choice is kept",
+            failures: &failures
+        ) {
+            let configuration = SoftwareUpdateConfiguration(
+                signingMode: .developerID,
+                feedURLString: "https://updates.example.com/appcast.xml",
+                publicEDKey: Data(repeating: 9, count: 32).base64EncodedString())
+            @MainActor func launch(_ driver: SoftwareUpdateDriverFake) -> SoftwareUpdateFeature {
+                let feature = SoftwareUpdateFeature(
+                    configuration: configuration,
+                    isFirstRunSetupPending: { false },
+                    makeDriver: { driver })
+                feature.start()
+                return feature
+            }
+
+            let undecided = SoftwareUpdateDriverFake()
+            let afterUpgrade = launch(undecided)
+            try expect(undecided.permissionRequests == 1)
+            try expect(afterUpgrade.state.automaticallyChecksForUpdates)
+            _ = launch(undecided)
+            _ = launch(undecided)
+            try expect(undecided.permissionRequests == 1, "the one-time request repeated")
+
+            let refused = SoftwareUpdateDriverFake()
+            refused.permissionAnswer = false
+            let declined = launch(refused)
+            try expect(refused.permissionRequests == 1)
+            try expect(!declined.state.automaticallyChecksForUpdates)
+            _ = launch(refused)
+            try expect(refused.permissionRequests == 1)
+
+            // A choice made earlier in Settings, on or off, is never questioned.
+            for decision in [false, true] {
+                let decided = SoftwareUpdateDriverFake(automaticChecksDecision: decision)
+                let feature = launch(decided)
+                try expect(decided.permissionRequests == 0)
+                try expect(decided.recordedDecisions.isEmpty)
+                try expect(feature.state.automaticallyChecksForUpdates == decision)
+            }
         }
 
         run(
@@ -5493,16 +5600,35 @@ private final class CustomMonitorFake: CustomShortcutMonitoring {
 @MainActor
 private final class SoftwareUpdateDriverFake: SoftwareUpdateDriving {
     private(set) var checkCount = 0
-    private(set) var automaticChecksEnabled = false
+    /// The recorded automatic-check decision, kept across simulated launches
+    /// the way Sparkle keeps it in user defaults; nil until one is recorded.
+    private(set) var automaticChecksDecision: Bool?
+    private(set) var recordedDecisions: [Bool] = []
+    private(set) var permissionRequests = 0
+    /// What the user answers when the updater's permission request appears.
+    var permissionAnswer = true
     private var observer: (@MainActor @Sendable (SoftwareUpdateDriverSnapshot) -> Void)?
 
+    init(automaticChecksDecision: Bool? = nil) {
+        self.automaticChecksDecision = automaticChecksDecision
+    }
+
+    var automaticChecksEnabled: Bool { automaticChecksDecision ?? false }
+
     func start(
+        requestsAutomaticCheckPermission: @escaping @MainActor () -> Bool,
         observing:
             @escaping @MainActor @Sendable (
                 SoftwareUpdateDriverSnapshot
             ) -> Void
     ) throws -> SoftwareUpdateDriverSnapshot {
         observer = observing
+        // Like Sparkle 2 without `SUEnableAutomaticChecks` in Info.plist: the
+        // delegate is consulted only while no decision is recorded.
+        if automaticChecksDecision == nil, requestsAutomaticCheckPermission() {
+            permissionRequests += 1
+            automaticChecksDecision = permissionAnswer
+        }
         return snapshot
     }
 
@@ -5513,7 +5639,8 @@ private final class SoftwareUpdateDriverFake: SoftwareUpdateDriving {
     func setAutomaticallyChecksForUpdates(
         _ enabled: Bool
     ) -> SoftwareUpdateDriverSnapshot {
-        automaticChecksEnabled = enabled
+        automaticChecksDecision = enabled
+        recordedDecisions.append(enabled)
         let snapshot = snapshot
         observer?(snapshot)
         return snapshot

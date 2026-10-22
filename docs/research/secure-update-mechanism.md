@@ -278,7 +278,18 @@ Sparkle informational update 指向人工恢复页面。
 建议保留 Sparkle 默认策略：
 
 - 第一次启动不打扰用户。
-- `SUEnableAutomaticChecks=NO`，不使用 Sparkle 第二次启动权限提示；只在 Speaker 设置中由用户明确开启自动检查。
+- 2026-10 修订：Info.plist 不写 `SUEnableAutomaticChecks`。Sparkle 2.x 的
+  `SPUUpdater` 只在这个键既不在用户 defaults 也不在 Info.plist 时才询问用户，
+  也才调用 delegate 的 `updaterShouldPromptForPermissionToCheckForUpdates:`；
+  Info.plist 里写 `NO` 会让旧用户永远停在“关闭”。
+- 新安装在首次引导最后一步看到「自动检查更新」开关，默认开启；点「开始使用 Speaker」
+  即视为确认，通过 `SoftwareUpdateFeature` 写入 `automaticallyChecksForUpdates`。
+  引导进行中 delegate 返回 NO，不弹 Sparkle 询问。
+- 已完成或推迟引导、从未表态的安装，delegate 返回 YES，Sparkle 在启动后弹一次标准询问；
+  回答写入用户 defaults，以后不再询问。用户曾在设置里明确开或关的，键已存在，
+  Sparkle 不询问也不调用 delegate，选择保持不变。
+- Sparkle 的询问窗口带“自动下载并安装更新”复选框（`SUAllowsAutomaticUpdates`
+  未设为 NO）；`SUEnableSystemProfiling=NO`，所以不出现发送系统信息的选项。
 - 菜单始终提供用户主动的“检查更新…”。
 - 自动检查默认周期为 24 小时，不在每次启动手动强制调用后台检查。
 - Settings 直接绑定 Sparkle 已由 `NSUserDefaults` 支持的
@@ -384,6 +395,7 @@ live Sparkle adapter 不得构造或启动：
 | EdDSA | 合法生产公钥；不等于开发 key/placeholder |
 | Feed security | `SUVerifyUpdateBeforeExtraction` 与 `SURequireSignedFeed` 均为 YES |
 | Profiling | `SUEnableSystemProfiling` 为 NO |
+| 自动检查 | Info.plist 不含 `SUEnableAutomaticChecks`，由用户选择 |
 | Version | `CFBundleVersion` 为数字且大于已发布最大值 |
 | Artifact | 最终 DMG 与 appcast 的 length、signature、URL 一致且不可变 |
 

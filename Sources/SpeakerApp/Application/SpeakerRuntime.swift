@@ -85,14 +85,18 @@ final class SpeakerRuntime: ObservableObject {
         LegacyPrivacyStateCleaner.removeObsoleteIdentifiers(
             from: dependencies.preferences
         )
-        softwareUpdate = SoftwareUpdateFeature(
+        let softwareUpdate = SoftwareUpdateFeature(
             configuration: .init(
                 signingMode: bundle.buildInfo.signingMode,
                 feedURLString: bundle.feedURLString,
                 publicEDKey: bundle.publicEDKey
             ),
+            isFirstRunSetupPending: { [preferences = dependencies.preferences] in
+                !OnboardingPresenter.hasCompletedSetup(in: preferences)
+            },
             makeDriver: dependencies.makeUpdateDriver
         )
+        self.softwareUpdate = softwareUpdate
         let dataErasureIntentStore = SpeakerDataErasureIntentStore(
             intentFileURL: dependencies.dataErasureIntentFileURL,
             preferences: dependencies.preferences,
@@ -257,6 +261,7 @@ final class SpeakerRuntime: ObservableObject {
                     announce: announce,
                     shortcutName: { shortcut.preference.displayName },
                     mode: mode,
+                    softwareUpdate: softwareUpdate,
                     completion: completion
                 )
             }
@@ -279,6 +284,7 @@ final class SpeakerRuntime: ObservableObject {
                 shortcut: shortcut,
                 microphones: microphones,
                 onboarding: onboarding,
+                preferences: dependencies.preferences,
                 launchArguments: dependencies.launchArguments
             ),
             publish: { [diagnostics] notice in diagnostics.publish(notice) }

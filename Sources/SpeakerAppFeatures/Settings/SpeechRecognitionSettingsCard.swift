@@ -41,7 +41,11 @@ package struct SpeechRecognitionSettingsCard: View {
                 )
             ) {
                 ForEach(model.availableProviders, id: \.self) { provider in
-                    Text(provider.displayName).tag(provider)
+                    Text(
+                        provider.isOnDevice
+                            ? "\(provider.displayName)（免 Key）" : provider.displayName
+                    )
+                    .tag(provider)
                 }
             }
             .settingsTrailingMenu()
