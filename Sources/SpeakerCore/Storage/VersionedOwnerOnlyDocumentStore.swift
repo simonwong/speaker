@@ -204,7 +204,8 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
     }
 
     /// Removes every preserved copy, for callers that erase the whole
-    /// document on the user's behalf.
+    /// document on the user's behalf. A candidate that is not a regular
+    /// owner-only file, such as a symbolic link, stops the removal untouched.
     package func removeBackups() throws {
         let candidates = try FileManager.default.contentsOfDirectory(
             at: backupDirectoryURL,
@@ -216,7 +217,7 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
             candidate.lastPathComponent.hasPrefix(backupNamePrefix)
             && candidate.pathExtension == "json"
         {
-            try FileManager.default.removeItem(at: candidate)
+            try OwnerOnlyFilePersistence.removeRegularFile(at: candidate)
         }
     }
 
@@ -230,7 +231,7 @@ package struct VersionedOwnerOnlyDocumentStore<Document: Sendable>: Sendable {
             isDirectory: false
         )
         do {
-            try FileManager.default.moveItem(at: fileURL, to: backupURL)
+            try OwnerOnlyFilePersistence.renameRegularFile(at: fileURL, to: backupURL)
         } catch {
             return VersionedDocumentLoad(
                 outcome: .failed(

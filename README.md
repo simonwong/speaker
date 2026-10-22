@@ -73,7 +73,7 @@ See [Privacy](PRIVACY.md) for the complete data-handling contract, local storage
 
 ## Development
 
-Building Speaker requires Swift 6 and the macOS 26 SDK, normally provided by Xcode 26 or compatible Command Line Tools. The wrappers prefer `/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`; set `SPEAKER_SDKROOT` to use another macOS 26-or-later SDK.
+Building Speaker requires Swift 6 and the macOS 26 SDK, normally provided by Xcode 26 or compatible Command Line Tools. The wrappers take the active toolchain's macOS SDK from `xcrun` and refuse one older than macOS 26; no SDK path is hardcoded. Set `SPEAKER_SDKROOT` to use another macOS 26-or-later SDK.
 
 Use the repository wrappers so local builds match CI:
 

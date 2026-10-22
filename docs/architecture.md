@@ -15,17 +15,20 @@ SpeakerApp                  Scene and SwiftUI composition
        ├─ History feature
        └─ Provider features
 
-SpeakerAppFeatures          Windowless product rules and injectable coordinators
+SpeakerAppFeatures          Product copy, SwiftUI views, the HUD panel, injectable coordinators
 SpeakerCore                 Session, transcription, refinement, delivery, local data
-SpeakerProviderEvidence     Provider acceptance evidence shared by app and tools
+SpeakerProviderEvidence     Provider acceptance evidence for the provider tools and their specs
+SpeakerAccuracyMetrics      Recognition accuracy metrics for SpeakerAccuracyEvaluator
 Platform adapters           AppKit, AX, AVAudio, Carbon, Keychain, SMAppService
 ```
 
-`SpeakerApp` declares the menu-bar, settings, onboarding, and history scenes. `SpeakerRuntime` is constructed from a `SpeakerRuntimeDependencies` value whose production defaults wire the live adapters (audio capture, history store, credential store, workspace, bundle info, preferences, termination coordinator); it references no shared singleton. Startup migration order lives in `RuntimeStartupSequence` and shutdown convergence in `RuntimeShutdownCoordinator`, both in `SpeakerAppFeatures` behind stage protocols so specifications drive them with fakes. App termination and the quiesce before local-data erasure call the same convergence, which runs once and lets later callers wait for it. SwiftUI views observe one feature state and send semantic intents; they do not coordinate several platform adapters.
+`SpeakerApp` declares the menu-bar, settings, onboarding, and history scenes. `SpeakerRuntime` is constructed from a `SpeakerRuntimeDependencies` value whose production defaults wire the live adapters (audio capture, history store, credential store, workspace, bundle info, preferences, termination coordinator); it references no shared singleton. Startup migration order lives in `RuntimeStartupSequence` and shutdown convergence in `RuntimeShutdownCoordinator`, both in `SpeakerAppFeatures` behind stage protocols so specifications drive them with fakes. App termination and the quiesce before local-data erasure call the same convergence, which runs once and lets later callers wait for it. SwiftUI views observe the feature objects they draw and send semantic intents to them; they do not coordinate several platform adapters.
 
 `SpeakerApp` keeps composition only: the scenes, dependency wiring, AppKit window controllers, the Sparkle driver, and the delivery smoke runner. The menu bar rows, the History and Overview models, and every user-visible sentence live in `SpeakerAppFeatures`. The runtime does not republish its children's change notifications; a view observes the feature objects it draws, including the menu bar label, which observes Voice Input and permission state directly.
 
-`SpeakerAppFeatures` owns product copy, SF Symbols, accessibility announcements, windowless presentation policy, and route effects. `SpeakerTypography` is its one type ladder and every rung is a relative text style, so the window follows the accessibility text size. `SpeakerCore` does not expose concrete UI language or presentation policy.
+`SpeakerAppFeatures` owns product copy, SF Symbols, accessibility announcements, presentation policy, the SwiftUI views that render them, the voice input HUD panel, and route effects. `SpeakerTypography` is its one type ladder and every rung is a relative text style, so the window follows the accessibility text size. `SpeakerCore` does not expose concrete UI language or presentation policy.
+
+`SpeakerProviderEvidence` and `SpeakerAccuracyMetrics` are internal targets. Only the tools under `Tools/` and their specification executables link them; the App does not, and the package does not export them as library products.
 
 ## Deep product modules
 
@@ -131,7 +134,7 @@ Startup finishes credential migration, provider-resource restore, Personal Dicti
 
 History retention settings are the sole source of user intent. Automatic age and count eviction is a destructive transaction. A committed deletion is never presented as rolled back because WAL checkpointing is busy; pending checkpoint work is retried on later writes and the next clean open.
 
-File-backed sensitive data cross `OwnerOnlyFilePersistence`. The implementation opens directories and files without following symbolic links, confirms a regular file owned by the current user, bounds reads, and performs atomic same-directory owner-only writes with descriptor-relative operations. Unsafe objects fail closed and remain available for diagnosis. Versioned JSON documents (`settings.json`, `personal-dictionary.json`, and the legacy `history.json`) share `VersionedOwnerOnlyDocumentStore`, which protects the existing file, reads it through that boundary, probes the schema version, dispatches to the store's per-version decoder table, preserves an undecodable file as a timestamped `<name>.<infix>-…json` sibling, and prunes older recovery archives. Pruning never fails a load, but it reports which archives survived and why, so a store whose archive directory cannot shrink raises a notice instead of growing silently. Each concrete store owns only its schema table and its domain-facing load result, and the Personal Dictionary reports a preserved corrupt file as a structured recovery instead of refusing to load.
+File-backed sensitive data cross `OwnerOnlyFilePersistence`. The implementation opens directories and files without following symbolic links, confirms a regular file owned by the current user, bounds reads, and performs atomic same-directory owner-only writes with descriptor-relative operations. Existence checks, removal, and moving a file aside (`regularFileExists`, `removeRegularFile`, `renameRegularFile`) go through the same boundary; a rename never replaces an existing name. Unsafe objects fail closed and remain available for diagnosis. Versioned JSON documents (`settings.json`, `personal-dictionary.json`, and the legacy `history.json`) share `VersionedOwnerOnlyDocumentStore`, which protects the existing file, reads it through that boundary, probes the schema version, dispatches to the store's per-version decoder table, preserves an undecodable file as a timestamped `<name>.<infix>-…json` sibling, and prunes older recovery archives. Pruning never fails a load, but it reports which archives survived and why, so a store whose archive directory cannot shrink raises a notice instead of growing silently. Each concrete store owns only its schema table and its domain-facing load result, and the Personal Dictionary reports a preserved corrupt file as a structured recovery instead of refusing to load.
 
 Credential migration treats the current Keychain service as primary and old Keychain or development files as legacy sources. Migration proceeds only when every legacy source is readable and all non-empty values agree. It writes and reads back the primary value before removing legacy sources. A conflict or inaccessible source preserves all data and emits only provider-level diagnostics.
 
@@ -167,6 +170,6 @@ Onboarding has a separate debug capture entry point that renders the production 
 - Transcript text is persisted only after the Input Target's security class is known; secure targets remain text-free in every state.
 - Waiting For Result never becomes failure from local elapsed time alone.
 - Shutdown stops trigger intake, closes session dispatch, and then waits for required local persistence.
-- SwiftUI views observe one feature state and emit semantic intents; they do not coordinate multiple platform adapters.
+- A SwiftUI view observes only the feature objects whose state it draws and emits semantic intents to them; it never coordinates multiple platform adapters itself. A view that draws several features, such as `MenuBarContent`, observes each of them directly rather than an aggregate the runtime republishes.
 - Global event taps never run on the main run loop, and the main thread never waits on Accessibility IPC to another App.
 - A seam has both a live adapter and a deterministic adapter. Pass-through protocols without real variation are removed by the deletion test.
