@@ -583,6 +583,62 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             try expect(copied)
         }
 
+        await runAsync(
+            "a window-scope target delivers but keeps its text out of history",
+            failures: &failures
+        ) {
+            for isSecurityClassConfirmed in [false, true] {
+                let history = SessionHistoryFake()
+                let sessions = VoiceInputSessions(
+                    audioCapture: AudioCaptureFake(),
+                    targetCapture: TargetCaptureFake(
+                        result: .writable(
+                            InputTargetSnapshot(
+                                id: UUID(),
+                                applicationName: "Terminal",
+                                isSecurityClassConfirmed: isSecurityClassConfirmed
+                            ))
+                    ),
+                    transcriber: SpeechTranscriberFake(text: "窗口里的文字"),
+                    delivery: TextDeliveryFake(result: .delivered),
+                    clipboard: ClipboardFake(),
+                    history: history
+                )
+                let terminal = terminalPresentation(from: await sessions.observe())
+
+                await sessions.send(.pressed)
+                await sessions.send(.released)
+
+                let result = await terminal.value
+                _ = await eventually(before: .seconds(2)) {
+                    await history.records.first != nil
+                }
+                let record = await history.records.first
+                try expect(
+                    result?.activity.isDelivered == true,
+                    "the target did not receive the text"
+                )
+                if isSecurityClassConfirmed {
+                    try expect(
+                        record?.finalText == "窗口里的文字",
+                        "an element target lost its history text"
+                    )
+                } else {
+                    try expect(
+                        record?.transcription == nil && record?.finalText == nil,
+                        "an unclassified target persisted transcript text"
+                    )
+                    guard case .delivered(_, _, let storedText)? = record?.outcome else {
+                        throw SpecFailure(message: "the delivered outcome was not recorded")
+                    }
+                    try expect(
+                        storedText.isEmpty,
+                        "an unclassified target persisted text in its outcome"
+                    )
+                }
+            }
+        }
+
         await runAsync("secure target never receives automatic text", failures: &failures) {
             let delivery = TextDeliveryFake(result: .delivered)
             let history = SessionHistoryFake()

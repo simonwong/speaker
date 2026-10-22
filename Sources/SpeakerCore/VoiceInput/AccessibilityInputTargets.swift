@@ -161,10 +161,13 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             }
             let id = UUID()
             targets[id] = StoredTarget(evidence: evidence)
+            // A window-scope target never exposed its focused element, so
+            // whether it is a secure field is unknown.
             return .writable(
                 .init(
                     id: id,
-                    applicationName: evidence.applicationName
+                    applicationName: evidence.applicationName,
+                    isSecurityClassConfirmed: evidence.reference.scope == .element
                 ))
         }
     }
@@ -208,9 +211,12 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             )
         }
 
-        if let originalValue = evidence.originalValue {
-            switch await system.value(of: evidence.reference) {
-            case .success(let value?) where value == originalValue:
+        if let original = evidence.valueSample {
+            switch await system.textSample(
+                of: evidence.reference,
+                in: original.range
+            ) {
+            case .success(let sample?) where sample.shows(original):
                 break
             case .success:
                 return .pendingCopyDiagnosed(
@@ -224,7 +230,13 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                 )
             }
         }
-        let expectedValue = replacingSelection(in: evidence, with: text)
+        let expectation = evidence.valueSample.flatMap { original in
+            AccessibilityPasteExpectation(
+                original: original,
+                selection: evidence.selection,
+                inserting: text
+            )
+        }
 
         let isFrontmostExactTarget = await system.isFrontmost(
             processID: evidence.processID
@@ -252,9 +264,12 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                 failure: failure
             )
         }
-        if let originalValue = evidence.originalValue {
-            switch await system.value(of: evidence.reference) {
-            case .success(let value?) where value == originalValue:
+        if let original = evidence.valueSample {
+            switch await system.textSample(
+                of: evidence.reference,
+                in: original.range
+            ) {
+            case .success(let sample?) where sample.shows(original):
                 break
             case .success:
                 return .pendingCopy(.changedTarget)
@@ -289,10 +304,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         }
         // A readable target keeps the user's clipboard aside until its value
         // shows whether the paste landed; any other target has no receipt.
-        let receiptEvidence = expectedValue.flatMap { expectedValue in
-            evidence.originalValue.map { (expectedValue, $0) }
-        }
-        let receipt = receiptEvidence == nil ? PasteReceipt.unconfirmed : PasteReceipt()
+        let receipt = expectation == nil ? PasteReceipt.unconfirmed : PasteReceipt()
         switch await system.paste(
             text,
             to: evidence.reference,
@@ -300,7 +312,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
             receipt: receipt
         ) {
         case .posted:
-            guard let (expectedValue, originalValue) = receiptEvidence else {
+            guard let expectation else {
                 return .pasteCommandPosted(
                     .init(
                         stage: .pasteReceipt,
@@ -308,8 +320,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                     ))
             }
             let outcome = await verifyMutationReceipt(
-                expectedValue,
-                originalValue: originalValue,
+                expectation,
                 target: evidence.reference,
                 diagnosticStage: .pasteReceipt
             )
@@ -349,8 +360,7 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
     }
 
     private func verifyMutationReceipt(
-        _ expectedValue: String,
-        originalValue: String,
+        _ expectation: AccessibilityPasteExpectation,
         target: AccessibilityTargetReference,
         diagnosticStage: DeliveryDiagnostic.Stage
     ) async -> DeliveryOutcome {
@@ -360,13 +370,16 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
         // target applies the paste, so only the last reading decides.
         var showsThirdValue = false
         while true {
-            switch await system.value(of: target) {
-            case .success(let value?) where value == expectedValue:
-                return .delivered
-            case .success(let value?) where value == originalValue:
-                showsThirdValue = false
-            case .success(.some):
-                showsThirdValue = true
+            switch await system.textSample(
+                of: target,
+                in: expectation.receiptRange
+            ) {
+            case .success(let sample?):
+                switch expectation.classify(sample) {
+                case .expected: return .delivered
+                case .original: showsThirdValue = false
+                case .other: showsThirdValue = true
+                }
             case .success(nil), .failure(.cannotComplete):
                 break
             case .failure(.invalidUIElement):
@@ -422,20 +435,6 @@ public actor AccessibilityInputTargets: InputTargetCapturing, InputTargetDiscard
                 )
             }
         }
-    }
-
-    private func replacingSelection(
-        in evidence: AccessibilityTargetEvidence,
-        with text: String
-    ) -> String? {
-        guard let originalValue = evidence.originalValue,
-            let range = evidence.selection
-        else { return nil }
-        let original = originalValue as NSString
-        guard range.location >= 0, range.length >= 0,
-            NSMaxRange(range) <= original.length
-        else { return nil }
-        return original.replacingCharacters(in: range, with: text)
     }
 
     private static func diagnostic(

@@ -201,10 +201,18 @@ public struct CapturedAudio: Equatable, Sendable {
 public struct InputTargetSnapshot: Equatable, Hashable, Sendable {
     public let id: UUID
     public let applicationName: String
+    /// Whether capture saw the focused element and ruled out a secure field.
+    /// Transcript text is persisted only when this is true.
+    package let isSecurityClassConfirmed: Bool
 
     public init(id: UUID, applicationName: String) {
+        self.init(id: id, applicationName: applicationName, isSecurityClassConfirmed: true)
+    }
+
+    package init(id: UUID, applicationName: String, isSecurityClassConfirmed: Bool) {
         self.id = id
         self.applicationName = applicationName
+        self.isSecurityClassConfirmed = isSecurityClassConfirmed
     }
 }
 
