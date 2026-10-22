@@ -83,7 +83,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             // the limit ended recording is still the current one.
             var limitStream = await sessions.observe().makeAsyncIterator()
             let limitPresentation = await limitStream.next()
-            guard case .processing(_, .capturingTarget, _) = limitPresentation?.activity else {
+            guard case .processing(_, .capturingTarget) = limitPresentation?.activity else {
                 throw SpecFailure(
                     message:
                         "the limit published \(String(describing: limitPresentation?.activity))"
@@ -501,7 +501,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let shutdownSessions = VoiceInputSessions(
                 audioCapture: shutdownAudio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
@@ -559,7 +560,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: target,
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history,
@@ -641,7 +642,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),
@@ -734,7 +736,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -793,7 +796,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "hello"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "hello")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -832,7 +836,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "保留"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "保留")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -869,7 +874,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -897,7 +903,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -916,7 +922,6 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let record = await history.records.last
             try expect(deliveredTexts.isEmpty)
             try expect(record?.outcome.isCancelled == true)
-            try expect(record?.applicationName == nil)
             try expect(record?.stageDurationsMilliseconds["doubao"] != nil)
         }
 
@@ -927,7 +932,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -967,7 +973,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -1035,7 +1041,7 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -1064,7 +1070,8 @@ enum RecordingLimitSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "后续会话"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "后续会话")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1095,6 +1102,8 @@ private actor TelemetryAudioCaptureFake: AudioCapturing, AudioCaptureTelemetryPr
     func stop() async throws -> CapturedAudio { specAudio }
 
     func cancel() async {}
+
+    func audioChunks() async -> AsyncStream<Data>? { nil }
 
     func observeTelemetry() -> AsyncStream<RecordingTelemetry> {
         let (stream, continuation) = AsyncStream<RecordingTelemetry>.makeStream()

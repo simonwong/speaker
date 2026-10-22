@@ -379,7 +379,9 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             } catch let failure as DoubaoASRFailure {
                 try expect(failure.kind == .network)
                 try expect(failure.providerStatusCode == "url.networkConnectionLost")
-                try expect(VoiceInputProblem(doubaoFailure: failure).failure == .networkUnavailable)
+                try expect(
+                    SpeechRecognitionFailure(doubaoFailure: failure).userFailure
+                        == .networkUnavailable)
             }
             let closeCount = await connection.closeCount
             try expect(closeCount == 1)
@@ -864,7 +866,6 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                 "untrusted provider response text entered session history"
             )
             try expect(record?.transcriptionProvider == "doubao")
-            try expect(record?.applicationName == nil)
             let discardedCount = await target.discardedCount
             try expect(discardedCount == 1)
         }
@@ -875,7 +876,8 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "仍可使用"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "仍可使用")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(failureNotice: .writeFailed(reason: "磁盘不可用"))
@@ -901,7 +903,8 @@ enum DoubaoClientSpecs: CoreSpecDomain {
         }
 
         await runAsync(
-            "voice text processing owns Doubao failure normalization", failures: &failures
+            "the recognition seam reports Doubao failures as recognition failures",
+            failures: &failures
         ) {
             let cases: [(DoubaoASRFailureKind, VoiceInputFailure)] = [
                 (.invalidCredential, .providerAuthenticationFailed),
@@ -920,13 +923,35 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             ]
 
             for (kind, expectedFailure) in cases {
-                let processor = DefaultVoiceTextProcessor(
-                    configuration: VoiceInputConfigurationController(),
-                    transcriber: DoubaoFailureTranscriber(
+                let transcriber = CredentialedSpeechTranscriber(
+                    credentials: ProviderCredentialStoreFake(),
+                    doubao: DoubaoFailureTranscriber(
                         failure: .init(
                             kind: kind,
                             providerRequestID: "doubao-mapping-log"
-                        )),
+                        ))
+                )
+                let expectedDiagnostic = VoiceProviderDiagnostic(
+                    provider: "doubao",
+                    operation: .transcription,
+                    requestID: "doubao-mapping-log",
+                    code: kind.rawValue
+                )
+                do {
+                    let (stream, continuation) = AsyncStream<Data>.makeStream()
+                    continuation.finish()
+                    _ = try await transcriber.transcribe(
+                        stream,
+                        context: .init(hotwords: [], purpose: .defaultSmoothing)
+                    )
+                    throw SpecFailure(message: "\(kind.rawValue) escaped the streaming seam")
+                } catch let failure as SpeechRecognitionFailure {
+                    try expect(failure.userFailure == expectedFailure)
+                    try expect(failure.providerDiagnostic == expectedDiagnostic)
+                }
+                let processor = DefaultVoiceTextProcessor(
+                    configuration: VoiceInputConfigurationController(),
+                    transcriber: transcriber,
                     refinement: OptionalTextRefinementPipeline(
                         refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused")))
                     )
@@ -936,14 +961,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
                     throw SpecFailure(message: "\(kind.rawValue) escaped the processing seam")
                 } catch let failure as VoiceTextProcessingFailure {
                     try expect(failure.userFailure == expectedFailure)
-                    try expect(
-                        failure.providerDiagnostic
-                            == .init(
-                                provider: "doubao",
-                                operation: .transcription,
-                                requestID: "doubao-mapping-log",
-                                code: kind.rawValue
-                            ))
+                    try expect(failure.providerDiagnostic == expectedDiagnostic)
                 }
             }
         }
@@ -953,7 +971,10 @@ enum DoubaoClientSpecs: CoreSpecDomain {
         ) {
             let processor = DefaultVoiceTextProcessor(
                 configuration: VoiceInputConfigurationController(),
-                transcriber: CredentialFailureTranscriber(error: .interactionUnavailable),
+                transcriber: CredentialedSpeechTranscriber(
+                    credentials: ProviderCredentialStoreFake(),
+                    doubao: CredentialFailureTranscriber(error: .interactionUnavailable)
+                ),
                 refinement: OptionalTextRefinementPipeline(
                     refiner: DeepSeekRefinerFake(result: .success(.init(text: "unused")))
                 )

@@ -543,7 +543,7 @@ package final class VoiceInputExperience: ObservableObject {
             (.finishRecording, .recording),
             (.cancel, .recording),
             (.cancel, .processing),
-            (.useRecognitionResult, .processing(_, .refining, _)),
+            (.useRecognitionResult, .processing(_, .refining)),
             (.copyRetainedText, .pendingCopy),
             (.dismissResult, .pendingCopy),
             (.dismissResult, .failed):
@@ -859,7 +859,7 @@ package final class VoiceInputExperience: ObservableObject {
                     remainingMilliseconds: telemetry?.remainingMilliseconds
                 )
             )
-        case .processing(let id, let stage, _):
+        case .processing(let id, let stage):
             .processing(
                 title: activity.compactTitle,
                 cancelAction: .init(sessionID: id, operation: .cancel),
@@ -905,7 +905,7 @@ package final class VoiceInputExperience: ObservableObject {
         case .idle: "idle"
         case .preparing: "preparing"
         case .recording: "recording"
-        case .processing(_, let stage, _): "processing.\(stage)"
+        case .processing(_, let stage): "processing.\(stage)"
         case .delivered: "delivered"
         case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
         case .cancelled: "cancelled"
@@ -920,7 +920,7 @@ package final class VoiceInputExperience: ObservableObject {
         switch activity {
         case .preparing:
             return nil
-        case .processing(_, let stage, _)
+        case .processing(_, let stage)
         where stage == .capturingTarget || stage == .delivering:
             return nil
         case .idle, .recording, .processing, .delivered, .pendingCopy,
@@ -932,7 +932,7 @@ package final class VoiceInputExperience: ObservableObject {
             case .idle: "idle"
             case .preparing: "preparing"
             case .recording: "recording"
-            case .processing(_, let stage, _): "processing.\(stage)"
+            case .processing(_, let stage): "processing.\(stage)"
             case .delivered: "delivered"
             case .pendingCopy(_, _, let reason): "pendingCopy.\(reason.rawValue)"
             case .cancelled: "cancelled"

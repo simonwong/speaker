@@ -152,7 +152,7 @@ public actor AVAudioCapture: AudioCapturing, AudioCaptureTelemetryProviding,
         )
     }
 
-    public func audioChunks() -> AsyncStream<Data> {
+    public func audioChunks() -> AsyncStream<Data>? {
         pendingAudioStream?.finish()
         let id = UUID()
         let audioStream = BoundedAudioChunkStream(
@@ -614,8 +614,6 @@ private final class AudioCaptureLevelMeter: @unchecked Sendable {
 
     func finish() { lock.withLock { isFinished = true } }
 }
-
-extension AVAudioCapture: AudioChunkStreaming {}
 
 package enum AudioChunkYieldResult: Equatable, Sendable {
     case accepted

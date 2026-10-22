@@ -32,33 +32,35 @@ public struct VoiceTextProcessingSnapshot: Equatable, Sendable {
 }
 
 public struct VoiceTextProcessingResult: Equatable, Sendable {
-    public let doubaoText: String
+    /// The Speech Recognition Provider's confirmed text.
+    public let recognitionText: String
     public let normalizedText: String
-    public let deepSeekText: String?
+    /// The Refinement Provider's text, when refinement produced one.
+    public let refinedText: String?
     public let finalText: String
-    public let doubaoRequestID: String?
-    public let deepSeekRequestID: String?
+    public let recognitionRequestID: String?
+    public let refinementRequestID: String?
     public let refinementStatus: TextRefinementStatus
     public let refinementFailure: TextRefinementFailure?
     public let stageDurationsMilliseconds: [String: Int]
 
     public init(
-        doubaoText: String,
+        recognitionText: String,
         normalizedText: String,
-        deepSeekText: String?,
+        refinedText: String?,
         finalText: String,
-        doubaoRequestID: String?,
-        deepSeekRequestID: String?,
+        recognitionRequestID: String?,
+        refinementRequestID: String?,
         refinementStatus: TextRefinementStatus,
         refinementFailure: TextRefinementFailure?,
         stageDurationsMilliseconds: [String: Int] = [:]
     ) {
-        self.doubaoText = doubaoText
+        self.recognitionText = recognitionText
         self.normalizedText = normalizedText
-        self.deepSeekText = deepSeekText
+        self.refinedText = refinedText
         self.finalText = finalText
-        self.doubaoRequestID = doubaoRequestID
-        self.deepSeekRequestID = deepSeekRequestID
+        self.recognitionRequestID = recognitionRequestID
+        self.refinementRequestID = refinementRequestID
         self.refinementStatus = refinementStatus
         self.refinementFailure = refinementFailure
         self.stageDurationsMilliseconds = stageDurationsMilliseconds
@@ -96,12 +98,12 @@ extension VoiceTextProcessingResult {
     package func removingControlCharacters() -> Self {
         let clean = ProviderTextSanitizer.removingControlCharacters(from:)
         return VoiceTextProcessingResult(
-            doubaoText: clean(doubaoText),
+            recognitionText: clean(recognitionText),
             normalizedText: clean(normalizedText),
-            deepSeekText: deepSeekText.map(clean),
+            refinedText: refinedText.map(clean),
             finalText: clean(finalText),
-            doubaoRequestID: doubaoRequestID,
-            deepSeekRequestID: deepSeekRequestID,
+            recognitionRequestID: recognitionRequestID,
+            refinementRequestID: refinementRequestID,
             refinementStatus: refinementStatus,
             refinementFailure: refinementFailure,
             stageDurationsMilliseconds: stageDurationsMilliseconds
@@ -111,14 +113,16 @@ extension VoiceTextProcessingResult {
 
 public struct VoiceTextProcessingProgress: Equatable, Sendable {
     public let stage: VoiceInputProcessingStage
-    public let confirmedDoubaoResult: TranscriptionResult?
+    /// The recognition Stage Result, reported once recognition is confirmed
+    /// and refinement has begun.
+    public let confirmedRecognitionResult: TranscriptionResult?
 
     public init(
         stage: VoiceInputProcessingStage,
-        confirmedDoubaoResult: TranscriptionResult? = nil
+        confirmedRecognitionResult: TranscriptionResult? = nil
     ) {
         self.stage = stage
-        self.confirmedDoubaoResult = confirmedDoubaoResult
+        self.confirmedRecognitionResult = confirmedRecognitionResult
     }
 }
 
@@ -138,16 +142,18 @@ public struct VoiceTextProcessingFailure: Error, Equatable, Sendable {
         )
     }
 
-    init(doubaoFailure: DoubaoASRFailure) {
-        problem = VoiceInputProblem(doubaoFailure: doubaoFailure)
-    }
-
-    init(doubaoCredentialFailure: ProviderCredentialStoreError) {
-        problem = VoiceInputProblem(doubaoCredentialFailure: doubaoCredentialFailure)
+    init(recognitionFailure failure: SpeechRecognitionFailure) {
+        self.init(
+            userFailure: failure.userFailure,
+            providerDiagnostic: failure.providerDiagnostic
+        )
     }
 }
 
 public protocol VoiceTextProcessing: Sendable {
+    /// This processor's form that recognizes audio while it is recorded, or
+    /// `nil` when it needs the complete recording.
+    var streaming: (any StreamingVoiceTextProcessing)? { get }
     func captureSnapshot() async -> VoiceTextProcessingSnapshot
     func process(
         _ audio: CapturedAudio,
@@ -296,6 +302,8 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
         self.refinement = refinement
     }
 
+    public nonisolated var streaming: (any StreamingVoiceTextProcessing)? { self }
+
     public func captureSnapshot() async -> VoiceTextProcessingSnapshot {
         await configuration.captureSnapshot()
     }
@@ -314,14 +322,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
                 context: Self.transcriptionContext(for: snapshot)
             )
         } catch let failure as SpeechRecognitionFailure {
-            throw VoiceTextProcessingFailure(
-                userFailure: failure.userFailure,
-                providerDiagnostic: failure.providerDiagnostic
-            )
-        } catch let failure as DoubaoASRFailure {
-            throw VoiceTextProcessingFailure(doubaoFailure: failure)
-        } catch let failure as ProviderCredentialStoreError {
-            throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
+            throw VoiceTextProcessingFailure(recognitionFailure: failure)
         }
         let transcriptionDuration = transcriptionStarted.duration(to: clock.now)
         return try await finishProcessing(
@@ -379,14 +380,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
                     for: snapshot, audioCaptureCompletion: audioCaptureCompletion)
             )
         } catch let failure as SpeechRecognitionFailure {
-            throw VoiceTextProcessingFailure(
-                userFailure: failure.userFailure,
-                providerDiagnostic: failure.providerDiagnostic
-            )
-        } catch let failure as DoubaoASRFailure {
-            throw VoiceTextProcessingFailure(doubaoFailure: failure)
-        } catch let failure as ProviderCredentialStoreError {
-            throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
+            throw VoiceTextProcessingFailure(recognitionFailure: failure)
         }
         let transcriptionDuration = transcriptionStarted.duration(to: clock.now)
         return try await finishProcessing(
@@ -424,7 +418,7 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             await progress(
                 .init(
                     stage: .refining,
-                    confirmedDoubaoResult: transcriptionResult
+                    confirmedRecognitionResult: transcriptionResult
                 ))
         }
         let refinementStarted = ContinuousClock.now
@@ -447,12 +441,12 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
             stageDurations["recording"] = Self.milliseconds(recordingDuration)
         }
         return VoiceTextProcessingResult(
-            doubaoText: transcriptionResult.text,
+            recognitionText: transcriptionResult.text,
             normalizedText: transcriptionResult.text,
-            deepSeekText: refinementOutcome.deepSeekText,
+            refinedText: refinementOutcome.deepSeekText,
             finalText: refinementOutcome.finalText,
-            doubaoRequestID: transcriptionResult.providerRequestID,
-            deepSeekRequestID: refinementOutcome.providerRequestID,
+            recognitionRequestID: transcriptionResult.providerRequestID,
+            refinementRequestID: refinementOutcome.providerRequestID,
             refinementStatus: refinementOutcome.status,
             refinementFailure: refinementOutcome.failure,
             stageDurationsMilliseconds: stageDurations
@@ -469,12 +463,20 @@ public actor DefaultVoiceTextProcessor: VoiceTextProcessing {
 
 extension DefaultVoiceTextProcessor: StreamingVoiceTextProcessing {}
 
-struct BasicVoiceTextProcessor: VoiceTextProcessing {
+/// Recognizes the complete recording with one transcriber and delivers its
+/// text unchanged: no snapshot, refinement, or streaming.
+package struct BasicVoiceTextProcessor: VoiceTextProcessing {
     let transcriber: any SpeechTranscribing
 
-    func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+    package init(transcriber: any SpeechTranscribing) {
+        self.transcriber = transcriber
+    }
 
-    func process(
+    package var streaming: (any StreamingVoiceTextProcessing)? { nil }
+
+    package func captureSnapshot() async -> VoiceTextProcessingSnapshot { .empty }
+
+    package func process(
         _ audio: CapturedAudio,
         snapshot: VoiceTextProcessingSnapshot,
         progress: @escaping @Sendable (VoiceTextProcessingProgress) async -> Void
@@ -483,22 +485,15 @@ struct BasicVoiceTextProcessor: VoiceTextProcessing {
         do {
             result = try await transcriber.transcribe(audio)
         } catch let failure as SpeechRecognitionFailure {
-            throw VoiceTextProcessingFailure(
-                userFailure: failure.userFailure,
-                providerDiagnostic: failure.providerDiagnostic
-            )
-        } catch let failure as DoubaoASRFailure {
-            throw VoiceTextProcessingFailure(doubaoFailure: failure)
-        } catch let failure as ProviderCredentialStoreError {
-            throw VoiceTextProcessingFailure(doubaoCredentialFailure: failure)
+            throw VoiceTextProcessingFailure(recognitionFailure: failure)
         }
         return VoiceTextProcessingResult(
-            doubaoText: result.text,
+            recognitionText: result.text,
             normalizedText: result.text,
-            deepSeekText: nil,
+            refinedText: nil,
             finalText: result.text,
-            doubaoRequestID: result.providerRequestID,
-            deepSeekRequestID: nil,
+            recognitionRequestID: result.providerRequestID,
+            refinementRequestID: nil,
             refinementStatus: .notRequested,
             refinementFailure: nil,
             stageDurationsMilliseconds: [

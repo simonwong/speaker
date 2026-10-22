@@ -362,7 +362,6 @@ private struct HistoryDocumentV1: Codable {
 package struct HistoryRecordV1: Codable {
     let sessionID: UUID
     let startedAt: Date
-    let applicationName: String?
     let transcription: String?
     let finalText: String?
     let transcriptionProvider: String?
@@ -373,8 +372,8 @@ package struct HistoryRecordV1: Codable {
     let providerStatusCode: String?
     let providerMessage: String?
     let deliveryDiagnosticCode: String?
-    let deepSeekText: String?
-    let deepSeekRequestID: String?
+    let refinedText: String?
+    let refinementRequestID: String?
     let refinementProviderID: RefinementProviderID?
     let refinementModelID: String?
     let refinementModeName: String?
@@ -392,10 +391,45 @@ package struct HistoryRecordV1: Codable {
     let stageDurationsMilliseconds: [String: Int]?
     let outcome: HistoryOutcomeV1
 
+    /// The keys written to disk. The refinement fields keep the names they
+    /// were first stored under, so existing history decodes unchanged. Keys
+    /// no longer written, such as `applicationName`, are ignored on read.
+    private enum CodingKeys: String, CodingKey {
+        case sessionID
+        case startedAt
+        case transcription
+        case finalText
+        case transcriptionProvider
+        case transcriptionModelID
+        case providerRequestID
+        case providerErrorCode
+        case providerOperation
+        case providerStatusCode
+        case providerMessage
+        case deliveryDiagnosticCode
+        case refinedText = "deepSeekText"
+        case refinementRequestID = "deepSeekRequestID"
+        case refinementProviderID
+        case refinementModelID
+        case refinementModeName
+        case refinementPrompt
+        case refinementStatus
+        case refinementFailureCode
+        case refinementFailureStatusCode
+        case refinementFailureMessage
+        case cancelledAtStage
+        case dictionarySnapshotID
+        case dictionarySnapshotEntries
+        case dictionaryRequestContext
+        case dictionaryReplacements
+        case durationMilliseconds
+        case stageDurationsMilliseconds
+        case outcome
+    }
+
     init(_ record: VoiceInputHistoryRecord) {
         sessionID = record.sessionID.rawValue
         startedAt = record.startedAt
-        applicationName = nil
         transcription = record.transcription
         finalText = record.finalText
         transcriptionProvider = record.transcriptionProvider
@@ -406,8 +440,8 @@ package struct HistoryRecordV1: Codable {
         providerStatusCode = record.providerStatusCode
         providerMessage = nil
         deliveryDiagnosticCode = record.deliveryDiagnosticCode
-        deepSeekText = record.deepSeekText
-        deepSeekRequestID = record.deepSeekRequestID
+        refinedText = record.refinedText
+        refinementRequestID = record.refinementRequestID
         refinementProviderID = record.refinementProviderID
         refinementModelID = record.refinementModelID
         refinementModeName = record.refinementModeName
@@ -431,7 +465,6 @@ package struct HistoryRecordV1: Codable {
             VoiceInputHistoryRecord(
                 sessionID: VoiceInputSessionID(rawValue: sessionID),
                 startedAt: startedAt,
-                applicationName: applicationName,
                 transcription: transcription,
                 finalText: finalText,
                 transcriptionProvider: transcriptionProvider,
@@ -442,8 +475,8 @@ package struct HistoryRecordV1: Codable {
                 providerStatusCode: providerStatusCode,
                 providerMessage: nil,
                 deliveryDiagnosticCode: deliveryDiagnosticCode,
-                deepSeekText: deepSeekText,
-                deepSeekRequestID: deepSeekRequestID,
+                refinedText: refinedText,
+                refinementRequestID: refinementRequestID,
                 refinementProviderID: refinementProviderID,
                 refinementModelID: refinementModelID,
                 refinementModeName: refinementModeName,
@@ -480,7 +513,6 @@ package struct HistoryOutcomeV1: Codable {
     let kind: Kind
     let sessionID: UUID?
     let processingStage: String?
-    let applicationName: String?
     let text: String?
     let pendingCopyReason: String?
     let failure: String?
@@ -493,13 +525,13 @@ package struct HistoryOutcomeV1: Codable {
             self.init(kind: .preparing, sessionID: id.rawValue)
         case .recording(let id):
             self.init(kind: .recording, sessionID: id.rawValue)
-        case .processing(let id, let stage, _):
+        case .processing(let id, let stage):
             self.init(
                 kind: .processing,
                 sessionID: id.rawValue,
                 processingStage: Self.encode(stage)
             )
-        case .delivered(let id, _, let text):
+        case .delivered(let id, let text):
             self.init(
                 kind: .delivered,
                 sessionID: id.rawValue,
@@ -527,7 +559,6 @@ package struct HistoryOutcomeV1: Codable {
         kind: Kind,
         sessionID: UUID? = nil,
         processingStage: String? = nil,
-        applicationName: String? = nil,
         text: String? = nil,
         pendingCopyReason: String? = nil,
         failure: String? = nil
@@ -535,7 +566,6 @@ package struct HistoryOutcomeV1: Codable {
         self.kind = kind
         self.sessionID = sessionID
         self.processingStage = processingStage
-        self.applicationName = applicationName
         self.text = text
         self.pendingCopyReason = pendingCopyReason
         self.failure = failure
@@ -556,20 +586,13 @@ package struct HistoryOutcomeV1: Codable {
                 }
                 return .processing(
                     try requiredSessionID(),
-                    try Self.decodeStage(processingStage),
-                    applicationName: applicationName
+                    try Self.decodeStage(processingStage)
                 )
             case .delivered:
                 guard let text else {
                     throw HistoryRecordDecodingError.missingField("text")
                 }
-                return .delivered(
-                    try requiredSessionID(),
-                    // Legacy records predate the application-name field; the
-                    // placeholder is part of the on-disk decoding contract.
-                    applicationName: applicationName ?? "当前输入框",
-                    text: text
-                )
+                return .delivered(try requiredSessionID(), text: text)
             case .pendingCopy:
                 guard let text else {
                     throw HistoryRecordDecodingError.missingField("text")

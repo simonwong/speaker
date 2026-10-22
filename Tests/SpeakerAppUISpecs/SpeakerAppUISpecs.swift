@@ -1887,14 +1887,12 @@ struct SpeakerAppUISpecs {
             let textRecord = makeHistoryRecord(
                 id: textID,
                 startedAt: startedAt,
-                applicationName: "备忘录",
                 transcription: "豆包初稿",
                 finalText: "最终正文"
             )
             let cancelledRecord = VoiceInputHistoryRecord(
                 sessionID: cancelledID,
                 startedAt: startedAt,
-                applicationName: nil,
                 transcription: "取消前已确认的转录",
                 finalText: nil,
                 cancelledAtStage: "deepseek",
@@ -1903,7 +1901,6 @@ struct SpeakerAppUISpecs {
             let earlyCancelledRecord = VoiceInputHistoryRecord(
                 sessionID: earlyCancelledID,
                 startedAt: startedAt,
-                applicationName: nil,
                 transcription: nil,
                 finalText: nil,
                 cancelledAtStage: "recording",
@@ -1912,7 +1909,6 @@ struct SpeakerAppUISpecs {
             let secureRecord = VoiceInputHistoryRecord(
                 sessionID: secureID,
                 startedAt: startedAt,
-                applicationName: "密码输入",
                 transcription: nil,
                 finalText: nil,
                 outcome: .pendingCopy(
@@ -1924,7 +1920,6 @@ struct SpeakerAppUISpecs {
             let recordingLimitRecord = VoiceInputHistoryRecord(
                 sessionID: recordingLimitID,
                 startedAt: startedAt,
-                applicationName: nil,
                 transcription: nil,
                 finalText: nil,
                 transcriptionProvider: "local",
@@ -1954,11 +1949,10 @@ struct SpeakerAppUISpecs {
             let skippedRecord = VoiceInputHistoryRecord(
                 sessionID: skippedID,
                 startedAt: startedAt,
-                applicationName: nil,
                 transcription: "识别结果",
                 finalText: "识别结果",
                 refinementStatus: TextRefinementStatus.skipped.rawValue,
-                outcome: .delivered(skippedID, applicationName: "备忘录", text: "识别结果")
+                outcome: .delivered(skippedID, text: "识别结果")
             )
             let skippedRow = HistoryPresentation.row(for: skippedRecord)
             try expect(skippedRow.note == .refinementSkipped)
@@ -1967,8 +1961,8 @@ struct SpeakerAppUISpecs {
             for failure in [VoiceInputFailure.recordingFailed, .providerAuthenticationFailed] {
                 let id = VoiceInputSessionID()
                 let record = VoiceInputHistoryRecord(
-                    sessionID: id, startedAt: startedAt, applicationName: nil,
-                    transcription: nil, finalText: nil, outcome: .failed(id, failure)
+                    sessionID: id, startedAt: startedAt, transcription: nil, finalText: nil,
+                    outcome: .failed(id, failure)
                 )
                 let row = HistoryPresentation.row(for: record)
                 try expect(row.problem == .failed(failure))
@@ -2004,47 +1998,40 @@ struct SpeakerAppUISpecs {
             let unconfirmedRecord = VoiceInputHistoryRecord(
                 sessionID: unconfirmedID,
                 startedAt: startedAt,
-                applicationName: "备忘录",
                 transcription: "豆包初稿",
                 finalText: "未确认正文",
                 deliveryDiagnosticCode: "pasteReceipt.unconfirmed",
                 outcome: .delivered(
                     unconfirmedID,
-                    applicationName: "备忘录",
                     text: "未确认正文"
                 )
             )
             let fallbackRecord = VoiceInputHistoryRecord(
                 sessionID: fallbackID,
                 startedAt: startedAt,
-                applicationName: "备忘录",
                 transcription: "豆包初稿",
                 finalText: "回退正文",
                 refinementStatus: "fellBack",
                 outcome: .delivered(
                     fallbackID,
-                    applicationName: "备忘录",
                     text: "回退正文"
                 )
             )
             let unconfirmedFallbackRecord = VoiceInputHistoryRecord(
                 sessionID: VoiceInputSessionID(),
                 startedAt: startedAt,
-                applicationName: "备忘录",
                 transcription: "豆包初稿",
                 finalText: "未确认回退正文",
                 deliveryDiagnosticCode: "pasteReceipt.unconfirmed",
                 refinementStatus: "fellBack",
                 outcome: .delivered(
                     deliveredID,
-                    applicationName: "备忘录",
                     text: "未确认回退正文"
                 )
             )
             let pendingRecord = VoiceInputHistoryRecord(
                 sessionID: pendingID,
                 startedAt: startedAt,
-                applicationName: nil,
                 transcription: "豆包初稿",
                 finalText: "待复制正文",
                 outcome: .pendingCopy(
@@ -2095,28 +2082,24 @@ struct SpeakerAppUISpecs {
                 makeHistoryRecord(
                     id: hiddenTranscriptID,
                     startedAt: Date(timeIntervalSince1970: 300),
-                    applicationName: "备忘录",
                     transcription: "只在原始转录出现的暗号",
                     finalText: "屏幕展示的最终正文"
                 ),
                 makeHistoryRecord(
                     id: bodyID,
                     startedAt: Date(timeIntervalSince1970: 200),
-                    applicationName: "邮件",
                     transcription: "初稿",
                     finalText: "需要搜索的正文"
                 ),
                 makeHistoryRecord(
                     id: appID,
                     startedAt: Date(timeIntervalSince1970: 100),
-                    applicationName: "Safari",
                     transcription: "网页内容",
                     finalText: nil
                 ),
                 makeHistoryRecord(
                     id: deliveryDiagnosticID,
                     startedAt: Date(timeIntervalSince1970: 50),
-                    applicationName: "TextEdit",
                     transcription: "普通正文",
                     finalText: "普通正文",
                     deliveryDiagnosticCode: "pasteReceipt.unconfirmed"
@@ -2156,7 +2139,6 @@ struct SpeakerAppUISpecs {
 private func makeHistoryRecord(
     id: VoiceInputSessionID,
     startedAt: Date,
-    applicationName: String? = "备忘录",
     transcription: String? = "测试文字",
     finalText: String? = "测试文字",
     deliveryDiagnosticCode: String? = nil
@@ -2164,13 +2146,11 @@ private func makeHistoryRecord(
     VoiceInputHistoryRecord(
         sessionID: id,
         startedAt: startedAt,
-        applicationName: applicationName,
         transcription: transcription,
         finalText: finalText,
         deliveryDiagnosticCode: deliveryDiagnosticCode,
         outcome: .delivered(
             id,
-            applicationName: applicationName ?? "当前输入框",
             text: finalText ?? transcription ?? ""
         )
     )

@@ -40,11 +40,10 @@ func usageRecord(
     return VoiceInputHistoryRecord(
         sessionID: id,
         startedAt: startedAt,
-        applicationName: "Notes",
         transcription: text,
         finalText: text,
         stageDurationsMilliseconds: recordingMs > 0 ? ["recording": recordingMs] : [:],
-        outcome: .delivered(id, applicationName: "Notes", text: text ?? "")
+        outcome: .delivered(id, text: text ?? "")
     )
 }
 

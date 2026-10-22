@@ -133,6 +133,37 @@ func injectProviderMessage(
     }
 }
 
+/// Writes the application names older builds stored in each record and its
+/// outcome.
+func injectLegacyApplicationNames(into fileURL: URL) throws {
+    var database: OpaquePointer?
+    guard
+        sqlite3_open_v2(
+            fileURL.path,
+            &database,
+            SQLITE_OPEN_READWRITE,
+            nil
+        ) == SQLITE_OK, let database
+    else {
+        if let database { sqlite3_close(database) }
+        throw SpecFailure(message: "could not open SQLite history for injection")
+    }
+    defer { sqlite3_close(database) }
+    let sql = """
+        UPDATE history_records
+        SET payload = CAST(json_set(
+            CAST(payload AS TEXT),
+            '$.applicationName',
+            '备忘录',
+            '$.outcome.applicationName',
+            '备忘录'
+        ) AS BLOB)
+        """
+    guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+        throw SpecFailure(message: "could not inject legacy application names")
+    }
+}
+
 func sqliteFilesContain(_ marker: Data, at fileURL: URL) -> Bool {
     for suffix in ["", "-wal", "-journal"] {
         let candidate = URL(fileURLWithPath: fileURL.path + suffix)

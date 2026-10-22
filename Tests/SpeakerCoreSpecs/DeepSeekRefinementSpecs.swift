@@ -814,7 +814,7 @@ enum DeepSeekRefinementSpecs: CoreSpecDomain {
             try expect(record?.transcriptionProvider == "openai")
             try expect(record?.transcriptionModelID == "gpt-transcribe")
             try expect(record?.transcription == "Use swift-lang")
-            try expect(record?.deepSeekText == "Use Swift.")
+            try expect(record?.refinedText == "Use Swift.")
             try expect(record?.refinementProviderID == .openAI)
             try expect(record?.refinementModelID == "gpt-5.6-luna")
             try expect(record?.refinementModeName == "精简清理")

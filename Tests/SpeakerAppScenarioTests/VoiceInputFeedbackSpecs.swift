@@ -151,7 +151,8 @@ enum VoiceInputFeedbackSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history)
@@ -290,7 +291,8 @@ enum VoiceInputFeedbackSpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
-                transcriber: SpeechTranscriberFake(text: "Secret sentinel"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "Secret sentinel")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
@@ -527,7 +529,8 @@ enum VoiceInputFeedbackSpecs {
         VoiceInputSessions(
             audioCapture: AudioCaptureFake(stopError: error),
             targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-            transcriber: SpeechTranscriberFake(text: "Retained text"),
+            textProcessor: BasicVoiceTextProcessor(
+                transcriber: SpeechTranscriberFake(text: "Retained text")),
             delivery: TextDeliveryFake(
                 result: .pendingCopy(.deliveryFailed), commitsBeforeDelivering: false),
             clipboard: ClipboardFake(),

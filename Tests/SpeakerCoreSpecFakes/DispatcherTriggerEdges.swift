@@ -53,7 +53,7 @@ extension VoiceInputSessions {
         guard let current else { return nil }
         let id: VoiceInputSessionID
         switch current.activity {
-        case .recording(let sessionID), .processing(let sessionID, _, _):
+        case .recording(let sessionID), .processing(let sessionID, _):
             id = sessionID
         default:
             return current

@@ -29,7 +29,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: firstID,
                     startedAt: Date(timeIntervalSince1970: 100),
-                    applicationName: "TextEdit",
                     transcription: "豆包原文 alpha",
                     finalText: "最终文本",
                     transcriptionProvider: "openai",
@@ -38,8 +37,8 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     providerErrorCode: nil,
                     deliveryDiagnosticCode:
                         "pasteReceipt.unconfirmed",
-                    deepSeekText: "DeepSeek 结果 beta",
-                    deepSeekRequestID: "deepseek-log-1",
+                    refinedText: "DeepSeek 结果 beta",
+                    refinementRequestID: "deepseek-log-1",
                     refinementProviderID: .openAI,
                     refinementModelID: "gpt-4.1-mini",
                     refinementModeName: "精简清理",
@@ -65,13 +64,12 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     ],
                     durationMilliseconds: 1_234,
                     stageDurationsMilliseconds: ["doubao": 500, "deepseek": 300],
-                    outcome: .delivered(firstID, applicationName: "TextEdit", text: "最终文本")
+                    outcome: .delivered(firstID, text: "最终文本")
                 ))
             await store.save(
                 .init(
                     sessionID: secondID,
                     startedAt: Date(timeIntervalSince1970: 200),
-                    applicationName: "Notes",
                     transcription: " \n ",
                     finalText: "\t",
                     providerRequestID: "request-log-2",
@@ -89,7 +87,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
             )
             try expect(allRecords.map(\.sessionID) == [secondID, firstID])
             try expect(allRecords.last?.transcription == "豆包原文 alpha")
-            try expect(allRecords.last?.deepSeekText == "DeepSeek 结果 beta")
+            try expect(allRecords.last?.refinedText == "DeepSeek 结果 beta")
             try expect(allRecords.last?.transcriptionProvider == "openai")
             try expect(
                 allRecords.last?.deliveryDiagnosticCode
@@ -137,7 +135,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: sessionID,
                     startedAt: Date(timeIntervalSince1970: 100),
-                    applicationName: "TextEdit",
                     transcription: "旧记录",
                     finalText: "旧记录",
                     dictionarySnapshotEntries: [
@@ -149,7 +146,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     ],
                     outcome: .delivered(
                         sessionID,
-                        applicationName: "TextEdit",
                         text: "旧记录"
                     )
                 ))
@@ -194,6 +190,55 @@ enum SessionHistorySpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "history keeps its stored keys and reads records older builds wrote",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-history-stored-keys-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let fileURL = directory.appendingPathComponent("history.sqlite3")
+            let id = VoiceInputSessionID()
+            let store = SQLiteSessionHistory(fileURL: fileURL)
+            await store.save(
+                .init(
+                    sessionID: id,
+                    startedAt: Date(),
+                    transcription: "识别原文",
+                    finalText: "整理后的正文",
+                    providerRequestID: "recognition-log-1",
+                    refinedText: "整理后的正文",
+                    refinementRequestID: "refinement-log-1",
+                    outcome: .delivered(id, text: "整理后的正文")
+                ))
+
+            let payload = try readHistoryPayload(from: fileURL)
+            let stored = try JSONSerialization.jsonObject(with: Data(payload.utf8))
+            guard let stored = stored as? [String: Any],
+                let outcome = stored["outcome"] as? [String: Any]
+            else { throw SpecFailure(message: "history payload is not a JSON record") }
+            try expect(stored["deepSeekText"] as? String == "整理后的正文")
+            try expect(stored["deepSeekRequestID"] as? String == "refinement-log-1")
+            try expect(
+                stored["refinedText"] == nil && stored["refinementRequestID"] == nil,
+                "in-memory names reached disk"
+            )
+            try expect(
+                stored["applicationName"] == nil && outcome["applicationName"] == nil,
+                "an application name reached disk"
+            )
+
+            try injectLegacyApplicationNames(into: fileURL)
+            let records = await SQLiteSessionHistory(fileURL: fileURL).allRecords()
+            try expect(records.map(\.sessionID) == [id], "a legacy record did not decode")
+            try expect(records.first?.refinedText == "整理后的正文")
+            try expect(records.first?.refinementRequestID == "refinement-log-1")
+            try expect(records.first?.outcome == .delivered(id, text: "整理后的正文"))
+        }
+
+        await runAsync(
             "SQLite history scrubs provider response text written by older builds",
             failures: &failures
         ) {
@@ -210,7 +255,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: "TextEdit",
                     transcription: "诊断记录",
                     finalText: nil,
                     providerErrorCode: "authentication",
@@ -281,7 +325,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: "TextEdit",
                     transcription: "诊断记录",
                     finalText: nil,
                     outcome: .failed(id, .providerAuthenticationFailed)
@@ -376,7 +419,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 await store.save(
                     .init(
                         sessionID: id, startedAt: Date().addingTimeInterval(Double(index)),
-                        applicationName: nil, transcription: nil, finalText: nil,
+                        transcription: nil, finalText: nil,
                         providerErrorCode: failure.rawValue,
                         outcome: .failed(id, failure)
                     ))
@@ -406,7 +449,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: emptyID,
                     startedAt: Date().addingTimeInterval(1),
-                    applicationName: nil,
                     transcription: " \n",
                     finalText: nil,
                     outcome: .failed(emptyID, .providerReturnedNoText)
@@ -419,24 +461,22 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: "TextEdit",
                     transcription: "第一阶段",
                     finalText: nil,
                     providerRequestID: "sqlite-request",
-                    outcome: .processing(id, .transcribing, applicationName: "TextEdit")
+                    outcome: .processing(id, .transcribing)
                 ))
             await store.save(
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: "TextEdit",
                     transcription: "豆包增量结果",
                     finalText: "最终增量结果",
                     providerRequestID: "sqlite-request",
-                    deepSeekText: "最终增量结果",
+                    refinedText: "最终增量结果",
                     refinementProviderID: .kimi,
                     refinementModelID: "kimi-k2.6",
-                    outcome: .delivered(id, applicationName: "TextEdit", text: "最终增量结果")
+                    outcome: .delivered(id, text: "最终增量结果")
                 ))
 
             let reloaded = SQLiteSessionHistory(fileURL: fileURL)
@@ -447,7 +487,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(records.first?.finalText == "最终增量结果")
             try expect(records.first?.refinementProviderID == .kimi)
             try expect(records.first?.refinementModelID == "kimi-k2.6")
-            try expect(records.first?.applicationName == nil)
             try expect(status.recordCount == 1)
             try expect(
                 (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
@@ -523,27 +562,23 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: interruptedID,
                     startedAt: Date(),
-                    applicationName: "TextEdit",
                     transcription: "已经确认的豆包文字",
                     finalText: nil,
                     transcriptionProvider: "doubao",
                     providerRequestID: "interrupted-request",
                     outcome: .processing(
                         interruptedID,
-                        .refining,
-                        applicationName: "TextEdit"
+                        .refining
                     )
                 ))
             await store.save(
                 .init(
                     sessionID: deliveredID,
                     startedAt: Date().addingTimeInterval(-1),
-                    applicationName: "Notes",
                     transcription: "完成",
                     finalText: "完成",
                     outcome: .delivered(
                         deliveredID,
-                        applicationName: "Notes",
                         text: "完成"
                     )
                 ))
@@ -586,7 +621,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: nil,
                     transcription: secret,
                     finalText: secret,
                     outcome: .pendingCopy(id, text: secret, reason: .missingTarget)
@@ -647,12 +681,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: oldID,
                     startedAt: now.addingTimeInterval(-90 * 86_400),
-                    applicationName: "TextEdit",
                     transcription: "old",
                     finalText: "old",
                     outcome: .delivered(
                         oldID,
-                        applicationName: "TextEdit",
                         text: "old"
                     )
                 ))
@@ -732,12 +764,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: oldID,
                     startedAt: Date(timeIntervalSince1970: 1),
-                    applicationName: "TextEdit",
                     transcription: secret,
                     finalText: secret,
                     outcome: .delivered(
                         oldID,
-                        applicationName: "TextEdit",
                         text: secret
                     )
                 ))
@@ -775,12 +805,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let replacement = VoiceInputHistoryRecord(
                 sessionID: replacementID,
                 startedAt: Date(timeIntervalSince1970: 2),
-                applicationName: "TextEdit",
                 transcription: "replacement",
                 finalText: "replacement",
                 outcome: .delivered(
                     replacementID,
-                    applicationName: "TextEdit",
                     text: "replacement"
                 )
             )
@@ -815,12 +843,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: "TextEdit",
                     transcription: "must not return",
                     finalText: "must not return",
                     outcome: .delivered(
                         id,
-                        applicationName: "TextEdit",
                         text: "must not return"
                     )
                 ))
@@ -835,7 +861,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: lateID,
                     startedAt: Date(),
-                    applicationName: nil,
                     transcription: "late write",
                     finalText: "late write",
                     outcome: .failed(
@@ -870,7 +895,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: nil,
                     transcription: "recovered",
                     finalText: "recovered",
                     outcome: .pendingCopy(id, text: "recovered", reason: .missingTarget)
@@ -894,12 +918,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
             let healthyRecord = VoiceInputHistoryRecord(
                 sessionID: healthyID,
                 startedAt: Date(),
-                applicationName: "TextEdit",
                 transcription: "healthy",
                 finalText: "healthy",
                 outcome: .delivered(
                     healthyID,
-                    applicationName: "TextEdit",
                     text: "healthy"
                 )
             )
@@ -965,7 +987,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     .init(
                         sessionID: id,
                         startedAt: date,
-                        applicationName: nil,
                         transcription: "legacy-\(offset)",
                         finalText: "legacy-\(offset)",
                         outcome: .pendingCopy(id, text: "legacy-\(offset)", reason: .missingTarget)
@@ -1024,7 +1045,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     .init(
                         sessionID: id,
                         startedAt: now.addingTimeInterval(Double(offset)),
-                        applicationName: nil,
                         transcription: "record-\(offset)",
                         finalText: "record-\(offset)",
                         outcome: .pendingCopy(id, text: "record-\(offset)", reason: .missingTarget)
@@ -1043,7 +1063,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: oldID,
                     startedAt: now.addingTimeInterval(-100 * 86_400),
-                    applicationName: nil,
                     transcription: "old",
                     finalText: "old",
                     outcome: .pendingCopy(oldID, text: "old", reason: .missingTarget)
@@ -1052,7 +1071,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: currentID,
                     startedAt: now,
-                    applicationName: nil,
                     transcription: "current",
                     finalText: "current",
                     outcome: .pendingCopy(currentID, text: "current", reason: .missingTarget)
@@ -1084,7 +1102,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     .init(
                         sessionID: existingID,
                         startedAt: Date(),
-                        applicationName: nil,
                         transcription: "existing",
                         finalText: "existing",
                         outcome: .pendingCopy(
@@ -1103,7 +1120,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     .init(
                         sessionID: existingID,
                         startedAt: Date(),
-                        applicationName: nil,
                         transcription: "updated",
                         finalText: "updated",
                         outcome: .pendingCopy(
@@ -1118,7 +1134,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     .init(
                         sessionID: skippedID,
                         startedAt: Date(),
-                        applicationName: nil,
                         transcription: "skipped",
                         finalText: "skipped",
                         outcome: .pendingCopy(
@@ -1151,7 +1166,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: nil,
                     transcription: "需要保留",
                     finalText: "需要保留",
                     outcome: .pendingCopy(id, text: "需要保留", reason: .missingTarget)
@@ -1181,7 +1195,6 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 .init(
                     sessionID: id,
                     startedAt: Date(),
-                    applicationName: nil,
                     transcription: "private history",
                     finalText: "private history",
                     outcome: .pendingCopy(
@@ -1225,11 +1238,10 @@ enum SessionHistorySpecs: CoreSpecDomain {
                     .init(
                         sessionID: id,
                         startedAt: Date(timeIntervalSince1970: TimeInterval(1_000 + index)),
-                        applicationName: nil,
                         transcription: text,
                         finalText: text,
                         outcome: hasText
-                            ? .delivered(id, applicationName: "备忘录", text: text ?? "")
+                            ? .delivered(id, text: text ?? "")
                             : .failed(id, .providerAuthenticationFailed)
                     ))
                 if hasText { expected.insert(id, at: 0) }

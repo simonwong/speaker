@@ -16,7 +16,8 @@ enum PendingCopyRecoveryUISpecs {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: text),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: text)),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake())

@@ -92,7 +92,7 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -195,7 +195,7 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                         AudioCaptureStart(start: { throw error }, cancel: {})
                     }),
                     targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                    transcriber: transcriber,
+                    textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                     delivery: TextDeliveryFake(result: .delivered),
                     clipboard: ClipboardFake(),
                     history: history
@@ -210,7 +210,7 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
                 try expect(terminal?.activity.failure == .microphoneUnavailable)
                 try expect(record?.providerErrorCode == code)
                 try expect(record?.transcriptionProvider == "local")
-                try expect(record?.providerMessage == nil && record?.applicationName == nil)
+                try expect(record?.providerMessage == nil)
                 try expect(record?.transcription == nil && record?.finalText == nil)
                 try expect(processingCount == 0)
             }
@@ -233,8 +233,8 @@ enum MicrophoneSessionSpecs: CoreSpecDomain {
 
     private static var unusedResult: VoiceTextProcessingResult {
         VoiceTextProcessingResult(
-            doubaoText: "unused", normalizedText: "unused", deepSeekText: nil,
-            finalText: "unused", doubaoRequestID: nil, deepSeekRequestID: nil,
+            recognitionText: "unused", normalizedText: "unused", refinedText: nil,
+            finalText: "unused", recognitionRequestID: nil, refinementRequestID: nil,
             refinementStatus: .notRequested, refinementFailure: nil
         )
     }

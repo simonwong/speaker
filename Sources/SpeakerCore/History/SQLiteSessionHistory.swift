@@ -664,7 +664,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             stage = "preparing"
         case .recording:
             stage = "recording"
-        case .processing(_, let processingStage, _):
+        case .processing(_, let processingStage):
             stage =
                 switch processingStage {
                 case .capturingTarget: "capturingTarget"
@@ -679,7 +679,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         return VoiceInputHistoryRecord(
             sessionID: record.sessionID,
             startedAt: record.startedAt,
-            applicationName: record.applicationName,
             transcription: record.transcription,
             finalText: record.finalText,
             transcriptionProvider: record.transcriptionProvider,
@@ -689,8 +688,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             providerOperation: record.providerOperation,
             providerStatusCode: record.providerStatusCode,
             providerMessage: nil,
-            deepSeekText: record.deepSeekText,
-            deepSeekRequestID: record.deepSeekRequestID,
+            refinedText: record.refinedText,
+            refinementRequestID: record.refinementRequestID,
             refinementProviderID: record.refinementProviderID,
             refinementModelID: record.refinementModelID,
             refinementModeName: record.refinementModeName,

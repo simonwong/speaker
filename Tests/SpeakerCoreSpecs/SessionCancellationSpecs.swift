@@ -17,7 +17,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: target,
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -55,7 +56,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "不得提交"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不得提交")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -71,7 +73,6 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let record = await history.records.last
             try expect(deliveredTexts.isEmpty)
             try expect(record?.outcome.isCancelled == true)
-            try expect(record?.applicationName == nil)
             try expect(record?.stageDurationsMilliseconds["delivery"] != nil)
             try expect(record?.cancelledAtStage == "delivery")
         }
@@ -83,7 +84,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -113,7 +115,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "Slow App"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "取消后不能迟到。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "取消后不能迟到。")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -169,7 +172,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "Slow App"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "可能没有贴进去。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "可能没有贴进去。")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -212,7 +216,7 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -290,7 +294,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "最终状态"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "最终状态")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -475,7 +480,8 @@ enum SessionCancellationSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()

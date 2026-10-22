@@ -44,7 +44,7 @@ enum SkipRefinementSpecs: CoreSpecDomain {
             try expect(record?.refinementStatus == TextRefinementStatus.skipped.rawValue)
             try expect(record?.transcription == "豆包已确认结果")
             try expect(record?.finalText == "豆包已确认结果")
-            try expect(record?.deepSeekText == nil)
+            try expect(record?.refinedText == nil)
         }
 
         await runAsync(
@@ -109,7 +109,7 @@ enum SkipRefinementSpecs: CoreSpecDomain {
         from stream: AsyncStream<VoiceInputPresentation>
     ) async -> VoiceInputSessionID? {
         for await presentation in stream {
-            if case .processing(let id, .refining, _) = presentation.activity {
+            if case .processing(let id, .refining) = presentation.activity {
                 return id
             }
             if presentation.activity.isTerminal { return nil }

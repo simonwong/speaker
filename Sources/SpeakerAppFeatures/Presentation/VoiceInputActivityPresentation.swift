@@ -43,7 +43,7 @@ extension VoiceInputActivity {
         case .idle: Self.idleCompactTitle
         case .preparing: Self.preparingCompactTitle
         case .recording: Self.recordingCompactTitle
-        case .processing(_, let stage, _): stage.compactTitle
+        case .processing(_, let stage): stage.compactTitle
         case .delivered: Self.deliveredCompactTitle
         case .pendingCopy: Self.pendingCopyCompactTitle
         case .cancelled: Self.cancelledCompactTitle
@@ -72,7 +72,7 @@ extension VoiceInputActivity {
             Self.preparingAnnouncement
         case .recording:
             Self.recordingAnnouncement
-        case .processing(_, let stage, _):
+        case .processing(_, let stage):
             stage.accessibilityAnnouncement
         case .delivered:
             Self.deliveredAnnouncement

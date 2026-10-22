@@ -1302,7 +1302,8 @@ enum InputTargetSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()

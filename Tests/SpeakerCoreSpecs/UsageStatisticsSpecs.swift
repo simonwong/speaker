@@ -162,7 +162,6 @@ enum UsageStatisticsSpecs: CoreSpecDomain {
                 VoiceInputHistoryRecord(
                     sessionID: counted.sessionID,
                     startedAt: counted.startedAt,
-                    applicationName: nil,
                     transcription: nil,
                     finalText: nil,
                     outcome: .failed(counted.sessionID, .recordingTooShort)

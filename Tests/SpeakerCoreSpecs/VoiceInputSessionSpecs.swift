@@ -22,7 +22,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: targets,
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: clipboard,
                 history: history
@@ -98,7 +98,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: targets,
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -125,7 +125,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "不应出现"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不应出现")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -152,7 +153,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                     startDelay: .milliseconds(20)
                 ),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history,
@@ -176,7 +178,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "请手动复制。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "请手动复制。")),
                 delivery: delivery,
                 clipboard: clipboard,
                 history: history
@@ -230,7 +233,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "旧的留存文字。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "旧的留存文字。")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
@@ -274,7 +278,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "不要复制。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不要复制。")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
@@ -307,7 +312,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "必须保留。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "必须保留。")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
@@ -607,7 +613,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                                 isSecurityClassConfirmed: isSecurityClassConfirmed
                             ))
                     ),
-                    transcriber: SpeechTranscriberFake(text: "窗口里的文字"),
+                    textProcessor: BasicVoiceTextProcessor(
+                        transcriber: SpeechTranscriberFake(text: "窗口里的文字")),
                     delivery: TextDeliveryFake(result: .delivered),
                     clipboard: ClipboardFake(),
                     history: history
@@ -636,7 +643,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                         record?.transcription == nil && record?.finalText == nil,
                         "an unclassified target persisted transcript text"
                     )
-                    guard case .delivered(_, _, let storedText)? = record?.outcome else {
+                    guard case .delivered(_, let storedText)? = record?.outcome else {
                         throw SpecFailure(message: "the delivered outcome was not recorded")
                     }
                     try expect(
@@ -653,7 +660,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
-                transcriber: SpeechTranscriberFake(text: "敏感文本"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "敏感文本")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: history
@@ -694,7 +702,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 "secure provider request identity was persisted"
             )
             try expect(
-                record?.deepSeekRequestID == nil,
+                record?.refinementRequestID == nil,
                 "secure refinement request identity was persisted"
             )
             try expect(
@@ -702,7 +710,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 "secure text was persisted inside its outcome"
             )
             try expect(
-                record?.deepSeekText == nil,
+                record?.refinedText == nil,
                 "secure DeepSeek text was persisted"
             )
             try expect(
@@ -719,7 +727,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.secureTarget)),
-                transcriber: SpeechTranscriberFake(text: "密码框的文字"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "密码框的文字")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: clipboard,
                 history: SessionHistoryFake()
@@ -805,7 +814,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "Terminal"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "\u{1B}\u{07}\r\n"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "\u{1B}\u{07}\r\n")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -891,7 +901,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "Editor"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "只粘贴一次。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "只粘贴一次。")),
                 delivery: TextDeliveryFake(
                     result: .pasteCommandPosted(
                         .init(
@@ -929,7 +940,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "结果不能丢。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "结果不能丢。")),
                 delivery: TextDeliveryFake(
                     result: .pendingCopyDiagnosed(
                         .deliveryUnconfirmed,
@@ -975,7 +987,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "只提交一次。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "只提交一次。")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1002,7 +1015,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: target,
-                transcriber: SpeechTranscriberFake(text: "发往结束时的输入框"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "发往结束时的输入框")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1039,7 +1053,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: targets,
-                transcriber: SpeechTranscriberFake(text: "不会阻塞事件回调"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不会阻塞事件回调")),
                 delivery: targets,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1081,7 +1096,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: target,
-                transcriber: SpeechTranscriberFake(text: "不会送到后来切换的应用"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "不会送到后来切换的应用")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1122,7 +1138,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
                 targetCapture: TargetCaptureFake(
                     result: .writable(.init(id: UUID(), applicationName: "TextEdit"))
                 ),
-                transcriber: SpeechTranscriberFake(text: "顺序正确。"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "顺序正确。")),
                 delivery: delivery,
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1154,7 +1171,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "先把结果交给用户"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "先把结果交给用户")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: history
@@ -1186,7 +1204,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1241,7 +1259,7 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: AudioCaptureFake(),
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: transcriber,
+                textProcessor: BasicVoiceTextProcessor(transcriber: transcriber),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake()
@@ -1287,7 +1305,8 @@ enum VoiceInputSessionSpecs: CoreSpecDomain {
             let sessions = VoiceInputSessions(
                 audioCapture: audio,
                 targetCapture: TargetCaptureFake(result: .unavailable(.missingTarget)),
-                transcriber: SpeechTranscriberFake(text: "unused"),
+                textProcessor: BasicVoiceTextProcessor(
+                    transcriber: SpeechTranscriberFake(text: "unused")),
                 delivery: TextDeliveryFake(result: .delivered),
                 clipboard: ClipboardFake(),
                 history: SessionHistoryFake(),

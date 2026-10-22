@@ -73,16 +73,8 @@ public enum VoiceInputActivity: Equatable, Sendable {
     case idle
     case preparing(VoiceInputSessionID)
     case recording(VoiceInputSessionID)
-    case processing(
-        VoiceInputSessionID,
-        VoiceInputProcessingStage,
-        applicationName: String?
-    )
-    case delivered(
-        VoiceInputSessionID,
-        applicationName: String,
-        text: String
-    )
+    case processing(VoiceInputSessionID, VoiceInputProcessingStage)
+    case delivered(VoiceInputSessionID, text: String)
     case pendingCopy(
         VoiceInputSessionID,
         text: String,
@@ -109,7 +101,7 @@ public enum VoiceInputActivity: Equatable, Sendable {
     }
 
     public var stage: VoiceInputProcessingStage? {
-        if case .processing(_, let stage, _) = self { stage } else { nil }
+        if case .processing(_, let stage) = self { stage } else { nil }
     }
 
     public var pendingCopyReason: PendingCopyReason? {
@@ -126,8 +118,8 @@ public enum VoiceInputActivity: Equatable, Sendable {
             nil
         case .preparing(let id),
             .recording(let id),
-            .processing(let id, _, _),
-            .delivered(let id, _, _),
+            .processing(let id, _),
+            .delivered(let id, _),
             .pendingCopy(let id, _, _),
             .cancelled(let id),
             .failed(let id, _):
@@ -297,7 +289,6 @@ public enum DeliveryOutcome: Equatable, Sendable {
 public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let sessionID: VoiceInputSessionID
     public let startedAt: Date
-    public let applicationName: String?
     public let transcription: String?
     public let finalText: String?
     public let transcriptionProvider: String?
@@ -308,8 +299,9 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public let providerStatusCode: String?
     public let providerMessage: String?
     public let deliveryDiagnosticCode: String?
-    public let deepSeekText: String?
-    public let deepSeekRequestID: String?
+    /// The Refinement Provider's text, before dictionary replacements.
+    public let refinedText: String?
+    public let refinementRequestID: String?
     public let refinementProviderID: RefinementProviderID?
     public let refinementModelID: String?
     public let refinementModeName: String?
@@ -330,7 +322,6 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     public init(
         sessionID: VoiceInputSessionID,
         startedAt: Date,
-        applicationName: String?,
         transcription: String?,
         finalText: String?,
         transcriptionProvider: String? = nil,
@@ -341,8 +332,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         providerStatusCode: String? = nil,
         providerMessage: String? = nil,
         deliveryDiagnosticCode: String? = nil,
-        deepSeekText: String? = nil,
-        deepSeekRequestID: String? = nil,
+        refinedText: String? = nil,
+        refinementRequestID: String? = nil,
         refinementProviderID: RefinementProviderID? = nil,
         refinementModelID: String? = nil,
         refinementModeName: String? = nil,
@@ -362,7 +353,6 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
     ) {
         self.sessionID = sessionID
         self.startedAt = startedAt
-        self.applicationName = applicationName
         self.transcription = transcription
         self.finalText = finalText
         self.transcriptionProvider = transcriptionProvider
@@ -373,8 +363,8 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.providerStatusCode = providerStatusCode
         self.providerMessage = providerMessage
         self.deliveryDiagnosticCode = deliveryDiagnosticCode
-        self.deepSeekText = deepSeekText
-        self.deepSeekRequestID = deepSeekRequestID
+        self.refinedText = refinedText
+        self.refinementRequestID = refinementRequestID
         self.refinementProviderID = refinementProviderID
         self.refinementModelID = refinementModelID
         self.refinementModeName = refinementModeName
@@ -391,15 +381,5 @@ public struct VoiceInputHistoryRecord: Equatable, Sendable {
         self.durationMilliseconds = durationMilliseconds
         self.stageDurationsMilliseconds = stageDurationsMilliseconds
         self.outcome = outcome
-    }
-}
-
-extension InputTargetCaptureResult {
-    var applicationName: String? {
-        if case .writable(let snapshot) = self {
-            snapshot.applicationName
-        } else {
-            nil
-        }
     }
 }
