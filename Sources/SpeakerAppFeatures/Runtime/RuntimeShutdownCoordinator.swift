@@ -18,8 +18,8 @@ package protocol RuntimeShutdownStages: AnyObject {
     func closePanel()
     /// Let the refinement settings finish their in-flight work.
     func shutdownRefinement() async
-    /// Let the Doubao settings finish their in-flight work.
-    func shutdownDoubao() async
+    /// Let the speech recognition settings finish their in-flight work.
+    func shutdownRecognition() async
     /// Finish or cancel the current Voice Input Session and flush history.
     func shutdownVoiceInput() async
     /// Wait for the cancelled startup sequence to leave its current stage.
@@ -67,7 +67,7 @@ package final class RuntimeShutdownCoordinator {
         stages.closeOnboarding()
         stages.closePanel()
         await stages.shutdownRefinement()
-        await stages.shutdownDoubao()
+        await stages.shutdownRecognition()
         await stages.shutdownVoiceInput()
         await stages.awaitStartup()
         await stages.flushPersistence()
