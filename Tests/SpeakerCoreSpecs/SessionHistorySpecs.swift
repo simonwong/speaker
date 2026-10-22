@@ -464,7 +464,7 @@ enum SessionHistorySpecs: CoreSpecDomain {
             try expect(records.first?.finalText == "最终增量结果")
             try expect(records.first?.refinementProviderID == .kimi)
             try expect(records.first?.refinementModelID == "kimi-k2.6")
-                        try expect(status.recordCount == 1)
+            try expect(status.recordCount == 1)
             try expect(
                 (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
                 "SQLite history file is not owner-only"
