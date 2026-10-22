@@ -1,24 +1,10 @@
 import Foundation
 
-/// The on-disk history format: one schema version and the payload codec.
-///
-/// The store writes payloads and the privacy migration rewrites them, so both
-/// cross the same encoder pair and compare against the same version.
+/// The version stamped on every `history_records` row and the database's
+/// `user_version`. Row payloads cross `SessionRecordPayloadCodec`, which the
+/// store and the privacy migration share.
 enum SQLiteHistorySchema {
     static let version: Int32 = 1
-
-    static var payloadEncoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .millisecondsSince1970
-        return encoder
-    }
-
-    static var payloadDecoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .millisecondsSince1970
-        return decoder
-    }
 }
 
 /// Incremental, crash-safe production history store. Each meaningful session
@@ -133,9 +119,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 ).isEmpty
         else { return }
         do {
-            let payload = try SQLiteHistorySchema.payloadEncoder.encode(
-                HistoryRecordV1(record)
-            )
+            let payload = try SessionRecordPayloadCodec.encode(record)
             let pruned: Bool
             try connection.beginImmediateTransaction()
             do {
@@ -181,10 +165,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     let payload = statement.blob(at: 0)
                 else { continue }
                 guard
-                    let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
-                        HistoryRecordV1.self,
-                        from: payload
-                    ), let record = try? stored.domainRecord
+                    let record = try? SessionRecordPayloadCodec.decode(payload)
                 else { continue }
                 guard SessionHistoryRecordPolicy.shouldRetain(record)
                 else { continue }
@@ -379,9 +360,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 for record in interrupted {
                     try upsert(
                         record,
-                        payload: SQLiteHistorySchema.payloadEncoder.encode(
-                            HistoryRecordV1(record)
-                        ),
+                        payload: SessionRecordPayloadCodec.encode(record),
                         on: connection
                     )
                 }
@@ -482,9 +461,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                 for record in expected {
                     try upsert(
                         record,
-                        payload: SQLiteHistorySchema.payloadEncoder.encode(
-                            HistoryRecordV1(record)
-                        ),
+                        payload: SessionRecordPayloadCodec.encode(record),
                         on: connection
                     )
                 }
@@ -498,9 +475,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             try checkpoint(connection)
             try connection.protectDatabaseFiles()
             for expectedRecord in expected {
-                let expectedPayload = try SQLiteHistorySchema.payloadEncoder.encode(
-                    HistoryRecordV1(expectedRecord)
-                )
+                let expectedPayload = try SessionRecordPayloadCodec.encode(expectedRecord)
                 guard
                     try storedPayload(
                         sessionID: expectedRecord.sessionID,
@@ -615,10 +590,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     throw SQLiteHistoryError.encoding
                 }
                 do {
-                    let record = try SQLiteHistorySchema.payloadDecoder.decode(
-                        HistoryRecordV1.self,
-                        from: payload
-                    ).domainRecord
+                    let record = try SessionRecordPayloadCodec.decode(payload)
                     guard isIncluded(record) else { continue }
                     records.append(record)
                     if let limit, records.count >= limit { break }
@@ -800,11 +772,7 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
         while try statement.step() {
             guard statement.int32(at: 1) == SQLiteHistorySchema.version,
                 let payload = statement.blob(at: 0),
-                let stored = try? SQLiteHistorySchema.payloadDecoder.decode(
-                    HistoryRecordV1.self,
-                    from: payload
-                ),
-                let record = try? stored.domainRecord,
+                let record = try? SessionRecordPayloadCodec.decode(payload),
                 SessionHistoryRecordPolicy.shouldRetain(record)
             else { continue }
             accumulator.add(record)

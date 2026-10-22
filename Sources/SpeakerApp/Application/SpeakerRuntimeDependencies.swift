@@ -149,7 +149,7 @@ struct SpeakerRuntimeDependencies {
             history: SQLiteSessionHistory(
                 fileURL: SQLiteSessionHistory.defaultFileURL()
             ),
-            legacyHistoryFileURL: VersionedLocalSessionHistory.defaultFileURL(),
+            legacyHistoryFileURL: LegacyHistoryReader.defaultFileURL(),
             settingsStore: VersionedLocalAppSettingsStore(
                 fileURL: VersionedLocalAppSettingsStore.defaultFileURL()
             ),
