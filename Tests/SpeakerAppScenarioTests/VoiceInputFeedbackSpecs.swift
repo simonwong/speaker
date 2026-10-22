@@ -432,6 +432,86 @@ enum VoiceInputFeedbackSpecs {
             await experience.shutdown()
             try expect(after == before, "the note replaced the retained result")
         }
+
+        SpeakerSpecSupport.run(
+            "the HUD follows the display holding most of the front window", failures: &failures
+        ) {
+            // Two side-by-side displays. Quartz bounds put the origin at the
+            // top left of the main display; AppKit frames at its bottom left.
+            let displays = [
+                VoiceInputPanelScreenSelection.Display(
+                    quartzBounds: CGRect(x: 0, y: 0, width: 1_440, height: 900),
+                    frame: CGRect(x: 0, y: 0, width: 1_440, height: 900)
+                ),
+                VoiceInputPanelScreenSelection.Display(
+                    quartzBounds: CGRect(x: 1_440, y: -200, width: 1_920, height: 1_080),
+                    frame: CGRect(x: 1_440, y: 20, width: 1_920, height: 1_080)
+                ),
+            ]
+            let pointerOnMain = CGPoint(x: 100, y: 100)
+
+            let straddlingMostlyRight = CGRect(x: 1_200, y: 100, width: 1_000, height: 600)
+            try expect(
+                VoiceInputPanelScreenSelection.displayIndex(
+                    frontWindowBounds: straddlingMostlyRight,
+                    pointer: pointerOnMain,
+                    displays: displays
+                ) == 1
+            )
+
+            let offScreenWindow = CGRect(x: -5_000, y: -5_000, width: 400, height: 300)
+            try expect(
+                VoiceInputPanelScreenSelection.displayIndex(
+                    frontWindowBounds: offScreenWindow,
+                    pointer: CGPoint(x: 2_000, y: 500),
+                    displays: displays
+                ) == 1,
+                "a window on no display did not fall back to the pointer"
+            )
+            try expect(
+                VoiceInputPanelScreenSelection.displayIndex(
+                    frontWindowBounds: nil,
+                    pointer: pointerOnMain,
+                    displays: displays
+                ) == 0
+            )
+            try expect(
+                VoiceInputPanelScreenSelection.displayIndex(
+                    frontWindowBounds: nil,
+                    pointer: CGPoint(x: -100, y: -100),
+                    displays: displays
+                ) == nil,
+                "a pointer on no display did not leave the choice to the main screen"
+            )
+        }
+
+        SpeakerSpecSupport.run(
+            "the HUD reads the front window from the window list front to back", failures: &failures
+        ) {
+            typealias Entry = FrontmostWindowLocator.WindowListEntry
+            let app: pid_t = 42
+            let front = CGRect(x: 1_500, y: 50, width: 800, height: 600)
+            let windows = [
+                Entry(
+                    ownerProcessID: 7, layer: 0, alpha: 1,
+                    bounds: CGRect(x: 0, y: 0, width: 500, height: 500)),
+                Entry(
+                    ownerProcessID: app, layer: 25, alpha: 1,
+                    bounds: CGRect(x: 0, y: 0, width: 200, height: 24)),
+                Entry(
+                    ownerProcessID: app, layer: 0, alpha: 0,
+                    bounds: CGRect(x: 0, y: 0, width: 300, height: 300)),
+                Entry(
+                    ownerProcessID: app, layer: 0, alpha: 1,
+                    bounds: CGRect(x: 10, y: 10, width: 1, height: 1)),
+                Entry(ownerProcessID: app, layer: 0, alpha: 1, bounds: front),
+                Entry(
+                    ownerProcessID: app, layer: 0, alpha: 1,
+                    bounds: CGRect(x: 0, y: 0, width: 900, height: 700)),
+            ]
+            try expect(FrontmostWindowLocator.frontWindowBounds(of: app, in: windows) == front)
+            try expect(FrontmostWindowLocator.frontWindowBounds(of: 99, in: windows) == nil)
+        }
     }
 
     private static func activity(of sessions: VoiceInputSessions) async -> VoiceInputActivity {

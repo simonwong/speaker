@@ -261,5 +261,39 @@ enum VersionedDocumentStoreSpecs: CoreSpecDomain {
             }
             try expect(FileManager.default.fileExists(atPath: targetURL.path))
         }
+
+        run(
+            "removing preserved copies never follows a symbolic link named like one",
+            failures: &failures
+        ) {
+            let directory = try fixtureDirectory("speaker-document-backup-link")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let outsideDirectory = try fixtureDirectory("speaker-document-backup-outside")
+            defer { try? FileManager.default.removeItem(at: outsideDirectory) }
+            let targetURL = outsideDirectory.appendingPathComponent("outside.json")
+            try Data("external".utf8).write(to: targetURL)
+            let linkURL = directory.appendingPathComponent("fixture.recovery-linked.json")
+            try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+            let store = VersionedOwnerOnlyDocumentStore(
+                fileURL: directory.appendingPathComponent("fixture.json"),
+                schema: fixtureSchema,
+                maximumByteCount: 4_096,
+                backupInfix: "recovery-"
+            )
+
+            do {
+                try store.removeBackups()
+                throw SpecFailure(message: "a symbolic link was removed as a preserved copy")
+            } catch let failure as SpecFailure {
+                throw failure
+            } catch {
+                // Expected: the link is refused and stays for diagnosis.
+            }
+            let destination = try FileManager.default.destinationOfSymbolicLink(
+                atPath: linkURL.path)
+            try expect(destination == targetURL.path, "the symbolic link was removed")
+            let target = try Data(contentsOf: targetURL)
+            try expect(target == Data("external".utf8), "the link target was changed")
+        }
     }
 }

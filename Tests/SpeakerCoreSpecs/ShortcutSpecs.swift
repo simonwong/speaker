@@ -538,5 +538,188 @@ enum ShortcutSpecs: CoreSpecDomain {
                     == .passThrough
             )
         }
+
+        run(
+            "idle shortcut taps observe key events only after a shortcut press", failures: &failures
+        ) {
+            var state = ShortcutEventTapState(
+                flagTrigger: .functionKey(FunctionKeyFlagEventPolicy())
+            )
+            try expect(state.observesModifierFlags)
+            try expect(!state.observesKeyEvents)
+
+            let press = state.modifierFlagsChanged(
+                keyCode: Int64(kVK_Function),
+                flags: .maskSecondaryFn,
+                secureInputEnabled: { false }
+            )
+            try expect(
+                press
+                    == .init(
+                        consumesEvent: true,
+                        effects: [.send(.pressed), .startSecureInputPolling]
+                    )
+            )
+            try expect(state.observesKeyEvents, "Escape was not armed by the press")
+
+            let typing = state.keyEvent(
+                keyCode: Int64(kVK_ANSI_A),
+                isKeyDown: true,
+                speakerIsActive: { true }
+            )
+            try expect(typing == .init(consumesEvent: false, effects: []))
+            try expect(state.observesKeyEvents)
+
+            let escapeDown = state.keyEvent(
+                keyCode: Int64(kVK_Escape),
+                isKeyDown: true,
+                speakerIsActive: { true }
+            )
+            try expect(
+                escapeDown
+                    == .init(
+                        consumesEvent: true,
+                        effects: [.stopSecureInputPolling, .send(.cancel)]
+                    )
+            )
+            // The session ends before Escape is released; its key-up still
+            // belongs to Speaker, so the key tap stays armed for it.
+            let escapeUp = state.keyEvent(
+                keyCode: Int64(kVK_Escape),
+                isKeyDown: false,
+                speakerIsActive: { false }
+            )
+            try expect(escapeUp == .init(consumesEvent: true, effects: []))
+            try expect(!state.observesKeyEvents, "Escape stayed armed after the session")
+        }
+
+        run(
+            "Escape stays armed while Speaker owns it and disarms on the next key",
+            failures: &failures
+        ) {
+            var state = ShortcutEventTapState(flagTrigger: .none)
+            try expect(!state.observesModifierFlags)
+            try expect(
+                state.shortcutPressed(secureInputEnabled: false)
+                    == [.send(.pressed), .startSecureInputPolling]
+            )
+            try expect(state.shortcutReleased() == [.stopSecureInputPolling, .send(.released)])
+
+            // A retained result still owns Escape after the press ends.
+            _ = state.keyEvent(
+                keyCode: Int64(kVK_ANSI_A), isKeyDown: true, speakerIsActive: { true })
+            try expect(state.observesKeyEvents)
+
+            let afterDismissal = state.keyEvent(
+                keyCode: Int64(kVK_Escape),
+                isKeyDown: true,
+                speakerIsActive: { false }
+            )
+            try expect(afterDismissal == .init(consumesEvent: false, effects: []))
+            try expect(!state.observesKeyEvents)
+        }
+
+        run(
+            "a shortcut press refused by Secure Event Input does not arm Escape",
+            failures: &failures
+        ) {
+            var state = ShortcutEventTapState(
+                flagTrigger: .functionKey(FunctionKeyFlagEventPolicy())
+            )
+            let press = state.modifierFlagsChanged(
+                keyCode: Int64(kVK_Function),
+                flags: .maskSecondaryFn,
+                secureInputEnabled: { true }
+            )
+            try expect(
+                press == .init(consumesEvent: true, effects: [.reportSecureInputBlockedPress])
+            )
+            try expect(!state.observesKeyEvents)
+            let release = state.modifierFlagsChanged(
+                keyCode: Int64(kVK_Function),
+                flags: [],
+                secureInputEnabled: { false }
+            )
+            try expect(release == .init(consumesEvent: true, effects: [.stopSecureInputPolling]))
+        }
+
+        run("Secure Event Input during a held shortcut cancels the press once", failures: &failures)
+        {
+            var state = ShortcutEventTapState(flagTrigger: .none)
+            _ = state.shortcutPressed(secureInputEnabled: false)
+            try expect(state.secureInputPollFired(secureInputEnabled: { false }).isEmpty)
+            try expect(
+                state.secureInputPollFired(secureInputEnabled: { true })
+                    == [.stopSecureInputPolling, .send(.cancel)]
+            )
+            try expect(state.secureInputPollFired(secureInputEnabled: { true }).isEmpty)
+            try expect(state.shortcutReleased() == [.stopSecureInputPolling])
+        }
+
+        run("a shortcut tap disabled by macOS cancels the press and recovers", failures: &failures)
+        {
+            var state = ShortcutEventTapState(
+                flagTrigger: .functionKey(FunctionKeyFlagEventPolicy())
+            )
+            _ = state.modifierFlagsChanged(
+                keyCode: Int64(kVK_Function),
+                flags: .maskSecondaryFn,
+                secureInputEnabled: { false }
+            )
+            try expect(
+                state.tapDisabled(.modifierFlags)
+                    == [
+                        .stopSecureInputPolling,
+                        .send(.cancel),
+                        .reenableModifierFlagTap,
+                        .send(.monitorRecovered),
+                    ]
+            )
+            try expect(!state.observesKeyEvents)
+            // The release that follows belongs to the cancelled press.
+            let release = state.modifierFlagsChanged(
+                keyCode: Int64(kVK_Function),
+                flags: [],
+                secureInputEnabled: { false }
+            )
+            try expect(release == .init(consumesEvent: false, effects: []))
+        }
+
+        run("the key tap Speaker disarmed itself is not a lost monitor", failures: &failures) {
+            var state = ShortcutEventTapState(
+                flagTrigger: .functionKey(FunctionKeyFlagEventPolicy())
+            )
+            try expect(state.tapDisabled(.keys).isEmpty)
+        }
+
+        run("stopping shortcut taps cancels only a press in progress", failures: &failures) {
+            var idle = ShortcutEventTapState(flagTrigger: .none)
+            try expect(idle.stop() == [.stopSecureInputPolling])
+
+            var pressed = ShortcutEventTapState(flagTrigger: .none)
+            _ = pressed.shortcutPressed(secureInputEnabled: false)
+            try expect(pressed.stop() == [.stopSecureInputPolling, .send(.cancel)])
+            try expect(!pressed.observesKeyEvents)
+        }
+
+        run("shortcut event taps run on their own user-interactive thread", failures: &failures) {
+            let thread = ShortcutEventTapThread.shared
+            let observed = thread.performAndWait {
+                (Thread.isMainThread, Thread.current.qualityOfService, thread.isCurrent)
+            }
+            try expect(!observed.0, "the tap thread is the main thread")
+            try expect(observed.1 == .userInteractive)
+            try expect(observed.2)
+            try expect(!thread.isCurrent)
+
+            // Work reaches the tap thread while the main thread is blocked,
+            // so a busy main thread cannot hold global key events.
+            let reached = DispatchSemaphore(value: 0)
+            thread.perform { reached.signal() }
+            try expect(
+                reached.wait(timeout: .now() + 5) == .success,
+                "the tap thread waited for the main thread"
+            )
+        }
     }
 }

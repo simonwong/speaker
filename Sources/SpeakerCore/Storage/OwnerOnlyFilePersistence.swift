@@ -254,6 +254,64 @@ package enum OwnerOnlyFilePersistence {
         }
     }
 
+    /// Moves one regular owner-only file to a name that does not exist yet.
+    ///
+    /// Both containing directories are opened without following links and the
+    /// source is validated through its descriptor. `renameatx_np` with
+    /// `RENAME_EXCL` then moves the directory entry itself: it never follows a
+    /// link at either name and refuses to replace an existing destination.
+    package static func renameRegularFile(
+        at sourceURL: URL,
+        to destinationURL: URL
+    ) throws {
+        try withDirectoryDescriptor(
+            for: sourceURL,
+            createIfMissing: false
+        ) { sourceDirectoryFD, sourceName in
+            try withDirectoryDescriptor(
+                for: destinationURL,
+                createIfMissing: false
+            ) { destinationDirectoryFD, destinationName in
+                guard
+                    let fileFD = try openExistingFile(
+                        in: sourceDirectoryFD,
+                        name: sourceName,
+                        pathForError: sourceURL.path
+                    )
+                else {
+                    throw CocoaError(
+                        .fileNoSuchFile,
+                        userInfo: [NSFilePathErrorKey: sourceURL.path]
+                    )
+                }
+                defer { Darwin.close(fileFD) }
+                try validateRegularOwnerOnlyFile(
+                    fileFD,
+                    pathForError: sourceURL.path
+                )
+                let result = sourceName.withCString { sourcePointer in
+                    destinationName.withCString { destinationPointer in
+                        Darwin.renameatx_np(
+                            sourceDirectoryFD,
+                            sourcePointer,
+                            destinationDirectoryFD,
+                            destinationPointer,
+                            UInt32(RENAME_EXCL)
+                        )
+                    }
+                }
+                guard result == 0 else {
+                    throw posixError(path: sourceURL.path)
+                }
+                guard Darwin.fsync(destinationDirectoryFD) == 0,
+                    Darwin.fsync(sourceDirectoryFD) == 0
+                else {
+                    throw posixError(path: destinationURL.path)
+                }
+            }
+        }
+    }
+
     @discardableResult
     package static func removeEmptyDirectory(at directoryURL: URL) throws -> Bool {
         let probeURL = directoryURL.appendingPathComponent(".speaker-directory-probe")

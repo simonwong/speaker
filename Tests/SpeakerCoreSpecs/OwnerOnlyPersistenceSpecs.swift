@@ -180,6 +180,191 @@ enum OwnerOnlyPersistenceSpecs: CoreSpecDomain {
             )
         }
 
+        run(
+            "owner-only existence checks and removal never follow a symbolic-link file",
+            failures: &failures
+        ) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-remove-symlink-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            let targetURL = directory.appendingPathComponent("outside.json")
+            let linkURL = directory.appendingPathComponent("history.json")
+            try Data("external".utf8).write(to: targetURL)
+            try FileManager.default.createSymbolicLink(
+                at: linkURL,
+                withDestinationURL: targetURL
+            )
+
+            do {
+                _ = try OwnerOnlyFilePersistence.regularFileExists(at: linkURL)
+                throw SpecFailure(message: "a symlinked file was reported as a regular file")
+            } catch let failure as SpecFailure {
+                throw failure
+            } catch {
+                // Expected: the no-follow open refuses the link.
+            }
+            do {
+                _ = try OwnerOnlyFilePersistence.removeRegularFile(at: linkURL)
+                throw SpecFailure(message: "a symlinked file was removed")
+            } catch let failure as SpecFailure {
+                throw failure
+            } catch {
+                // Expected: removal refuses the link instead of unlinking it.
+            }
+            let destination = try FileManager.default.destinationOfSymbolicLink(
+                atPath: linkURL.path
+            )
+            try expect(destination == targetURL.path, "the link was removed or replaced")
+            let target = try Data(contentsOf: targetURL)
+            try expect(target == Data("external".utf8), "the link target was changed")
+
+            let missingURL = directory.appendingPathComponent("missing.json")
+            let missingExists = try OwnerOnlyFilePersistence.regularFileExists(at: missingURL)
+            let missingRemoved = try OwnerOnlyFilePersistence.removeRegularFile(at: missingURL)
+            try expect(!missingExists && !missingRemoved, "a missing file was reported")
+            let missingDirectoryExists = try OwnerOnlyFilePersistence.regularFileExists(
+                at: directory.appendingPathComponent("absent/missing.json")
+            )
+            try expect(!missingDirectoryExists, "a file in a missing directory was reported")
+
+            let regularURL = directory.appendingPathComponent("credentials.json")
+            try OwnerOnlyFilePersistence.write(Data("key".utf8), to: regularURL)
+            let regularExists = try OwnerOnlyFilePersistence.regularFileExists(at: regularURL)
+            let regularRemoved = try OwnerOnlyFilePersistence.removeRegularFile(at: regularURL)
+            try expect(regularExists && regularRemoved, "a regular file was not removed")
+            try expect(!FileManager.default.fileExists(atPath: regularURL.path))
+        }
+
+        run(
+            "owner-only rename moves a regular file without following or replacing links",
+            failures: &failures
+        ) {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "speaker-rename-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: root) }
+            try FileManager.default.createDirectory(
+                at: root,
+                withIntermediateDirectories: true
+            )
+
+            func expectContents(_ url: URL, _ text: String, _ message: String) throws {
+                let data = try Data(contentsOf: url)
+                try expect(data == Data(text.utf8), message)
+            }
+            func expectLink(_ link: URL, pointsTo target: URL) throws {
+                let destination = try FileManager.default.destinationOfSymbolicLink(
+                    atPath: link.path
+                )
+                try expect(destination == target.path, "a symbolic link was moved or replaced")
+            }
+            func expectRefused(from source: URL, to destination: URL, _ message: String) throws {
+                do {
+                    try OwnerOnlyFilePersistence.renameRegularFile(at: source, to: destination)
+                    throw SpecFailure(message: message)
+                } catch let failure as SpecFailure {
+                    throw failure
+                } catch {
+                    // Expected: the rename fails closed and moves nothing.
+                }
+            }
+
+            let sourceURL = root.appendingPathComponent("settings.json")
+            let destinationURL = root.appendingPathComponent("settings.recovery-1.json")
+            try Data("evidence".utf8).write(to: sourceURL)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o644],
+                ofItemAtPath: sourceURL.path
+            )
+
+            try OwnerOnlyFilePersistence.renameRegularFile(at: sourceURL, to: destinationURL)
+
+            try expect(!FileManager.default.fileExists(atPath: sourceURL.path))
+            try expectContents(destinationURL, "evidence", "the moved file changed")
+            let attributes = try FileManager.default.attributesOfItem(
+                atPath: destinationURL.path
+            )
+            let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue
+            try expect(permissions == 0o600, "the moved file is not owner-only")
+
+            // An existing destination, whether a file or a link, is never replaced.
+            let occupiedURL = root.appendingPathComponent("occupied.json")
+            try Data("occupied".utf8).write(to: occupiedURL)
+            try Data("second".utf8).write(to: sourceURL)
+            try expectRefused(from: sourceURL, to: occupiedURL, "a rename replaced a file")
+            try expectContents(occupiedURL, "occupied", "the occupied file changed")
+            try expectContents(sourceURL, "second", "the source changed")
+
+            let externalURL = root.appendingPathComponent("external-sentinel")
+            try Data("external".utf8).write(to: externalURL)
+            let linkedDestinationURL = root.appendingPathComponent("linked-destination.json")
+            try FileManager.default.createSymbolicLink(
+                at: linkedDestinationURL,
+                withDestinationURL: externalURL
+            )
+            try expectRefused(
+                from: sourceURL,
+                to: linkedDestinationURL,
+                "a rename replaced a symbolic link"
+            )
+            try expectLink(linkedDestinationURL, pointsTo: externalURL)
+            try expectContents(sourceURL, "second", "the source changed")
+
+            // A symlinked source is refused rather than moved.
+            let linkedSourceURL = root.appendingPathComponent("linked-source.json")
+            try FileManager.default.createSymbolicLink(
+                at: linkedSourceURL,
+                withDestinationURL: externalURL
+            )
+            let unusedURL = root.appendingPathComponent("unused.json")
+            try expectRefused(from: linkedSourceURL, to: unusedURL, "a symbolic link was moved")
+            try expect(!FileManager.default.fileExists(atPath: unusedURL.path))
+            try expectLink(linkedSourceURL, pointsTo: externalURL)
+            try expectContents(externalURL, "external", "the link target changed")
+
+            // A symlinked containing directory is refused at either end.
+            let outsideDirectory = root.appendingPathComponent("outside", isDirectory: true)
+            let linkedDirectory = root.appendingPathComponent("Speaker", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: outsideDirectory,
+                withIntermediateDirectories: false
+            )
+            try FileManager.default.createSymbolicLink(
+                at: linkedDirectory,
+                withDestinationURL: outsideDirectory
+            )
+            try expectRefused(
+                from: sourceURL,
+                to: linkedDirectory.appendingPathComponent("moved.json"),
+                "a rename wrote through a symlinked directory"
+            )
+            let outsideNames = try FileManager.default.contentsOfDirectory(
+                atPath: outsideDirectory.path
+            )
+            try expect(outsideNames.isEmpty, "a file was moved into the link target")
+            try expectContents(sourceURL, "second", "the source changed")
+
+            let outsideFileURL = outsideDirectory.appendingPathComponent("history.json")
+            try Data("outside".utf8).write(to: outsideFileURL)
+            let archiveURL = root.appendingPathComponent("history.recovery-1.json")
+            try expectRefused(
+                from: linkedDirectory.appendingPathComponent("history.json"),
+                to: archiveURL,
+                "a rename moved a file out of a symlinked directory"
+            )
+            try expectContents(outsideFileURL, "outside", "the outside file changed")
+            try expect(!FileManager.default.fileExists(atPath: archiveURL.path))
+        }
+
         await runAsync(
             "settings reject non-regular and oversized files without moving evidence",
             failures: &failures

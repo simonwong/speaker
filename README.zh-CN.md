@@ -72,7 +72,7 @@ Speaker 没有托管账号服务，也不提供共享的服务商凭据。你需
 
 ## 开发
 
-构建 Speaker 需要 Swift 6 和 macOS 26 SDK，通常由 Xcode 26 或兼容的 Command Line Tools 提供。项目脚本优先使用 `/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`；也可以通过 `SPEAKER_SDKROOT` 选择其他 macOS 26 或更高版本 SDK。
+构建 Speaker 需要 Swift 6 和 macOS 26 SDK，通常由 Xcode 26 或兼容的 Command Line Tools 提供。项目脚本通过 `xcrun` 取当前工具链的 macOS SDK，低于 macOS 26 时拒绝构建，不写死 SDK 路径；也可以通过 `SPEAKER_SDKROOT` 选择其他 macOS 26 或更高版本 SDK。
 
 请使用仓库脚本，让本地构建与 CI 保持一致：
 

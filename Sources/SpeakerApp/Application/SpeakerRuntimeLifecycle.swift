@@ -179,8 +179,15 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     }
 
     func migrateLegacyHistory() async -> LegacyHistoryMigrationOutcome {
-        guard FileManager.default.fileExists(atPath: legacyHistoryFileURL.path) else {
-            return .notNeeded
+        do {
+            guard try OwnerOnlyFilePersistence.regularFileExists(at: legacyHistoryFileURL)
+            else {
+                return .notNeeded
+            }
+        } catch {
+            // A link or other non-regular entry at the legacy path is left
+            // untouched instead of being read through.
+            return .legacyProtectionFailed
         }
         let legacy = LegacyHistoryReader(fileURL: legacyHistoryFileURL)
         let records: [VoiceInputHistoryRecord]

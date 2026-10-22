@@ -97,9 +97,7 @@ public actor LocalFileProviderCredentialStore: ProviderCredentialStoring {
         }
         if document.apiKeys.isEmpty {
             do {
-                try FileManager.default.removeItem(at: fileURL)
-            } catch let error as CocoaError where error.code == .fileNoSuchFile {
-                return
+                try OwnerOnlyFilePersistence.removeRegularFile(at: fileURL)
             } catch {
                 throw ProviderCredentialStoreError.storageUnavailable
             }
