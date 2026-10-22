@@ -45,6 +45,7 @@ package final class SettingsWorkspace {
     let navigation: SettingsNavigationModel
     let permissions: PermissionModel
     let shortcut: VoiceShortcutFeature
+    let refinementModeShortcut: RefinementModeShortcutFeature
     let microphones: MicrophoneSelectionFeature
     let loginItemSettings: LoginItemSettingsModel
     let historyRetention: HistoryRetentionSettingsModel
@@ -64,6 +65,7 @@ package final class SettingsWorkspace {
         navigation: SettingsNavigationModel,
         permissions: PermissionModel,
         shortcut: VoiceShortcutFeature,
+        refinementModeShortcut: RefinementModeShortcutFeature,
         microphones: MicrophoneSelectionFeature,
         loginItemSettings: LoginItemSettingsModel,
         historyRetention: HistoryRetentionSettingsModel,
@@ -81,6 +83,7 @@ package final class SettingsWorkspace {
         self.navigation = navigation
         self.permissions = permissions
         self.shortcut = shortcut
+        self.refinementModeShortcut = refinementModeShortcut
         self.microphones = microphones
         self.loginItemSettings = loginItemSettings
         self.historyRetention = historyRetention
@@ -145,6 +148,26 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
         }
     }
 
+    package init(selection: RefinementModeSelection) {
+        switch selection {
+        case .defaultSmooth: self = .defaultSmooth
+        case .conciseCleanup: self = .conciseCleanup
+        case .fullRewrite: self = .fullRewrite
+        case .custom: self = .custom
+        }
+    }
+
+    /// The list entry a built-in card selects. The Custom card stands for the
+    /// whole Custom Mode list and selects no single entry.
+    package var selection: RefinementModeSelection? {
+        switch self {
+        case .defaultSmooth: .defaultSmooth
+        case .conciseCleanup: .conciseCleanup
+        case .fullRewrite: .fullRewrite
+        case .custom: nil
+        }
+    }
+
     package init(mode: TextRefinementMode) {
         switch mode.builtInMode {
         case .conciseCleanup:
@@ -164,21 +187,36 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    func refinementMode(
-        promptOverrides: RefinementPromptOverrides
-    ) -> TextRefinementMode? {
-        if let builtInMode {
-            return builtInMode.refinementMode(
-                promptOverride: promptOverrides[builtInMode]
-            )
-        }
-        return self == .defaultSmooth ? .defaultSmooth : nil
-    }
+}
+
+/// What a press of the Refinement Mode shortcut did.
+package enum RefinementModeCycleOutcome: Equatable, Sendable {
+    /// The next mode is now selected for new sessions.
+    case selected(TextRefinementMode)
+    /// Only Default Smoothing is usable until the provider's Key is saved.
+    case requiresKey(providerName: String)
+    /// A provider or Key change was in progress, so nothing changed.
+    case unchanged
+}
+
+/// One row of the menu bar's Refinement Mode list.
+package struct RefinementModeMenuEntry: Identifiable, Equatable {
+    package let selection: RefinementModeSelection
+    package let title: String
+    package let isSelected: Bool
+    /// Modes other than Default Smoothing need a saved Key.
+    package let isEnabled: Bool
+
+    package var id: RefinementModeSelection { selection }
 }
 
 @MainActor
 package final class RefinementSettingsModel: ObservableObject {
+    /// The mode new sessions use.
     @Published package private(set) var mode: TextRefinementMode = .defaultSmooth
+    /// The list entry `mode` comes from.
+    @Published package private(set) var selection: RefinementModeSelection = .defaultSmooth
+    @Published package private(set) var customModes: [CustomRefinementMode] = []
     @Published package private(set) var providers = RefinementProviderSettings()
     @Published package private(set) var isUpdatingProvider = false
     @Published package var modelIDDraft = RefinementProviderProfile.defaultProfile(for: .deepSeek)
@@ -187,12 +225,14 @@ package final class RefinementSettingsModel: ObservableObject {
         .baseURL
     @Published package var isEditingModelID = false
     @Published package private(set) var providerNotice: String?
-    @Published package var customName = "我的模式"
+    @Published package var customName = RefinementSettingsModel.newCustomModeName
     @Published package var customPrompt = ""
+    /// The Custom Mode the editor changes, or nil while it drafts a new one.
+    @Published package private(set) var editingCustomModeID: UUID?
     @Published package var promptDraft = ""
     @Published package private(set) var promptOverrides = RefinementPromptOverrides()
     @Published package private(set) var inspectedPromptMode: BuiltInRefinementMode?
-    @Published private(set) var isEditingCustomMode = false
+    @Published package private(set) var isEditingCustomMode = false
     @Published private(set) var notice: String?
 
     private let service: any RefinementProviderServicing
@@ -201,7 +241,12 @@ package final class RefinementSettingsModel: ObservableObject {
     /// The selected profile's Key, retargeted whenever the profile changes.
     private let credential: ProviderCredentialEditor
     private var credentialChanges: AnyCancellable?
-    private var deferredMode: TextRefinementMode?
+    /// The entry the user chose while its provider has no Key; it becomes
+    /// active once the Key is saved.
+    private var deferredSelection: RefinementModeSelection?
+    /// The last Refinement Mode shortcut press; each press waits for the one
+    /// before it so quick presses step one mode each.
+    private var pendingCycle: Task<RefinementModeCycleOutcome, Never>?
     private var providerDrafts:
         [RefinementProviderID: (modelID: String, baseURL: String, manual: Bool)] = [:]
 
@@ -279,14 +324,13 @@ package final class RefinementSettingsModel: ObservableObject {
         defer { isUpdatingProvider = false }
         credential.invalidateConnection()
         do {
-            let desiredMode = deferredMode ?? mode
+            let desiredSelection = deferredSelection ?? selection
             let profile = updated.selectedProfile
             let valid = (try? profile.validated()) != nil
             let configured = valid ? try await service.hasAPIKey(for: profile) : false
             try await settingsStore.updateRefinementProviders(updated)
             providerDrafts[selectedProvider] = (modelIDDraft, baseURLDraft, isEditingModelID)
-            let activation = RefinementActivationPlan(
-                desiredMode: desiredMode, hasStoredKey: configured)
+            let activation = activation(for: desiredSelection, hasStoredKey: configured)
             if valid {
                 try await configuration.selectRefinementProvider(
                     profile, mode: activation.activeMode)
@@ -295,8 +339,7 @@ package final class RefinementSettingsModel: ObservableObject {
             }
             let switched = updated.selectedProvider != selectedProvider
             providers = updated
-            mode = activation.activeMode
-            deferredMode = activation.deferredMode
+            apply(activation)
             credential.retarget(
                 to: Self.credentialNamespace(for: profile, service: service),
                 hasStoredKey: configured)
@@ -308,7 +351,7 @@ package final class RefinementSettingsModel: ObservableObject {
             } else {
                 syncProviderDrafts()
             }
-            notice = activation.deferredMode == nil ? nil : "已保留整理模式；保存 \(providerName) Key 后会自动恢复。"
+            notice = activation.deferred == nil ? nil : "已保留整理模式；保存 \(providerName) Key 后会自动恢复。"
         } catch {
             providerNotice = SpeakerCopy.Failure.message(for: error)
         }
@@ -349,8 +392,19 @@ package final class RefinementSettingsModel: ObservableObject {
             delete: { try await service.deleteAPIKey(for: profile.provider) })
     }
 
-    var choice: RefinementChoice {
-        RefinementChoice(mode: mode)
+    package var choice: RefinementChoice {
+        RefinementChoice(selection: selection)
+    }
+
+    package static let newCustomModeName = "我的模式"
+
+    package var canAddCustomMode: Bool {
+        customModes.count < CustomRefinementMode.maximumCount
+    }
+
+    /// The editor is changing the Custom Mode new sessions use.
+    package var isEditingActiveCustomMode: Bool {
+        editingCustomModeID != nil && selection.customModeID == editingCustomModeID
     }
 
     /// The prompt editor state for the active mode, or nil when the mode has
@@ -363,10 +417,16 @@ package final class RefinementSettingsModel: ObservableObject {
         )
     }
 
-    /// The single save-enabled condition for Custom Mode; the card renders it
-    /// rather than recomputing the rule.
+    /// Whether 保存并启用 is available: a valid draft and a saved Key. The
+    /// card renders it rather than recomputing the rule.
     package var canSaveCustomMode: Bool {
-        hasStoredKey
+        hasStoredKey && canSaveCustomModeDraft
+    }
+
+    /// Whether 保存 is available: a valid draft that fits in the list. Saving
+    /// without enabling needs no Key.
+    package var canSaveCustomModeDraft: Bool {
+        (editingCustomModeID != nil || canAddCustomMode)
             && !customName
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty
@@ -378,12 +438,6 @@ package final class RefinementSettingsModel: ObservableObject {
                 <= TextRefinementMode.maximumCustomPromptLength
     }
 
-    package var savedCustomModeName: String? {
-        let name = customName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prompt = customPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty || prompt.isEmpty ? nil : name
-    }
-
     package func load() async {
         let loadedSettings = await settingsStore.load().settings
         providers = loadedSettings.refinementProviders
@@ -392,31 +446,23 @@ package final class RefinementSettingsModel: ObservableObject {
             to: Self.credentialNamespace(for: selectedProfile, service: service))
         await credential.refresh()
         promptOverrides = loadedSettings.refinementPromptOverrides
-        let loadedMode = loadedSettings.refinement.textRefinementMode
-            .applyingPromptOverrides(loadedSettings.refinementPromptOverrides)
-        let savedCustomMode = loadedSettings.savedCustomRefinement?.textRefinementMode
-        if case .custom(let name, let prompt) = savedCustomMode ?? loadedMode {
-            customName = name
-            customPrompt = prompt
-        }
+        customModes = loadedSettings.customRefinementModes
+        let desired = loadedSettings.refinementSelection
+        loadCustomModeDraft(desired.customModeID ?? customModes.first?.id)
         do {
-            let validated = try loadedMode.validated()
-            let activation = RefinementActivationPlan(
-                desiredMode: validated,
-                hasStoredKey: hasStoredKey
-            )
+            let desiredMode = try (resolvedMode(desired) ?? .defaultSmooth).validated()
+            let activation = activation(for: desired, hasStoredKey: hasStoredKey)
             if hasValidProfile {
                 try await configuration.selectRefinementProvider(
                     selectedProfile, mode: activation.activeMode)
             } else {
                 try await configuration.selectRefinementMode(.defaultSmooth)
             }
-            mode = activation.activeMode
-            deferredMode = activation.deferredMode
-            inspectedPromptMode = validated.builtInMode
+            apply(activation)
+            inspectedPromptMode = desired.builtInMode
             syncPromptDraft()
-            if activation.deferredMode != nil {
-                notice = "已保留“\(validated.displayName)”模式；保存 \(providerName) Key 后会自动恢复使用。"
+            if activation.deferred != nil {
+                notice = "已保留“\(desiredMode.displayName)”模式；保存 \(providerName) Key 后会自动恢复使用。"
             } else {
                 notice = nil
             }
@@ -429,14 +475,12 @@ package final class RefinementSettingsModel: ObservableObject {
         guard !isMutating, hasValidProfile, !hasProfileChanges else { return }
         guard await credential.save() else { return }
         do {
-            if let deferredMode {
-                let restoredMode = deferredMode.applyingPromptOverrides(
-                    promptOverrides
-                )
+            if let deferredSelection, let restoredMode = resolvedMode(deferredSelection) {
                 try await configuration.selectRefinementMode(restoredMode)
                 mode = restoredMode
-                inspectedPromptMode = restoredMode.builtInMode
-                self.deferredMode = nil
+                selection = deferredSelection
+                inspectedPromptMode = deferredSelection.builtInMode
+                self.deferredSelection = nil
                 syncPromptDraft()
             }
             notice = nil
@@ -448,7 +492,7 @@ package final class RefinementSettingsModel: ObservableObject {
     package func deleteAPIKey() async {
         guard !isMutating else { return }
         guard await credential.delete() else { return }
-        deferredMode = nil
+        deferredSelection = nil
         await select(.defaultSmooth)
     }
 
@@ -484,11 +528,12 @@ package final class RefinementSettingsModel: ObservableObject {
         }
 
         if choice == .custom {
+            loadCustomModeDraft(selection.customModeID ?? customModes.first?.id)
             isEditingCustomMode = true
             notice =
                 hasStoredKey
                 ? nil
-                : "可先编辑规则；保存 \(providerName) API Key 后才能启用。"
+                : "可先编辑自定义模式；保存 \(providerName) API Key 后才能启用。"
             return
         }
 
@@ -499,24 +544,120 @@ package final class RefinementSettingsModel: ObservableObject {
             return
         }
 
-        guard
-            let selectedMode = choice.refinementMode(
-                promptOverrides: promptOverrides
-            )
-        else { return }
+        guard let selection = choice.selection else { return }
+        await activate(selection, persist: persist)
+    }
 
+    /// Makes `selection` the mode for new sessions. A session already
+    /// recording keeps the mode it captured when its shortcut was pressed.
+    private func activate(_ selection: RefinementModeSelection, persist: Bool) async {
+        guard let selectedMode = resolvedMode(selection) else { return }
         do {
-            try await configuration.selectRefinementMode(selectedMode)
-            mode = try selectedMode.validated()
+            let validated = try selectedMode.validated()
+            try await configuration.selectRefinementMode(validated)
+            mode = validated
+            self.selection = selection
             syncPromptDraft()
             notice = nil
             if persist {
-                try await persistSelection(mode)
-                deferredMode = nil
+                try await persistSelection(selection)
+                deferredSelection = nil
             }
         } catch {
             notice = SpeakerCopy.Failure.message(for: error)
         }
+    }
+
+    /// The menu's mode list: built-in modes, then every Custom Mode in list
+    /// order, the same order the Refinement Mode shortcut steps through.
+    package var menuEntries: [RefinementModeMenuEntry] {
+        RefinementModeSelection.order(customModes: customModes).map { entry in
+            RefinementModeMenuEntry(
+                selection: entry,
+                title: title(for: entry),
+                isSelected: entry == selection,
+                isEnabled: entry == .defaultSmooth || hasStoredKey
+            )
+        }
+    }
+
+    package func title(for entry: RefinementModeSelection) -> String {
+        switch entry {
+        case .defaultSmooth: SpeakerCopy.RefinementMode.defaultSmooth
+        case .conciseCleanup: SpeakerCopy.RefinementMode.conciseCleanup
+        case .fullRewrite: SpeakerCopy.RefinementMode.fullRewrite
+        case .custom(let id):
+            customModes.first { $0.id == id }?.name ?? SpeakerCopy.RefinementMode.custom
+        }
+    }
+
+    /// Selects one entry of the mode list, as the menu does.
+    package func selectMode(_ entry: RefinementModeSelection) async {
+        if let id = entry.customModeID {
+            isEditingCustomMode = false
+            await selectCustomMode(id)
+        } else {
+            await select(RefinementChoice(selection: entry))
+        }
+    }
+
+    /// Steps to the next Refinement Mode in list order for the next session,
+    /// as choosing it in the menu would. The frontmost App plays no part.
+    package func cycleMode() async -> RefinementModeCycleOutcome {
+        let previous = pendingCycle
+        let cycle = Task { @MainActor [weak self] () -> RefinementModeCycleOutcome in
+            _ = await previous?.value
+            guard let self else { return .unchanged }
+            return await self.stepToNextMode()
+        }
+        pendingCycle = cycle
+        return await cycle.value
+    }
+
+    private func stepToNextMode() async -> RefinementModeCycleOutcome {
+        guard !isMutating else { return .unchanged }
+        guard hasStoredKey else { return .requiresKey(providerName: providerName) }
+        let next = selection.next(customModes: customModes)
+        await activate(next, persist: true)
+        guard selection == next else { return .unchanged }
+        if let builtInMode = next.builtInMode {
+            inspectPrompt(builtInMode)
+        } else {
+            inspectedPromptMode = nil
+        }
+        return .selected(mode)
+    }
+
+    private struct SelectionActivation {
+        let active: RefinementModeSelection
+        let activeMode: TextRefinementMode
+        let deferred: RefinementModeSelection?
+    }
+
+    /// Default Smoothing stays live while a provider-backed choice waits for
+    /// its Key; a Custom Mode no longer in the list falls back the same way.
+    private func activation(
+        for desired: RefinementModeSelection, hasStoredKey: Bool
+    ) -> SelectionActivation {
+        guard let desiredMode = resolvedMode(desired) else {
+            return SelectionActivation(
+                active: .defaultSmooth, activeMode: .defaultSmooth, deferred: nil)
+        }
+        let plan = RefinementActivationPlan(desiredMode: desiredMode, hasStoredKey: hasStoredKey)
+        return plan.deferredMode == nil
+            ? SelectionActivation(active: desired, activeMode: plan.activeMode, deferred: nil)
+            : SelectionActivation(
+                active: .defaultSmooth, activeMode: plan.activeMode, deferred: desired)
+    }
+
+    private func apply(_ activation: SelectionActivation) {
+        mode = activation.activeMode
+        selection = activation.active
+        deferredSelection = activation.deferred
+    }
+
+    private func resolvedMode(_ selection: RefinementModeSelection) -> TextRefinementMode? {
+        selection.refinementMode(customModes: customModes, promptOverrides: promptOverrides)
     }
 
     /// Saves the inspected built-in mode's prompt override, taking
@@ -578,66 +719,132 @@ package final class RefinementSettingsModel: ObservableObject {
             try await configuration.selectRefinementMode(updatedMode)
             mode = updatedMode
         }
-        if deferredMode?.builtInMode == editedBuiltInMode {
-            deferredMode = updatedMode
+        // A deferred built-in mode resolves its prompt when the Key arrives.
+    }
+
+    /// Opens the editor on a new Custom Mode draft.
+    package func beginNewCustomMode() {
+        guard !isMutating, canAddCustomMode else { return }
+        loadCustomModeDraft(nil)
+        inspectedPromptMode = nil
+        isEditingCustomMode = true
+    }
+
+    /// Opens the editor on one saved Custom Mode.
+    package func editCustomMode(_ id: UUID) {
+        guard !isMutating, customModes.contains(where: { $0.id == id }) else { return }
+        loadCustomModeDraft(id)
+        inspectedPromptMode = nil
+        isEditingCustomMode = true
+    }
+
+    private func loadCustomModeDraft(_ id: UUID?) {
+        if let id, let saved = customModes.first(where: { $0.id == id }) {
+            editingCustomModeID = saved.id
+            customName = saved.name
+            customPrompt = saved.prompt
+        } else {
+            editingCustomModeID = nil
+            customName = Self.newCustomModeName
+            customPrompt = ""
         }
     }
 
-    package func saveCustomMode() async {
+    /// Saves the editor's draft into the Custom Mode list and, by default,
+    /// enables it. Saving the mode in use applies its new prompt to the next
+    /// session; saving any other mode without enabling it changes nothing
+    /// live and needs no Key.
+    package func saveCustomMode(enabling: Bool = true) async {
         guard !isMutating else { return }
-        guard hasStoredKey else {
-            notice = "请先保存 \(providerName) API Key，再保存并启用自定义规则。"
+        guard !enabling || hasStoredKey else {
+            notice = "请先保存 \(providerName) API Key，再保存并启用自定义模式。"
             return
         }
         do {
-            let customMode = try TextRefinementMode.custom(
+            let draft = try CustomRefinementMode(
+                id: editingCustomModeID ?? UUID(),
                 name: customName,
                 prompt: customPrompt
             ).validated()
-            try await settingsStore.updateSavedCustomRefinement(
-                RefinementPreference(mode: customMode)
-            )
-            if case .custom(let name, let prompt) = customMode {
-                customName = name
-                customPrompt = prompt
+            let saved = try await settingsStore.saveCustomRefinementMode(draft)
+            customModes = saved.customRefinementModes
+            loadCustomModeDraft(draft.id)
+            if enabling {
+                try await configuration.selectRefinementMode(draft.textRefinementMode)
+                mode = draft.textRefinementMode
+                selection = .custom(draft.id)
+                inspectedPromptMode = nil
+                isEditingCustomMode = false
+                try await persistSelection(selection)
+                deferredSelection = nil
+            } else if selection == .custom(draft.id) {
+                try await configuration.selectRefinementMode(draft.textRefinementMode)
+                mode = draft.textRefinementMode
             }
-            try await configuration.selectRefinementMode(customMode)
-            mode = customMode
-            inspectedPromptMode = nil
-            isEditingCustomMode = false
             notice = nil
-            try await persistSelection(customMode)
         } catch {
             notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
-    package func selectSavedCustomMode() async {
+    /// Makes one saved Custom Mode the mode for new sessions.
+    package func selectCustomMode(_ id: UUID) async {
         guard !isMutating else { return }
         guard hasStoredKey else {
             notice = "请先保存 \(providerName) API Key。"
             return
         }
+        guard customModes.contains(where: { $0.id == id }) else { return }
+        inspectedPromptMode = nil
+        await activate(.custom(id), persist: true)
+    }
+
+    /// Deletes one Custom Mode. Deleting the mode in use returns new sessions
+    /// to Default Smoothing.
+    package func deleteCustomMode(_ id: UUID) async {
+        guard !isMutating else { return }
         do {
-            let customMode = try TextRefinementMode.custom(
-                name: customName,
-                prompt: customPrompt
-            ).validated()
-            try await configuration.selectRefinementMode(customMode)
-            mode = customMode
-            inspectedPromptMode = nil
-            isEditingCustomMode = false
+            let saved = try await settingsStore.deleteCustomRefinementMode(id: id)
+            customModes = saved.customRefinementModes
+            if deferredSelection == .custom(id) {
+                deferredSelection = nil
+            }
+            if selection == .custom(id) {
+                try await configuration.selectRefinementMode(.defaultSmooth)
+                mode = .defaultSmooth
+                selection = .defaultSmooth
+            }
+            if editingCustomModeID == id {
+                loadCustomModeDraft(customModes.first?.id)
+            }
             notice = nil
-            try await persistSelection(customMode)
         } catch {
             notice = SpeakerCopy.Failure.message(for: error)
         }
     }
 
-    private func persistSelection(_ selectedMode: TextRefinementMode) async throws {
-        try await settingsStore.updateRefinement(
-            RefinementPreference(mode: selectedMode)
-        )
+    /// Moves one Custom Mode up (negative) or down (positive) in the list,
+    /// which is also the order the Refinement Mode shortcut steps through.
+    package func moveCustomMode(_ id: UUID, by offset: Int) async {
+        guard !isMutating, let index = customModes.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        do {
+            let saved = try await settingsStore.moveCustomRefinementMode(
+                id: id, to: index + offset)
+            customModes = saved.customRefinementModes
+            notice = nil
+        } catch {
+            notice = SpeakerCopy.Failure.message(for: error)
+        }
+    }
+
+    private func persistSelection(_ selection: RefinementModeSelection) async throws {
+        guard
+            let preference = RefinementPreference(
+                selection: selection, customModes: customModes)
+        else { return }
+        try await settingsStore.updateRefinement(preference)
     }
 
     private static func connectionMessage(
@@ -898,8 +1105,13 @@ package struct ShortcutRecorderPolicy {
         "这个组合键是常用编辑命令，请换一个组合键。"
 
     private var modifierPolicy = ShortcutRecorderModifierPolicy()
+    /// What an unsafe chord is answered with: the prompt of the shortcut
+    /// being recorded.
+    private let prompt: String
 
-    package init() {}
+    package init(prompt: String = ShortcutRecorderPolicy.recordingPrompt) {
+        self.prompt = prompt
+    }
 
     package mutating func handle(
         _ input: ShortcutRecorderInput
@@ -935,7 +1147,7 @@ package struct ShortcutRecorderPolicy {
                 return .reject(Self.editingConflictPrompt)
             }
             guard hotKey.isSafeForGlobalVoiceInput else {
-                return .reject(Self.recordingPrompt)
+                return .reject(prompt)
             }
             return .capture(hotKey)
         }
@@ -976,17 +1188,33 @@ package struct ShortcutRecorderPolicy {
     }
 }
 
+/// The shortcut a recorder is capturing.
+enum ShortcutRecorderTarget: Equatable {
+    case recording
+    case refinementMode
+}
+
 @MainActor
 final class ShortcutRecorderModel: ObservableObject {
-    @Published private(set) var isRecording = false
+    @Published private(set) var target: ShortcutRecorderTarget?
     @Published private(set) var notice: String?
     private var monitor: Any?
     private var policy = ShortcutRecorderPolicy()
 
-    func start(onCapture: @escaping (CustomHotKey) -> Void) {
+    var isRecording: Bool { target != nil }
+
+    /// Records one chord for `target`. `validate` names why a captured chord
+    /// cannot be used; recording then continues so the user can try another.
+    func start(
+        for target: ShortcutRecorderTarget = .recording,
+        prompt: String = ShortcutRecorderPolicy.recordingPrompt,
+        validate: @escaping (CustomHotKey) -> String? = { _ in nil },
+        onCapture: @escaping (CustomHotKey) -> Void
+    ) {
         stop()
-        isRecording = true
-        notice = ShortcutRecorderPolicy.recordingPrompt
+        self.target = target
+        policy = ShortcutRecorderPolicy(prompt: prompt)
+        notice = prompt
         monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.flagsChanged, .keyDown]
         ) { [weak self] event in
@@ -1010,6 +1238,11 @@ final class ShortcutRecorderModel: ObservableObject {
             case .cancel:
                 self.stop()
             case .capture(let hotKey):
+                if let message = validate(hotKey) {
+                    self.notice = message
+                    self.policy.reset()
+                    break
+                }
                 self.stop()
                 onCapture(hotKey)
             case .reject(let message):
@@ -1025,6 +1258,6 @@ final class ShortcutRecorderModel: ObservableObject {
         }
         monitor = nil
         policy.reset()
-        isRecording = false
+        target = nil
     }
 }

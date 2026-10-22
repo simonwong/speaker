@@ -433,6 +433,72 @@ enum VoiceInputFeedbackSpecs {
             try expect(after == before, "the note replaced the retained result")
         }
 
+        await runAsync(
+            "voice feedback names the next Refinement Mode while no session is on screen",
+            failures: &failures
+        ) {
+            var announcements: [String] = []
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                noticeDuration: .milliseconds(300),
+                announce: { announcements.append($0) })
+            experience.start()
+            let first = SpeakerCopy.RefinementModeShortcut.notice(
+                for: .selected(.conciseCleanup()))!
+            let second = SpeakerCopy.RefinementModeShortcut.notice(
+                for: .selected(.custom(name: "工作邮件", prompt: "整理成邮件")))!
+            experience.showRefinementModeNotice(first)
+            let shown = experience.state.overlay == .notice(title: first)
+            experience.showRefinementModeNotice(second)
+            let replaced = experience.state.overlay == .notice(title: second)
+            let hidden = await eventually(before: .seconds(2)) {
+                experience.state.overlay == .hidden
+            }
+            await experience.shutdown()
+
+            try expect(first == "整理模式：精简清理" && second == "整理模式：工作邮件")
+            try expect(shown, "the notice did not appear")
+            try expect(replaced, "a later press did not replace the notice")
+            try expect(announcements == [first, second], "the notice was not announced")
+            try expect(hidden, "the notice stayed on screen")
+        }
+
+        await runAsync(
+            "voice feedback keeps the session HUD over a Refinement Mode notice",
+            failures: &failures
+        ) {
+            var announcements: [String] = []
+            let experience = VoiceInputExperience(
+                sessions: makeSessions(),
+                announce: { announcements.append($0) })
+            experience.start()
+            experience.shortcutTarget.receive(.pressed)
+            let recording = await eventually(before: .seconds(2)) { experience.state.isRecording }
+            try expect(recording)
+            let duringRecording = experience.state.overlay
+            experience.showRefinementModeNotice("整理模式：完整重写")
+            let afterRecordingPress = experience.state.overlay
+            guard case .recording(_, _, let finish, _) = duringRecording else {
+                throw SpecFailure(message: "recording action missing")
+            }
+            experience.perform(finish)
+            let retained = await eventually(before: .seconds(2)) {
+                if case .pendingCopy = experience.state.overlay { true } else { false }
+            }
+            try expect(retained, "the result was not retained")
+            let before = experience.state.overlay
+            experience.showRefinementModeNotice("整理模式：默认顺滑")
+            let after = experience.state.overlay
+            await experience.shutdown()
+
+            try expect(
+                afterRecordingPress == duringRecording, "the notice covered the recording HUD")
+            try expect(after == before, "the notice replaced the retained result")
+            try expect(
+                !announcements.contains { $0.hasPrefix("整理模式") },
+                "a notice hidden behind the session HUD was announced")
+        }
+
         SpeakerSpecSupport.run(
             "the HUD follows the display holding most of the front window", failures: &failures
         ) {

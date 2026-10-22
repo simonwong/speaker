@@ -167,6 +167,37 @@ enum ShortcutRecorderSpecs {
         }
 
         await runAsync(
+            "the Refinement Mode shortcut recorder answers an unsafe chord with its own prompt",
+            failures: &failures
+        ) {
+            let prompt = SpeakerCopy.RefinementModeShortcut.recordingPrompt
+            var policy = ShortcutRecorderPolicy(prompt: prompt)
+            let unsafe = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_M),
+                    flags: [.shift],
+                    charactersIgnoringModifiers: "m"
+                ))
+            let safe = policy.handle(
+                .keyDown(
+                    keyCode: UInt16(kVK_ANSI_M),
+                    flags: [.control, .option],
+                    charactersIgnoringModifiers: "m"
+                ))
+            try expect(unsafe == .reject(prompt), "unexpected decision \(unsafe)")
+            guard case .capture(let hotKey) = safe else {
+                throw SpecFailure(message: "a safe chord was not captured: \(safe)")
+            }
+            try expect(hotKey.displayName == "⌃⌥M")
+            try expect(
+                RefinementModeShortcutFeature.rejection(
+                    for: .modifierOnly(.leftOption, displayName: "左 ⌥"),
+                    recordingShortcut: .functionKey
+                ).map(SpeakerCopy.RefinementModeShortcut.message(for:))
+                    == "切换整理模式需要组合键，不能单独使用修饰键。")
+        }
+
+        await runAsync(
             "shortcut recorder finishes a modifier recording only on a clean release",
             failures: &failures
         ) {

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ShortcutSettingsPage: View {
     @ObservedObject var shortcut: VoiceShortcutFeature
+    @ObservedObject var refinementModeShortcut: RefinementModeShortcutFeature
     @ObservedObject var shortcutRecorder: ShortcutRecorderModel
     let openPermissionSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -16,7 +17,7 @@ struct ShortcutSettingsPage: View {
                 FunctionKeyConflictHint()
             }
 
-            if shortcutRecorder.isRecording,
+            if shortcutRecorder.target == .recording,
                 let notice = shortcutRecorder.notice
             {
                 recordingNotice(notice)
@@ -31,6 +32,92 @@ struct ShortcutSettingsPage: View {
                     recoveryRow(recovery)
                 }
             }
+
+            SettingsRowDivider()
+            modeShortcutRow
+
+            if shortcutRecorder.target == .refinementMode,
+                let notice = shortcutRecorder.notice
+            {
+                recordingNotice(notice)
+            }
+
+            modeShortcutNotice
+        }
+    }
+
+    /// The optional shortcut that steps to the next Refinement Mode for the
+    /// next session. It never depends on the frontmost App.
+    private var modeShortcutRow: some View {
+        SpeakerRow(SpeakerCopy.RefinementModeShortcut.title) {
+            HStack(spacing: 14) {
+                ShortcutKeycap(
+                    name: refinementModeShortcut.hotKey?.displayName
+                        ?? SpeakerCopy.RefinementModeShortcut.unset
+                )
+
+                if let status = modeShortcutStatus {
+                    StatusBadge(text: status.text, icon: status.icon, color: status.color)
+                }
+
+                if refinementModeShortcut.hotKey != nil {
+                    Button("清除") {
+                        shortcutRecorder.stop()
+                        refinementModeShortcut.clear()
+                    }
+                }
+
+                Button(
+                    shortcutRecorder.target == .refinementMode
+                        ? "取消" : refinementModeShortcut.hotKey == nil ? "设置快捷键" : "更改快捷键"
+                ) {
+                    if shortcutRecorder.target == .refinementMode {
+                        shortcutRecorder.stop()
+                    } else {
+                        shortcutRecorder.start(
+                            for: .refinementMode,
+                            prompt: SpeakerCopy.RefinementModeShortcut.recordingPrompt,
+                            validate: { hotKey in
+                                RefinementModeShortcutFeature.rejection(
+                                    for: hotKey, recordingShortcut: shortcut.preference
+                                ).map(SpeakerCopy.RefinementModeShortcut.message(for:))
+                            },
+                            onCapture: { hotKey in
+                                refinementModeShortcut.select(hotKey)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var modeShortcutNotice: some View {
+        if shortcutRecorder.target != .refinementMode {
+            Text("每按一次，下一次输入改用下一个整理模式；正在录音或处理的输入不受影响。")
+                .font(SpeakerTypography.footnote)
+                .foregroundStyle(.secondary)
+        }
+        if refinementModeShortcut.persistenceFailed {
+            SettingsNotice(text: "快捷键已生效，但未能保存到本机设置。", color: .orange)
+            HStack {
+                Spacer()
+                Button("重试") { refinementModeShortcut.retryPersistence() }
+            }
+        }
+    }
+
+    private var modeShortcutStatus: (text: String, icon: String, color: Color)? {
+        switch refinementModeShortcut.activation {
+        case .notSet, .active:
+            nil
+        case .conflict:
+            ("与录音快捷键相同，未启用", "exclamationmark.circle.fill", .orange)
+        case .unavailable:
+            ("已选择，但未能注册", "exclamationmark.circle.fill", .orange)
+        case .stopped:
+            ("已停止", "pause.circle.fill", .red)
         }
     }
 
@@ -58,13 +145,20 @@ struct ShortcutSettingsPage: View {
         }
         .disabled(shortcut.activation.activePreference == .functionKey)
 
-        Button(shortcutRecorder.isRecording ? "取消" : "更改快捷键") {
-            if shortcutRecorder.isRecording {
+        Button(shortcutRecorder.target == .recording ? "取消" : "更改快捷键") {
+            if shortcutRecorder.target == .recording {
                 shortcutRecorder.stop()
             } else {
-                shortcutRecorder.start { hotKey in
-                    shortcut.select(.init(customHotKey: hotKey))
-                }
+                shortcutRecorder.start(
+                    for: .recording,
+                    validate: { hotKey in
+                        refinementModeShortcut.conflicts(withRecordingShortcut: hotKey)
+                            ? SpeakerCopy.RefinementModeShortcut.usedByModeShortcut : nil
+                    },
+                    onCapture: { hotKey in
+                        shortcut.select(.init(customHotKey: hotKey))
+                    }
+                )
             }
         }
     }

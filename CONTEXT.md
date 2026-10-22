@@ -48,9 +48,15 @@ _Avoid_: default rule, smart rewrite
 
 **Custom Mode**
 
-A user-named Refinement Mode with a user-authored refinement instruction.
+A user-named Refinement Mode with a user-authored refinement instruction. The user keeps an ordered list of at most ten; any one of them may be the selected Refinement Mode.
 
 _Avoid_: custom rule, custom transcription
+
+**Refinement Mode Shortcut**
+
+An optional global key chord that selects the next Refinement Mode in list order: the built-in modes, then the Custom Modes. It changes the mode for the next Voice Input Session only; the frontmost App never chooses or changes a Refinement Mode.
+
+_Avoid_: mode hotkey, per-App mode, recording shortcut
 
 **Personal Dictionary**
 

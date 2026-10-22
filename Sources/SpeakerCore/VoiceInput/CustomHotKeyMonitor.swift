@@ -240,7 +240,7 @@ package final class CustomHotKeyMonitor {
                 return .eventHandlerUnavailable(status: handlerStatus)
             }
 
-            let hotKeyID = EventHotKeyID(signature: 0x5350_4B52, id: 1)
+            let hotKeyID = SpeakerHotKeyIdentifier.voiceInput.eventHotKeyID
             let registerStatus = RegisterEventHotKey(
                 hotKey.keyCode,
                 hotKey.modifiers,
@@ -290,8 +290,39 @@ package final class CustomHotKeyMonitor {
     }
 }
 
+/// Carbon hands every hot key the App registers to every handler installed on
+/// the application target, so each handler acts only on its own identifier
+/// and passes the others along.
+package enum SpeakerHotKeyIdentifier: UInt32, Sendable {
+    case voiceInput = 1
+    case refinementMode = 2
+
+    private static let signature: OSType = 0x5350_4B52
+
+    package var eventHotKeyID: EventHotKeyID {
+        EventHotKeyID(signature: Self.signature, id: rawValue)
+    }
+
+    package func matches(_ event: EventRef) -> Bool {
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            event,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+        return status == noErr && hotKeyID.signature == Self.signature
+            && hotKeyID.id == rawValue
+    }
+}
+
 private let customHotKeyCallback: EventHandlerUPP = { _, event, userData in
-    guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+    guard let event, let userData, SpeakerHotKeyIdentifier.voiceInput.matches(event) else {
+        return OSStatus(eventNotHandledErr)
+    }
     let taps = Unmanaged<ShortcutEventTaps>.fromOpaque(userData).takeUnretainedValue()
     switch GetEventKind(event) {
     case UInt32(kEventHotKeyPressed):

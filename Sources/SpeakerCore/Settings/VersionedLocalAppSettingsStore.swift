@@ -80,18 +80,14 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
     case defaultSmooth
     case conciseCleanup
     case fullRewrite
-    case custom(name: String, prompt: String)
+    case custom(CustomRefinementMode)
 
-    public init(mode: TextRefinementMode) {
-        switch mode {
-        case .defaultSmooth:
-            self = .defaultSmooth
-        case .conciseCleanup:
-            self = .conciseCleanup
-        case .fullRewrite:
-            self = .fullRewrite
-        case .custom(let name, let prompt):
-            self = .custom(name: name, prompt: prompt)
+    public var selection: RefinementModeSelection {
+        switch self {
+        case .defaultSmooth: .defaultSmooth
+        case .conciseCleanup: .conciseCleanup
+        case .fullRewrite: .fullRewrite
+        case .custom(let mode): .custom(mode.id)
         }
     }
 
@@ -103,8 +99,8 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
             .conciseCleanup()
         case .fullRewrite:
             .fullRewrite()
-        case .custom(let name, let prompt):
-            .custom(name: name, prompt: prompt)
+        case .custom(let mode):
+            mode.textRefinementMode
         }
     }
 
@@ -115,8 +111,11 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
         case custom
     }
 
+    /// A custom preference keeps the `name` and `prompt` keys builds without
+    /// the Custom Mode list read; `id` is ignored by them.
     private enum CodingKeys: String, CodingKey {
         case kind
+        case id
         case name
         case prompt
     }
@@ -132,9 +131,12 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
             self = .fullRewrite
         case .custom:
             self = .custom(
-                name: try container.decode(String.self, forKey: .name),
-                prompt: try container.decode(String.self, forKey: .prompt)
-            )
+                CustomRefinementMode(
+                    id: try container.decodeIfPresent(UUID.self, forKey: .id)
+                        ?? CustomRefinementMode.legacyActiveID,
+                    name: try container.decode(String.self, forKey: .name),
+                    prompt: try container.decode(String.self, forKey: .prompt)
+                ))
         }
     }
 
@@ -147,10 +149,11 @@ public enum RefinementPreference: Equatable, Sendable, Codable {
             try container.encode(Kind.conciseCleanup, forKey: .kind)
         case .fullRewrite:
             try container.encode(Kind.fullRewrite, forKey: .kind)
-        case .custom(let name, let prompt):
+        case .custom(let mode):
             try container.encode(Kind.custom, forKey: .kind)
-            try container.encode(name, forKey: .name)
-            try container.encode(prompt, forKey: .prompt)
+            try container.encode(mode.id, forKey: .id)
+            try container.encode(mode.name, forKey: .name)
+            try container.encode(mode.prompt, forKey: .prompt)
         }
     }
 }
@@ -222,7 +225,11 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     public var refinement: RefinementPreference
     public var refinementProviders: RefinementProviderSettings
     public var speechRecognitionProviders: SpeechRecognitionProviderSettings
-    public var savedCustomRefinement: RefinementPreference?
+    /// The user's Custom Modes in display order. A selected Custom Mode in
+    /// `refinement` is always one of them.
+    public internal(set) var customRefinementModes: [CustomRefinementMode]
+    /// The optional global shortcut that steps to the next Refinement Mode.
+    public var refinementModeShortcut: CustomHotKey?
     public var refinementPromptOverrides: RefinementPromptOverrides
     public var launchAtLogin: Bool
     public var doubaoResourceID: String?
@@ -236,7 +243,8 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         refinementProviders: RefinementProviderSettings = RefinementProviderSettings(),
         speechRecognitionProviders: SpeechRecognitionProviderSettings =
             SpeechRecognitionProviderSettings(),
-        savedCustomRefinement: RefinementPreference? = nil,
+        customRefinementModes: [CustomRefinementMode] = [],
+        refinementModeShortcut: CustomHotKey? = nil,
         refinementPromptOverrides: RefinementPromptOverrides = RefinementPromptOverrides(),
         launchAtLogin: Bool = false,
         doubaoResourceID: String? = nil,
@@ -248,7 +256,8 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.refinement = refinement
         self.refinementProviders = refinementProviders
         self.speechRecognitionProviders = speechRecognitionProviders
-        self.savedCustomRefinement = savedCustomRefinement
+        self.customRefinementModes = customRefinementModes
+        self.refinementModeShortcut = refinementModeShortcut
         self.refinementPromptOverrides = refinementPromptOverrides
         self.launchAtLogin = launchAtLogin
         self.doubaoResourceID = doubaoResourceID
@@ -256,6 +265,7 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.historyRetentionWhenEnabled = Self.enabledRetention(
             historyRetentionWhenEnabled ?? historyRetention
         )
+        reconcileRefinementSelection()
     }
 
     public static let `default` = SpeakerAppSettings()
@@ -266,7 +276,11 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         case refinement
         case refinementProviders
         case speechRecognitionProviders
+        case customRefinementModes
+        /// Written for builds that predate `customRefinementModes`; read only
+        /// when that key is absent.
         case savedCustomRefinement
+        case refinementModeShortcut
         case refinementPromptOverrides
         case launchAtLogin
         case doubaoResourceID
@@ -297,9 +311,21 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
             try container.decodeIfPresent(
                 SpeechRecognitionProviderSettings.self, forKey: .speechRecognitionProviders)
             ?? SpeechRecognitionProviderSettings()
-        savedCustomRefinement = try container.decodeIfPresent(
-            RefinementPreference.self,
-            forKey: .savedCustomRefinement
+        // Incremental field: settings.json written before the Custom Mode
+        // list existed migrates its single saved Custom Mode into the list.
+        customRefinementModes =
+            try container.decodeIfPresent(
+                [CustomRefinementMode].self,
+                forKey: .customRefinementModes
+            )
+            ?? Self.legacyCustomRefinementModes(
+                saved: try container.decodeIfPresent(
+                    RefinementPreference.self,
+                    forKey: .savedCustomRefinement
+                ))
+        refinementModeShortcut = try container.decodeIfPresent(
+            CustomHotKey.self,
+            forKey: .refinementModeShortcut
         )
         // Incremental field: settings.json written before prompt overrides
         // existed decodes with no overrides.
@@ -328,6 +354,25 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         historyRetentionWhenEnabled = Self.enabledRetention(
             rememberedRetention
         )
+        reconcileRefinementSelection()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(shortcut, forKey: .shortcut)
+        try container.encode(microphone, forKey: .microphone)
+        try container.encode(refinement, forKey: .refinement)
+        try container.encode(refinementProviders, forKey: .refinementProviders)
+        try container.encode(speechRecognitionProviders, forKey: .speechRecognitionProviders)
+        try container.encode(customRefinementModes, forKey: .customRefinementModes)
+        try container.encodeIfPresent(
+            legacySavedCustomRefinement, forKey: .savedCustomRefinement)
+        try container.encodeIfPresent(refinementModeShortcut, forKey: .refinementModeShortcut)
+        try container.encode(refinementPromptOverrides, forKey: .refinementPromptOverrides)
+        try container.encode(launchAtLogin, forKey: .launchAtLogin)
+        try container.encodeIfPresent(doubaoResourceID, forKey: .doubaoResourceID)
+        try container.encode(historyRetention, forKey: .historyRetention)
+        try container.encode(historyRetentionWhenEnabled, forKey: .historyRetentionWhenEnabled)
     }
 
     private static func enabledRetention(
@@ -402,10 +447,20 @@ public protocol AppSettingsStoring: Sendable {
         async throws
         -> SpeakerAppSettings
 
+    /// Adds or replaces one Custom Mode; see
+    /// `SpeakerAppSettings.saveCustomRefinementMode`.
     @discardableResult
-    func updateSavedCustomRefinement(
-        _ refinement: RefinementPreference
+    func saveCustomRefinementMode(
+        _ mode: CustomRefinementMode
     ) async throws -> SpeakerAppSettings
+
+    /// Removes one Custom Mode; deleting the selected one selects Default
+    /// Smoothing in the same write.
+    @discardableResult
+    func deleteCustomRefinementMode(id: UUID) async throws -> SpeakerAppSettings
+
+    @discardableResult
+    func moveCustomRefinementMode(id: UUID, to index: Int) async throws -> SpeakerAppSettings
 
     @discardableResult
     func updateRefinementPromptOverride(
@@ -549,7 +604,7 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
         _ refinement: RefinementPreference
     ) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
-        settings.refinement = refinement
+        settings.selectRefinement(refinement)
         try save(settings)
         return settings
     }
@@ -576,11 +631,37 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     }
 
     @discardableResult
-    public func updateSavedCustomRefinement(
-        _ refinement: RefinementPreference
+    public func saveCustomRefinementMode(
+        _ mode: CustomRefinementMode
     ) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
-        settings.savedCustomRefinement = refinement
+        try settings.saveCustomRefinementMode(mode)
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func deleteCustomRefinementMode(id: UUID) throws -> SpeakerAppSettings {
+        var settings = try settingsForUpdate()
+        settings.deleteCustomRefinementMode(id: id)
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func moveCustomRefinementMode(id: UUID, to index: Int) throws -> SpeakerAppSettings {
+        var settings = try settingsForUpdate()
+        settings.moveCustomRefinementMode(id: id, to: index)
+        try save(settings)
+        return settings
+    }
+
+    @discardableResult
+    public func updateRefinementModeShortcut(
+        _ hotKey: CustomHotKey?
+    ) throws -> SpeakerAppSettings {
+        var settings = try settingsForUpdate()
+        settings.refinementModeShortcut = hotKey
         try save(settings)
         return settings
     }

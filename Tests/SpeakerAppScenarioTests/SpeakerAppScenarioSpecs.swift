@@ -3431,22 +3431,26 @@ struct SpeakerAppScenarioSpecs {
             )
             try expect(model.mode == expectedMode)
             let saved = await settingsStore.settings
-            try expect(
-                saved.savedCustomRefinement == RefinementPreference(mode: expectedMode)
-            )
-            try expect(saved.refinement == RefinementPreference(mode: expectedMode))
+            try expect(saved.customRefinementModes.count == 1)
+            guard let stored = saved.customRefinementModes.first else {
+                throw SpecFailure(message: "the Custom Mode was not saved")
+            }
+            try expect(stored.textRefinementMode == expectedMode)
+            try expect(saved.refinement == .custom(stored))
+            try expect(model.selection == .custom(stored.id))
             let currentMode = await configuration.currentRefinementMode()
             try expect(currentMode == expectedMode)
         }
 
         await runAsync(
-            "custom mode cannot be saved without a stored DeepSeek key",
+            "custom mode cannot be enabled without a stored DeepSeek key but can be saved",
             failures: &failures
         ) {
+            let settingsStore = ScenarioAppSettingsStore()
             let model = RefinementSettingsModel(
                 service: ScenarioDeepSeekSettingsService(hasKey: false),
                 configuration: VoiceInputConfigurationController(),
-                settingsStore: ScenarioAppSettingsStore()
+                settingsStore: settingsStore
             )
 
             await model.load()
@@ -3455,6 +3459,191 @@ struct SpeakerAppScenarioSpecs {
 
             try expect(!model.hasStoredKey)
             try expect(!model.canSaveCustomMode)
+            try expect(model.canSaveCustomModeDraft)
+
+            await model.saveCustomMode(enabling: false)
+            let saved = await settingsStore.settings
+            try expect(saved.customRefinementModes.map(\.name) == ["工作邮件"])
+            try expect(saved.refinement == .defaultSmooth && model.mode == .defaultSmooth)
+        }
+
+        await runAsync(
+            "refinement settings keep several Custom Modes and deleting the active one falls back",
+            failures: &failures
+        ) {
+            let settingsStore = ScenarioAppSettingsStore()
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: configuration,
+                settingsStore: settingsStore
+            )
+            await model.load()
+
+            for (name, prompt) in [("邮件", "整理成邮件"), ("笔记", "整理成要点"), ("周报", "整理成周报")] {
+                model.beginNewCustomMode()
+                try expect(model.editingCustomModeID == nil)
+                model.customName = name
+                model.customPrompt = prompt
+                await model.saveCustomMode(enabling: false)
+            }
+            try expect(model.customModes.map(\.name) == ["邮件", "笔记", "周报"])
+            try expect(model.mode == .defaultSmooth, "saving without enabling changed the mode")
+
+            let notes = model.customModes[1]
+            await model.selectCustomMode(notes.id)
+            try expect(model.selection == .custom(notes.id) && model.choice == .custom)
+            let selectedMode = await configuration.currentRefinementMode()
+            try expect(selectedMode == notes.textRefinementMode)
+
+            // Editing the mode in use applies its new prompt to the next session.
+            model.editCustomMode(notes.id)
+            try expect(model.isEditingActiveCustomMode)
+            model.customPrompt = "整理成三条要点"
+            await model.saveCustomMode(enabling: false)
+            let editedMode = await configuration.currentRefinementMode()
+            try expect(editedMode == .custom(name: "笔记", prompt: "整理成三条要点"))
+
+            await model.moveCustomMode(notes.id, by: -1)
+            try expect(model.customModes.map(\.name) == ["笔记", "邮件", "周报"])
+            let persistedOrder = await settingsStore.settings.customRefinementModes.map(\.name)
+            try expect(persistedOrder == ["笔记", "邮件", "周报"])
+
+            await model.deleteCustomMode(notes.id)
+            try expect(model.customModes.map(\.name) == ["邮件", "周报"])
+            try expect(model.selection == .defaultSmooth && model.mode == .defaultSmooth)
+            let fallbackMode = await configuration.currentRefinementMode()
+            try expect(fallbackMode == .defaultSmooth)
+            let saved = await settingsStore.settings
+            try expect(saved.refinement == .defaultSmooth)
+        }
+
+        await runAsync(
+            "refinement settings stop adding Custom Modes at the list limit",
+            failures: &failures
+        ) {
+            var settings = SpeakerAppSettings()
+            for index in 1...CustomRefinementMode.maximumCount {
+                try settings.saveCustomRefinementMode(
+                    CustomRefinementMode(name: "模式\(index)", prompt: "提示\(index)"))
+            }
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore(settings: settings)
+            )
+            await model.load()
+            try expect(!model.canAddCustomMode)
+            model.beginNewCustomMode()
+            try expect(model.editingCustomModeID != nil, "a new draft opened at the limit")
+        }
+
+        await runAsync(
+            "the Refinement Mode shortcut steps through every mode for the next session only",
+            failures: &failures
+        ) {
+            let mail = CustomRefinementMode(name: "邮件", prompt: "整理成邮件")
+            let notes = CustomRefinementMode(name: "笔记", prompt: "整理成要点")
+            let settingsStore = ScenarioAppSettingsStore(
+                settings: SpeakerAppSettings(customRefinementModes: [mail, notes]))
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: configuration,
+                settingsStore: settingsStore
+            )
+            await model.load()
+
+            // A session that started before the press keeps its mode.
+            let pressedSnapshot = await configuration.captureSnapshot()
+            var outcomes: [RefinementModeCycleOutcome] = []
+            for _ in 0..<5 {
+                outcomes.append(await model.cycleMode())
+            }
+            try expect(
+                outcomes == [
+                    .selected(.conciseCleanup()), .selected(.fullRewrite()),
+                    .selected(mail.textRefinementMode), .selected(notes.textRefinementMode),
+                    .selected(.defaultSmooth),
+                ])
+            try expect(pressedSnapshot.refinementMode == .defaultSmooth)
+
+            _ = await model.cycleMode()
+            let next = await configuration.captureSnapshot()
+            try expect(next.refinementMode == .conciseCleanup())
+            let saved = await settingsStore.settings
+            try expect(saved.refinement == .conciseCleanup, "the stepped mode was not saved")
+        }
+
+        await runAsync(
+            "concurrent Refinement Mode shortcut presses each step one mode",
+            failures: &failures
+        ) {
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore()
+            )
+            await model.load()
+            async let first = model.cycleMode()
+            async let second = model.cycleMode()
+            _ = await (first, second)
+            try expect(model.selection == .fullRewrite)
+        }
+
+        await runAsync(
+            "the Refinement Mode shortcut asks for a Key before leaving Default Smoothing",
+            failures: &failures
+        ) {
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: false),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore()
+            )
+            await model.load()
+            let outcome = await model.cycleMode()
+            try expect(outcome == .requiresKey(providerName: model.providerName))
+            try expect(model.mode == .defaultSmooth)
+            try expect(
+                SpeakerCopy.RefinementModeShortcut.notice(for: outcome)?.contains("Key") == true)
+            try expect(SpeakerCopy.RefinementModeShortcut.notice(for: .unchanged) == nil)
+        }
+
+        await runAsync(
+            "the menu lists built-in modes then every Custom Mode",
+            failures: &failures
+        ) {
+            let mail = CustomRefinementMode(name: "邮件", prompt: "整理成邮件")
+            let notes = CustomRefinementMode(name: "笔记", prompt: "整理成要点")
+            let settings = SpeakerAppSettings(customRefinementModes: [mail, notes])
+            let configuration = VoiceInputConfigurationController()
+            let model = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: true),
+                configuration: configuration,
+                settingsStore: ScenarioAppSettingsStore(settings: settings)
+            )
+            await model.load()
+            try expect(
+                model.menuEntries.map(\.title)
+                    == ["默认顺滑", "精简清理", "完整重写", "邮件", "笔记"])
+            try expect(model.menuEntries.allSatisfy(\.isEnabled))
+            try expect(
+                model.menuEntries.filter(\.isSelected).map(\.selection) == [.defaultSmooth])
+
+            await model.selectMode(.custom(notes.id))
+            try expect(model.menuEntries.filter(\.isSelected).map(\.title) == ["笔记"])
+            let selectedMode = await configuration.currentRefinementMode()
+            try expect(selectedMode == notes.textRefinementMode)
+
+            let locked = RefinementSettingsModel(
+                service: ScenarioDeepSeekSettingsService(hasKey: false),
+                configuration: VoiceInputConfigurationController(),
+                settingsStore: ScenarioAppSettingsStore(settings: settings)
+            )
+            await locked.load()
+            try expect(
+                locked.menuEntries.filter(\.isEnabled).map(\.selection) == [.defaultSmooth],
+                "a mode that needs a Key was enabled without one")
         }
 
         await runAsync(
@@ -5459,7 +5648,7 @@ private actor ScenarioAppSettingsStore: AppSettingsStoring {
     func updateRefinement(
         _ refinement: RefinementPreference
     ) -> SpeakerAppSettings {
-        settings.refinement = refinement
+        settings.selectRefinement(refinement)
         return settings
     }
 
@@ -5491,10 +5680,22 @@ private actor ScenarioAppSettingsStore: AppSettingsStoring {
     }
 
     @discardableResult
-    func updateSavedCustomRefinement(
-        _ refinement: RefinementPreference
-    ) -> SpeakerAppSettings {
-        settings.savedCustomRefinement = refinement
+    func saveCustomRefinementMode(
+        _ mode: CustomRefinementMode
+    ) throws -> SpeakerAppSettings {
+        try settings.saveCustomRefinementMode(mode)
+        return settings
+    }
+
+    @discardableResult
+    func deleteCustomRefinementMode(id: UUID) -> SpeakerAppSettings {
+        settings.deleteCustomRefinementMode(id: id)
+        return settings
+    }
+
+    @discardableResult
+    func moveCustomRefinementMode(id: UUID, to index: Int) -> SpeakerAppSettings {
+        settings.moveCustomRefinementMode(id: id, to: index)
         return settings
     }
 

@@ -31,6 +31,7 @@ struct SpeakerCoreSpecs {
         await OwnerOnlyPersistenceSpecs.run(failures: &failures)
         await VersionedDocumentStoreSpecs.run(failures: &failures)
         await AppSettingsStoreSpecs.run(failures: &failures)
+        await RefinementModeSpecs.run(failures: &failures)
         await UsageStatisticsSpecs.run(failures: &failures)
 
         SpecSummary.finish(failures: failures, label: "core specs")
