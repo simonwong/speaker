@@ -153,10 +153,6 @@ private struct OnDeviceRecognitionSettings: View {
 
     var body: some View {
         SpeakerRow("语言模型") { modelStatus }
-        SettingsRowDivider()
-        SettingsNotice(
-            text: "在这台 Mac 上识别，录音不上传，也不需要 API Key。识别语言跟随系统首选语言。"
-                + "中英混说和标点不如云端服务，建议同时开启文字整理。")
     }
 
     @ViewBuilder

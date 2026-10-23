@@ -68,15 +68,6 @@ public enum RefinementModeSelection: Equatable, Hashable, Sendable {
         builtIn + customModes.map { .custom($0.id) }
     }
 
-    /// The entry after `current`, wrapping to Default Smoothing after the
-    /// last one. A selection missing from the list, such as a deleted Custom
-    /// Mode, steps to the first entry.
-    public func next(customModes: [CustomRefinementMode]) -> RefinementModeSelection {
-        let order = Self.order(customModes: customModes)
-        guard let index = order.firstIndex(of: self) else { return order[0] }
-        return order[(index + 1) % order.count]
-    }
-
     package var builtInMode: BuiltInRefinementMode? {
         switch self {
         case .conciseCleanup: .conciseCleanup

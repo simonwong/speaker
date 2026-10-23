@@ -86,7 +86,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
     private let historyModel: HistoryModel
     private let loginItem: LoginItemSettingsModel
     private let shortcut: VoiceShortcutFeature
-    private let refinementModeShortcut: RefinementModeShortcutFeature
     private let microphones: MicrophoneSelectionFeature
     private let onboarding: OnboardingPresenter
     private let preferences: UserDefaults
@@ -105,7 +104,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         historyModel: HistoryModel,
         loginItem: LoginItemSettingsModel,
         shortcut: VoiceShortcutFeature,
-        refinementModeShortcut: RefinementModeShortcutFeature,
         microphones: MicrophoneSelectionFeature,
         onboarding: OnboardingPresenter,
         preferences: UserDefaults,
@@ -123,7 +121,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         self.historyModel = historyModel
         self.loginItem = loginItem
         self.shortcut = shortcut
-        self.refinementModeShortcut = refinementModeShortcut
         self.microphones = microphones
         self.onboarding = onboarding
         self.preferences = preferences
@@ -235,10 +232,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
         shortcut.restore(preference)
     }
 
-    func restoreRefinementModeShortcut(_ hotKey: CustomHotKey?) {
-        refinementModeShortcut.restore(hotKey)
-    }
-
     func presentOnboarding() {
         #if DEBUG
             if let captureURL = SpeakerDebugLaunchOptions.onboardingCaptureURL(
@@ -271,7 +264,6 @@ final class SpeakerRuntimeStartupStages: RuntimeStartupStages {
 @MainActor
 final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     private let shortcut: VoiceShortcutFeature
-    private let refinementModeShortcut: RefinementModeShortcutFeature
     private let microphones: MicrophoneSelectionFeature
     private let permissionRefresh: PermissionRefreshCoordinator
     private let startup: RuntimeStartupSequence
@@ -283,7 +275,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
 
     init(
         shortcut: VoiceShortcutFeature,
-        refinementModeShortcut: RefinementModeShortcutFeature,
         microphones: MicrophoneSelectionFeature,
         permissionRefresh: PermissionRefreshCoordinator,
         startup: RuntimeStartupSequence,
@@ -294,7 +285,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         voiceInput: VoiceInputExperience
     ) {
         self.shortcut = shortcut
-        self.refinementModeShortcut = refinementModeShortcut
         self.microphones = microphones
         self.permissionRefresh = permissionRefresh
         self.startup = startup
@@ -305,10 +295,7 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
         self.voiceInput = voiceInput
     }
 
-    func stopTrigger() {
-        shortcut.beginShutdown()
-        refinementModeShortcut.beginShutdown()
-    }
+    func stopTrigger() { shortcut.beginShutdown() }
     func stopPermissionRefresh() { permissionRefresh.stop() }
     func stopMicrophoneSelection() { microphones.beginShutdown() }
     func cancelStartup() { startup.cancel() }
@@ -320,7 +307,6 @@ final class SpeakerRuntimeShutdownStages: RuntimeShutdownStages {
     func awaitStartup() async { await startup.waitUntilFinished() }
     func flushPersistence() async {
         await shortcut.flushPersistence()
-        await refinementModeShortcut.flushPersistence()
         await microphones.flushPersistence()
     }
 }

@@ -270,8 +270,8 @@ package final class VoiceInputExperience: ObservableObject {
     private var noticeHideTask: Task<Void, Never>?
     private let secureInputHolderName: @MainActor () -> String?
     private let secureInputNoticeDuration: Duration
-    /// A note shown while no session is on screen: the Secure Event Input
-    /// note or the Refinement Mode notice. It keeps its own timer.
+    /// A note shown while no session is on screen, such as the Secure Event
+    /// Input note. It keeps its own timer.
     private var idleNoticeTitle: String? {
         didSet { showsSecureInputNotice = false }
     }
@@ -589,15 +589,6 @@ package final class VoiceInputExperience: ObservableObject {
         let title = SecureInputBlockedNotice.title(holderName: secureInputHolderName())
         showIdleNotice(title, for: secureInputNoticeDuration)
         showsSecureInputNotice = true
-    }
-
-    /// Names the Refinement Mode new sessions use after a press of the
-    /// Refinement Mode shortcut. It shows only while no session is on screen,
-    /// so it never covers a recording, processing, retained result, or
-    /// problem; a later press replaces it and restarts its timer.
-    package func showRefinementModeNotice(_ title: String) {
-        guard !isShuttingDown, canShowIdleNotice else { return }
-        showIdleNotice(title, for: noticeDuration)
     }
 
     private var canShowIdleNotice: Bool {

@@ -3,15 +3,10 @@ import SpeakerCore
 import SpeakerCoreSpecFakes
 import SpeakerSpecSupport
 
-/// The Custom Mode list, the Refinement Mode order, and the optional shortcut
-/// that steps through it. The mode is always the user's own choice, fixed when
-/// the recording shortcut is pressed; nothing here reads the frontmost App.
+/// The Custom Mode list and the Refinement Mode order. The mode is always the
+/// user's own choice, fixed when the recording shortcut is pressed; nothing
+/// here reads the frontmost App.
 enum RefinementModeSpecs: CoreSpecDomain {
-    /// ⌃⌥M, a safe key chord.
-    static let controlOptionM = CustomHotKey(keyCode: 46, modifiers: 6_144, displayName: "⌃⌥M")
-    /// ⌥Space, the same physical keys as the custom recording shortcut below.
-    static let optionSpace = CustomHotKey(keyCode: 49, modifiers: 2_048, displayName: "⌥ Space")
-
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
@@ -36,7 +31,6 @@ enum RefinementModeSpecs: CoreSpecDomain {
                 "the selected Custom Mode did not attach to the migrated entry")
             try expect(
                 first == second, "two loads of one unmigrated file named different modes")
-            try expect(first.refinementModeShortcut == nil)
         }
 
         await runAsync(
@@ -72,7 +66,6 @@ enum RefinementModeSpecs: CoreSpecDomain {
             let notes = CustomRefinementMode(name: "笔记", prompt: "整理成要点")
             try await store.saveCustomRefinementMode(notes)
             try await store.updateRefinement(.custom(notes))
-            try await store.updateRefinementModeShortcut(controlOptionM)
 
             // An older build reads `refinement` and `savedCustomRefinement` with
             // the `kind`/`name`/`prompt` keys and ignores keys it does not know.
@@ -101,7 +94,6 @@ enum RefinementModeSpecs: CoreSpecDomain {
 
             let restored = await VersionedLocalAppSettingsStore(fileURL: fileURL).load().settings
             try expect(restored.customRefinementModes.map(\.name) == ["邮件", "笔记"])
-            try expect(restored.refinementModeShortcut == controlOptionM)
         }
 
         run(
@@ -159,28 +151,16 @@ enum RefinementModeSpecs: CoreSpecDomain {
         }
 
         run(
-            "the mode order is built-in modes then Custom Modes in list order, and wraps",
+            "the mode order is built-in modes then Custom Modes in list order",
             failures: &failures
         ) {
             let mail = CustomRefinementMode(name: "邮件", prompt: "整理成邮件")
             let notes = CustomRefinementMode(name: "笔记", prompt: "整理成要点")
-            let modes = [mail, notes]
-            var visited: [RefinementModeSelection] = []
-            var current = RefinementModeSelection.defaultSmooth
-            for _ in 0..<6 {
-                current = current.next(customModes: modes)
-                visited.append(current)
-            }
             try expect(
-                visited == [
-                    .conciseCleanup, .fullRewrite, .custom(mail.id), .custom(notes.id),
-                    .defaultSmooth, .conciseCleanup,
+                RefinementModeSelection.order(customModes: [mail, notes]) == [
+                    .defaultSmooth, .conciseCleanup, .fullRewrite, .custom(mail.id),
+                    .custom(notes.id),
                 ])
-            try expect(
-                RefinementModeSelection.fullRewrite.next(customModes: []) == .defaultSmooth)
-            try expect(
-                RefinementModeSelection.custom(UUID()).next(customModes: modes) == .defaultSmooth,
-                "a deleted selection did not restart the order")
         }
 
         await runAsync(
@@ -212,10 +192,9 @@ enum RefinementModeSpecs: CoreSpecDomain {
             )
 
             await sessions.dispatchPress()
-            // The Refinement Mode shortcut steps to the next mode mid-session.
-            let next = RefinementModeSelection.custom(mail.id).next(customModes: [mail, notes])
+            // The menu selects another mode mid-session.
             let nextMode = try require(
-                next.refinementMode(
+                RefinementModeSelection.custom(notes.id).refinementMode(
                     customModes: [mail, notes], promptOverrides: RefinementPromptOverrides()))
             try await configuration.selectRefinementMode(nextMode)
             await sessions.dispatchRelease()
@@ -237,82 +216,6 @@ enum RefinementModeSpecs: CoreSpecDomain {
                 modes == [mail.textRefinementMode, notes.textRefinementMode],
                 "the switch reached the session that was already recording")
         }
-
-        run(
-            "the Refinement Mode shortcut accepts only safe key chords other than the recording shortcut",
-            failures: &failures
-        ) {
-            let recording = VoiceShortcutPreference(customHotKey: optionSpace)
-            func rejection(_ hotKey: CustomHotKey) -> RefinementModeShortcutRejection? {
-                RefinementModeShortcutFeature.rejection(for: hotKey, recordingShortcut: recording)
-            }
-            try expect(rejection(controlOptionM) == nil)
-            try expect(
-                rejection(.modifierOnly(.rightOption, displayName: "右 ⌥")) == .modifierOnly)
-            try expect(
-                rejection(CustomHotKey(keyCode: 53, modifiers: 6_144, displayName: "⌃⌥Esc"))
-                    == .reservedForCancellation)
-            try expect(
-                rejection(CustomHotKey(keyCode: 9, modifiers: 256, displayName: "⌘V"))
-                    == .editingConflict)
-            try expect(
-                rejection(CustomHotKey(keyCode: 46, modifiers: 512, displayName: "⇧M"))
-                    == .unsafeShortcut)
-            try expect(
-                rejection(CustomHotKey(keyCode: 49, modifiers: 2_048, displayName: "⌥Space"))
-                    == .sameAsRecordingShortcut)
-            try expect(
-                RefinementModeShortcutFeature.rejection(
-                    for: optionSpace, recordingShortcut: .functionKey) == nil)
-        }
-
-        await runAsync(
-            "the Refinement Mode shortcut registers, persists, clears, and restores",
-            failures: &failures
-        ) {
-            let monitor = ActionShortcutMonitorFake()
-            let persisted = PersistedHotKeys()
-            let recording = RecordingShortcutBox()
-            let feature = RefinementModeShortcutFeature(
-                monitor: monitor,
-                recordingShortcut: { recording.value },
-                persist: { await persisted.append($0) }
-            )
-            try expect(feature.activation == .notSet)
-
-            try expect(feature.select(controlOptionM) == nil)
-            try expect(feature.activation == .active(controlOptionM))
-            try expect(monitor.registeredKeys == [controlOptionM])
-            await feature.flushPersistence()
-            let afterSelect = await persisted.values
-            try expect(afterSelect == [controlOptionM])
-            try expect(feature.conflicts(withRecordingShortcut: controlOptionM))
-
-            recording.value = VoiceShortcutPreference(customHotKey: optionSpace)
-            try expect(feature.select(optionSpace) == .sameAsRecordingShortcut)
-            try expect(feature.hotKey == controlOptionM, "a refused chord replaced the shortcut")
-
-            feature.clear()
-            await feature.flushPersistence()
-            try expect(feature.activation == .notSet)
-            try expect(!monitor.isRegistered)
-            let afterClear = await persisted.values
-            try expect(afterClear == [controlOptionM, nil])
-
-            let restored = RefinementModeShortcutFeature(
-                monitor: ActionShortcutMonitorFake(),
-                recordingShortcut: { recording.value },
-                persist: { _ in }
-            )
-            restored.restore(optionSpace)
-            try expect(
-                restored.activation == .conflict(optionSpace),
-                "a saved chord equal to the recording shortcut was registered")
-            restored.restore(controlOptionM)
-            try expect(restored.activation == .active(controlOptionM))
-            restored.beginShutdown()
-            try expect(restored.activation == .stopped)
-        }
     }
 
     private static func require<T>(_ value: T?) throws -> T {
@@ -325,34 +228,5 @@ enum RefinementModeSpecs: CoreSpecDomain {
             .appendingPathComponent("speaker-refinement-modes-\(label)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
-    }
-}
-
-@MainActor
-final class ActionShortcutMonitorFake: ActionShortcutMonitoring {
-    private(set) var isRegistered = false
-    private(set) var registeredKeys: [CustomHotKey] = []
-
-    func register(_ hotKey: CustomHotKey) -> CustomShortcutRegistrationResult {
-        registeredKeys.append(hotKey)
-        isRegistered = true
-        return .active
-    }
-
-    func unregister() {
-        isRegistered = false
-    }
-}
-
-@MainActor
-private final class RecordingShortcutBox {
-    var value = VoiceShortcutPreference.functionKey
-}
-
-private actor PersistedHotKeys {
-    private(set) var values: [CustomHotKey?] = []
-
-    func append(_ hotKey: CustomHotKey?) {
-        values.append(hotKey)
     }
 }

@@ -114,6 +114,7 @@ package final class VoiceShortcutFeature: ObservableObject {
     private var hasUserSelection = false
     private var hasRestoredPreference = false
     private var isShuttingDown = false
+    private var isSuspendedForRecorder = false
     private var failedPersistencePreference: VoiceShortcutPreference?
 
     private static let accessibilityNotice = VoiceShortcutNotice(
@@ -147,13 +148,14 @@ package final class VoiceShortcutFeature: ObservableObject {
 
     package func select(_ preference: VoiceShortcutPreference) {
         guard !isShuttingDown else { return }
+        isSuspendedForRecorder = false
         hasUserSelection = true
         hasRestoredPreference = true
         activate(preference, persist: true)
     }
 
     package func retryActivation() {
-        guard !isShuttingDown else { return }
+        guard !isShuttingDown, !isSuspendedForRecorder else { return }
         activate(preference, persist: false)
     }
 
@@ -170,6 +172,25 @@ package final class VoiceShortcutFeature: ObservableObject {
     }
 
     package func synchronize() {
+        guard !isShuttingDown, !isSuspendedForRecorder else { return }
+        synchronizeActivation()
+    }
+
+    /// Releases the live shortcut while Settings records a new one, so a
+    /// press of the current shortcut reaches the recorder instead of starting
+    /// a session. `activation` keeps describing the chosen shortcut.
+    package func suspendForRecorder() {
+        guard !isShuttingDown, !isSuspendedForRecorder else { return }
+        isSuspendedForRecorder = true
+        functionKeyMonitor.stop()
+        customShortcutMonitor.unregister()
+    }
+
+    /// Listens for the chosen shortcut again after a recording that captured
+    /// nothing. A captured shortcut ends the suspension through `select`.
+    package func resumeAfterRecorder() {
+        guard isSuspendedForRecorder else { return }
+        isSuspendedForRecorder = false
         guard !isShuttingDown else { return }
         synchronizeActivation()
     }
