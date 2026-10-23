@@ -35,11 +35,6 @@ private struct AboutSettingsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             identity
 
-            if let message = softwareUpdate.state.unavailableMessage {
-                SpeakerNotice(text: message)
-                    .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
-            }
-
             VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.sectionSpacing) {
                 section(.project) { projectRows }
                 section(.author) { authorRows }
@@ -61,20 +56,20 @@ private struct AboutSettingsPage: View {
         }
     }
 
+    /// The app icon's size here: a brand mark, so a local constant.
+    private static let identityTileSize: CGFloat = 64
+
     /// The identity block names the product and owns its version and update
     /// check; the project card owns every outside link, so no fact appears
-    /// twice on this page.
+    /// twice on this page. Why updates are unavailable is said once, in
+    /// Settings, and repeated here only as the disabled button's tooltip.
     private var identity: some View {
-        HStack(spacing: 16) {
-            SpeakerIdentityTile(size: 64)
+        HStack(spacing: SpeakerSpacing.l) {
+            SpeakerIdentityTile(size: Self.identityTileSize)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: SpeakerSpacing.xs) {
                 Text("Speaker")
                     .font(SpeakerTypography.title)
-                Text("按住快捷键说话，文字送达松开时所在的输入框。")
-                    .font(SpeakerTypography.detail)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 Text(versionText)
                     .font(SpeakerTypography.detail.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -82,22 +77,24 @@ private struct AboutSettingsPage: View {
                     .accessibilityLabel("当前版本 \(versionText)")
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: SpeakerSpacing.m)
 
             Button("检查更新…") {
                 softwareUpdate.checkForUpdates()
             }
             .buttonStyle(SpeakerButtonStyle())
             .disabled(!softwareUpdate.state.canCheckForUpdates)
+            .help(softwareUpdate.state.unavailableMessage ?? "")
         }
     }
 
     @ViewBuilder
     private var projectRows: some View {
         SpeakerRow("官网", detail: "speaker.moonunder.app") {
-            Button("打开官网") {
+            Button("打开") {
                 routeEffects.openURL(ExternalLinks.speakerWebsite)
             }
+            .accessibilityLabel("打开 Speaker 官网")
         }
         SpeakerRowDivider()
         SpeakerRow("源代码", detail: "MIT 许可证") {
@@ -105,67 +102,64 @@ private struct AboutSettingsPage: View {
                 routeEffects.openURL(ExternalLinks.speakerRepository)
             } label: {
                 Label {
-                    Text("在 GitHub 查看")
+                    Text("GitHub")
                 } icon: {
                     GitHubMark()
                         .fill(Color.primary)
-                        .frame(width: 14, height: 14)
+                        .frame(width: Self.gitHubMarkSize, height: Self.gitHubMarkSize)
                 }
             }
             .accessibilityLabel("在 GitHub 查看 Speaker")
         }
         SpeakerRowDivider()
-        SpeakerRow("反馈问题") {
-            Button("提交反馈") {
+        SpeakerRow("反馈问题", detail: "GitHub Issues") {
+            Button("打开") {
                 routeEffects.openURL(ExternalLinks.speakerIssues)
             }
+            .accessibilityLabel("在 GitHub 提交反馈")
         }
     }
+
+    /// The GitHub mark sits beside a button title, at its cap height.
+    private static let gitHubMarkSize: CGFloat = 14
 
     @ViewBuilder
     private var authorRows: some View {
         SpeakerRow("Simon Wong", detail: "simonw.dev") {
-            Button("打开网站") {
+            Button("打开") {
                 routeEffects.openURL(ExternalLinks.authorWebsite)
             }
             .accessibilityLabel("打开 Simon Wong 的网站")
         }
         SpeakerRowDivider()
         SpeakerRow("MoonUnder Studio", detail: "moonunder.app") {
-            Button("打开网站") {
+            Button("打开") {
                 routeEffects.openURL(ExternalLinks.studioWebsite)
             }
             .accessibilityLabel("打开 MoonUnder Studio 的网站")
         }
     }
 
+    /// The privacy promises. Each action sits on the row it belongs to.
     @ViewBuilder
     private var privacyBoundaryRows: some View {
-        SpeakerRow(
-            "音频",
-            detail: "只在内存中转换并发送给所选语音识别服务，不写入磁盘或历史。"
-        )
+        SpeakerRow("音频", detail: "只在内存中转换并发送给所选语音识别服务，不写入磁盘或历史")
         SpeakerRowDivider()
-        SpeakerRow(
-            "识别文字",
-            detail: "保留在本机；只有启用文字整理模式时才会发送给所选文字整理服务。"
-        )
+        SpeakerRow("识别文字", detail: "保留在本机；只在启用文字整理时发送给所选文字整理服务")
         SpeakerRowDivider()
-        SpeakerRow(
-            "历史、设置与词库",
-            detail: "只保存在这台 Mac 的当前用户目录，不包含音频或 API Key。"
-        )
-        SpeakerRowDivider()
-
-        HStack {
-            Spacer()
-            if let privacyPolicyURL = ExternalLinks.privacyPolicy {
-                Button("查看完整隐私说明") {
+        SpeakerRow("历史、设置与词库", detail: "只保存在这台 Mac 的当前用户目录，不包含音频或 API Key") {
+            Button("在 Finder 中显示") {
+                routeEffects.openURL(speakerApplicationSupportDirectory)
+            }
+            .accessibilityLabel("在 Finder 中显示本地数据")
+        }
+        if let privacyPolicyURL = ExternalLinks.privacyPolicy {
+            SpeakerRowDivider()
+            SpeakerRow("完整隐私说明") {
+                Button("打开") {
                     routeEffects.openURL(privacyPolicyURL)
                 }
-            }
-            Button("打开本地数据文件夹") {
-                routeEffects.openURL(speakerApplicationSupportDirectory)
+                .accessibilityLabel("打开完整隐私说明")
             }
         }
     }
@@ -175,22 +169,17 @@ private struct AboutSettingsPage: View {
     @ViewBuilder
     private var diagnosticsRows: some View {
         ForEach(diagnostics.warnings, id: \.self) { warning in
-            SpeakerNotice(tone: .warning, text: warning)
+            SpeakerNotice(
+                tone: .warning,
+                text: warning,
+                onDismiss: .init(label: "清除提示") { diagnostics.dismissWarnings() }
+            )
         }
         if !diagnostics.warnings.isEmpty {
-            HStack {
-                Spacer()
-                Button("清除提示") {
-                    diagnostics.dismissWarnings()
-                }
-            }
             SpeakerRowDivider()
         }
 
-        SpeakerRow(
-            "诊断信息",
-            detail: "包含版本、权限和服务状态，不包含文字、音频或 API Key。"
-        ) {
+        SpeakerRow("诊断信息", detail: "不包含文字、音频或 API Key") {
             Button("复制诊断信息") {
                 Task { await copyDiagnostics() }
             }

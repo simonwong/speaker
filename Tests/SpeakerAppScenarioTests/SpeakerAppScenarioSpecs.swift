@@ -104,8 +104,8 @@ struct SpeakerAppScenarioSpecs {
                 permissions: PermissionSnapshot(accessibility: .granted, microphone: .granted),
                 recognitionProvider: .apple, recognitionReadiness: model.readiness)
             try expect(gap == .speechRecognitionKey(.apple))
-            try expect(
-                gap?.message.contains("语言模型") == true && gap?.message.contains("Key") == false)
+            let bannerText = gap.map(VoiceInputSetupBanner.text(for:)) ?? ""
+            try expect(bannerText.contains("语言模型") && !bannerText.contains("Key"))
 
             await model.installOnDeviceModel()
             try expect(model.onDeviceModelStatus == .installed && model.readiness == .ready)
@@ -3911,7 +3911,7 @@ struct SpeakerAppScenarioSpecs {
                 VoiceInputSetupGap.speechRecognitionKey(.doubao).settingsGroup
                     == .speechRecognition)
             try expect(
-                VoiceInputSetupGap.speechRecognitionKey(.doubao).message.contains("豆包语音"))
+                VoiceInputSetupBanner.text(for: .speechRecognitionKey(.doubao)).contains("豆包语音"))
         }
 
         await runAsync(
@@ -3993,10 +3993,10 @@ struct SpeakerAppScenarioSpecs {
             try expect(
                 MainWindowLayout(availableWidth: 900).widthClass == .regular
             )
-            try expect(minimum.pageHorizontalPadding == 18)
+            try expect(minimum.pageHorizontalPadding == 16)
             try expect(regular.pageHorizontalPadding == 24)
-            try expect(minimum.overviewMetricDividerPadding == 18)
-            try expect(regular.overviewMetricDividerPadding == 34)
+            try expect(minimum.overviewMetricDividerPadding == 16)
+            try expect(regular.overviewMetricDividerPadding == 32)
         }
 
         run(
@@ -5153,7 +5153,7 @@ struct SpeakerAppScenarioSpecs {
             experience.shortcutTarget.receive(.released)
             let historyFailurePresented = await eventually(before: .seconds(2)) {
                 experience.state.menu.notice?
-                    .contains("会话历史写入失败") == true
+                    .contains("历史记录写入失败") == true
             }
             let fallbackMessage =
                 VoiceInputNotice.refinementNetworkFallbackMessage
@@ -5428,7 +5428,7 @@ struct SpeakerAppScenarioSpecs {
 
             let noticePresented = await eventually(before: .seconds(2)) {
                 experience.state.menu.notice?
-                    .contains("会话历史写入失败") == true
+                    .contains("历史记录写入失败") == true
             }
             try expect(
                 noticePresented,

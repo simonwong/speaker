@@ -8,6 +8,17 @@ private enum OverviewConstants {
     static let voiceprintDays = 18
 }
 
+/// The voiceprint's drawing constants. Like the heatmap's, they size marks in
+/// a chart, not distances between views.
+private enum VoiceprintMetrics {
+    static let barWidth: CGFloat = 5
+    static let barGap: CGFloat = 4
+    static let minimumBarHeight: CGFloat = 6
+    static let barHeightRange: CGFloat = 18
+    /// The tallest bar with a little headroom.
+    static let rowHeight: CGFloat = 26
+}
+
 /// One overview snapshot: the usage totals and the moment they describe. The
 /// reference date travels with the state so week, voiceprint, and heatmap
 /// windows stay pinned instead of reading the wall clock while rendering.
@@ -68,16 +79,19 @@ package struct OverviewDashboard: View {
         let now = state.referenceDate
 
         SpeakerPage {
-            if let setupGap {
-                VoiceInputSetupBanner(gap: setupGap) { openSetup(setupGap) }
-                    .padding(.bottom, SpeakerSurfaceMetrics.sectionSpacing)
-            }
-            if let whatsNewVersion {
-                WhatsNewBanner(
-                    version: whatsNewVersion,
-                    open: openWhatsNew,
-                    dismiss: dismissWhatsNew
-                )
+            if setupGap != nil || whatsNewVersion != nil {
+                VStack(alignment: .leading, spacing: SpeakerSpacing.s) {
+                    if let setupGap {
+                        VoiceInputSetupBanner(gap: setupGap) { openSetup(setupGap) }
+                    }
+                    if let whatsNewVersion {
+                        WhatsNewBanner(
+                            version: whatsNewVersion,
+                            open: openWhatsNew,
+                            dismiss: dismissWhatsNew
+                        )
+                    }
+                }
                 .padding(.bottom, SpeakerSurfaceMetrics.sectionSpacing)
             }
             OverviewHero(
@@ -125,10 +139,9 @@ private struct OverviewHero: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("累计说出")
                 .font(SpeakerTypography.label)
-                .tracking(1)
                 .foregroundStyle(.secondary)
 
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
+            HStack(alignment: .lastTextBaseline, spacing: SpeakerSpacing.s) {
                 Text(characterCount.formatted(.number.grouping(.automatic)))
                     .font(SpeakerTypography.Display.hero(size: heroNumberSize))
                     .lineLimit(1)
@@ -136,16 +149,16 @@ private struct OverviewHero: View {
                     .contentTransition(.numericText())
 
                 Text("字")
-                    .font(.title3.weight(.semibold))
+                    .font(SpeakerTypography.title)
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 12)
+            .padding(.top, SpeakerSpacing.m)
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.7),
                 value: characterCount
             )
 
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: SpeakerSpacing.s) {
                 OverviewVoiceprint(
                     counts: voiceprintCounts,
                     isLoaded: isLoaded,
@@ -153,20 +166,20 @@ private struct OverviewHero: View {
                 )
                 Text("近 \(OverviewConstants.voiceprintDays) 天")
                     .font(SpeakerTypography.detail)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     // The bars are hidden from VoiceOver; this line carries
                     // what they show.
                     .accessibilityLabel(
                         "近 \(OverviewConstants.voiceprintDays) 天说出 \(voiceprintCounts.reduce(0, +).formatted(.number.grouping(.automatic))) 字"
                     )
             }
-            .padding(.top, 14)
+            .padding(.top, SpeakerSpacing.m)
 
             if showsFirstUseHint {
                 Text("按住快捷键，说出第一句话。")
                     .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
-                    .padding(.top, 11)
+                    .padding(.top, SpeakerSpacing.m)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -195,21 +208,22 @@ private struct OverviewVoiceprint: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 4) {
+        HStack(alignment: .center, spacing: VoiceprintMetrics.barGap) {
             ForEach(Array(counts.enumerated()), id: \.offset) { index, count in
                 let ratio = Double(max(0, count)) / peak
                 Capsule()
                     .fill(
                         count == 0
-                            ? Color.primary.opacity(0.07)
+                            ? SpeakerFill.control
                             : SpeakerVisualIdentity.usageTrace(
                                 ratio,
                                 colorScheme: colorScheme
                             )
                     )
                     .frame(
-                        width: 5,
-                        height: 6 + 18 * pow(ratio, 0.7)
+                        width: VoiceprintMetrics.barWidth,
+                        height: VoiceprintMetrics.minimumBarHeight
+                            + VoiceprintMetrics.barHeightRange * pow(ratio, 0.7)
                     )
                     .scaleEffect(
                         x: 1,
@@ -228,7 +242,7 @@ private struct OverviewVoiceprint: View {
                     )
             }
         }
-        .frame(height: 26)
+        .frame(height: VoiceprintMetrics.rowHeight)
         .onChange(of: isLoaded) { _, loaded in
             if loaded, !isPresented { isPresented = true }
         }
@@ -302,26 +316,30 @@ private struct OverviewMetric: View {
     let value: Text
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.xs) {
             value
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
             Text(label)
                 .font(SpeakerTypography.detail)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
 
+/// A hairline between two figures, as tall as a figure and its label.
 private struct MetricDivider: View {
     let horizontalPadding: CGFloat
+    private static let height: CGFloat = 32
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Rectangle()
-            .fill(Color.primary.opacity(0.12))
-            .frame(width: 0.5, height: 32)
+            .fill(SpeakerStroke.hairline(increasedContrast: contrast == .increased))
+            .frame(width: 1 / displayScale, height: Self.height)
             .padding(.horizontal, horizontalPadding)
             .accessibilityHidden(true)
     }
@@ -338,7 +356,7 @@ private struct OverviewHeatmapCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.m) {
             let heatmap = heatmap
 
             ContributionHeatmapGrid(
@@ -365,8 +383,10 @@ private struct OverviewHeatmapCard: View {
 private enum HeatmapMetrics {
     static let gap = ContributionHeatmapLayout.gap
     static let corner: CGFloat = 3
+    static let legendCorner: CGFloat = 2
     static let monthAxisHeight: CGFloat = 12
     static let legendSwatch: CGFloat = 9
+    static let legendGap: CGFloat = 3
 }
 
 private struct ContributionHeatmapGrid: View {
@@ -385,7 +405,7 @@ private struct ContributionHeatmapGrid: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.s) {
             monthAxis
             LazyVGrid(
                 columns: gridColumns,
@@ -490,11 +510,11 @@ private struct HeatmapLegend: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: HeatmapMetrics.legendGap) {
             Text("少")
-                .padding(.trailing, 2)
+                .padding(.trailing, SpeakerSpacing.hairline)
             ForEach(0...4, id: \.self) { level in
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                RoundedRectangle(cornerRadius: HeatmapMetrics.legendCorner, style: .continuous)
                     .fill(HeatmapPalette.color(forLevel: level, colorScheme: colorScheme))
                     .frame(
                         width: HeatmapMetrics.legendSwatch,
@@ -502,10 +522,10 @@ private struct HeatmapLegend: View {
                     )
             }
             Text("多")
-                .padding(.leading, 2)
+                .padding(.leading, SpeakerSpacing.hairline)
         }
         .font(SpeakerTypography.detail)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .accessibilityHidden(true)
     }
 }
@@ -518,7 +538,7 @@ private enum HeatmapPalette {
                 Double(level - 1) / 3,
                 colorScheme: colorScheme
             )
-        default: Color.primary.opacity(0.06)
+        default: SpeakerFill.control
         }
     }
 }

@@ -2,14 +2,15 @@ import AppKit
 import SpeakerCore
 import SwiftUI
 
+/// One Entry on the dictionary page: a single-line `SpeakerChip`. An Entry
+/// past the provider's capacity is marked omitted; a quality hint is a
+/// trailing glyph whose sentence lives in the tooltip and in the accessibility
+/// text, so the chip never grows a second line.
 package struct DictionaryEntryChip: View {
     private let word: String
     private let isOmitted: Bool
     private let qualityHint: DictionaryEntryQualityHint
     private let onDelete: () -> Void
-    @State private var isHovered = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
 
     package init(
         word: String,
@@ -23,107 +24,51 @@ package struct DictionaryEntryChip: View {
         self.onDelete = onDelete
     }
 
-    private var showsStatusRow: Bool {
-        isOmitted || qualityHint != .none
-    }
+    private static let omittedText = "不会发送"
 
-    /// A plain Entry stays a pill; one carrying guidance squares off so the
-    /// second line reads as part of the same chip.
-    private var shape: AnyShape {
-        showsStatusRow
-            ? AnyShape(
-                RoundedRectangle(
-                    cornerRadius: SpeakerRadius.inner,
-                    style: .continuous
-                )
-            )
-            : AnyShape(Capsule())
-    }
-
-    private var fillColor: Color {
-        isOmitted ? SpeakerTone.warning.color.opacity(0.08) : Color.primary.opacity(0.05)
-    }
-
-    private var strokeColor: Color {
-        if isOmitted {
-            return SpeakerTone.warning.color.opacity(contrast == .increased ? 0.8 : 0.35)
-        }
-        return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
-    }
-
-    package var body: some View {
-        HStack(spacing: 5) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(word)
-                    .font(SpeakerTypography.emphasis)
-                    .foregroundStyle(isOmitted ? .secondary : .primary)
-
-                if showsStatusRow {
-                    HStack(spacing: 8) {
-                        if isOmitted {
-                            Label("不会发送", systemImage: SpeakerTone.warning.symbol)
-                                .foregroundStyle(SpeakerTone.warning.color)
-                        }
-                        if let presentation = qualityHint.presentation {
-                            Label(
-                                presentation.text,
-                                systemImage: presentation.symbol
-                            )
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(SpeakerTypography.detail)
-                    .overlay {
-                        DictionaryEntryStatusAccessibilityElement(
-                            label: statusAccessibilityLabel
-                        )
-                    }
-                }
-            }
-
-            Button(action: onDelete) {
-                ZStack {
-                    Circle()
-                        .fill(Color.primary.opacity(isHovered ? 0.10 : 0))
-                    Image(systemName: "xmark")
-                        // A glyph centred in a fixed 20pt hit circle.
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .opacity(isHovered || contrast == .increased ? 1 : 0.35)
-                }
-                .frame(width: 20, height: 20)
-                .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: isHovered)
-            }
-            .buttonStyle(
-                SpeakerPressableButtonStyle(
-                    pressedScale: SpeakerMotion.compactPressedScale
-                )
-            )
-            .contentShape(Circle())
-            .accessibilityHidden(true)
-            .overlay {
-                AccessibilityButtonBridge(
-                    label: "删除词条 \(word)",
-                    hint: "删除这个个人词库词条",
-                    action: onDelete
-                )
-            }
-        }
-        .padding(.leading, 10)
-        .padding(.trailing, 5)
-        .padding(.vertical, showsStatusRow ? 6 : 5)
-        .background(fillColor, in: shape)
-        .overlay { shape.stroke(strokeColor, lineWidth: 1) }
-        .onHover { isHovered = $0 }
-    }
-
-    private var statusAccessibilityLabel: String {
-        [
-            isOmitted ? "不会发送" : nil,
+    /// Every sentence the chip's glyphs stand for, in reading order.
+    private var statusText: String? {
+        let parts = [
+            isOmitted ? Self.omittedText : nil,
             qualityHint.presentation?.text,
         ]
         .compactMap { $0 }
-        .joined(separator: "，")
+        return parts.isEmpty ? nil : parts.joined(separator: "，")
+    }
+
+    private var deleteLabel: String { "删除词条 \(word)" }
+
+    package var body: some View {
+        SpeakerChip(
+            word,
+            isOmitted: isOmitted,
+            hintSymbol: qualityHint.presentation?.symbol,
+            help: statusText,
+            deleteLabel: deleteLabel,
+            onDelete: onDelete
+        )
+        // SwiftUI's own elements can drop out of AppKit's accessibility tree,
+        // so the chip speaks through two bridged elements instead: the word
+        // with its status, and the delete button over the chip's trailing
+        // glyph.
+        .accessibilityHidden(true)
+        .overlay {
+            DictionaryEntryStatusAccessibilityElement(
+                label: [word, statusText].compactMap { $0 }.joined(separator: "，")
+            )
+        }
+        .overlay(alignment: .trailing) {
+            AccessibilityButtonBridge(
+                label: deleteLabel,
+                hint: "删除这个个人词库词条",
+                action: onDelete
+            )
+            .frame(
+                width: SpeakerControlMetrics.compactHeight,
+                height: SpeakerControlMetrics.compactHeight
+            )
+            .padding(.trailing, SpeakerSpacing.xs)
+        }
     }
 }
 

@@ -62,7 +62,7 @@ package struct MainWindowTabs<Page: View>: View {
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .frame(height: 10)
+                .frame(height: SpeakerSpacing.s)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
@@ -84,21 +84,21 @@ package struct MainWindowTabBar: View {
     @Binding private var selection: MainWindowTab
     @Namespace private var indicator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
 
     package init(selection: Binding<MainWindowTab>) {
         _selection = selection
     }
 
     package var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: SpeakerSpacing.hairline) {
             ForEach(MainWindowTab.allCases) { tab in
-                Button {
+                MainWindowTabButton(
+                    title: tab.title,
+                    isSelected: selection == tab,
+                    indicator: indicator
+                ) {
                     selection = tab
-                } label: {
-                    label(for: tab)
                 }
-                .buttonStyle(.plain)
             }
         }
         // Only the indicator slides; the page itself swaps at once.
@@ -113,19 +113,49 @@ package struct MainWindowTabBar: View {
             .labelsHidden()
         }
     }
+}
 
-    private func label(for tab: MainWindowTab) -> some View {
-        Text(tab.title)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .background {
-                if selection == tab {
-                    Capsule()
-                        .fill(Color.primary.opacity(contrast == .increased ? 0.2 : 0.1))
-                        .matchedGeometryEffect(id: "selection", in: indicator)
+/// One page in the tab bar. The selected page carries the sliding capsule;
+/// an unselected page answers the pointer with the faint hover fill.
+private struct MainWindowTabButton: View {
+    let title: String
+    let isSelected: Bool
+    let indicator: Namespace.ID
+    let action: () -> Void
+    @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(SpeakerTypography.body)
+                .padding(.horizontal, SpeakerSpacing.m)
+                .padding(.vertical, SpeakerSpacing.xs)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(SpeakerFill.selected)
+                            .overlay {
+                                // Increase Contrast outlines the selection
+                                // instead of darkening its fill.
+                                if contrast == .increased {
+                                    Capsule().strokeBorder(
+                                        SpeakerStroke.hairline(increasedContrast: true),
+                                        lineWidth: 1
+                                    )
+                                }
+                            }
+                            .matchedGeometryEffect(id: "selection", in: indicator)
+                    } else if isHovered {
+                        Capsule().fill(SpeakerFill.subtle)
+                    }
                 }
-            }
-            .contentShape(Capsule())
+                .contentShape(Capsule())
+                .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 

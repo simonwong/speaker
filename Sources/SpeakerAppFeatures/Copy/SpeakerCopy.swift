@@ -47,11 +47,11 @@ package enum SpeakerCopy {
         package static let textCopied = "文字已复制"
     }
 
-    /// The result of copying the diagnostic report. About and the runtime
-    /// report the same sentence, including the promise about what the report
-    /// never contains.
+    /// The result of copying the diagnostic report. It appears under the
+    /// About row whose detail already promises what the report never
+    /// contains, so the confirmation itself stays short.
     package enum Diagnostics {
-        package static let copied = "诊断信息已复制，不包含文字、音频或 API Key。"
+        package static let copied = "已复制"
         package static let copyFailed = "复制失败，请重试。"
     }
 
@@ -91,9 +91,9 @@ package enum SpeakerCopy {
     /// local data. Wording lives here so the runtime only dispatches.
     package enum Startup {
         package static let historyPrivacyScrubIncomplete =
-            "旧版会话历史的隐私清理未完成；Speaker 已保留明确错误供你处理。"
+            "旧版历史记录的隐私清理未完成；Speaker 已保留明确错误供你处理。"
         package static let interruptedSessionsNotReconciled =
-            "上次运行中断的会话历史未能完成恢复，请在“关于”中复制诊断信息。"
+            "上次运行中断的历史记录未能完成恢复，请在“关于”中复制诊断信息。"
         package static let legacyDictionaryCleanupFailed =
             "个人词库已迁移，但旧版词库文件未能删除。"
         package static let legacyDictionaryMigrationFailed =
@@ -144,15 +144,15 @@ package enum SpeakerCopy {
             case .notNeeded, .migrated:
                 nil
             case .migratedLegacyFileRemains:
-                "会话历史已迁移，但旧版 history.json 未能删除。"
+                "历史记录已迁移，但旧版 history.json 未能删除。"
             case .legacyCorrupted(let backupName):
                 "旧版历史文件损坏，已保留为 \(backupName)。"
             case .legacyProtectionFailed:
-                "旧版会话历史的文件权限无法收紧，已停止迁移并保留原文件。"
+                "旧版历史记录的文件权限无法收紧，已停止迁移并保留原文件。"
             case .legacyNotReady:
-                "旧版会话历史尚未满足安全迁移条件，原文件仍保留。"
+                "旧版历史记录尚未满足安全迁移条件，原文件仍保留。"
             case .importRefused:
-                "旧版会话历史尚未完成迁移，原文件仍保留。"
+                "旧版历史记录尚未完成迁移，原文件仍保留。"
             }
         }
     }
@@ -174,9 +174,9 @@ package enum SpeakerCopy {
         ) -> String {
             switch notice {
             case .privacyMigrationFailed(let failure):
-                "旧版会话历史的隐私清理失败：\(reason(failure))"
+                "旧版历史记录的隐私清理失败：\(reason(failure))"
             case .writeFailed(let detail):
-                "会话历史写入失败：\(detail)"
+                "历史记录写入失败：\(detail)"
             case .corruptedRecordsSkipped(let count):
                 "有 \(count) 条本地历史记录已损坏，其他记录仍可使用。"
             case .corruptedDataPreserved, .recoveryArchivePruneFailed:
