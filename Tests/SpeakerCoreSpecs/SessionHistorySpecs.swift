@@ -79,7 +79,12 @@ enum SessionHistorySpecs: CoreSpecDomain {
                 "an application name reached disk"
             )
 
-            try injectLegacyApplicationNames(into: fileURL)
+            try injectRetiredPayloadKeys(into: fileURL)
+            let injected = try readHistoryPayload(from: fileURL)
+            try expect(
+                injected.contains(#""releaseToDeliveryMilliseconds":640"#),
+                "the retired keys were not injected"
+            )
             let records = await SQLiteSessionHistory(fileURL: fileURL).allRecords()
             try expect(records.map(\.sessionID) == [id], "a legacy record did not decode")
             try expect(records.first?.refinedText == "整理后的正文")

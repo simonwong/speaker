@@ -67,9 +67,6 @@ struct SessionRecordPayloadV1: Codable {
     let dictionaryReplacements: [DictionaryReplacement]?
     let durationMilliseconds: Int?
     let stageDurationsMilliseconds: [String: Int]?
-    /// Added after schema 1 shipped. Absent in older payloads and omitted
-    /// when nil, so payloads without it keep their bytes.
-    let releaseToDeliveryMilliseconds: Int?
     let outcome: SessionRecordOutcomePayloadV1
 
     /// The keys written to disk. The refinement fields keep the names they
@@ -105,7 +102,6 @@ struct SessionRecordPayloadV1: Codable {
         case dictionaryReplacements
         case durationMilliseconds
         case stageDurationsMilliseconds
-        case releaseToDeliveryMilliseconds
         case outcome
     }
 
@@ -139,7 +135,6 @@ struct SessionRecordPayloadV1: Codable {
         dictionaryReplacements = record.dictionaryReplacements
         durationMilliseconds = record.durationMilliseconds
         stageDurationsMilliseconds = record.stageDurationsMilliseconds
-        releaseToDeliveryMilliseconds = record.releaseToDeliveryMilliseconds
         outcome = SessionRecordOutcomePayloadV1(record.outcome)
     }
 
@@ -175,7 +170,6 @@ struct SessionRecordPayloadV1: Codable {
                 dictionaryReplacements: dictionaryReplacements ?? [],
                 durationMilliseconds: durationMilliseconds ?? 0,
                 stageDurationsMilliseconds: stageDurationsMilliseconds ?? [:],
-                releaseToDeliveryMilliseconds: releaseToDeliveryMilliseconds,
                 outcome: try outcome.domainOutcome
             )
         }
