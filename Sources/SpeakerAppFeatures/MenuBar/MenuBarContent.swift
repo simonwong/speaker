@@ -5,6 +5,9 @@ import SwiftUI
 /// The menu bar extra's rows. Order comes from `MenuBarPresentation`; the
 /// wording, symbols, and shortcuts of each row live here rather than in the
 /// composition root.
+///
+/// The menu keeps the native style. Every row but Quit carries an SF Symbol,
+/// so all titles start on one column.
 package struct MenuBarContent: View {
     @ObservedObject var voiceInput: VoiceInputExperience
     @ObservedObject var refinement: RefinementSettingsModel
@@ -107,12 +110,14 @@ package struct MenuBarContent: View {
                 Button {
                     commandRouter.perform(.settingsSection(setupGap.settingsGroup))
                 } label: {
-                    Label(setupGap.menuTitle, systemImage: "exclamationmark.circle")
+                    Label(setupGap.menuTitle, systemImage: "exclamationmark.triangle")
                 }
             }
         case .openSpeaker:
-            Button("打开 Speaker") {
+            Button {
                 commandRouter.perform(.overview)
+            } label: {
+                Label("打开 Speaker", systemImage: "macwindow")
             }
         case .refinementMode:
             Menu {
@@ -145,8 +150,10 @@ package struct MenuBarContent: View {
             }
         case .cancelVoiceInput:
             if let cancelAction = voiceInput.state.menu.cancelAction {
-                Button("取消当前输入") {
+                Button {
                     voiceInput.perform(cancelAction)
+                } label: {
+                    Label("取消当前输入", systemImage: "xmark.circle")
                 }
             }
         case .voiceNotice:
@@ -155,33 +162,45 @@ package struct MenuBarContent: View {
             }
         case .copyRetainedText:
             if let copyAction = voiceInput.state.menu.copyRetainedTextAction {
-                Button(
-                    voiceInput.state.menu.copyRetainedTextTitle
-                        ?? "复制保留的文字"
-                ) {
+                Button {
                     voiceInput.perform(copyAction)
+                } label: {
+                    Label(
+                        voiceInput.state.menu.copyRetainedTextTitle ?? "复制保留的文字",
+                        systemImage: "doc.on.doc"
+                    )
                 }
             }
         case .recoverVoiceInput:
             if let recoveryAction = voiceInput.state.menu.recoveryAction {
-                Button("检查语音设置…") {
+                Button {
                     guard let effect = voiceInput.perform(recoveryAction) else {
                         return
                     }
                     commandRouter.perform(effect)
+                } label: {
+                    Label("检查语音设置…", systemImage: "wrench.and.screwdriver")
                 }
             }
         case .dismissVoiceInput:
             if let dismissAction = voiceInput.state.menu.dismissAction {
-                Button("关闭当前提示") {
+                Button {
                     voiceInput.perform(dismissAction)
+                } label: {
+                    Label("关闭当前提示", systemImage: "xmark")
                 }
             }
         case .onboarding:
-            Button("使用引导…") { commandRouter.perform(.onboarding) }
+            Button {
+                commandRouter.perform(.onboarding)
+            } label: {
+                Label("使用引导…", systemImage: "questionmark.circle")
+            }
         case .settings:
-            Button("设置…") {
+            Button {
                 commandRouter.perform(.settings)
+            } label: {
+                Label("设置…", systemImage: "gearshape")
             }
             .keyboardShortcut(",")
         case .dataErasureStatus:
@@ -194,10 +213,13 @@ package struct MenuBarContent: View {
                     : "exclamationmark.triangle"
             )
         case .dataErasureRecovery:
-            Button("查看清除状态…") {
+            Button {
                 commandRouter.perform(.dataErasureRecovery)
+            } label: {
+                Label("查看清除状态…", systemImage: "externaldrive")
             }
         case .quit:
+            // The one row without a symbol, as in every Mac menu.
             Button("退出 Speaker") {
                 commandRouter.perform(.quit)
             }

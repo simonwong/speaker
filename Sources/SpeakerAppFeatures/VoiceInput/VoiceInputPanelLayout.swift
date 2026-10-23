@@ -19,6 +19,25 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
     /// and the reveal animation are never clipped by the window edge.
     package static let contentInset: CGFloat = 5
 
+    /// The strip's inner geometry. The HUD views lay out with these values
+    /// and the width math below adds up the same values, so a measured strip
+    /// always fits what it draws.
+    package enum Metrics {
+        /// From the capsule's edge to a leading icon or text.
+        package static let textInset = SpeakerSpacing.m
+        /// Between an icon, a text, and a control in one strip.
+        package static let itemSpacing = SpeakerSpacing.s
+        /// From the capsule's edge to an icon button, which centres the
+        /// button in the capsule's rounded end.
+        package static let buttonInset = SpeakerSpacing.xs
+        /// An icon button's circle.
+        package static let buttonSide: CGFloat = 26
+        /// The slot a leading status glyph occupies.
+        package static let glyphWidth: CGFloat = 18
+        /// The lane an icon button and its gap take beside the text.
+        package static let controlLane = buttonInset + buttonSide + itemSpacing
+    }
+
     package init?(_ presentation: VoiceInputOverlayPresentation) {
         switch presentation {
         case .hidden:
@@ -55,9 +74,11 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
 
     /// Icon, title and close control, with the strip's own padding.
     package static func problemWidth(title: String) -> CGFloat {
-        let chrome: CGFloat = 14 + 18 + 9 + 9 + 26 + 4
+        let chrome =
+            Metrics.textInset + Metrics.glyphWidth + Metrics.itemSpacing
+            + Metrics.itemSpacing + Metrics.buttonSide + Metrics.buttonInset
         return fitted(
-            textWidth(title, style: .callout) + chrome,
+            textWidth(title) + chrome,
             minimum: 140,
             maximum: 320
         )
@@ -65,9 +86,10 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
 
     /// Icon and title, with the strip's own padding.
     package static func noticeWidth(title: String) -> CGFloat {
-        let chrome: CGFloat = 14 + 18 + 9 + 14
+        let chrome =
+            Metrics.textInset + Metrics.glyphWidth + Metrics.itemSpacing + Metrics.textInset
         return fitted(
-            textWidth(title, style: .callout) + chrome,
+            textWidth(title) + chrome,
             minimum: 140,
             maximum: 320
         )
@@ -76,17 +98,18 @@ package enum VoiceInputPanelLayout: Equatable, Sendable {
     /// The text sits between the dismiss and copy controls; the width keeps
     /// room for both so revealing dismiss on hover never truncates it.
     package static func pendingCopyWidth(text: String, failureTitle: String?) -> CGFloat {
-        let chrome: CGFloat = 38 + 38
-        let failure = failureTitle.map { textWidth($0, style: .caption1) + 8 } ?? 0
+        let chrome = 2 * Metrics.controlLane
+        let failure = failureTitle.map { textWidth($0) + Metrics.itemSpacing } ?? 0
         return fitted(
-            textWidth(text, style: .callout) + failure + chrome,
+            textWidth(text) + failure + chrome,
             minimum: 160,
             maximum: 360
         )
     }
 
-    private static func textWidth(_ text: String, style: NSFont.TextStyle) -> CGFloat {
-        let font = NSFont.preferredFont(forTextStyle: style)
+    /// Every HUD text is set in `SpeakerTypography.detail`, the callout style.
+    private static func textWidth(_ text: String) -> CGFloat {
+        let font = NSFont.preferredFont(forTextStyle: .callout)
         return NSAttributedString(string: text, attributes: [.font: font]).size().width
     }
 
