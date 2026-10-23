@@ -458,12 +458,15 @@ struct SpeakerAppScenarioSpecs {
                 recognitionReadiness: .needsSetup
             )
             try expect(!pending.canContinue(from: .permissions))
-            try expect(pending.permissionInstructions(for: .microphone).contains("macOS"))
-            try expect(pending.permissionInstructions(for: .accessibility).contains("+"))
+            try expect(pending.permissionInstructions(for: .microphone)?.contains("macOS") == true)
+            try expect(pending.permissionInstructions(for: .accessibility)?.contains("+") == true)
             let authorized = OnboardingPresentation(
                 permissions: .init(accessibility: .granted, microphone: .granted),
                 recognitionReadiness: .unverified
             )
+            // A granted permission's badge already says so; no steps follow it.
+            try expect(authorized.permissionInstructions(for: .microphone) == nil)
+            try expect(authorized.permissionInstructions(for: .accessibility) == nil)
             try expect(authorized.canContinue(from: .permissions))
             try expect(!authorized.canContinue(from: .apiKey))
             try expect(!authorized.canContinue(from: .shortcut))
@@ -4642,7 +4645,8 @@ struct SpeakerAppScenarioSpecs {
                 transcribing.compactTitle
                     == VoiceInputProcessingStage.transcribingCompactTitle
             )
-            try expect(transcribing.icon == "sparkles")
+            try expect(transcribing.icon == "waveform")
+            try expect(VoiceInputActivity.processing(id, .refining).icon == "sparkles")
             try expect(
                 transcribing.accessibilityAnnouncement
                     == VoiceInputProcessingStage.transcribingAnnouncement

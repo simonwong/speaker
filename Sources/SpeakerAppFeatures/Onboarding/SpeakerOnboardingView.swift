@@ -52,14 +52,14 @@ package struct SpeakerOnboardingView: View {
 
     package var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: SpeakerSpacing.xl) {
                 header
                 stepIndicator
                 stepContent
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 20)
+            .padding(.horizontal, SpeakerSpacing.xl)
+            .padding(.top, SpeakerSurfaceMetrics.pageTopPadding)
+            .padding(.bottom, SpeakerSpacing.l)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
@@ -103,40 +103,37 @@ package struct SpeakerOnboardingView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .center, spacing: SpeakerSpacing.m) {
             SpeakerIdentityTile(size: 48, accessibility: .named)
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: SpeakerSpacing.xs) {
                 Text(step.title)
                     .font(SpeakerTypography.title)
-                Text(stepDescription)
-                    .font(SpeakerTypography.detail)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let stepDescription {
+                    Text(stepDescription)
+                        .font(SpeakerTypography.detail)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
 
-    private var stepDescription: String {
+    /// Only the provider step needs a line under its title: the rows of the
+    /// other steps already say what each item is for.
+    private var stepDescription: String? {
         switch step {
-        case .permissions: "先让 Speaker 听见你，并将文字输入其他应用。"
-        case .apiKey: "选择把语音转成文字的服务；云端服务使用你自己的 Key。"
-        case .shortcut: "记住键盘上的快捷键，就能在任何输入框中开始。"
+        case .apiKey: "云端服务使用你自己的 Key。"
+        case .permissions, .shortcut: nil
         }
     }
 
+    /// Completed steps trade their number for a checkmark, the current step
+    /// takes the coral, and later steps keep their number.
     private var stepIndicator: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: SpeakerSpacing.s) {
             ForEach(OnboardingStep.allCases, id: \.rawValue) { item in
-                HStack(spacing: 6) {
-                    Text("\(item.rawValue + 1)")
-                        .font(SpeakerTypography.label.monospacedDigit())
-                        .frame(width: 24, height: 24)
-                        .background(
-                            item == step
-                                ? SpeakerVisualIdentity.controlTint : Color.secondary.opacity(0.12),
-                            in: Circle()
-                        )
-                        .foregroundStyle(item == step ? Color.white : Color.secondary)
+                HStack(spacing: SpeakerSpacing.s) {
+                    stepMarker(item)
                     Text(item.shortTitle)
                         .font(item == step ? SpeakerTypography.label : SpeakerTypography.detail)
                         .foregroundStyle(item == step ? .primary : .secondary)
@@ -144,7 +141,7 @@ package struct SpeakerOnboardingView: View {
                 }
                 if item != .shortcut {
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.2))
+                        .fill(SpeakerStroke.hairline(increasedContrast: false))
                         .frame(maxWidth: .infinity)
                         .frame(height: 1)
                         .accessibilityHidden(true)
@@ -154,6 +151,29 @@ package struct SpeakerOnboardingView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("第 \(step.rawValue + 1) 步，共 3 步：\(step.title)")
     }
+
+    private func stepMarker(_ item: OnboardingStep) -> some View {
+        let isCurrent = item == step
+        let isCompleted = item.rawValue < step.rawValue
+        return Group {
+            if isCompleted {
+                Image(systemName: "checkmark")
+                    .fontWeight(.semibold)
+            } else {
+                Text("\(item.rawValue + 1)")
+                    .monospacedDigit()
+            }
+        }
+        .font(SpeakerTypography.label)
+        .foregroundStyle(isCurrent ? Color.white : Color.secondary)
+        .frame(width: Self.stepMarkerSide, height: Self.stepMarkerSide)
+        .background(
+            isCurrent ? SpeakerVisualIdentity.controlTint : SpeakerFill.selected,
+            in: Circle()
+        )
+    }
+
+    private static let stepMarkerSide: CGFloat = 24
 
     /// One step at a time: the next step slides in from the side it lies on
     /// while the last one only fades. Reduce Motion keeps only the fade.
@@ -177,13 +197,19 @@ package struct SpeakerOnboardingView: View {
     private func content(for step: OnboardingStep) -> some View {
         switch step {
         case .permissions:
-            VStack(alignment: .leading, spacing: 16) {
-                permissionCard(
-                    .microphone, title: "麦克风", icon: "mic.fill", purpose: "用于听见你的声音。Speaker 不保存音频。")
-                permissionCard(
-                    .accessibility, title: "辅助功能", icon: "accessibility",
-                    purpose: "用于响应键盘快捷键，并把文字输入你正在使用的应用。")
-                Button("重新检查权限", action: refreshPermissions)
+            VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.cardSpacing) {
+                SpeakerCard {
+                    permissionRow(
+                        .microphone, title: "麦克风", icon: "mic.fill",
+                        purpose: "录制语音，Speaker 不保存音频")
+                    SpeakerRowDivider()
+                    permissionRow(
+                        .accessibility, title: "辅助功能", icon: "accessibility",
+                        purpose: "响应快捷键并输入文字")
+                }
+                if !permissions.snapshot.allGranted {
+                    Button("重新检查权限", action: refreshPermissions)
+                }
             }
         case .apiKey:
             VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.sectionHeaderSpacing) {
@@ -192,29 +218,26 @@ package struct SpeakerOnboardingView: View {
                     .environment(\.collapsesStoredProviderKeys, false)
             }
         case .shortcut:
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        Text("当前键盘快捷键")
-                            .font(SpeakerTypography.emphasis)
-                        Spacer()
+            VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.cardSpacing) {
+                SpeakerCard {
+                    SpeakerRow("当前键盘快捷键") {
                         SpeakerKeycap(name: shortcutName())
                     }
                     if shortcutName() == VoiceShortcutPreference.functionKey.displayName {
                         FunctionKeyConflictHint()
                     }
-                    tutorialRow(
-                        icon: "hand.tap", title: "短按键盘快捷键",
-                        detail: "按一下 \(shortcutName()) 开始录音，再按一下结束。"
-                    )
-                    tutorialRow(
-                        icon: "hand.point.up.left", title: "长按键盘快捷键",
-                        detail: "按住 \(shortcutName()) 讲话，松开结束录音。")
-                    tutorialRow(
-                        icon: "escape", title: "按 Esc 取消", detail: "录音或处理中按 Esc，取消这次语音输入。")
+                    SpeakerRowDivider()
+                    // The title names the physical key, so the detail never
+                    // repeats it.
+                    SpeakerRow("短按 \(shortcutName())", detail: "开始录音，再按一下结束")
+                    SpeakerRowDivider()
+                    SpeakerRow("按住 \(shortcutName())", detail: "说话，松开结束")
+                    SpeakerRowDivider()
+                    SpeakerRow("按 Esc", detail: "录音或处理中取消本次输入")
+                }
+                SpeakerCard {
                     practiceField
                 }
-                .speakerCard()
                 if mode == .setup, let softwareUpdate {
                     OnboardingAutomaticUpdateChoice(model: softwareUpdate)
                 }
@@ -222,7 +245,10 @@ package struct SpeakerOnboardingView: View {
         }
     }
 
-    private func permissionCard(
+    /// The same row Settings shows for a permission, followed by the steps
+    /// that grant it while it is still missing. The steps line up with the
+    /// row's title, past the icon tile.
+    private func permissionRow(
         _ permission: PermissionKind,
         title: String,
         icon: String,
@@ -230,39 +256,39 @@ package struct SpeakerOnboardingView: View {
     ) -> some View {
         let state = permissions.snapshot[permission]
         let status = PermissionStatusPresentation(state: state)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                SpeakerIconTile(symbol: icon, tone: status.tileTone)
-                Text(title)
-                    .font(SpeakerTypography.emphasis)
-                Spacer()
+        let instructions = presentation.permissionInstructions(for: permission)
+        let action = presentation.permissionAction(for: permission)
+        return VStack(alignment: .leading, spacing: SpeakerSpacing.s) {
+            SpeakerRow(title, detail: purpose, icon: icon, iconTone: status.tileTone) {
                 StatusBadge(
                     text: status.text,
                     icon: status.symbolName,
                     tone: status.tone
                 )
             }
-            Text(purpose)
-                .font(SpeakerTypography.detail)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(presentation.permissionInstructions(for: permission))
-                .font(SpeakerTypography.detail)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let action = presentation.permissionAction(for: permission) {
-                Button(action == .request ? "允许麦克风" : "打开\(title)设置") {
-                    Task { await requestPermission(permission) }
+            if instructions != nil || action != nil {
+                VStack(alignment: .leading, spacing: SpeakerSpacing.s) {
+                    if let instructions {
+                        Text(instructions)
+                            .font(SpeakerTypography.detail)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let action {
+                        Button(action == .request ? "允许麦克风" : "打开\(title)设置") {
+                            Task { await requestPermission(permission) }
+                        }
+                    }
                 }
-                .buttonStyle(SpeakerButtonStyle())
+                .padding(.leading, SpeakerControlMetrics.height + SpeakerSpacing.m)
             }
         }
-        .speakerCard()
     }
 
     /// A real Input Target inside onboarding, so the first dictation shows
     /// text arriving without leaving setup. Nothing typed here is kept.
     private var practiceField: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.s) {
             Text("试一试")
                 .font(SpeakerTypography.emphasis)
             TextField(
@@ -273,36 +299,20 @@ package struct SpeakerOnboardingView: View {
             .lineLimit(1...3)
             .textFieldStyle(SpeakerMultilineTextFieldStyle())
             .accessibilityLabel("练习输入框")
-            Text("文字会输入到结束录音时所在的输入框。看到文字出现在这里，就可以在任何 App 里这样用了。")
+            Text("文字会输入到结束录音时所在的输入框。")
                 .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func tutorialRow(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            SpeakerIconTile(symbol: icon)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(SpeakerTypography.emphasis)
-                Text(detail)
-                    .font(SpeakerTypography.detail)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.m) {
             Divider()
             if !presentation.canContinue(from: step) {
-                Text(blockingMessage)
-                    .font(SpeakerTypography.detail)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                SpeakerNotice(text: blockingMessage)
             }
-            HStack(spacing: 12) {
+            HStack(spacing: SpeakerSpacing.s) {
                 Button(mode == .review ? "关闭引导" : "稍后配置", action: completion)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityHidden(true)
@@ -311,7 +321,7 @@ package struct SpeakerOnboardingView: View {
                             label: mode == .review ? "关闭引导" : "稍后配置", hint: "关闭首次设置，之后可在设置中完成配置。",
                             action: completion)
                     }
-                Spacer(minLength: 4)
+                Spacer(minLength: SpeakerSpacing.xs)
                 if step != .permissions {
                     Button("上一步", action: previousStep)
                         .accessibilityHidden(true)
@@ -337,8 +347,8 @@ package struct SpeakerOnboardingView: View {
                 }
             }
         }
-        .padding(.horizontal, 28)
-        .padding(.bottom, 18)
+        .padding(.horizontal, SpeakerSpacing.xl)
+        .padding(.bottom, SpeakerSpacing.l)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -369,8 +379,8 @@ package struct SpeakerOnboardingView: View {
     private var blockingMessage: String {
         if !permissions.snapshot.allGranted {
             return step == .permissions
-                ? "两项权限都开启后，点击「下一步」。也可以稍后在设置中完成。"
-                : "权限尚未全部开启，请返回第一步检查。"
+                ? "开启两项权限后继续。"
+                : "权限尚未全部开启，请返回第一步。"
         }
         if recognition.selectedProvider.isOnDevice {
             return "下载 Apple 语音识别的语言模型后继续。"
@@ -378,7 +388,7 @@ package struct SpeakerOnboardingView: View {
         if recognition.selectedProvider != .doubao {
             return "保存所选语音识别服务的 Key 后继续。"
         }
-        return "保存豆包 Key，选择已开通的资源，再点击「检查连接」。连接成功后继续。"
+        return "保存豆包 Key、选择已开通的资源，再点「检查连接」。"
     }
 }
 
@@ -389,11 +399,7 @@ private struct OnboardingAutomaticUpdateChoice: View {
 
     var body: some View {
         if model.offersSetupAutomaticChecksChoice {
-            SpeakerRow(
-                "自动检查更新",
-                detail: "每天检查一次新版本，有更新时提醒你安装。之后可在「设置 → 通用」中更改。",
-                icon: "arrow.triangle.2.circlepath"
-            ) {
+            SpeakerRow("自动检查更新", detail: "每天检查一次，有新版本时提醒你安装") {
                 Toggle("自动检查更新", isOn: $model.setupAutomaticChecksChoice)
                     .speakerSwitch()
                     .labelsHidden()

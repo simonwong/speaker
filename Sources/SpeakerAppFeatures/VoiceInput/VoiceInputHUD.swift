@@ -215,7 +215,7 @@ private struct ActivityPill: View {
                             ? ActivityPillModel.compactCountdownText(remainingSeconds)
                             : ActivityPillModel.countdownText(remainingSeconds)
                     )
-                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .font(HUDTypography.countdown)
                     .foregroundStyle(.primary)
                     .contentTransition(.numericText(countsDown: true))
                     .animation(
@@ -240,7 +240,7 @@ private struct ActivityPill: View {
                     // Recording hands over to processing in place; Reduce Motion
                     // swaps the bars without moving them.
                     .animation(
-                        reduceMotion ? nil : .easeInOut(duration: 0.2),
+                        reduceMotion ? nil : SpeakerMotion.change,
                         value: model.isProcessing
                     )
                     .accessibilityLabel(model.accessibilityTitle)
@@ -270,7 +270,7 @@ private struct ActivityPill: View {
                         )
                     }
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, VoiceInputPanelLayout.Metrics.buttonInset)
             }
         }
         .hudShadow()
@@ -286,18 +286,19 @@ private struct ActivityPill: View {
             await Task.yield()
             // Shown on every shortcut press, so the reveal stays short and
             // settles without overshoot.
-            withAnimation(.hudReveal) {
+            withAnimation(SpeakerMotion.hudReveal) {
                 isRevealed = true
             }
         }
         .onChange(of: dismissal) { _, dismissal in
+            // The pill collapses on the same curve the panel fades on.
             let animation: Animation? =
                 if reduceMotion {
                     nil
                 } else if let dismissal {
-                    .easeOut(duration: dismissal.fadeDuration)
+                    SpeakerMotion.easeOut(duration: dismissal.fadeDuration)
                 } else {
-                    .hudReveal
+                    SpeakerMotion.hudReveal
                 }
             withAnimation(animation) {
                 isRevealed = dismissal == nil
@@ -314,7 +315,7 @@ private struct ActivityPill: View {
             advanced.removeFirst()
             advanced.append(strength)
             withAnimation(
-                reduceMotion ? nil : .easeOut(duration: 0.1)
+                reduceMotion ? nil : HUDMotion.level
             ) {
                 levels = advanced
             }
@@ -612,24 +613,24 @@ private struct PendingCopyStrip: View {
             palette: palette
         ) {
             ZStack {
-                HStack(spacing: 8) {
+                HStack(spacing: Metrics.itemSpacing) {
                     if copyFailed {
                         Text(title)
-                            .font(.caption)
+                            .font(HUDTypography.text)
                             .foregroundStyle(.red)
                             .fixedSize()
                             .transition(.opacity)
                     }
                     Text(text)
-                        .font(.callout)
-                        .foregroundStyle(.primary.opacity(0.92))
+                        .font(HUDTypography.text)
+                        .foregroundStyle(.primary.opacity(HUDTypography.textOpacity))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .help(text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.leading, controlsVisible ? 38 : 16)
-                .padding(.trailing, 38)
+                .padding(.leading, controlsVisible ? Metrics.controlLane : Metrics.textInset)
+                .padding(.trailing, Metrics.controlLane)
                 .animation(
                     reduceMotion ? nil : SpeakerMotion.change,
                     value: copyFailed
@@ -659,7 +660,7 @@ private struct PendingCopyStrip: View {
                     )
                     .keyboardShortcut(.defaultAction)
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, Metrics.buttonInset)
             }
         }
         .hudShadow()
@@ -691,19 +692,19 @@ private struct NoticeStrip: View {
             height: contentSize.height,
             palette: palette
         ) {
-            HStack(spacing: 9) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.orange)
+            HStack(spacing: Metrics.itemSpacing) {
+                Image(systemName: SpeakerTone.warning.symbol)
+                    .font(HUDTypography.glyph)
+                    .foregroundStyle(SpeakerTone.warning.color)
                     .accessibilityHidden(true)
                 Text(title)
-                    .font(.callout)
-                    .foregroundStyle(.primary.opacity(0.9))
+                    .font(HUDTypography.text)
+                    .foregroundStyle(.primary.opacity(HUDTypography.textOpacity))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, Metrics.textInset)
         }
         .hudShadow()
         .padding(VoiceInputPanelLayout.contentInset)
@@ -734,17 +735,17 @@ private struct ProblemStrip: View {
             height: contentSize.height,
             palette: palette
         ) {
-            HStack(spacing: 9) {
+            HStack(spacing: Metrics.itemSpacing) {
                 Image(systemName: icon)
-                    .font(.callout.weight(.semibold))
+                    .font(HUDTypography.glyph)
                     .foregroundStyle(
                         .red.opacity(max(0.82, palette.errorIconOpacity))
                     )
                     .accessibilityHidden(true)
 
                 Text(title)
-                    .font(.callout)
-                    .foregroundStyle(.primary.opacity(0.9))
+                    .font(HUDTypography.text)
+                    .foregroundStyle(.primary.opacity(HUDTypography.textOpacity))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(title + "\n" + guidance)
@@ -761,8 +762,8 @@ private struct ProblemStrip: View {
                 )
                 .keyboardShortcut(.cancelAction)
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 4)
+            .padding(.leading, Metrics.textInset)
+            .padding(.trailing, Metrics.buttonInset)
         }
         .onHover(perform: hold)
         .hudShadow()
@@ -786,7 +787,7 @@ private struct HUDIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
+                .font(HUDTypography.buttonGlyph)
                 // Copy turning into retry morphs the glyph instead of
                 // swapping it between frames.
                 .contentTransition(.symbolEffect(.replace))
@@ -799,7 +800,7 @@ private struct HUDIconButton: View {
                         ? (colorScheme == .dark ? Color.black : Color.white)
                         : Color.primary.opacity(max(0.88, palette.darkControlForegroundOpacity))
                 )
-                .frame(width: 26, height: 26)
+                .frame(width: Metrics.buttonSide, height: Metrics.buttonSide)
                 .background(
                     Color.primary.opacity(
                         prominent
@@ -835,9 +836,24 @@ private struct HUDIconButton: View {
     }
 }
 
-extension Animation {
-    /// The pill growing out of, or back into, its dot.
-    fileprivate static let hudReveal = Animation.smooth(duration: 0.26)
+private typealias Metrics = VoiceInputPanelLayout.Metrics
+
+/// The HUD's type, mapped onto the window ladder. Text and status glyphs use
+/// the `detail` and `label` roles; the countdown and the button glyphs sit in
+/// fixed 34 pt and 26 pt geometry, so they keep fixed sizes: the countdown at
+/// the `body` size, a button glyph one point under `detail`.
+private enum HUDTypography {
+    static let text = SpeakerTypography.detail
+    static let glyph = SpeakerTypography.label
+    static let countdown = Font.system(size: 13, weight: .semibold).monospacedDigit()
+    static let buttonGlyph = Font.system(size: 12, weight: .semibold)
+    /// Text over the dark glass, a step under full strength.
+    static let textOpacity = 0.9
+}
+
+private enum HUDMotion {
+    /// One microphone level sample easing into the next.
+    static let level = SpeakerMotion.easeOut(duration: 0.1)
 }
 
 extension View {

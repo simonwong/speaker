@@ -954,6 +954,10 @@ struct SpeakerAppUISpecs {
             try expect(window.styleMask.contains(.resizable))
             try expect(window.styleMask.contains(.fullSizeContentView))
             try expect(window.titlebarAppearsTransparent)
+            try expect(
+                window.titleVisibility == .hidden,
+                "the onboarding title bar repeats the step title"
+            )
             try expect(!window.isReleasedWhenClosed)
             try expect(window.minSize == layout.effectiveMinimumSize)
             try expect(
