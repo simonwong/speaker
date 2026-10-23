@@ -4,27 +4,15 @@ import SwiftUI
 package struct SpeechRecognitionSettingsCard: View {
     @ObservedObject var model: SpeechRecognitionSettingsModel
 
-    /// Settings already titles its section 语音识别, so it hides the card's
-    /// own header; onboarding shows the card alone and keeps it.
-    private let showsHeader: Bool
-
-    package init(
-        model: SpeechRecognitionSettingsModel,
-        showsHeader: Bool = true
-    ) {
+    /// The card carries no title; Settings and onboarding each put a
+    /// 语音识别 section header above it.
+    package init(model: SpeechRecognitionSettingsModel) {
         self.model = model
-        self.showsHeader = showsHeader
     }
 
     package var body: some View {
-        Group {
-            if showsHeader {
-                SettingsCard("语音识别", icon: "waveform") { rows }
-            } else {
-                SettingsCard { rows }
-            }
-        }
-        .onDisappear { model.discardKeyDraft() }
+        SpeakerCard { rows }
+            .onDisappear { model.discardKeyDraft() }
     }
 
     @ViewBuilder
@@ -45,12 +33,12 @@ package struct SpeechRecognitionSettingsCard: View {
                     .tag(provider)
                 }
             }
-            .settingsTrailingMenu()
+            .speakerTrailingMenu()
             .accessibilityLabel("语音识别服务商")
             .disabled(model.isMutating)
         }
 
-        SettingsRowDivider()
+        SpeakerRowDivider()
 
         if model.selectedProvider == .doubao {
             DoubaoRecognitionSettings(model: model)
@@ -59,7 +47,7 @@ package struct SpeechRecognitionSettingsCard: View {
             OnDeviceRecognitionSettings(model: model)
         } else {
             profileControls
-            SettingsRowDivider()
+            SpeakerRowDivider()
             ProviderKeyEditor(
                 draft: $model.apiKeyDraft,
                 providerName: model.providerName,
@@ -69,7 +57,7 @@ package struct SpeechRecognitionSettingsCard: View {
                 status: ProviderKeyStatus(
                     text: model.hasStoredKey ? "已配置" : "未配置",
                     icon: model.hasStoredKey ? "checkmark.circle.fill" : "key.circle.fill",
-                    color: model.hasStoredKey ? SpeakerVisualIdentity.settledGreen : .secondary),
+                    tone: model.hasStoredKey ? .ok : .neutral),
                 links: [
                     .console(for: model.selectedProvider, region: model.selectedProfile.region)
                 ].compactMap { $0 },
@@ -78,7 +66,7 @@ package struct SpeechRecognitionSettingsCard: View {
                 delete: { await model.deleteAPIKey() })
         }
         if let notice = model.notice {
-            SettingsNotice(text: notice, color: .red)
+            SpeakerNotice(tone: .error, text: notice)
         }
     }
 
@@ -104,10 +92,10 @@ package struct SpeechRecognitionSettingsCard: View {
                         Text(method.displayName).tag(method)
                     }
                 }
-                .settingsTrailingMenu()
+                .speakerTrailingMenu()
                 .accessibilityLabel("语音识别方式")
             }
-            SettingsRowDivider()
+            SpeakerRowDivider()
             if model.selectedProvider == .qwen {
                 SpeakerRow("地域") {
                     Picker(
@@ -121,10 +109,10 @@ package struct SpeechRecognitionSettingsCard: View {
                             Text(region.displayName).tag(region)
                         }
                     }
-                    .settingsTrailingMenu()
+                    .speakerTrailingMenu()
                     .accessibilityLabel("语音识别地域")
                 }
-                SettingsRowDivider()
+                SpeakerRowDivider()
             }
             SpeakerRow("模型") {
                 Picker(
@@ -138,7 +126,7 @@ package struct SpeechRecognitionSettingsCard: View {
                         Text(modelID).tag(modelID)
                     }
                 }
-                .settingsTrailingMenu()
+                .speakerTrailingMenu()
                 .accessibilityLabel("语音识别模型")
             }
         }
@@ -172,8 +160,7 @@ private struct OnDeviceRecognitionSettings: View {
             case nil:
                 ProgressView().controlSize(.small)
             case .installed:
-                Label("已下载", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(SpeakerVisualIdentity.settledGreen)
+                StatusBadge(text: "已下载", tone: .ok)
             case .notInstalled:
                 Button("下载模型") { Task { await model.installOnDeviceModel() } }
                     .help("由 macOS 从 Apple 下载这门语言的识别模型")

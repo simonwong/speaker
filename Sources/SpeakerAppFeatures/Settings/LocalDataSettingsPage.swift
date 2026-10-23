@@ -1,21 +1,17 @@
 import SwiftUI
 
-/// 设置页底部的红色危险区：本地数据清除的唯一入口。
+/// 设置页底部的本地数据分组：本地数据清除的唯一入口。卡片和标题保持中性，
+/// 只有清除按钮的文字是红色，后果写在确认对话框里。
 struct LocalDataSettingsPage: View {
     @ObservedObject var dataErasure: SpeakerDataErasureCoordinator
     @State private var confirmsDataErasure = false
 
     var body: some View {
-        SettingsCard(
-            "清除本地数据",
-            subtitle: "移除这台 Mac 上由 Speaker 保存的全部数据",
-            icon: "externaldrive.badge.xmark",
-            tint: .red
-        ) {
+        SpeakerCard {
             Text(
                 "包括 API Key、会话历史、个人词库、设置、缓存和登录项；完成后 Speaker 退出。系统的麦克风与辅助功能授权不会被撤销。"
             )
-            .font(SpeakerTypography.caption)
+            .font(SpeakerTypography.detail)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 

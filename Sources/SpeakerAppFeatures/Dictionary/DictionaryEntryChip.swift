@@ -33,7 +33,7 @@ package struct DictionaryEntryChip: View {
         showsStatusRow
             ? AnyShape(
                 RoundedRectangle(
-                    cornerRadius: SpeakerSurfaceMetrics.chipCornerRadius,
+                    cornerRadius: SpeakerRadius.inner,
                     style: .continuous
                 )
             )
@@ -41,11 +41,13 @@ package struct DictionaryEntryChip: View {
     }
 
     private var fillColor: Color {
-        isOmitted ? Color.orange.opacity(0.08) : Color.primary.opacity(0.05)
+        isOmitted ? SpeakerTone.warning.color.opacity(0.08) : Color.primary.opacity(0.05)
     }
 
     private var strokeColor: Color {
-        if isOmitted { return Color.orange.opacity(contrast == .increased ? 0.8 : 0.35) }
+        if isOmitted {
+            return SpeakerTone.warning.color.opacity(contrast == .increased ? 0.8 : 0.35)
+        }
         return Color.primary.opacity(contrast == .increased ? 0.4 : 0.08)
     }
 
@@ -53,17 +55,14 @@ package struct DictionaryEntryChip: View {
         HStack(spacing: 5) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(word)
-                    .font(SpeakerTypography.bodyEmphasis)
+                    .font(SpeakerTypography.emphasis)
                     .foregroundStyle(isOmitted ? .secondary : .primary)
 
                 if showsStatusRow {
                     HStack(spacing: 8) {
                         if isOmitted {
-                            Label(
-                                "不会发送",
-                                systemImage: "exclamationmark.circle.fill"
-                            )
-                            .foregroundStyle(.orange)
+                            Label("不会发送", systemImage: SpeakerTone.warning.symbol)
+                                .foregroundStyle(SpeakerTone.warning.color)
                         }
                         if let presentation = qualityHint.presentation {
                             Label(
@@ -73,7 +72,7 @@ package struct DictionaryEntryChip: View {
                             .foregroundStyle(.secondary)
                         }
                     }
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .overlay {
                         DictionaryEntryStatusAccessibilityElement(
                             label: statusAccessibilityLabel
@@ -134,9 +133,9 @@ extension DictionaryEntryQualityHint {
         case .none:
             nil
         case .tooLong:
-            ("建议少于 10 个字符", "text.badge.exclamationmark")
+            ("建议少于 10 个字符", "exclamationmark.circle")
         case .singleCharacter:
-            ("单字效果可能较弱", "text.badge.exclamationmark")
+            ("单字效果可能较弱", "exclamationmark.circle")
         }
     }
 }

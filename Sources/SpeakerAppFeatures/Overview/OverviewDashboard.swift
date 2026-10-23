@@ -107,7 +107,7 @@ private struct OverviewHero: View {
     let showsFirstUseHint: Bool
     let reduceMotion: Bool
     @ScaledMetric(relativeTo: .largeTitle)
-    private var heroNumberSize = SpeakerTypography.heroNumberBaseSize
+    private var heroNumberSize = SpeakerTypography.Display.heroBaseSize
 
     private var characterCount: Int {
         max(0, summary.totalRecognizedCharacterCount)
@@ -124,13 +124,13 @@ private struct OverviewHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("累计说出")
-                .font(SpeakerTypography.sectionHeader)
+                .font(SpeakerTypography.label)
                 .tracking(1)
                 .foregroundStyle(.secondary)
 
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 Text(characterCount.formatted(.number.grouping(.automatic)))
-                    .font(SpeakerTypography.heroNumber(size: heroNumberSize))
+                    .font(SpeakerTypography.Display.hero(size: heroNumberSize))
                     .lineLimit(1)
                     .minimumScaleFactor(0.62)
                     .contentTransition(.numericText())
@@ -152,7 +152,7 @@ private struct OverviewHero: View {
                     reduceMotion: reduceMotion
                 )
                 Text("近 \(OverviewConstants.voiceprintDays) 天")
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.tertiary)
                     // The bars are hidden from VoiceOver; this line carries
                     // what they show.
@@ -164,7 +164,7 @@ private struct OverviewHero: View {
 
             if showsFirstUseHint {
                 Text("按住快捷键，说出第一句话。")
-                    .font(SpeakerTypography.caption)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .padding(.top, 11)
             }
@@ -272,7 +272,7 @@ private struct OverviewMetrics: View {
         )
         let formatted = String(format: "%.1f", hours)
         return unit("约 ")
-            + Text(formatted).font(SpeakerTypography.metricNumber)
+            + Text(formatted).font(SpeakerTypography.Display.metric)
             + unit("小时")
     }
 
@@ -283,16 +283,16 @@ private struct OverviewMetrics: View {
         )
         let formatted = count.formatted(.number.grouping(.automatic))
         return Text(count > 0 ? "+\(formatted)" : formatted)
-            .font(SpeakerTypography.metricNumber) + unit("字")
+            .font(SpeakerTypography.Display.metric) + unit("字")
     }
 
     private func number(_ value: Int) -> Text {
-        Text("\(value)").font(SpeakerTypography.metricNumber)
+        Text("\(value)").font(SpeakerTypography.Display.metric)
     }
 
     private func unit(_ text: String) -> Text {
         Text(text)
-            .font(SpeakerTypography.footnote.weight(.semibold))
+            .font(SpeakerTypography.label)
             .foregroundStyle(.secondary)
     }
 }
@@ -307,7 +307,7 @@ private struct OverviewMetric: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
             Text(label)
-                .font(SpeakerTypography.caption)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -416,7 +416,7 @@ private struct ContributionHeatmapGrid: View {
             ZStack(alignment: .topLeading) {
                 ForEach(heatmap.monthLabels, id: \.column) { label in
                     Text(label.text)
-                        .font(SpeakerTypography.footnote)
+                        .font(SpeakerTypography.detail)
                         .foregroundStyle(.secondary)
                         .fixedSize()
                         .offset(x: layout.leadingOffset(forColumn: label.column))
@@ -504,7 +504,7 @@ private struct HeatmapLegend: View {
             Text("多")
                 .padding(.leading, 2)
         }
-        .font(SpeakerTypography.footnote)
+        .font(SpeakerTypography.detail)
         .foregroundStyle(.tertiary)
         .accessibilityHidden(true)
     }

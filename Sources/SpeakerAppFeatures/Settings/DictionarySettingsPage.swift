@@ -15,13 +15,13 @@ struct DictionarySettingsPage: View {
                     "输入词条，回车添加",
                     text: $model.draftWord
                 )
-                .textFieldStyle(SettingsTextFieldStyle())
+                .textFieldStyle(SpeakerTextFieldStyle())
                 .onSubmit { Task { await model.add() } }
 
                 Button("添加") {
                     Task { await model.add() }
                 }
-                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .buttonStyle(SpeakerButtonStyle(prominent: true))
                 .disabled(
                     model.draftWord
                         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -52,7 +52,7 @@ struct DictionarySettingsPage: View {
             }
 
             if let notice = model.notice {
-                SettingsNotice(text: notice)
+                SpeakerNotice(text: notice)
             }
         }
         .animation(
@@ -70,7 +70,7 @@ struct DictionarySettingsPage: View {
     private func undoRow(for entry: DictionaryEntry) -> some View {
         HStack(spacing: 10) {
             Text("已删除「\(entry.word)」")
-                .font(SpeakerTypography.footnote)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -78,7 +78,7 @@ struct DictionarySettingsPage: View {
             Button("撤销") {
                 Task { await model.undoDelete() }
             }
-            .buttonStyle(SettingsButtonStyle())
+            .buttonStyle(SpeakerButtonStyle())
             .accessibilityLabel("撤销删除 \(entry.word)")
             Button {
                 model.dismissUndo()
@@ -99,8 +99,8 @@ struct DictionarySettingsPage: View {
     private var capacityRow: some View {
         HStack(spacing: 10) {
             Text(model.sendingCountText)
-                .font(SpeakerTypography.footnote.weight(.medium))
-                .foregroundStyle(hasOmittedEntries ? Color.orange : Color.secondary)
+                .font(SpeakerTypography.detail)
+                .foregroundStyle(hasOmittedEntries ? SpeakerTone.warning.color : Color.secondary)
 
             Spacer(minLength: 12)
 
@@ -129,7 +129,7 @@ private struct DictionaryCapacityBar: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var fillColor: Color {
-        if isAtCapacity { return .orange }
+        if isAtCapacity { return SpeakerTone.warning.color }
         return colorScheme == .dark
             ? SpeakerVisualIdentity.warmGold
             : SpeakerVisualIdentity.warmGoldDeep

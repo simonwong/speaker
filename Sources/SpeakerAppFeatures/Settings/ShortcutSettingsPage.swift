@@ -7,13 +7,13 @@ struct ShortcutSettingsPage: View {
     let openPermissionSettings: () -> Void
 
     var body: some View {
-        SettingsCard {
+        SpeakerCard {
             recorderRow
 
             if shortcutRecorder.isRecording, let rejection = shortcutRecorder.rejection {
                 Text(rejection)
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.orange)
+                    .font(SpeakerTypography.detail)
+                    .foregroundStyle(SpeakerTone.warning.color)
             }
 
             if shortcut.preference == .functionKey, !shortcutRecorder.isRecording {
@@ -21,9 +21,9 @@ struct ShortcutSettingsPage: View {
             }
 
             if let notice = shortcut.notice {
-                SettingsNotice(
-                    text: notice.message,
-                    color: noticeColor(notice.level)
+                SpeakerNotice(
+                    tone: noticeTone(notice.level),
+                    text: notice.message
                 )
                 if let recovery = notice.recovery {
                     recoveryRow(recovery)
@@ -35,16 +35,16 @@ struct ShortcutSettingsPage: View {
     private var recorderRow: some View {
         SpeakerRow("录音快捷键") {
             HStack(spacing: 14) {
-                ShortcutKeycap(
+                SpeakerKeycap(
                     name: shortcutRecorder.isRecording
                         ? "按下新快捷键" : shortcut.preference.displayName,
-                    isListening: shortcutRecorder.isRecording
+                    isRecording: shortcutRecorder.isRecording
                 )
 
                 // The keycap already names a working shortcut; only a shortcut
                 // that is not listening needs words beside it.
                 if let status = shortcutStatus, !shortcutRecorder.isRecording {
-                    StatusBadge(text: status.text, icon: status.icon, color: status.color)
+                    StatusBadge(text: status.text, icon: status.icon, tone: status.tone)
                 }
 
                 recorderButtons
@@ -92,64 +92,24 @@ struct ShortcutSettingsPage: View {
         }
     }
 
-    private var shortcutStatus: (text: String, icon: String, color: Color)? {
+    private var shortcutStatus: (text: String, icon: String, tone: SpeakerTone)? {
         switch shortcut.activation {
         case .active:
             nil
         case .waitingForAccessibility:
-            ("已选择，等待辅助功能权限", "exclamationmark.circle.fill", .orange)
+            ("已选择，等待辅助功能权限", "exclamationmark.circle.fill", .warning)
         case .unavailable:
-            ("已选择，但监听尚未启用", "exclamationmark.circle.fill", .orange)
+            ("已选择，但监听尚未启用", "exclamationmark.circle.fill", .warning)
         case .stopped:
-            ("监听已停止", "pause.circle.fill", .red)
+            ("监听已停止", "pause.circle.fill", .error)
         }
     }
 
-    private func noticeColor(_ level: VoiceShortcutNotice.Level) -> Color {
+    private func noticeTone(_ level: VoiceShortcutNotice.Level) -> SpeakerTone {
         switch level {
-        case .information: .secondary
-        case .warning: .orange
-        case .error: .red
+        case .information: .neutral
+        case .warning: .warning
+        case .error: .error
         }
-    }
-}
-
-/// The current shortcut drawn as one key. Settings and the onboarding
-/// tutorial show the same keycap.
-struct ShortcutKeycap: View {
-    let name: String
-    /// Settings is waiting for a new shortcut: the keycap asks for one.
-    var isListening = false
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
-            style: .continuous
-        )
-    }
-
-    var body: some View {
-        Text(name)
-            .font(
-                isListening
-                    ? SpeakerTypography.body
-                    : Font.system(.title2, design: .rounded).weight(.semibold)
-            )
-            .foregroundStyle(isListening ? .secondary : .primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .frame(minWidth: 72, minHeight: 40)
-            .background(Color.primary.opacity(0.06), in: shape)
-            .overlay {
-                if isListening {
-                    shape.strokeBorder(Color.accentColor, lineWidth: 1.5)
-                } else {
-                    shape.strokeBorder(
-                        Color.primary.opacity(contrast == .increased ? 0.4 : 0.10),
-                        lineWidth: 1
-                    )
-                }
-            }
     }
 }

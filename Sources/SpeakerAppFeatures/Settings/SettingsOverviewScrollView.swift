@@ -5,7 +5,6 @@ import SwiftUI
 package struct SettingsOverviewScrollView<SectionContent: View>: View {
     @ObservedObject private var navigation: SettingsNavigationModel
     private let sectionContent: (SettingsGroup) -> SectionContent
-    @Environment(\.mainWindowLayout) private var mainWindowLayout
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     package init(
@@ -28,12 +27,7 @@ package struct SettingsOverviewScrollView<SectionContent: View>: View {
                             .id(SettingsPresentationTarget.section(group))
                     }
                 }
-                .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
-                .frame(maxWidth: .infinity)
-                .padding(
-                    .horizontal,
-                    mainWindowLayout.pageHorizontalPadding
-                )
+                .speakerPageColumn()
                 .padding(.top, SpeakerSurfaceMetrics.pageTopPadding)
                 .padding(.bottom, SpeakerSurfaceMetrics.pageBottomPadding)
                 .id(SettingsPresentationTarget.top)

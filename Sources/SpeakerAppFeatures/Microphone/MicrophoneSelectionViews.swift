@@ -59,29 +59,29 @@ package struct MicrophoneSettingsPage: View {
     }
 
     package var body: some View {
-        SettingsCard {
+        SpeakerCard {
             SpeakerRow("输入设备", detail: model.state.captureDescription) {
                 MicrophoneSelectionPicker(model: model)
-                    .settingsTrailingMenu()
+                    .speakerTrailingMenu()
             }
             if let notice = model.state.deviceNotice {
-                SettingsNotice(text: notice, color: .orange)
+                SpeakerNotice(tone: .warning, text: notice)
                 HStack {
                     Spacer()
                     Button("刷新麦克风列表", action: model.refresh)
                 }
             }
             if model.state.persistenceFailed {
-                SettingsNotice(
-                    text: "麦克风选择尚未保存，退出后可能恢复旧选择。",
-                    color: .orange
+                SpeakerNotice(
+                    tone: .warning,
+                    text: "麦克风选择尚未保存，退出后可能恢复旧选择。"
                 )
                 HStack {
                     Spacer()
                     Button("重试保存麦克风选择", action: model.retryPersistence)
                 }
             }
-            SettingsRowDivider()
+            SpeakerRowDivider()
             SpeakerRow("测试麦克风") {
                 switch model.state.testStatus {
                 case .idle:
@@ -95,12 +95,12 @@ package struct MicrophoneSettingsPage: View {
             }
             if model.state.testStatus == .testing {
                 ProgressView(value: model.state.testLevel)
-                    .tint(SpeakerVisualIdentity.controlTint)
+                    .speakerProgress()
                     .accessibilityLabel("麦克风输入电平")
                     .accessibilityValue("\(Int(model.state.testLevel * 100))%")
             }
             if let error = model.state.testError {
-                SettingsNotice(text: error, color: .orange)
+                SpeakerNotice(tone: .warning, text: error)
             }
         }
         .onDisappear {

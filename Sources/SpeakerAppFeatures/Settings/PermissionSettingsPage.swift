@@ -6,7 +6,7 @@ struct PermissionSettingsPage: View {
     let requestPermission: (PermissionKind) async -> Void
 
     var body: some View {
-        SettingsCard {
+        SpeakerCard {
             PermissionSettingsRow(
                 title: "麦克风",
                 explanation: "录制语音",
@@ -15,7 +15,7 @@ struct PermissionSettingsPage: View {
                 requestPermission: requestPermission
             )
 
-            SettingsRowDivider()
+            SpeakerRowDivider()
 
             PermissionSettingsRow(
                 title: "辅助功能",
@@ -40,13 +40,13 @@ private struct PermissionSettingsRow: View {
             title,
             detail: explanation,
             icon: icon,
-            iconTint: status.tileTint
+            iconTone: status.tileTone
         ) {
             HStack(spacing: 10) {
                 StatusBadge(
                     text: status.text,
                     icon: status.symbolName,
-                    color: status.tint
+                    tone: status.tone
                 )
 
                 if state != .granted, state != .restricted {

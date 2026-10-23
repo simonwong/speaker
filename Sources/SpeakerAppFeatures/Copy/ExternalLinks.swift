@@ -33,7 +33,7 @@ package enum ExternalLinks {
 
     /// The author's website shown by the About page.
     package static let authorWebsite = absolute(
-        "https://simonwong.cn"
+        "https://simonw.dev"
     )
 
     /// The studio website shown by the About page.
