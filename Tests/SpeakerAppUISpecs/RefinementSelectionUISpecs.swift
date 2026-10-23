@@ -75,7 +75,10 @@ enum RefinementSelectionUISpecs {
                     expectedEditing = choice == .custom && model.choice != .custom ? index : nil
                     selected = highlightedCards(in: bitmap, matching: isCoral)
                     editing = highlightedCards(in: bitmap, matching: isGold)
-                    return selected.count == 1 && selected.firstColumn == expectedSelected
+                    // Selecting a mode saves before it takes effect, so the old
+                    // mode's ring alone does not mean the click was handled.
+                    return (choice == .custom || model.choice == choice)
+                        && selected.count == 1 && selected.firstColumn == expectedSelected
                         && editing.count == (expectedEditing == nil ? 0 : 1)
                         && editing.firstColumn == expectedEditing
                 }
