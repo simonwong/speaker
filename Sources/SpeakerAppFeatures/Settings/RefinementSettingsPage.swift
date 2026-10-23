@@ -151,11 +151,7 @@ private struct CustomRefinementModeEditor: View {
                 .disabled(!model.canAddCustomMode)
             }
 
-            if model.customModes.isEmpty {
-                Text("还没有自定义模式。填写名称和提示词后保存。")
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
+            if !model.customModes.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(Array(model.customModes.enumerated()), id: \.element.id) {
                         index, mode in
@@ -174,9 +170,6 @@ private struct CustomRefinementModeEditor: View {
                         )
                     }
                 }
-                Text("菜单栏和“切换整理模式”快捷键按内置模式、再按此列表的顺序排列。")
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.secondary)
             }
 
             SettingsRowDivider()
@@ -184,16 +177,6 @@ private struct CustomRefinementModeEditor: View {
             RefinementEditorSectionTitle(
                 title: model.editingCustomModeID == nil ? "新建模式" : "编辑“\(model.customName)”"
             )
-
-            if model.isEditingActiveCustomMode {
-                Text("这是正在使用的模式，保存后从下一次输入开始生效。")
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.secondary)
-            } else if model.choice != .custom || model.editingCustomModeID == nil {
-                Text("保存并启用后生效；当前使用「\(model.mode.displayName)」。")
-                    .font(SpeakerTypography.footnote)
-                    .foregroundStyle(.secondary)
-            }
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("模式名称").font(SpeakerTypography.caption)

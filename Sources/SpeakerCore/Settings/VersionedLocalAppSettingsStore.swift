@@ -228,8 +228,6 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
     /// The user's Custom Modes in display order. A selected Custom Mode in
     /// `refinement` is always one of them.
     public internal(set) var customRefinementModes: [CustomRefinementMode]
-    /// The optional global shortcut that steps to the next Refinement Mode.
-    public var refinementModeShortcut: CustomHotKey?
     public var refinementPromptOverrides: RefinementPromptOverrides
     public var launchAtLogin: Bool
     public var doubaoResourceID: String?
@@ -244,7 +242,6 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         speechRecognitionProviders: SpeechRecognitionProviderSettings =
             SpeechRecognitionProviderSettings(),
         customRefinementModes: [CustomRefinementMode] = [],
-        refinementModeShortcut: CustomHotKey? = nil,
         refinementPromptOverrides: RefinementPromptOverrides = RefinementPromptOverrides(),
         launchAtLogin: Bool = false,
         doubaoResourceID: String? = nil,
@@ -257,7 +254,6 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         self.refinementProviders = refinementProviders
         self.speechRecognitionProviders = speechRecognitionProviders
         self.customRefinementModes = customRefinementModes
-        self.refinementModeShortcut = refinementModeShortcut
         self.refinementPromptOverrides = refinementPromptOverrides
         self.launchAtLogin = launchAtLogin
         self.doubaoResourceID = doubaoResourceID
@@ -280,7 +276,6 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         /// Written for builds that predate `customRefinementModes`; read only
         /// when that key is absent.
         case savedCustomRefinement
-        case refinementModeShortcut
         case refinementPromptOverrides
         case launchAtLogin
         case doubaoResourceID
@@ -323,10 +318,6 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
                     RefinementPreference.self,
                     forKey: .savedCustomRefinement
                 ))
-        refinementModeShortcut = try container.decodeIfPresent(
-            CustomHotKey.self,
-            forKey: .refinementModeShortcut
-        )
         // Incremental field: settings.json written before prompt overrides
         // existed decodes with no overrides.
         refinementPromptOverrides =
@@ -367,7 +358,6 @@ public struct SpeakerAppSettings: Equatable, Sendable, Codable {
         try container.encode(customRefinementModes, forKey: .customRefinementModes)
         try container.encodeIfPresent(
             legacySavedCustomRefinement, forKey: .savedCustomRefinement)
-        try container.encodeIfPresent(refinementModeShortcut, forKey: .refinementModeShortcut)
         try container.encode(refinementPromptOverrides, forKey: .refinementPromptOverrides)
         try container.encode(launchAtLogin, forKey: .launchAtLogin)
         try container.encodeIfPresent(doubaoResourceID, forKey: .doubaoResourceID)
@@ -652,16 +642,6 @@ public actor VersionedLocalAppSettingsStore: AppSettingsStoring {
     public func moveCustomRefinementMode(id: UUID, to index: Int) throws -> SpeakerAppSettings {
         var settings = try settingsForUpdate()
         settings.moveCustomRefinementMode(id: id, to: index)
-        try save(settings)
-        return settings
-    }
-
-    @discardableResult
-    public func updateRefinementModeShortcut(
-        _ hotKey: CustomHotKey?
-    ) throws -> SpeakerAppSettings {
-        var settings = try settingsForUpdate()
-        settings.refinementModeShortcut = hotKey
         try save(settings)
         return settings
     }

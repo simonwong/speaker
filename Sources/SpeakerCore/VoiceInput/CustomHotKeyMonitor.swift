@@ -291,11 +291,10 @@ package final class CustomHotKeyMonitor {
 }
 
 /// Carbon hands every hot key the App registers to every handler installed on
-/// the application target, so each handler acts only on its own identifier
+/// the application target, so the handler acts only on its own identifier
 /// and passes the others along.
 package enum SpeakerHotKeyIdentifier: UInt32, Sendable {
     case voiceInput = 1
-    case refinementMode = 2
 
     private static let signature: OSType = 0x5350_4B52
 

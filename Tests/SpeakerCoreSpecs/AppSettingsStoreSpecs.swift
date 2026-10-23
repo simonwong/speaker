@@ -316,8 +316,6 @@ enum AppSettingsStoreSpecs: CoreSpecDomain {
             let settings = SpeakerAppSettings(
                 shortcut: .custom(keyCode: 49, modifiers: 2_048, displayName: "⌥ Space"),
                 refinement: .custom(CustomRefinementMode(name: "短句", prompt: "只清理重复")),
-                refinementModeShortcut: CustomHotKey(
-                    keyCode: 46, modifiers: 6_144, displayName: "⌃⌥M"),
                 launchAtLogin: true,
                 doubaoResourceID: DoubaoStreamingResource.model1Concurrent.rawValue,
                 historyRetention: .thirtyDays

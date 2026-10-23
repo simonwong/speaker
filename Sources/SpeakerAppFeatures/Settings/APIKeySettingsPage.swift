@@ -188,10 +188,6 @@ package struct RefinementProviderSettingsCard: View {
             if let connectionFailure = model.connectionFailure {
                 SettingsNotice(text: connectionFailure, color: .red)
             }
-
-            Text("默认顺滑不使用文字整理服务")
-                .font(SpeakerTypography.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 

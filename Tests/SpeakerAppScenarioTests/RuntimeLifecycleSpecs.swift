@@ -35,7 +35,6 @@ private final class StartupStagesFake: RuntimeStartupStages {
     var legacyHistory: LegacyHistoryMigrationOutcome = .notNeeded
     var reconciles = true
     var restoredShortcut: VoiceShortcutPreference?
-    var restoredRefinementModeShortcut: CustomHotKey?
     var restoredMicrophone: MicrophonePreference?
     var restoredLoginItem: Bool?
     var appliedRetention: HistoryRetentionPolicy?
@@ -109,11 +108,6 @@ private final class StartupStagesFake: RuntimeStartupStages {
         restoredShortcut = preference
     }
 
-    func restoreRefinementModeShortcut(_ hotKey: CustomHotKey?) {
-        calls.append("restoreRefinementModeShortcut")
-        restoredRefinementModeShortcut = hotKey
-    }
-
     func presentOnboarding() {
         calls.append("presentOnboarding")
     }
@@ -158,7 +152,6 @@ enum RuntimeLifecycleSpecs {
         "restoreLoginItem",
         "restoreMicrophone",
         "restoreShortcut",
-        "restoreRefinementModeShortcut",
         "presentOnboarding",
     ]
 
@@ -188,12 +181,10 @@ enum RuntimeLifecycleSpecs {
                 modifiers: 0x100,
                 displayName: "⌘Space"
             )
-            let modeShortcut = CustomHotKey(keyCode: 46, modifiers: 6_144, displayName: "⌃⌥M")
             stages.settings = .loaded(
                 SpeakerAppSettings(
                     shortcut: customShortcut,
                     microphone: .device(uid: "startup-microphone"),
-                    refinementModeShortcut: modeShortcut,
                     launchAtLogin: true,
                     historyRetention: .thirtyDays
                 ))
@@ -206,7 +197,6 @@ enum RuntimeLifecycleSpecs {
 
             try expect(stages.calls == fullStartupOrder, "unexpected order \(stages.calls)")
             try expect(stages.restoredShortcut == customShortcut)
-            try expect(stages.restoredRefinementModeShortcut == modeShortcut)
             try expect(stages.restoredMicrophone == .device(uid: "startup-microphone"))
             try expect(stages.restoredLoginItem == true)
             try expect(stages.appliedRetention == .thirtyDays)
@@ -343,7 +333,6 @@ enum RuntimeLifecycleSpecs {
                     "restoreLoginItem",
                     "restoreMicrophone",
                     "restoreShortcut",
-                    "restoreRefinementModeShortcut",
                     "presentOnboarding",
                 ], "unexpected order \(stages.calls)")
             try expect(notices == [SpeakerCopy.Startup.historyPrivacyScrubIncomplete])

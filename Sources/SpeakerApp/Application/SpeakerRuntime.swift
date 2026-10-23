@@ -21,7 +21,6 @@ final class SpeakerRuntime: ObservableObject {
     let loginItemSettings: LoginItemSettingsModel
     let settingsNavigation: SettingsNavigationModel
     let shortcut: VoiceShortcutFeature
-    let refinementModeShortcut: RefinementModeShortcutFeature
     let microphones: MicrophoneSelectionFeature
     let diagnostics: DiagnosticNoticeModel
     let softwareUpdate: SoftwareUpdateFeature
@@ -48,7 +47,6 @@ final class SpeakerRuntime: ObservableObject {
         navigation: settingsNavigation,
         permissions: permissions,
         shortcut: shortcut,
-        refinementModeShortcut: refinementModeShortcut,
         microphones: microphones,
         loginItemSettings: loginItemSettings,
         historyRetention: historyRetention,
@@ -220,26 +218,6 @@ final class SpeakerRuntime: ObservableObject {
             }
         )
         self.shortcut = shortcut
-        // Each press selects the next Refinement Mode for the next session.
-        // The Carbon callback only schedules this work; the frontmost App
-        // plays no part in the choice.
-        let refinementModeShortcut = RefinementModeShortcutFeature(
-            action: { [weak refinementSettings, weak voiceInput] in
-                Task { @MainActor in
-                    guard let refinementSettings else { return }
-                    let outcome = await refinementSettings.cycleMode()
-                    guard
-                        let notice = SpeakerCopy.RefinementModeShortcut.notice(for: outcome)
-                    else { return }
-                    voiceInput?.showRefinementModeNotice(notice)
-                }
-            },
-            recordingShortcut: { shortcut.preference },
-            persist: { hotKey in
-                _ = try await settingsStore.updateRefinementModeShortcut(hotKey)
-            }
-        )
-        self.refinementModeShortcut = refinementModeShortcut
         let permissionRefreshCoordinator = PermissionRefreshCoordinator(
             permissions: permissions,
             shortcut: shortcut
@@ -301,7 +279,6 @@ final class SpeakerRuntime: ObservableObject {
                 historyModel: historyModel,
                 loginItem: loginItemSettings,
                 shortcut: shortcut,
-                refinementModeShortcut: refinementModeShortcut,
                 microphones: microphones,
                 onboarding: onboarding,
                 preferences: dependencies.preferences,
@@ -313,7 +290,6 @@ final class SpeakerRuntime: ObservableObject {
         let shutdown = RuntimeShutdownCoordinator(
             stages: SpeakerRuntimeShutdownStages(
                 shortcut: shortcut,
-                refinementModeShortcut: refinementModeShortcut,
                 microphones: microphones,
                 permissionRefresh: permissionRefreshCoordinator,
                 startup: startup,

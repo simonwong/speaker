@@ -45,7 +45,6 @@ package final class SettingsWorkspace {
     let navigation: SettingsNavigationModel
     let permissions: PermissionModel
     let shortcut: VoiceShortcutFeature
-    let refinementModeShortcut: RefinementModeShortcutFeature
     let microphones: MicrophoneSelectionFeature
     let loginItemSettings: LoginItemSettingsModel
     let historyRetention: HistoryRetentionSettingsModel
@@ -65,7 +64,6 @@ package final class SettingsWorkspace {
         navigation: SettingsNavigationModel,
         permissions: PermissionModel,
         shortcut: VoiceShortcutFeature,
-        refinementModeShortcut: RefinementModeShortcutFeature,
         microphones: MicrophoneSelectionFeature,
         loginItemSettings: LoginItemSettingsModel,
         historyRetention: HistoryRetentionSettingsModel,
@@ -83,7 +81,6 @@ package final class SettingsWorkspace {
         self.navigation = navigation
         self.permissions = permissions
         self.shortcut = shortcut
-        self.refinementModeShortcut = refinementModeShortcut
         self.microphones = microphones
         self.loginItemSettings = loginItemSettings
         self.historyRetention = historyRetention
@@ -189,16 +186,6 @@ package enum RefinementChoice: String, CaseIterable, Identifiable {
 
 }
 
-/// What a press of the Refinement Mode shortcut did.
-package enum RefinementModeCycleOutcome: Equatable, Sendable {
-    /// The next mode is now selected for new sessions.
-    case selected(TextRefinementMode)
-    /// Only Default Smoothing is usable until the provider's Key is saved.
-    case requiresKey(providerName: String)
-    /// A provider or Key change was in progress, so nothing changed.
-    case unchanged
-}
-
 /// One row of the menu bar's Refinement Mode list.
 package struct RefinementModeMenuEntry: Identifiable, Equatable {
     package let selection: RefinementModeSelection
@@ -244,9 +231,6 @@ package final class RefinementSettingsModel: ObservableObject {
     /// The entry the user chose while its provider has no Key; it becomes
     /// active once the Key is saved.
     private var deferredSelection: RefinementModeSelection?
-    /// The last Refinement Mode shortcut press; each press waits for the one
-    /// before it so quick presses step one mode each.
-    private var pendingCycle: Task<RefinementModeCycleOutcome, Never>?
     private var providerDrafts:
         [RefinementProviderID: (modelID: String, baseURL: String, manual: Bool)] = [:]
 
@@ -599,33 +583,6 @@ package final class RefinementSettingsModel: ObservableObject {
         } else {
             await select(RefinementChoice(selection: entry))
         }
-    }
-
-    /// Steps to the next Refinement Mode in list order for the next session,
-    /// as choosing it in the menu would. The frontmost App plays no part.
-    package func cycleMode() async -> RefinementModeCycleOutcome {
-        let previous = pendingCycle
-        let cycle = Task { @MainActor [weak self] () -> RefinementModeCycleOutcome in
-            _ = await previous?.value
-            guard let self else { return .unchanged }
-            return await self.stepToNextMode()
-        }
-        pendingCycle = cycle
-        return await cycle.value
-    }
-
-    private func stepToNextMode() async -> RefinementModeCycleOutcome {
-        guard !isMutating else { return .unchanged }
-        guard hasStoredKey else { return .requiresKey(providerName: providerName) }
-        let next = selection.next(customModes: customModes)
-        await activate(next, persist: true)
-        guard selection == next else { return .unchanged }
-        if let builtInMode = next.builtInMode {
-            inspectPrompt(builtInMode)
-        } else {
-            inspectedPromptMode = nil
-        }
-        return .selected(mode)
     }
 
     private struct SelectionActivation {
@@ -1096,22 +1053,15 @@ package enum ShortcutRecorderDecision: Equatable {
 }
 
 package struct ShortcutRecorderPolicy {
-    package static let recordingPrompt =
-        "请单独按下左/右 ⌥、⌃、⇧，或输入一个安全组合键；按 Esc 取消。"
-    package static let soloCommandPrompt =
-        "不支持单独使用 Command；请选择左/右 ⌥、⌃ 或 ⇧。"
-    package static let missingModifierPrompt = "组合键必须包含至少一个修饰键。"
-    package static let editingConflictPrompt =
-        "这个组合键是常用编辑命令，请换一个组合键。"
+    /// The answer to a chord that is not safe for a global shortcut.
+    package static let recordingPrompt = "请换一个组合键，或单独按左/右 ⌥、⌃、⇧"
+    package static let soloCommandPrompt = "不能单独使用 ⌘"
+    package static let missingModifierPrompt = "组合键需要至少一个修饰键"
+    package static let editingConflictPrompt = "这是常用编辑命令，请换一个"
 
     private var modifierPolicy = ShortcutRecorderModifierPolicy()
-    /// What an unsafe chord is answered with: the prompt of the shortcut
-    /// being recorded.
-    private let prompt: String
 
-    package init(prompt: String = ShortcutRecorderPolicy.recordingPrompt) {
-        self.prompt = prompt
-    }
+    package init() {}
 
     package mutating func handle(
         _ input: ShortcutRecorderInput
@@ -1147,7 +1097,7 @@ package struct ShortcutRecorderPolicy {
                 return .reject(Self.editingConflictPrompt)
             }
             guard hotKey.isSafeForGlobalVoiceInput else {
-                return .reject(prompt)
+                return .reject(Self.recordingPrompt)
             }
             return .capture(hotKey)
         }
@@ -1188,33 +1138,28 @@ package struct ShortcutRecorderPolicy {
     }
 }
 
-/// The shortcut a recorder is capturing.
-enum ShortcutRecorderTarget: Equatable {
-    case recording
-    case refinementMode
-}
-
-@MainActor
+/// Records the recording shortcut from the Settings window. Only the window's
+/// own key events reach it, so the live shortcut must be released while it
+/// records; `onEnd` hands it back.
 final class ShortcutRecorderModel: ObservableObject {
-    @Published private(set) var target: ShortcutRecorderTarget?
-    @Published private(set) var notice: String?
+    @Published private(set) var isRecording = false
+    /// Why the last chord was refused. Recording continues.
+    @Published private(set) var rejection: String?
     private var monitor: Any?
     private var policy = ShortcutRecorderPolicy()
+    private var onEnd: (() -> Void)?
 
-    var isRecording: Bool { target != nil }
-
-    /// Records one chord for `target`. `validate` names why a captured chord
-    /// cannot be used; recording then continues so the user can try another.
+    /// Records one chord. A capture runs `onCapture` before `onEnd`, so the
+    /// new shortcut is chosen before the old one would listen again.
     func start(
-        for target: ShortcutRecorderTarget = .recording,
-        prompt: String = ShortcutRecorderPolicy.recordingPrompt,
-        validate: @escaping (CustomHotKey) -> String? = { _ in nil },
-        onCapture: @escaping (CustomHotKey) -> Void
+        onCapture: @escaping (CustomHotKey) -> Void,
+        onEnd: @escaping () -> Void = {}
     ) {
         stop()
-        self.target = target
-        policy = ShortcutRecorderPolicy(prompt: prompt)
-        notice = prompt
+        isRecording = true
+        rejection = nil
+        policy = ShortcutRecorderPolicy()
+        self.onEnd = onEnd
         monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.flagsChanged, .keyDown]
         ) { [weak self] event in
@@ -1238,15 +1183,10 @@ final class ShortcutRecorderModel: ObservableObject {
             case .cancel:
                 self.stop()
             case .capture(let hotKey):
-                if let message = validate(hotKey) {
-                    self.notice = message
-                    self.policy.reset()
-                    break
-                }
-                self.stop()
                 onCapture(hotKey)
+                self.stop()
             case .reject(let message):
-                self.notice = message
+                self.rejection = message
             }
             return nil
         }
@@ -1258,6 +1198,10 @@ final class ShortcutRecorderModel: ObservableObject {
         }
         monitor = nil
         policy.reset()
-        target = nil
+        isRecording = false
+        rejection = nil
+        let onEnd = onEnd
+        self.onEnd = nil
+        onEnd?()
     }
 }

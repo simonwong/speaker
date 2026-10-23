@@ -203,6 +203,45 @@ enum ShortcutSpecs: CoreSpecDomain {
         }
 
         await runAsync(
+            "recording a new shortcut releases the current one until it ends",
+            failures: &failures
+        ) {
+            let functionMonitor = FunctionKeyMonitorFake()
+            let customMonitor = CustomShortcutMonitorFake()
+            let feature = VoiceShortcutFeature(
+                functionKeyMonitor: functionMonitor,
+                customShortcutMonitor: customMonitor,
+                accessibilityGranted: { true },
+                persistPreference: { _ in }
+            )
+            let rightOption = VoiceShortcutPreference(
+                customHotKey: .modifierOnly(.rightOption, displayName: "右 ⌥"))
+            feature.select(rightOption)
+            try expect(customMonitor.isRegistered)
+
+            // Pressing the current shortcut while recording must reach the
+            // recorder, so nothing may listen for it.
+            feature.suspendForRecorder()
+            try expect(!customMonitor.isRegistered && !functionMonitor.isRunning)
+            feature.synchronize()
+            try expect(!customMonitor.isRegistered, "a permission refresh resumed listening")
+            try expect(feature.activation == .active(rightOption))
+
+            feature.resumeAfterRecorder()
+            try expect(customMonitor.isRegistered, "a cancelled recording left it unregistered")
+
+            // Capturing the same shortcut again selects it and listens again.
+            feature.suspendForRecorder()
+            feature.select(rightOption)
+            try expect(customMonitor.isRegistered)
+            let registrations = customMonitor.registeredKeys.count
+            feature.resumeAfterRecorder()
+            try expect(
+                customMonitor.registeredKeys.count == registrations,
+                "the end of the recording registered the shortcut twice")
+        }
+
+        await runAsync(
             "shortcut feature rejects editing conflicts and persists its Fn fallback",
             failures: &failures
         ) {
