@@ -56,7 +56,10 @@ extension VoiceInputActivity {
         case .idle: "waveform"
         case .preparing: "mic.badge.plus"
         case .recording: "mic.fill"
-        case .processing: "sparkles"
+        // Sparkles stand only for refinement; every other processing stage
+        // still works on the recognized speech.
+        case .processing(_, .refining): "sparkles"
+        case .processing: "waveform"
         case .delivered: "checkmark.circle.fill"
         case .pendingCopy: "doc.on.clipboard"
         case .cancelled: "xmark.circle"
