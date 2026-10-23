@@ -2,7 +2,8 @@ import AppKit
 
 @MainActor
 package enum OnboardingWindowFactory {
-    /// The onboarding window's title bar text.
+    /// The onboarding window's name in the Window menu and to VoiceOver. The
+    /// title bar hides it, because every step shows its own title.
     package static let windowTitle = "开始使用 Speaker"
 
     package static func make(
@@ -29,6 +30,8 @@ package enum OnboardingWindowFactory {
         )
         window.title = windowTitle
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
         window.minSize = layout.effectiveMinimumSize
         window.contentMinSize = layout.effectiveMinimumSize

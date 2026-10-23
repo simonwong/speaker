@@ -180,6 +180,10 @@ package enum SpeakerMotion {
     package static let feedback = easeOut(duration: 0.12)
     /// A block appearing, leaving, or changing selection.
     package static let change = easeOut(duration: 0.2)
+    /// The HUD pill growing out of, or back into, its dot. A spatial change
+    /// rather than feedback, so it runs a little past `change` and settles
+    /// without overshoot.
+    package static let hudReveal = Animation.smooth(duration: 0.26)
     /// How far a pressed plain control shrinks. Never towards zero.
     package static let pressedScale: CGFloat = 0.97
     /// Icon-only controls of 26 pt or less shrink a little further, so the

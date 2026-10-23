@@ -65,10 +65,12 @@ package struct OnboardingPresentation: Equatable, Sendable {
         }
     }
 
-    package func permissionInstructions(for permission: PermissionKind) -> String {
+    /// The steps that grant a missing permission. A granted one has none: its
+    /// badge already says so.
+    package func permissionInstructions(for permission: PermissionKind) -> String? {
         switch (permission, permissions[permission]) {
         case (_, .granted):
-            "Speaker 已确认权限开启。"
+            nil
         case (_, .restricted):
             "此权限受系统或组织限制，请联系这台 Mac 的管理员。"
         case (.microphone, .notDetermined):
