@@ -46,6 +46,8 @@ speaker_test_run_parallel "test-scripts-test-summary" \
     /bin/zsh "$SCRIPT_DIR/test-scripts-test-summary"
 speaker_test_run_parallel "test-skills-lock" \
     /bin/zsh "$SCRIPT_DIR/test-skills-lock"
+speaker_test_run_parallel "check-design-tokens" \
+    /bin/zsh "$SCRIPT_DIR/check-design-tokens"
 
 speaker_test_run "SpeakerCoreSpecs" \
     /bin/zsh "$SCRIPT_DIR/swiftw" run --disable-sandbox SpeakerCoreSpecs
