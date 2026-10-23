@@ -85,4 +85,4 @@ Only `.monospacedDigit()` may follow a token. No `.weight(...)` on a token, no `
 
 ## Guarding
 
-`scripts/check-design-tokens` fails when page code outside `DesignSystem/`, `Brand/`, and the HUD contains `.system(size:`, `Color.accentColor`, `cornerRadius: <number>`, `.green`, or `spacing: <number>` / `.padding(<number>)`.
+`scripts/check-design-tokens`, part of `./scripts/test`, fails when page code outside `DesignSystem/`, `Brand/`, and `VoiceInputHUD*.swift` contains `.system(size:`, `Color.accentColor`, `cornerRadius: <number>`, `.green`, or a non-zero `spacing: <number>` / `.padding(<number>)`. `spacing: 0` and 1-pt hairline frames stay allowed.

@@ -105,11 +105,11 @@ for mode in quiet --with-ui --ui-only; do
         quiet)
             [[ "$trace" != *SpeakerAppUISpecs* && "$trace" == *SpeakerCoreSpecs* ]]
             [[ "$mode_output" == *"Native UI coverage requires"* ]]
-            [[ "$mode_output" == *"all 23 gate steps passed"* ]]
+            [[ "$mode_output" == *"all 24 gate steps passed"* ]]
             ;;
         --with-ui)
             [[ "$trace" == *SpeakerAppUISpecs* && "$trace" == *SpeakerCoreSpecs* ]]
-            [[ "$mode_output" == *"all 24 gate steps passed"* ]]
+            [[ "$mode_output" == *"all 25 gate steps passed"* ]]
             ;;
         --ui-only)
             [[ "$trace" == "swiftw run --disable-sandbox SpeakerAppUISpecs" ]]

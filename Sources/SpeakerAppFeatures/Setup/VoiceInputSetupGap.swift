@@ -52,22 +52,4 @@ package enum VoiceInputSetupGap: Equatable, Sendable {
         case .speechRecognitionKey: "设置语音识别…"
         }
     }
-
-    package var message: String {
-        switch self {
-        case .permissions:
-            "Speaker 还没有麦克风或辅助功能权限，暂时不能录音。"
-        case .speechRecognitionKey(let provider) where provider.isOnDevice:
-            "\(provider.displayName)的语言模型还没下载，暂时不能识别。"
-        case .speechRecognitionKey(let provider):
-            "还没有保存\(provider.displayName)的 API Key，暂时不能识别。"
-        }
-    }
-
-    package var actionTitle: String {
-        switch self {
-        case .permissions: "去允许"
-        case .speechRecognitionKey: "去设置"
-        }
-    }
 }

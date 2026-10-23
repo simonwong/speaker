@@ -1,0 +1,47 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+ROOT="${SCRIPT_DIR:h}"
+FEATURES="$ROOT/Sources/SpeakerAppFeatures"
+
+# Page code reaches type, spacing, shape, and status color through the
+# tokens in DesignSystem/. Brand marks and the HUD keep their own drawing
+# constants on purpose (docs/design-system.md, "Surfaces that differ").
+# `spacing: 0`, `.padding(0)`, and hairline frames stay allowed: they remove
+# space rather than choose an amount.
+typeset -A RULES
+RULES=(
+    'system font size' '\.system\(size:'
+    'Color.accentColor' 'Color\.accentColor'
+    'numeric corner radius' 'cornerRadius: *[0-9]'
+    'system green' '\.green([^A-Za-z0-9_]|$)'
+    'numeric spacing' 'spacing: *([1-9]|0\.)'
+    'numeric padding' '\.padding\(((\.[A-Za-z]+|\[[^]]*\]), *)?([1-9]|0\.)'
+)
+
+typeset -a FILES
+FILES=("$FEATURES"/**/*.swift(N.))
+FILES=("${(@)FILES:#$FEATURES/DesignSystem/*}")
+FILES=("${(@)FILES:#$FEATURES/Brand/*}")
+FILES=("${(@)FILES:#$FEATURES/VoiceInput/VoiceInputHUD*.swift}")
+(( ${#FILES} > 0 )) || {
+    print -u2 "check-design-tokens: no page sources under $FEATURES"
+    exit 1
+}
+
+FAILED=0
+for NAME PATTERN in "${(@kv)RULES}"; do
+    HITS="$(
+        /usr/bin/grep -nE -- "$PATTERN" "${FILES[@]}" \
+            | /usr/bin/grep -vE '^[^:]+:[0-9]+: *//' || true
+    )"
+    [[ -z "$HITS" ]] && continue
+    FAILED=1
+    print -u2 "check-design-tokens: $NAME outside DesignSystem/; use a token:"
+    print -u2 -- "${HITS//$ROOT\//}"
+done
+
+(( FAILED == 0 )) || exit 1
+print "PASS: ${#FILES} page sources use design tokens"

@@ -122,6 +122,7 @@ Every file in `scripts/` is listed here; `ls scripts | wc -l` must equal the num
 | --- | --- | --- |
 | `build` | Builds the `SpeakerApp` product in `SPEAKER_CONFIGURATION` (default debug), passing any extra arguments to SwiftPM. | developer |
 | `bundle` | Assembles, versions, signs, and validates `Speaker.app` from the built executable. `SPEAKER_BUNDLE_WARNINGS_AS_ERRORS=1`, set only by CI, builds a development bundle with warnings as errors; production-signed builds always do. | developer, `launch`, `install`, `distribute`, `./scripts/test`, CI |
+| `check-design-tokens` | Fails when page code outside `DesignSystem/`, `Brand/`, and the HUD writes a raw font size, corner radius, spacing, padding, `Color.accentColor`, or `.green`. | `./scripts/test` |
 | `compatibility-smoke` | Runs the manual cross-application delivery matrix and writes a redacted owner-only report. | developer (manual gate) |
 | `delivery-e2e-smoke` | Drives an end-to-end delivery run against the `SpeakerDeliverySmokeTarget` fixture app. | developer |
 | `delivery-smoke` | Delivers one fixed string into TextEdit or Terminal and checks the receipt. | developer |
