@@ -9,7 +9,6 @@ struct PermissionSettingsPage: View {
         SpeakerCard {
             PermissionSettingsRow(
                 title: "麦克风",
-                explanation: "录制语音",
                 kind: .microphone,
                 state: permissions.snapshot.microphone,
                 requestPermission: requestPermission
@@ -19,7 +18,6 @@ struct PermissionSettingsPage: View {
 
             PermissionSettingsRow(
                 title: "辅助功能",
-                explanation: "响应快捷键并输入文字",
                 kind: .accessibility,
                 state: permissions.snapshot.accessibility,
                 requestPermission: requestPermission
@@ -30,7 +28,6 @@ struct PermissionSettingsPage: View {
 
 private struct PermissionSettingsRow: View {
     let title: String
-    let explanation: String
     let kind: PermissionKind
     let state: PermissionState
     let requestPermission: (PermissionKind) async -> Void
@@ -38,11 +35,10 @@ private struct PermissionSettingsRow: View {
     var body: some View {
         SpeakerRow(
             title,
-            detail: explanation,
             icon: icon,
             iconTone: status.tileTone
         ) {
-            HStack(spacing: 10) {
+            HStack(spacing: SpeakerSpacing.s) {
                 StatusBadge(
                     text: status.text,
                     icon: status.symbolName,

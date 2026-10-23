@@ -11,9 +11,7 @@ struct ShortcutSettingsPage: View {
             recorderRow
 
             if shortcutRecorder.isRecording, let rejection = shortcutRecorder.rejection {
-                Text(rejection)
-                    .font(SpeakerTypography.detail)
-                    .foregroundStyle(SpeakerTone.warning.color)
+                SpeakerNotice(tone: .warning, text: rejection)
             }
 
             if shortcut.preference == .functionKey, !shortcutRecorder.isRecording {
@@ -23,18 +21,16 @@ struct ShortcutSettingsPage: View {
             if let notice = shortcut.notice {
                 SpeakerNotice(
                     tone: noticeTone(notice.level),
-                    text: notice.message
+                    text: notice.message,
+                    action: notice.recovery.map(recoveryAction)
                 )
-                if let recovery = notice.recovery {
-                    recoveryRow(recovery)
-                }
             }
         }
     }
 
     private var recorderRow: some View {
         SpeakerRow("录音快捷键") {
-            HStack(spacing: 14) {
+            HStack(spacing: SpeakerSpacing.s) {
                 SpeakerKeycap(
                     name: shortcutRecorder.isRecording
                         ? "按下新快捷键" : shortcut.preference.displayName,
@@ -74,20 +70,19 @@ struct ShortcutSettingsPage: View {
         }
     }
 
-    private func recoveryRow(
+    private func recoveryAction(
         _ recovery: VoiceShortcutNotice.Recovery
-    ) -> some View {
-        HStack {
-            Spacer()
-            Button(recovery == .openAccessibilitySettings ? "查看权限设置" : "重试") {
-                switch recovery {
-                case .retryActivation:
-                    shortcut.retryActivation()
-                case .retryPersistence:
-                    shortcut.retryPersistence()
-                case .openAccessibilitySettings:
-                    openPermissionSettings()
-                }
+    ) -> SpeakerNotice.Action {
+        SpeakerNotice.Action(
+            recovery == .openAccessibilitySettings ? "查看权限设置" : "重试"
+        ) {
+            switch recovery {
+            case .retryActivation:
+                shortcut.retryActivation()
+            case .retryPersistence:
+                shortcut.retryPersistence()
+            case .openAccessibilitySettings:
+                openPermissionSettings()
             }
         }
     }

@@ -517,14 +517,14 @@ package final class RefinementSettingsModel: ObservableObject {
             notice =
                 hasStoredKey
                 ? nil
-                : "可先编辑自定义模式；保存 \(providerName) API Key 后才能启用。"
+                : "保存 \(providerName) API Key 后才能启用。"
             return
         }
 
         isEditingCustomMode = false
 
         if choice != .defaultSmooth, !hasStoredKey {
-            notice = "提示词可查看和编辑；保存 \(providerName) API Key 后才能启用该模式。"
+            notice = "保存 \(providerName) API Key 后才能启用该模式。"
             return
         }
 
