@@ -98,7 +98,7 @@ private struct AboutSettingsPage: View {
             SettingsRowDivider()
             SpeakerRow(
                 "源代码",
-                detail: "MIT 许可证开源，托管在 GitHub。",
+                detail: "MIT 许可证",
                 icon: "chevron.left.forwardslash.chevron.right"
             ) {
                 Button {
@@ -115,11 +115,7 @@ private struct AboutSettingsPage: View {
                 .accessibilityLabel("在 GitHub 查看 Speaker")
             }
             SettingsRowDivider()
-            SpeakerRow(
-                "反馈问题",
-                detail: "在 GitHub Issues 报告问题或提建议；附上诊断信息便于排查。",
-                icon: "exclamationmark.bubble"
-            ) {
+            SpeakerRow("反馈问题", icon: "exclamationmark.bubble") {
                 Button("提交反馈") {
                     routeEffects.openURL(ExternalLinks.speakerIssues)
                 }
@@ -132,15 +128,18 @@ private struct AboutSettingsPage: View {
             AboutSection.author.title,
             icon: AboutSection.author.icon
         ) {
-            SpeakerRow(
-                "simonwong",
-                detail: "Speaker 的作者与维护者。",
-                icon: "person.fill"
-            ) {
-                Button("GitHub 主页") {
-                    routeEffects.openURL(ExternalLinks.authorProfile)
+            SpeakerRow("Simon Wong", detail: "simonwong.cn", icon: "person.fill") {
+                Button("打开网站") {
+                    routeEffects.openURL(ExternalLinks.authorWebsite)
                 }
-                .accessibilityLabel("在 GitHub 查看作者主页")
+                .accessibilityLabel("打开 Simon Wong 的网站")
+            }
+            SettingsRowDivider()
+            SpeakerRow("MoonUnder Studio", detail: "moonunder.app", icon: "building.2") {
+                Button("打开网站") {
+                    routeEffects.openURL(ExternalLinks.studioWebsite)
+                }
+                .accessibilityLabel("打开 MoonUnder Studio 的网站")
             }
         }
     }
@@ -205,7 +204,7 @@ private struct AboutSettingsPage: View {
 
             SpeakerRow(
                 "诊断信息",
-                detail: "复制版本、权限和服务状态，便于反馈问题；不包含文字、音频或 API Key。"
+                detail: "包含版本、权限和服务状态，不包含文字、音频或 API Key。"
             ) {
                 Button("复制诊断信息") {
                     Task { await copyDiagnostics() }
