@@ -31,9 +31,14 @@ package enum ExternalLinks {
         return URL(string: "https://github.com/simonwong/speaker/releases/tag/v\(version)")
     }
 
-    /// The author's GitHub profile shown by the About page.
-    package static let authorProfile = absolute(
-        "https://github.com/simonwong"
+    /// The author's website shown by the About page.
+    package static let authorWebsite = absolute(
+        "https://simonwong.cn"
+    )
+
+    /// The studio website shown by the About page.
+    package static let studioWebsite = absolute(
+        "https://moonunder.app"
     )
 
     /// The Volcengine console page that issues Doubao speech API keys.
