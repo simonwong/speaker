@@ -279,7 +279,7 @@ final class SpeakerRuntime: ObservableObject {
                 historyModel: historyModel,
                 loginItem: loginItemSettings,
                 shortcut: shortcut,
-                        microphones: microphones,
+                microphones: microphones,
                 onboarding: onboarding,
                 preferences: dependencies.preferences,
                 launchArguments: dependencies.launchArguments
@@ -290,7 +290,7 @@ final class SpeakerRuntime: ObservableObject {
         let shutdown = RuntimeShutdownCoordinator(
             stages: SpeakerRuntimeShutdownStages(
                 shortcut: shortcut,
-                        microphones: microphones,
+                microphones: microphones,
                 permissionRefresh: permissionRefreshCoordinator,
                 startup: startup,
                 onboarding: onboarding,
