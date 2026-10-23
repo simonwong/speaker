@@ -5,11 +5,11 @@ struct DictionarySettingsPage: View {
     @ObservedObject var model: DictionarySettingsModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// The tab already names the page, so the field, the capacity, and the
+    /// Entries sit on the page ground the way History's search and records
+    /// do, with no card of their own; an empty dictionary is just the field.
     var body: some View {
-        SettingsCard(
-            "个人词库",
-            icon: "text.book.closed"
-        ) {
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
             HStack(spacing: 8) {
                 TextField(
                     "输入词条，回车添加",
@@ -31,13 +31,7 @@ struct DictionarySettingsPage: View {
 
             capacityRow
 
-            if model.entries.isEmpty {
-                SpeakerEmptyState(
-                    title: "还没有词条",
-                    description: "在上方输入一个词，回车即可添加。",
-                    systemImage: "text.book.closed"
-                )
-            } else {
+            if !model.entries.isEmpty {
                 let omittedEntryIDs = model.omittedEntryIDs
                 DictionaryChipFlowLayout(spacing: 8) {
                     ForEach(model.entries) { entry in
@@ -104,13 +98,9 @@ struct DictionarySettingsPage: View {
 
     private var capacityRow: some View {
         HStack(spacing: 10) {
-            Label {
-                Text(model.sendingCountText)
-            } icon: {
-                Image(systemName: "paperplane.fill")
-            }
-            .font(SpeakerTypography.footnote.weight(.medium))
-            .foregroundStyle(hasOmittedEntries ? Color.orange : Color.secondary)
+            Text(model.sendingCountText)
+                .font(SpeakerTypography.footnote.weight(.medium))
+                .foregroundStyle(hasOmittedEntries ? Color.orange : Color.secondary)
 
             Spacer(minLength: 12)
 
@@ -120,6 +110,9 @@ struct DictionarySettingsPage: View {
             )
         }
         .frame(height: 20)
+        // Inset like a section header, so the count does not sit flush
+        // against the field's curve above it.
+        .padding(.horizontal, 4)
     }
 
     private var capacityRatio: Double {
