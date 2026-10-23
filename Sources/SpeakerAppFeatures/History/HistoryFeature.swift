@@ -114,13 +114,13 @@ package final class HistoryModel: ObservableObject {
         guard await store.delete(sessionID: id) else {
             publishFeedback(
                 .error,
-                "无法删除这条会话记录，请重试。"
+                "无法删除这条历史记录，请重试。"
             )
             await refresh()
             return false
         }
         await refresh()
-        publishFeedback(.success, "会话记录已删除")
+        publishFeedback(.success, "已删除")
         return true
     }
 
@@ -133,7 +133,7 @@ package final class HistoryModel: ObservableObject {
         guard await store.clear() else {
             publishFeedback(
                 .error,
-                "无法清空会话历史，请检查本地存储后重试。"
+                "无法清空历史记录，请检查本地存储后重试。"
             )
             await refresh()
             return false
@@ -141,7 +141,7 @@ package final class HistoryModel: ObservableObject {
         await refresh()
         publishFeedback(
             .success,
-            "已清空 \(deletedCount) 条会话记录"
+            "已清空 \(deletedCount) 条历史记录"
         )
         return true
     }

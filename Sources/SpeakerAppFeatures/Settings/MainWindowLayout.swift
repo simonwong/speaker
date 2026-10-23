@@ -22,11 +22,11 @@ package struct MainWindowLayout: Equatable, Sendable {
     }
 
     package var pageHorizontalPadding: CGFloat {
-        widthClass == .compact ? 18 : 24
+        widthClass == .compact ? SpeakerSpacing.l : SpeakerSpacing.xl
     }
 
     package var overviewMetricDividerPadding: CGFloat {
-        widthClass == .compact ? 18 : 34
+        widthClass == .compact ? SpeakerSpacing.l : SpeakerSpacing.xxl
     }
 }
 

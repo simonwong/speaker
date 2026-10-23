@@ -10,13 +10,10 @@ struct DictionarySettingsPage: View {
     /// do, with no card of their own; an empty dictionary is just the field.
     var body: some View {
         VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.rowSpacing) {
-            HStack(spacing: 8) {
-                TextField(
-                    "输入词条，回车添加",
-                    text: $model.draftWord
-                )
-                .textFieldStyle(SpeakerTextFieldStyle())
-                .onSubmit { Task { await model.add() } }
+            HStack(spacing: SpeakerSpacing.s) {
+                TextField("添加词条", text: $model.draftWord)
+                    .textFieldStyle(SpeakerTextFieldStyle())
+                    .onSubmit { Task { await model.add() } }
 
                 Button("添加") {
                     Task { await model.add() }
@@ -33,7 +30,7 @@ struct DictionarySettingsPage: View {
 
             if !model.entries.isEmpty {
                 let omittedEntryIDs = model.omittedEntryIDs
-                DictionaryChipFlowLayout(spacing: 8) {
+                DictionaryChipFlowLayout(spacing: SpeakerSpacing.s) {
                     ForEach(model.entries) { entry in
                         DictionaryEntryChip(
                             word: entry.word,
@@ -48,11 +45,11 @@ struct DictionarySettingsPage: View {
             }
 
             if let deleted = model.recentlyDeleted {
-                undoRow(for: deleted)
+                undoNotice(for: deleted)
             }
 
             if let notice = model.notice {
-                SpeakerNotice(text: notice)
+                SpeakerNotice(tone: noticeTone(for: notice), text: notice)
             }
         }
         .animation(
@@ -67,52 +64,43 @@ struct DictionarySettingsPage: View {
         reduceMotion ? .opacity : .scale(scale: 0.9).combined(with: .opacity)
     }
 
-    private func undoRow(for entry: DictionaryEntry) -> some View {
-        HStack(spacing: 10) {
-            Text("已删除「\(entry.word)」")
-                .font(SpeakerTypography.detail)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 12)
-            Button("撤销") {
+    private func undoNotice(for entry: DictionaryEntry) -> some View {
+        SpeakerNotice(
+            text: "已删除「\(entry.word)」",
+            action: .init("撤销", hint: "撤销删除 \(entry.word)") {
                 Task { await model.undoDelete() }
-            }
-            .buttonStyle(SpeakerButtonStyle())
-            .accessibilityLabel("撤销删除 \(entry.word)")
-            Button {
-                model.dismissUndo()
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("关闭")
-        }
+            },
+            onDismiss: .init(label: "关闭") { model.dismissUndo() }
+        )
         .transition(.opacity)
+    }
+
+    /// A recovered dictionary still works, so its notice is a warning; every
+    /// other dictionary notice reports a load or save that failed.
+    private func noticeTone(for notice: String) -> SpeakerTone {
+        if let recovery = model.recovery,
+            notice == DictionarySettingsModel.recoveryNotice(for: recovery)
+        {
+            return .warning
+        }
+        return .error
     }
 
     private var hasOmittedEntries: Bool {
         !model.omittedEntryIDs.isEmpty
     }
 
+    /// The count and its bar read as one measurement, inset to line up with
+    /// the field's text above.
     private var capacityRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: SpeakerSpacing.s) {
             Text(model.sendingCountText)
-                .font(SpeakerTypography.detail)
+                .font(SpeakerTypography.detail.monospacedDigit())
                 .foregroundStyle(hasOmittedEntries ? SpeakerTone.warning.color : Color.secondary)
 
-            Spacer(minLength: 12)
-
-            DictionaryCapacityBar(
-                filledRatio: capacityRatio,
-                isAtCapacity: capacityRatio >= 1 && hasOmittedEntries
-            )
+            DictionaryCapacityBar(filledRatio: capacityRatio)
         }
-        .frame(height: 20)
-        // Inset like a section header, so the count does not sit flush
-        // against the field's curve above it.
-        .padding(.horizontal, 4)
+        .padding(.horizontal, SpeakerSpacing.m)
     }
 
     private var capacityRatio: Double {
@@ -123,31 +111,29 @@ struct DictionarySettingsPage: View {
 }
 
 /// A silent companion to `sendingCountText`; the numbers stay in that text.
+/// Gold while there is room, orange once the provider's capacity is full.
 private struct DictionaryCapacityBar: View {
     let filledRatio: Double
-    let isAtCapacity: Bool
     @Environment(\.colorScheme) private var colorScheme
 
+    private static let width: CGFloat = 120
+    private static let height: CGFloat = 4
+
     private var fillColor: Color {
-        if isAtCapacity { return SpeakerTone.warning.color }
+        if filledRatio >= 1 { return SpeakerTone.warning.color }
         return colorScheme == .dark
             ? SpeakerVisualIdentity.warmGold
             : SpeakerVisualIdentity.warmGoldDeep
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.08))
-                Capsule()
-                    .fill(fillColor)
-                    .frame(
-                        width: geometry.size.width
-                            * max(0, min(1, filledRatio))
-                    )
-            }
+        ZStack(alignment: .leading) {
+            Capsule().fill(SpeakerFill.control)
+            Capsule()
+                .fill(fillColor)
+                .frame(width: Self.width * max(0, min(1, filledRatio)))
         }
-        .frame(width: 120, height: 4)
+        .frame(width: Self.width, height: Self.height)
         .accessibilityHidden(true)
     }
 }

@@ -11,9 +11,9 @@ struct WhatsNewBanner: View {
 
     var body: some View {
         SpeakerNotice(
-            text: "Speaker 已更新到 \(version)。",
+            text: "已更新到 \(version)",
             glyph: .highlight("sparkles"),
-            action: .init("看看更新了什么", perform: open),
+            action: .init("更新内容", perform: open),
             onDismiss: .init(label: "关闭更新提示", help: "不再显示", perform: dismiss)
         )
     }

@@ -159,14 +159,14 @@ package struct HistoryDashboard: View {
                 }
             }
             .confirmationDialog(
-                "清空所有会话历史？",
+                "清空所有历史记录？",
                 isPresented: $confirmsClear,
                 titleVisibility: .visible
             ) {
                 Button("清空历史", role: .destructive, action: actions.clear)
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("文字记录会从本机永久删除，此操作无法撤销。概览里的累计数字会保留。")
+                Text("无法撤销。概览的累计数字会保留。")
             }
     }
 
@@ -180,8 +180,8 @@ package struct HistoryDashboard: View {
     }
 
     private var historyToolbar: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 7) {
+        HStack(spacing: SpeakerSpacing.s) {
+            HStack(spacing: SpeakerSpacing.s) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
@@ -209,10 +209,11 @@ package struct HistoryDashboard: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.tertiary)
+                    .help("清空搜索")
                     .accessibilityLabel("清空搜索")
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, SpeakerSpacing.m)
             .frame(height: SpeakerControlMetrics.height)
             .speakerField(focused: searchIsFocused)
 
@@ -228,8 +229,8 @@ package struct HistoryDashboard: View {
             } label: {
                 Image(systemName: "ellipsis")
                     // A glyph centred in a fixed hit box, matched to the search
-                    // field's height: the size belongs to the box.
-                    .font(.system(size: 13, weight: .medium))
+                    // field's height, like an icon button.
+                    .font(SpeakerTypography.emphasis)
                     .foregroundStyle(.secondary)
                     .frame(
                         width: SpeakerControlMetrics.height,
@@ -244,7 +245,9 @@ package struct HistoryDashboard: View {
             .accessibilityLabel("历史选项")
         }
         .speakerPageColumn()
-        .padding(.vertical, 10)
+        // The field starts where every other tab's content starts.
+        .padding(.top, SpeakerSurfaceMetrics.pageTopPadding)
+        .padding(.bottom, SpeakerSpacing.s)
         // Opaque, because the list scrolls under it.
         .background(Color.historyGround)
     }
@@ -255,10 +258,7 @@ package struct HistoryDashboard: View {
 
     private var emptyState: some View {
         SpeakerEmptyState(
-            title: isSearching ? "没有找到匹配记录" : "还没有会话记录",
-            description: isSearching
-                ? "尝试缩短关键词，或清空搜索后查看全部记录。"
-                : "完成第一次语音输入后，记录会出现在这里。",
+            title: isSearching ? "没有匹配的历史记录" : "还没有历史记录",
             systemImage: isSearching ? "magnifyingglass" : "clock.arrow.circlepath"
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -288,20 +288,17 @@ package struct HistoryDashboard: View {
 
     /// The day heading stays pinned while its own records scroll, so a long
     /// day never loses its date. Its ground is opaque for the same reason.
+    /// Inset by the row padding, so the date lines up with the time column.
     private func sectionHeader(_ section: HistoryDaySection) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(section.title)
-                .font(SpeakerTypography.label)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 12)
-            Text("\(section.records.count) 条")
-                .font(SpeakerTypography.detail)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 8)
-        .padding(.top, 16)
-        .padding(.bottom, 6)
-        .background(Color.historyGround)
+        Text(section.title)
+            .font(SpeakerTypography.label)
+            .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, SpeakerSpacing.s)
+            .padding(.top, SpeakerSpacing.l)
+            .padding(.bottom, SpeakerSpacing.s)
+            .background(Color.historyGround)
     }
 
     private func row(for record: VoiceInputHistoryRecord) -> some View {
@@ -325,14 +322,14 @@ package struct HistoryDashboard: View {
         )
     }
 
-    /// The status line reads as a tinted banner on the ground rather than a
+    /// The status line reads as a tinted notice on the ground rather than a
     /// strip behind a rule, so the tab carries no horizontal lines at all.
     @ViewBuilder
     private var statusFooter: some View {
         if let footer {
-            SpeakerNotice(tone: footer.tone, text: footer.message, glyph: .symbol(footer.icon))
+            SpeakerNotice(tone: footer.tone, text: footer.message)
                 .speakerPageColumn()
-                .padding(.vertical, 10)
+                .padding(.vertical, SpeakerSpacing.s)
                 .background(Color.historyGround)
                 .accessibilityLabel(footer.message)
         }
@@ -341,18 +338,10 @@ package struct HistoryDashboard: View {
     /// Transient feedback outranks the persistent store notice.
     private var footer: HistoryFooterLine? {
         if let feedback = state.feedback {
-            return HistoryFooterLine(
-                message: feedback.message,
-                icon: feedback.kind.systemImage,
-                tone: feedback.kind.tone
-            )
+            return HistoryFooterLine(message: feedback.message, tone: feedback.kind.tone)
         }
         if let notice = state.notice {
-            return HistoryFooterLine(
-                message: notice,
-                icon: "exclamationmark.circle.fill",
-                tone: .error
-            )
+            return HistoryFooterLine(message: notice, tone: .error)
         }
         return nil
     }
@@ -362,7 +351,6 @@ package struct HistoryDashboard: View {
 /// feedback and the persistent store notice is showing.
 private struct HistoryFooterLine {
     let message: String
-    let icon: String
     let tone: SpeakerTone
 }
 
@@ -393,7 +381,10 @@ private struct HistoryRecordRow: View {
 
     /// The gap between two rows. Rows carry no rule between them: the hover
     /// fill is what tells the pointer which record it is on.
-    static let spacing: CGFloat = 2
+    static let spacing = SpeakerSpacing.hairline
+
+    /// Wide enough for "23:59" in the mono face.
+    private static let timeColumnWidth: CGFloat = 44
 
     /// A collapsed row shows at most two lines. It does not reserve them: the
     /// action cluster holds its width whether or not it is visible, so the
@@ -412,16 +403,16 @@ private struct HistoryRecordRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: SpeakerSpacing.m) {
                 // A real button, so the keyboard and VoiceOver can expand a
                 // record and reach its actions, not only the pointer.
                 Button(action: toggleDetails) {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: SpeakerSpacing.m) {
                         Text(presentation.time)
                             .font(SpeakerTypography.mono)
                             .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .leading)
-                            .padding(.top, 2)
+                            .frame(width: Self.timeColumnWidth, alignment: .leading)
+                            .padding(.top, SpeakerSpacing.hairline)
 
                         recordText
 
@@ -429,14 +420,14 @@ private struct HistoryRecordRow: View {
                             Image(systemName: problem.icon)
                                 .font(SpeakerTypography.body)
                                 .foregroundStyle(problem.tone.color)
-                                .padding(.top, 2)
+                                .padding(.top, SpeakerSpacing.hairline)
                                 .help(problem.label)
                                 .accessibilityLabel(problem.label)
                         } else if let note = presentation.note {
                             Image(systemName: note.icon)
                                 .font(SpeakerTypography.body)
                                 .foregroundStyle(.secondary)
-                                .padding(.top, 2)
+                                .padding(.top, SpeakerSpacing.hairline)
                                 .help(note.label)
                                 .accessibilityLabel(note.label)
                         }
@@ -458,8 +449,8 @@ private struct HistoryRecordRow: View {
                 // it is visible: revealing it must never reflow the text.
                 rowActions
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 10)
+            .padding(.horizontal, SpeakerSpacing.s)
+            .padding(.vertical, SpeakerSpacing.s)
             .contentShape(Rectangle())
             .onTapGesture(perform: toggleDetails)
 
@@ -468,17 +459,17 @@ private struct HistoryRecordRow: View {
                     record: record,
                     presentation: presentation
                 )
-                .padding(.horizontal, 8)
-                .padding(.bottom, 12)
+                .padding(.horizontal, SpeakerSpacing.s)
+                .padding(.bottom, SpeakerSpacing.m)
                 .transition(.opacity.combined(with: .offset(y: -6)))
             }
         }
-        .background(shape.fill(Color.primary.opacity(fillOpacity)))
+        .background(shape.fill(fill))
         // Nothing rules one record off from the next, so Increase Contrast
         // gets the boundary back as a border around each record.
         .overlay {
             if contrast == .increased {
-                shape.strokeBorder(Color.primary.opacity(0.25), lineWidth: 1)
+                shape.strokeBorder(SpeakerStroke.hairline(increasedContrast: true), lineWidth: 1)
             }
         }
         #if DEBUG
@@ -501,14 +492,14 @@ private struct HistoryRecordRow: View {
                 .disabled(isBusy)
         }
         .confirmationDialog(
-            "删除这条会话记录？",
+            "删除这条历史记录？",
             isPresented: $confirmsDelete,
             titleVisibility: .visible
         ) {
             Button("删除记录", role: .destructive, action: delete)
             Button("取消", role: .cancel) {}
         } message: {
-            Text("记录只保存在本机，删除后无法恢复。")
+            Text("删除后无法恢复。")
         }
     }
 
@@ -519,17 +510,16 @@ private struct HistoryRecordRow: View {
         )
     }
 
-    private var fillOpacity: Double {
-        let increased = contrast == .increased
-        if isExpanded { return increased ? 0.12 : 0.06 }
-        if isHovered { return increased ? 0.09 : 0.04 }
-        return 0
+    private var fill: Color {
+        if isExpanded { return SpeakerFill.selected }
+        if isHovered { return SpeakerFill.subtle }
+        return .clear
     }
 
     @ViewBuilder
     private var recordText: some View {
         if isExpanded {
-            HStack(spacing: 8) {
+            HStack(spacing: SpeakerSpacing.s) {
                 Text(presentation.canCopy ? (record.refinementModeName ?? "默认顺滑") : "错误详情")
                     .font(SpeakerTypography.emphasis)
                 Image(systemName: "chevron.up")
@@ -540,7 +530,7 @@ private struct HistoryRecordRow: View {
         } else {
             Text(presentation.previewText)
                 .font(SpeakerTypography.body)
-                .lineSpacing(2)
+                .lineSpacing(SpeakerSpacing.hairline)
                 .lineLimit(Self.collapsedLineLimit)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -551,83 +541,27 @@ private struct HistoryRecordRow: View {
     /// text column never resizes; the buttons themselves only exist while
     /// visible, staying out of the focus ring and the accessibility tree.
     private var rowActions: some View {
-        HStack(spacing: HistoryRowActionButton.spacing) {
+        HStack(spacing: Self.actionSpacing) {
             if showsActions {
                 if presentation.canCopy {
-                    HistoryRowActionButton(
-                        symbol: "doc.on.doc",
-                        label: "复制",
-                        isEnabled: !isBusy,
-                        action: copy
-                    )
+                    SpeakerIconButton(symbol: "doc.on.doc", label: "复制", action: copy)
                 }
-                HistoryRowActionButton(
-                    symbol: "trash",
-                    label: "删除",
-                    isEnabled: !isBusy
-                ) {
+                SpeakerIconButton(symbol: "trash", label: "删除") {
                     confirmsDelete = true
                 }
             }
         }
+        .disabled(isBusy)
         .frame(
-            width: HistoryRowActionButton.clusterWidth,
-            height: HistoryRowActionButton.side,
+            width: Self.actionClusterWidth,
+            height: SpeakerControlMetrics.height,
             alignment: .trailing
         )
     }
-}
 
-/// One icon button in a record row, with its own hover fill so the pointer
-/// lands on something that answers back.
-private struct HistoryRowActionButton: View {
-    static let spacing: CGFloat = 2
-    static let side: CGFloat = 24
-    /// Two buttons plus the gap: the width a row reserves for the cluster.
-    static let clusterWidth = side * 2 + spacing
-
-    let symbol: String
-    let label: String
-    let isEnabled: Bool
-    let action: () -> Void
-    @State private var isHovered = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: SpeakerRadius.inner,
-            style: .continuous
-        )
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                // A glyph centred in a fixed hit box: the size belongs to the
-                // box, not to the text ladder.
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: Self.side, height: Self.side)
-                .background(
-                    shape.fill(
-                        Color.primary.opacity(
-                            isHovered && isEnabled ? 0.09 : 0
-                        )
-                    )
-                )
-                .contentShape(shape)
-                .animation(reduceMotion ? nil : SpeakerMotion.feedback, value: isHovered)
-        }
-        .buttonStyle(
-            SpeakerPressableButtonStyle(
-                pressedScale: SpeakerMotion.compactPressedScale
-            )
-        )
-        .disabled(!isEnabled)
-        .onHover { isHovered = $0 }
-        .help(label)
-        .accessibilityLabel(label)
-    }
+    private static let actionSpacing = SpeakerSpacing.s
+    /// Two icon buttons plus the gap: the width a row reserves for the cluster.
+    private static let actionClusterWidth = SpeakerControlMetrics.height * 2 + actionSpacing
 }
 
 package struct HistoryExpandedRecord: View {
@@ -640,10 +574,10 @@ package struct HistoryExpandedRecord: View {
     }
 
     package var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.m) {
             Divider()
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: SpeakerSpacing.xs) {
                 if let problem = presentation.problem {
                     Label(problem.label, systemImage: problem.icon)
                         .font(SpeakerTypography.detail)
@@ -662,7 +596,7 @@ package struct HistoryExpandedRecord: View {
             if presentation.canCopy {
                 Text(presentation.text)
                     .font(SpeakerTypography.body)
-                    .lineSpacing(4)
+                    .lineSpacing(SpeakerSpacing.xs)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -688,14 +622,14 @@ package struct HistoryExpandedRecord: View {
 
             if !diagnosticLines.isEmpty {
                 DisclosureGroup("诊断信息") {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: SpeakerSpacing.xs) {
                         ForEach(diagnosticLines, id: \.self) { line in
                             diagnosticText(line)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
+                    .padding(.top, SpeakerSpacing.s)
                     .textSelection(.enabled)
                 }
                 .font(SpeakerTypography.detail)
@@ -709,10 +643,10 @@ package struct HistoryExpandedRecord: View {
             Text(text)
                 .font(SpeakerTypography.body)
                 .foregroundStyle(.primary)
-                .lineSpacing(4)
+                .lineSpacing(SpeakerSpacing.xs)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
+                .padding(.top, SpeakerSpacing.s)
                 .textSelection(.enabled)
         }
         .font(SpeakerTypography.detail)
@@ -788,18 +722,10 @@ package struct HistoryExpandedRecord: View {
 }
 
 extension HistoryDashboardFeedback.Kind {
-    fileprivate var systemImage: String {
-        switch self {
-        case .information: "info.circle.fill"
-        case .success: "checkmark.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .error: "xmark.circle.fill"
-        }
-    }
-
     fileprivate var tone: SpeakerTone {
         switch self {
-        case .information, .success: .neutral
+        case .information: .neutral
+        case .success: .ok
         case .warning: .warning
         case .error: .error
         }
