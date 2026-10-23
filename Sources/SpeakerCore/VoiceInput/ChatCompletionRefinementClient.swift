@@ -521,28 +521,6 @@ public actor ChatCompletionRefinementClient: TextRefining {
         return request
     }
 
-    /// The characters one refinement request sends in its messages: the fixed
-    /// system prompt plus the user prompt built exactly as `makeURLRequest`
-    /// builds it. Usage estimates count with it so they include the prompt
-    /// overhead, not only the transcript.
-    package static func requestMessageCharacterCount(
-        text: String,
-        instruction: String,
-        dictionaryWords: [String]
-    ) -> Int {
-        fixedSystemPrompt.count
-            + userPrompt(
-                text: text,
-                instruction: instruction,
-                dictionaryWords: dictionaryWords
-            ).count
-    }
-
-    /// The characters of the answer the request asks for, `{"text":"…"}`.
-    package static func responseCharacterCount(text: String) -> Int {
-        #"{"text":}"#.count + jsonString(text).count
-    }
-
     /// The blocks run from the least to the most variable — rule, Personal Dictionary,
     /// transcript — so the system prompt, rule, and Entries form a prefix that providers
     /// with prompt caching can reuse across sessions.

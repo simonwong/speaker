@@ -183,7 +183,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
                     sessionCount: Int(archive.int64(at: 3))
                 )
             }
-            try SQLiteServiceUsageArchive.read(into: &accumulator.services, on: connection)
             return accumulator.summary()
         } catch {
             return accumulator.summary()
@@ -549,7 +548,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             )
             """
         )
-        try SQLiteServiceUsageArchive.create(on: connection)
         if try !connection.table("history_records", containsColumn: "payload_schema") {
             try connection.execute(
                 "ALTER TABLE history_records ADD COLUMN payload_schema INTEGER NOT NULL DEFAULT 1"
@@ -755,9 +753,8 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
 
     /// Folds the usage of the rows about to be deleted into `usage_archive`.
     ///
-    /// The archive keeps only per-day counts, plus per-service counts in
-    /// `service_usage_archive`: no text, session identifiers, or timestamps
-    /// finer than a day. Rows that never counted toward usage, or
+    /// The archive keeps only per-day counts: no text, session identifiers, or
+    /// timestamps finer than a day. Rows that never counted toward usage, or
     /// cannot be decoded, add nothing. Callers run it inside the transaction
     /// that deletes the same rows.
     private func archiveUsage(
@@ -797,7 +794,6 @@ public actor SQLiteSessionHistory: LocalSessionHistoryStoring {
             upsert.bind(Int64(usage.sessionCount), at: 4)
             try upsert.stepDone()
         }
-        try SQLiteServiceUsageArchive.fold(accumulator.services, on: connection)
     }
 
     private func checkpoint(_ connection: SQLiteConnection) throws {
