@@ -65,18 +65,18 @@ package struct DataErasureRecoveryView: View {
     }
 
     package var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: SpeakerSpacing.l) {
             ContentUnavailableView(
                 "本地数据尚未全部清除",
                 systemImage: "externaldrive.badge.xmark",
                 description: Text(failureText)
             )
 
-            HStack(spacing: 12) {
+            HStack(spacing: SpeakerSpacing.s) {
                 Button("打开本地数据文件夹") {
                     routeEffects.openURL(speakerApplicationSupportDirectory)
                 }
-                Button("重试清除并退出", role: .destructive) {
+                Button("重试清除并退出…", role: .destructive) {
                     confirmsRetry = true
                 }
                 .disabled(dataErasure.state == .erasing)
@@ -86,22 +86,13 @@ package struct DataErasureRecoveryView: View {
             .buttonStyle(SpeakerButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
+        .padding(SpeakerSpacing.xxl)
         .background(Color(nsColor: .windowBackgroundColor))
-        .alert(
-            "重试清除 Speaker 保存的所有本地数据？",
+        .localDataEraseConfirmation(
+            LocalDataEraseConfirmation.retryTitle,
             isPresented: $confirmsRetry
         ) {
-            Button("取消", role: .cancel) {}
-            Button("清除并退出", role: .destructive) {
-                Task {
-                    _ = await dataErasure.eraseAllAndExit()
-                }
-            }
-        } message: {
-            Text(
-                "API Key、文字历史、个人词库、设置和登录项将被永久移除。Speaker 不会删除系统权限记录，也无法恢复这些本地数据。"
-            )
+            Task { _ = await dataErasure.eraseAllAndExit() }
         }
     }
 

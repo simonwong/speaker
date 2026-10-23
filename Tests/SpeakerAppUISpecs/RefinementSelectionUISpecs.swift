@@ -9,7 +9,7 @@ enum RefinementSelectionUISpecs {
     @MainActor
     static func run(failures: inout [String]) async {
         await runAsync(
-            "refinement cards highlight the clicked choice without duplicate highlights",
+            "refinement cards ring the mode in use in coral and an open editor in gold",
             failures: &failures
         ) {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -28,7 +28,7 @@ enum RefinementSelectionUISpecs {
                 rootView: RefinementSettingsPage(model: model).frame(width: 720, alignment: .top)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .environment(\.colorScheme, .light).tint(.blue)
-                    // This spec checks which card ends up highlighted. Its async
+                    // This spec checks which card ends up ringed. Its async
                     // run loop cannot advance SwiftUI animations, so it renders
                     // each selection without the change animation.
                     .transaction { $0.disablesAnimations = true })
@@ -56,7 +56,13 @@ enum RefinementSelectionUISpecs {
                 }
                 try expect(button.accessibilityPerformPress(), "card click was rejected")
                 var lastBitmap: NSBitmapImageRep?
-                var highlighted = HighlightedCards(count: 0, firstColumn: nil)
+                var selected = HighlightedCards(count: 0, firstColumn: nil)
+                var editing = HighlightedCards(count: 0, firstColumn: nil)
+                // Opening the Custom editor leaves the previous mode in use:
+                // that card keeps the coral ring and the Custom card turns
+                // gold. Every other click selects its own card.
+                var expectedSelected: Int?
+                var expectedEditing: Int?
                 let rendered = await eventually(before: .seconds(2)) {
                     pumpUI()
                     hosting.layoutSubtreeIfNeeded()
@@ -65,8 +71,16 @@ enum RefinementSelectionUISpecs {
                     else { return false }
                     hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
                     lastBitmap = bitmap
-                    highlighted = highlightedCards(in: bitmap)
-                    return highlighted.count == 1 && highlighted.firstColumn == index
+                    expectedSelected = RefinementChoice.allCases.firstIndex(of: model.choice)
+                    expectedEditing = choice == .custom && model.choice != .custom ? index : nil
+                    selected = highlightedCards(in: bitmap, matching: isCoral)
+                    editing = highlightedCards(in: bitmap, matching: isGold)
+                    // Selecting a mode saves before it takes effect, so the old
+                    // mode's ring alone does not mean the click was handled.
+                    return (choice == .custom || model.choice == choice)
+                        && selected.count == 1 && selected.firstColumn == expectedSelected
+                        && editing.count == (expectedEditing == nil ? 0 : 1)
+                        && editing.firstColumn == expectedEditing
                 }
                 guard let bitmap = lastBitmap else {
                     throw SpecFailure(message: "cannot render refinement cards")
@@ -80,19 +94,27 @@ enum RefinementSelectionUISpecs {
                     try png.write(to: url.appendingPathComponent("refinement-\(choice.id).png"))
                 }
                 try expect(
-                    highlighted.count == 1,
-                    "refinement cards showed \(highlighted.count) simultaneous highlights")
+                    selected.count == 1,
+                    "refinement cards showed \(selected.count) coral rings at once")
                 try expect(
                     rendered,
-                    "clicking \(choice.id) did not render its highlighted card before the deadline")
+                    "clicking \(choice.id) did not render its rings before the deadline")
                 if choice == .custom {
                     try expect(
                         model.mode == previouslyActiveMode,
                         "opening an unfinished custom editor changed the active mode")
+                } else {
+                    try expect(
+                        model.choice == choice, "clicking \(choice.id) did not put it in use")
                 }
                 try expect(
-                    highlighted.firstColumn == RefinementChoice.allCases.firstIndex(of: choice),
-                    "clicking \(choice.id) highlighted column \(String(describing: highlighted.firstColumn)) instead of its own card"
+                    selected.firstColumn == expectedSelected,
+                    "clicking \(choice.id) put the coral ring on column \(String(describing: selected.firstColumn)) instead of the mode in use"
+                )
+                try expect(
+                    editing.count == (expectedEditing == nil ? 0 : 1)
+                        && editing.firstColumn == expectedEditing,
+                    "clicking \(choice.id) left \(editing.count) gold rings, first at column \(String(describing: editing.firstColumn))"
                 )
             }
             await model.shutdown()
@@ -103,16 +125,22 @@ enum RefinementSelectionUISpecs {
         var firstColumn: Int?
     }
 
+    /// Whether one pixel belongs to a ring of the colour being counted.
+    private typealias RingColor =
+        @MainActor (_ x: Int, _ y: Int, _ bitmap: NSBitmapImageRep) -> Bool
+
     @MainActor
-    private static func highlightedCards(in bitmap: NSBitmapImageRep) -> HighlightedCards {
+    private static func highlightedCards(
+        in bitmap: NSBitmapImageRep, matching isRing: RingColor
+    ) -> HighlightedCards {
         var result = HighlightedCards(count: 0, firstColumn: nil)
         // Scan every row: a thin horizontal border can fall between sampled rows.
         for y in 0..<bitmap.pixelsHigh {
-            guard rowMayContainHighlight(y, in: bitmap) else { continue }
+            guard rowMayContainHighlight(y, in: bitmap, matching: isRing) else { continue }
             var spans = 0
             var length = 0
             for x in 0..<bitmap.pixelsWide {
-                if isCoral(x: x, y: y, in: bitmap) {
+                if isRing(x, y, bitmap) {
                     length += 1
                 } else {
                     if length > 90 {
@@ -131,10 +159,12 @@ enum RefinementSelectionUISpecs {
     }
 
     @MainActor
-    private static func rowMayContainHighlight(_ y: Int, in bitmap: NSBitmapImageRep) -> Bool {
+    private static func rowMayContainHighlight(
+        _ y: Int, in bitmap: NSBitmapImageRep, matching isRing: RingColor
+    ) -> Bool {
         var consecutive = 0
         for x in stride(from: 0, to: bitmap.pixelsWide, by: 8) {
-            consecutive = isCoral(x: x, y: y, in: bitmap) ? consecutive + 1 : 0
+            consecutive = isRing(x, y, bitmap) ? consecutive + 1 : 0
             // Every span longer than 90 pixels contains at least 11 samples.
             if consecutive >= 11 { return true }
         }
@@ -143,12 +173,27 @@ enum RefinementSelectionUISpecs {
 
     /// Only the saturated coral selection ring counts: a highlighted card's
     /// faint tint fill is cut by its own text and must not read as a second
-    /// card.
+    /// card. Coral and gold both lean red over blue; green sits low for coral
+    /// and near the middle for gold. That ratio does not change as a ring's
+    /// edge pixels blend into the ground, so it separates the two.
     @MainActor
     private static func isCoral(x: Int, y: Int, in bitmap: NSBitmapImageRep) -> Bool {
         guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
-        return color.redComponent - color.blueComponent > 0.3
+        let redOverBlue = color.redComponent - color.blueComponent
+        return redOverBlue > 0.3
             && color.redComponent > color.greenComponent
+            && color.greenComponent - color.blueComponent < 0.35 * redOverBlue
+    }
+
+    /// The gold ring of a card whose editor is open while another mode is in
+    /// use.
+    @MainActor
+    private static func isGold(x: Int, y: Int, in bitmap: NSBitmapImageRep) -> Bool {
+        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
+        let redOverBlue = color.redComponent - color.blueComponent
+        return redOverBlue > 0.15
+            && color.redComponent > color.greenComponent
+            && color.greenComponent - color.blueComponent > 0.45 * redOverBlue
     }
 
     @MainActor
