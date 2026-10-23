@@ -36,10 +36,10 @@ package enum HistoryRecordProblem: Equatable, Sendable {
         }
     }
 
-    package var color: Color {
+    package var tone: SpeakerTone {
         switch self {
-        case .refinementFailed: .orange
-        case .failed: .red
+        case .refinementFailed: .warning
+        case .failed: .error
         }
     }
 }

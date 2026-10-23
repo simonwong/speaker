@@ -121,7 +121,6 @@ package struct HistoryDashboard: View {
     @State private var searchRefresh: Task<Void, Never>?
     @FocusState private var searchIsFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.mainWindowLayout) private var mainWindowLayout
 
     package init(
         state: HistoryDashboardState,
@@ -214,7 +213,7 @@ package struct HistoryDashboard: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: SpeakerSurfaceMetrics.fieldHeight)
+            .frame(height: SpeakerControlMetrics.height)
             .speakerField(focused: searchIsFocused)
 
             Menu {
@@ -233,8 +232,8 @@ package struct HistoryDashboard: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(
-                        width: SpeakerSurfaceMetrics.fieldHeight,
-                        height: SpeakerSurfaceMetrics.fieldHeight
+                        width: SpeakerControlMetrics.height,
+                        height: SpeakerControlMetrics.height
                     )
                     .contentShape(Rectangle())
             }
@@ -244,9 +243,7 @@ package struct HistoryDashboard: View {
             .help("刷新与清空历史")
             .accessibilityLabel("历史选项")
         }
-        .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+        .speakerPageColumn()
         .padding(.vertical, 10)
         // Opaque, because the list scrolls under it.
         .background(Color.historyGround)
@@ -284,9 +281,7 @@ package struct HistoryDashboard: View {
                     }
                 }
             }
-            .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+            .speakerPageColumn()
             .padding(.bottom, SpeakerSurfaceMetrics.pageBottomPadding)
         }
     }
@@ -296,11 +291,11 @@ package struct HistoryDashboard: View {
     private func sectionHeader(_ section: HistoryDaySection) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(section.title)
-                .font(SpeakerTypography.sectionHeader)
+                .font(SpeakerTypography.label)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 12)
             Text("\(section.records.count) 条")
-                .font(SpeakerTypography.footnote)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 8)
@@ -335,10 +330,8 @@ package struct HistoryDashboard: View {
     @ViewBuilder
     private var statusFooter: some View {
         if let footer {
-            SettingsNotice(text: footer.message, color: footer.color, icon: footer.icon)
-                .frame(maxWidth: SpeakerSurfaceMetrics.contentMaxWidth)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, mainWindowLayout.pageHorizontalPadding)
+            SpeakerNotice(tone: footer.tone, text: footer.message, glyph: .symbol(footer.icon))
+                .speakerPageColumn()
                 .padding(.vertical, 10)
                 .background(Color.historyGround)
                 .accessibilityLabel(footer.message)
@@ -351,14 +344,14 @@ package struct HistoryDashboard: View {
             return HistoryFooterLine(
                 message: feedback.message,
                 icon: feedback.kind.systemImage,
-                color: feedback.kind.color
+                tone: feedback.kind.tone
             )
         }
         if let notice = state.notice {
             return HistoryFooterLine(
                 message: notice,
                 icon: "exclamationmark.circle.fill",
-                color: .red
+                tone: .error
             )
         }
         return nil
@@ -370,7 +363,7 @@ package struct HistoryDashboard: View {
 private struct HistoryFooterLine {
     let message: String
     let icon: String
-    let color: Color
+    let tone: SpeakerTone
 }
 
 extension Color {
@@ -435,7 +428,7 @@ private struct HistoryRecordRow: View {
                         if let problem = presentation.problem {
                             Image(systemName: problem.icon)
                                 .font(SpeakerTypography.body)
-                                .foregroundStyle(problem.color)
+                                .foregroundStyle(problem.tone.color)
                                 .padding(.top, 2)
                                 .help(problem.label)
                                 .accessibilityLabel(problem.label)
@@ -521,7 +514,7 @@ private struct HistoryRecordRow: View {
 
     private var shape: RoundedRectangle {
         RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            cornerRadius: SpeakerRadius.inner,
             style: .continuous
         )
     }
@@ -538,9 +531,9 @@ private struct HistoryRecordRow: View {
         if isExpanded {
             HStack(spacing: 8) {
                 Text(presentation.canCopy ? (record.refinementModeName ?? "默认顺滑") : "错误详情")
-                    .font(SpeakerTypography.bodyEmphasis)
+                    .font(SpeakerTypography.emphasis)
                 Image(systemName: "chevron.up")
-                    .font(SpeakerTypography.caption)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -602,7 +595,7 @@ private struct HistoryRowActionButton: View {
 
     private var shape: RoundedRectangle {
         RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.iconTileCornerRadius,
+            cornerRadius: SpeakerRadius.inner,
             style: .continuous
         )
     }
@@ -653,15 +646,15 @@ package struct HistoryExpandedRecord: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let problem = presentation.problem {
                     Label(problem.label, systemImage: problem.icon)
-                        .font(SpeakerTypography.footnote.weight(.medium))
-                        .foregroundStyle(problem.color)
+                        .font(SpeakerTypography.detail)
+                        .foregroundStyle(problem.tone.color)
                 } else if let note = presentation.note {
                     Label(note.label, systemImage: note.icon)
-                        .font(SpeakerTypography.footnote.weight(.medium))
+                        .font(SpeakerTypography.detail)
                         .foregroundStyle(.secondary)
                 }
                 Text(metadataLine)
-                    .font(SpeakerTypography.caption)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -705,7 +698,7 @@ package struct HistoryExpandedRecord: View {
                     .padding(.top, 8)
                     .textSelection(.enabled)
                 }
-                .font(SpeakerTypography.footnote)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
             }
         }
@@ -722,7 +715,7 @@ package struct HistoryExpandedRecord: View {
                 .padding(.top, 8)
                 .textSelection(.enabled)
         }
-        .font(SpeakerTypography.footnote)
+        .font(SpeakerTypography.detail)
         .foregroundStyle(.secondary)
     }
 
@@ -804,12 +797,11 @@ extension HistoryDashboardFeedback.Kind {
         }
     }
 
-    fileprivate var color: Color {
+    fileprivate var tone: SpeakerTone {
         switch self {
-        case .information: .secondary
-        case .success: .secondary
-        case .warning: .orange
-        case .error: .red
+        case .information, .success: .neutral
+        case .warning: .warning
+        case .error: .error
         }
     }
 }

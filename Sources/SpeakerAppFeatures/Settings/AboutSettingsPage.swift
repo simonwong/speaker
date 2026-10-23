@@ -36,21 +36,28 @@ private struct AboutSettingsPage: View {
             identity
 
             if let message = softwareUpdate.state.unavailableMessage {
-                SettingsNotice(text: message, color: .secondary)
+                SpeakerNotice(text: message)
                     .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
             }
 
-            projectCard
-                .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
+            VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.sectionSpacing) {
+                section(.project) { projectRows }
+                section(.author) { authorRows }
+                section(.privacyBoundary) { privacyBoundaryRows }
+                section(.diagnostics) { diagnosticsRows }
+            }
+            .padding(.top, SpeakerSurfaceMetrics.sectionSpacing)
+        }
+    }
 
-            authorCard
-                .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
-
-            privacyBoundaryCard
-                .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
-
-            diagnosticsCard
-                .padding(.top, SpeakerSurfaceMetrics.cardSpacing)
+    /// Each group is titled outside its card, like the Settings groups.
+    private func section<Content: View>(
+        _ section: AboutSection,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.sectionHeaderSpacing) {
+            SpeakerSectionHeader(section.title)
+            SpeakerCard(content: content)
         }
     }
 
@@ -63,13 +70,13 @@ private struct AboutSettingsPage: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Speaker")
-                    .font(SpeakerTypography.pageTitle)
+                    .font(SpeakerTypography.title)
                 Text("按住快捷键说话，文字送达松开时所在的输入框。")
-                    .font(SpeakerTypography.caption)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(versionText)
-                    .font(SpeakerTypography.caption.monospacedDigit())
+                    .font(SpeakerTypography.detail.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .accessibilityLabel("当前版本 \(versionText)")
@@ -80,145 +87,122 @@ private struct AboutSettingsPage: View {
             Button("检查更新…") {
                 softwareUpdate.checkForUpdates()
             }
-            .buttonStyle(SettingsButtonStyle())
+            .buttonStyle(SpeakerButtonStyle())
             .disabled(!softwareUpdate.state.canCheckForUpdates)
         }
     }
 
-    private var projectCard: some View {
-        SettingsCard(
-            AboutSection.project.title,
-            icon: AboutSection.project.icon
-        ) {
-            SpeakerRow("官网", detail: "speaker.moonunder.app", icon: "globe") {
-                Button("打开官网") {
-                    routeEffects.openURL(ExternalLinks.speakerWebsite)
+    @ViewBuilder
+    private var projectRows: some View {
+        SpeakerRow("官网", detail: "speaker.moonunder.app") {
+            Button("打开官网") {
+                routeEffects.openURL(ExternalLinks.speakerWebsite)
+            }
+        }
+        SpeakerRowDivider()
+        SpeakerRow("源代码", detail: "MIT 许可证") {
+            Button {
+                routeEffects.openURL(ExternalLinks.speakerRepository)
+            } label: {
+                Label {
+                    Text("在 GitHub 查看")
+                } icon: {
+                    GitHubMark()
+                        .fill(Color.primary)
+                        .frame(width: 14, height: 14)
                 }
             }
-            SettingsRowDivider()
-            SpeakerRow(
-                "源代码",
-                detail: "MIT 许可证",
-                icon: "chevron.left.forwardslash.chevron.right"
-            ) {
-                Button {
-                    routeEffects.openURL(ExternalLinks.speakerRepository)
-                } label: {
-                    Label {
-                        Text("在 GitHub 查看")
-                    } icon: {
-                        GitHubMark()
-                            .fill(Color.primary)
-                            .frame(width: 14, height: 14)
-                    }
-                }
-                .accessibilityLabel("在 GitHub 查看 Speaker")
-            }
-            SettingsRowDivider()
-            SpeakerRow("反馈问题", icon: "exclamationmark.bubble") {
-                Button("提交反馈") {
-                    routeEffects.openURL(ExternalLinks.speakerIssues)
-                }
+            .accessibilityLabel("在 GitHub 查看 Speaker")
+        }
+        SpeakerRowDivider()
+        SpeakerRow("反馈问题") {
+            Button("提交反馈") {
+                routeEffects.openURL(ExternalLinks.speakerIssues)
             }
         }
     }
 
-    private var authorCard: some View {
-        SettingsCard(
-            AboutSection.author.title,
-            icon: AboutSection.author.icon
-        ) {
-            SpeakerRow("Simon Wong", detail: "simonwong.cn", icon: "person.fill") {
-                Button("打开网站") {
-                    routeEffects.openURL(ExternalLinks.authorWebsite)
-                }
-                .accessibilityLabel("打开 Simon Wong 的网站")
+    @ViewBuilder
+    private var authorRows: some View {
+        SpeakerRow("Simon Wong", detail: "simonw.dev") {
+            Button("打开网站") {
+                routeEffects.openURL(ExternalLinks.authorWebsite)
             }
-            SettingsRowDivider()
-            SpeakerRow("MoonUnder Studio", detail: "moonunder.app", icon: "building.2") {
-                Button("打开网站") {
-                    routeEffects.openURL(ExternalLinks.studioWebsite)
-                }
-                .accessibilityLabel("打开 MoonUnder Studio 的网站")
+            .accessibilityLabel("打开 Simon Wong 的网站")
+        }
+        SpeakerRowDivider()
+        SpeakerRow("MoonUnder Studio", detail: "moonunder.app") {
+            Button("打开网站") {
+                routeEffects.openURL(ExternalLinks.studioWebsite)
             }
+            .accessibilityLabel("打开 MoonUnder Studio 的网站")
         }
     }
 
-    private var privacyBoundaryCard: some View {
-        SettingsCard(
-            AboutSection.privacyBoundary.title,
-            icon: AboutSection.privacyBoundary.icon
-        ) {
-            SpeakerRow(
-                "音频",
-                detail: "只在内存中转换并发送给所选语音识别服务，不写入磁盘或历史。",
-                icon: "waveform"
-            )
-            SettingsRowDivider()
-            SpeakerRow(
-                "识别文字",
-                detail: "保留在本机；只有启用文字整理模式时才会发送给所选文字整理服务。",
-                icon: "text.alignleft"
-            )
-            SettingsRowDivider()
-            SpeakerRow(
-                "历史、设置与词库",
-                detail: "只保存在这台 Mac 的当前用户目录，不包含音频或 API Key。",
-                icon: "clock.arrow.circlepath"
-            )
-            SettingsRowDivider()
+    @ViewBuilder
+    private var privacyBoundaryRows: some View {
+        SpeakerRow(
+            "音频",
+            detail: "只在内存中转换并发送给所选语音识别服务，不写入磁盘或历史。"
+        )
+        SpeakerRowDivider()
+        SpeakerRow(
+            "识别文字",
+            detail: "保留在本机；只有启用文字整理模式时才会发送给所选文字整理服务。"
+        )
+        SpeakerRowDivider()
+        SpeakerRow(
+            "历史、设置与词库",
+            detail: "只保存在这台 Mac 的当前用户目录，不包含音频或 API Key。"
+        )
+        SpeakerRowDivider()
 
-            HStack {
-                Spacer()
-                if let privacyPolicyURL = ExternalLinks.privacyPolicy {
-                    Button("查看完整隐私说明") {
-                        routeEffects.openURL(privacyPolicyURL)
-                    }
+        HStack {
+            Spacer()
+            if let privacyPolicyURL = ExternalLinks.privacyPolicy {
+                Button("查看完整隐私说明") {
+                    routeEffects.openURL(privacyPolicyURL)
                 }
-                Button("打开本地数据文件夹") {
-                    routeEffects.openURL(speakerApplicationSupportDirectory)
-                }
+            }
+            Button("打开本地数据文件夹") {
+                routeEffects.openURL(speakerApplicationSupportDirectory)
             }
         }
     }
 
     /// Startup and recovery warnings land here, next to the redacted
     /// diagnostics copy that failure guidance elsewhere points to.
-    private var diagnosticsCard: some View {
-        SettingsCard(
-            AboutSection.diagnostics.title,
-            icon: AboutSection.diagnostics.icon
+    @ViewBuilder
+    private var diagnosticsRows: some View {
+        ForEach(diagnostics.warnings, id: \.self) { warning in
+            SpeakerNotice(tone: .warning, text: warning)
+        }
+        if !diagnostics.warnings.isEmpty {
+            HStack {
+                Spacer()
+                Button("清除提示") {
+                    diagnostics.dismissWarnings()
+                }
+            }
+            SpeakerRowDivider()
+        }
+
+        SpeakerRow(
+            "诊断信息",
+            detail: "包含版本、权限和服务状态，不包含文字、音频或 API Key。"
         ) {
-            ForEach(diagnostics.warnings, id: \.self) { warning in
-                SettingsNotice(text: warning, color: .orange)
+            Button("复制诊断信息") {
+                Task { await copyDiagnostics() }
             }
-            if !diagnostics.warnings.isEmpty {
-                HStack {
-                    Spacer()
-                    Button("清除提示") {
-                        diagnostics.dismissWarnings()
-                    }
-                }
-                SettingsRowDivider()
-            }
+        }
 
-            SpeakerRow(
-                "诊断信息",
-                detail: "包含版本、权限和服务状态，不包含文字、音频或 API Key。"
-            ) {
-                Button("复制诊断信息") {
-                    Task { await copyDiagnostics() }
-                }
-            }
-
-            switch diagnostics.copyResult {
-            case .copied:
-                SettingsNotice(text: SpeakerCopy.Diagnostics.copied, color: .green)
-            case .failed:
-                SettingsNotice(text: SpeakerCopy.Diagnostics.copyFailed, color: .orange)
-            case nil:
-                EmptyView()
-            }
+        switch diagnostics.copyResult {
+        case .copied:
+            SpeakerNotice(tone: .ok, text: SpeakerCopy.Diagnostics.copied)
+        case .failed:
+            SpeakerNotice(tone: .warning, text: SpeakerCopy.Diagnostics.copyFailed)
+        case nil:
+            EmptyView()
         }
     }
 }

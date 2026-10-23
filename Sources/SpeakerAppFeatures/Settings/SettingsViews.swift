@@ -29,7 +29,7 @@ package struct SettingsView: View {
                 )
             }
         }
-        .buttonStyle(SettingsButtonStyle())
+        .buttonStyle(SpeakerButtonStyle())
         .task {
             await workspace.refresh()
         }
@@ -83,7 +83,7 @@ package struct DataErasureRecoveryView: View {
             }
             // The main window shows this view outside `SettingsView`, so it
             // carries the settings button style itself.
-            .buttonStyle(SettingsButtonStyle())
+            .buttonStyle(SpeakerButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
@@ -140,11 +140,8 @@ private struct SettingsOverviewView: View {
         _ group: SettingsGroup,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SpeakerSectionHeader(
-                group.title,
-                tint: group == .localData ? .red : .secondary
-            )
+        VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.sectionHeaderSpacing) {
+            SpeakerSectionHeader(group.title)
             content()
         }
     }
@@ -168,10 +165,7 @@ private struct SettingsOverviewView: View {
                 requestPermission: workspace.requestPermission
             )
         case .speechRecognition:
-            SpeechRecognitionSettingsCard(
-                model: workspace.recognition,
-                showsHeader: false
-            )
+            SpeechRecognitionSettingsCard(model: workspace.recognition)
         case .refinement:
             // The modes come first; the provider and its key, which unlock
             // every mode but 默认顺滑, sit below them.
@@ -189,4 +183,12 @@ private struct SettingsOverviewView: View {
             LocalDataSettingsPage(dataErasure: workspace.dataErasure)
         }
     }
+}
+
+var speakerApplicationSupportDirectory: URL {
+    FileManager.default.urls(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask
+    ).first?.appendingPathComponent(SpeakerDataDirectory.name, isDirectory: true)
+        ?? FileManager.default.homeDirectoryForCurrentUser
 }

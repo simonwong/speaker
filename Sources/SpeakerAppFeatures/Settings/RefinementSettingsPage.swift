@@ -11,13 +11,13 @@ package struct RefinementSettingsPage: View {
 
     package var body: some View {
         // The 整理 section already names this card, so it carries no header.
-        SettingsCard {
+        SpeakerCard {
             modeGrid
 
             if let promptEditor = model.promptEditorState,
                 !model.isEditingCustomMode
             {
-                SettingsRowDivider()
+                SpeakerRowDivider()
                 RefinementPromptEditor(
                     model: model,
                     promptEditor: promptEditor
@@ -25,7 +25,7 @@ package struct RefinementSettingsPage: View {
             }
 
             if model.isEditingCustomMode || model.choice == .custom {
-                SettingsRowDivider()
+                SpeakerRowDivider()
                 CustomRefinementModeEditor(model: model)
             }
         }
@@ -54,14 +54,14 @@ package struct RefinementSettingsPage: View {
         // A pending notice already says what the key unlocks.
         if !model.hasStoredKey, model.notice == nil {
             Text("在下方配置整理服务后解锁其他模式")
-                .font(SpeakerTypography.footnote)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
         }
 
         if let notice = model.notice {
-            SettingsNotice(
+            SpeakerNotice(
                 text: notice,
-                icon: model.isConnectionVerified ? "checkmark.circle.fill" : nil
+                glyph: model.isConnectionVerified ? .symbol(SpeakerTone.ok.symbol) : .tone
             )
         }
     }
@@ -73,7 +73,7 @@ private struct RefinementEditorSectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(SpeakerTypography.bodyEmphasis)
+            .font(SpeakerTypography.emphasis)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -99,15 +99,15 @@ private struct RefinementPromptEditor: View {
                 Text(
                     "\(model.promptDraft.count) / \(TextRefinementMode.maximumCustomPromptLength)"
                 )
-                .font(SpeakerTypography.footnote.monospacedDigit())
+                .font(SpeakerTypography.detail.monospacedDigit())
                 .foregroundStyle(
                     model.promptDraft.count
                         > TextRefinementMode.maximumCustomPromptLength
-                        ? Color.red
+                        ? SpeakerTone.error.color
                         : .secondary
                 )
                 Text(promptEditor.isOverridden ? "当前为自定义提示词" : "当前为内置提示词")
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("恢复默认") {
@@ -119,7 +119,7 @@ private struct RefinementPromptEditor: View {
                 Button("保存") {
                     Task { await model.savePromptOverride() }
                 }
-                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .buttonStyle(SpeakerButtonStyle(prominent: true))
                 .disabled(!promptEditor.canSave(draft: model.promptDraft))
             }
         }
@@ -139,7 +139,7 @@ private struct CustomRefinementModeEditor: View {
             HStack(alignment: .firstTextBaseline) {
                 RefinementEditorSectionTitle(title: "自定义模式")
                 Text("\(model.customModes.count) / \(CustomRefinementMode.maximumCount)")
-                    .font(SpeakerTypography.footnote.monospacedDigit())
+                    .font(SpeakerTypography.detail.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -147,7 +147,7 @@ private struct CustomRefinementModeEditor: View {
                 } label: {
                     Label("新建模式", systemImage: "plus")
                 }
-                .buttonStyle(SettingsButtonStyle())
+                .buttonStyle(SpeakerButtonStyle())
                 .disabled(!model.canAddCustomMode)
             }
 
@@ -172,14 +172,14 @@ private struct CustomRefinementModeEditor: View {
                 }
             }
 
-            SettingsRowDivider()
+            SpeakerRowDivider()
 
             RefinementEditorSectionTitle(
                 title: model.editingCustomModeID == nil ? "新建模式" : "编辑“\(model.customName)”"
             )
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("模式名称").font(SpeakerTypography.caption)
+                Text("模式名称").font(SpeakerTypography.detail)
                 TextField("模式名称", text: $model.customName, prompt: Text("例如：工作邮件"))
             }
 
@@ -188,17 +188,17 @@ private struct CustomRefinementModeEditor: View {
                 Text(
                     "\(model.customName.count) / \(TextRefinementMode.maximumCustomNameLength)"
                 )
-                .font(SpeakerTypography.footnote.monospacedDigit())
+                .font(SpeakerTypography.detail.monospacedDigit())
                 .foregroundStyle(
                     model.customName.count
                         > TextRefinementMode.maximumCustomNameLength
-                        ? Color.red
+                        ? SpeakerTone.error.color
                         : .secondary
                 )
             }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("提示词").font(SpeakerTypography.caption)
+                Text("提示词").font(SpeakerTypography.detail)
                 RefinementPromptTextEditor(
                     text: $model.customPrompt,
                     label: "自定义模式提示词",
@@ -211,11 +211,11 @@ private struct CustomRefinementModeEditor: View {
                 Text(
                     "\(model.customPrompt.count) / \(TextRefinementMode.maximumCustomPromptLength)"
                 )
-                .font(SpeakerTypography.footnote.monospacedDigit())
+                .font(SpeakerTypography.detail.monospacedDigit())
                 .foregroundStyle(
                     model.customPrompt.count
                         > TextRefinementMode.maximumCustomPromptLength
-                        ? Color.red
+                        ? SpeakerTone.error.color
                         : .secondary
                 )
                 Spacer()
@@ -223,13 +223,13 @@ private struct CustomRefinementModeEditor: View {
                     Button("保存") {
                         Task { await model.saveCustomMode(enabling: false) }
                     }
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(SpeakerButtonStyle())
                     .disabled(!model.canSaveCustomModeDraft)
                 }
                 Button(model.isEditingActiveCustomMode ? "保存" : "保存并启用") {
                     Task { await model.saveCustomMode() }
                 }
-                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .buttonStyle(SpeakerButtonStyle(prominent: true))
                 .disabled(!model.canSaveCustomMode)
             }
         }
@@ -275,7 +275,7 @@ private struct CustomRefinementModeRow: View {
 
     private var shape: RoundedRectangle {
         RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            cornerRadius: SpeakerRadius.inner,
             style: .continuous
         )
     }
@@ -317,10 +317,10 @@ private struct CustomRefinementModeRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(mode.name)
-                    .font(SpeakerTypography.bodyEmphasis)
+                    .font(SpeakerTypography.emphasis)
                     .lineLimit(1)
                 Text(mode.prompt)
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -329,11 +329,11 @@ private struct CustomRefinementModeRow: View {
             Spacer(minLength: 8)
             if isActive {
                 Text("使用中")
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(SpeakerVisualIdentity.controlTint)
             } else {
                 Button("使用", action: use)
-                    .buttonStyle(SettingsButtonStyle())
+                    .buttonStyle(SpeakerButtonStyle())
                     .controlSize(.small)
                     .disabled(!canUse)
                     .accessibilityLabel("使用“\(mode.name)”")
@@ -408,7 +408,7 @@ private struct RefinementModeButton: View {
 
     private var shape: RoundedRectangle {
         RoundedRectangle(
-            cornerRadius: SpeakerSurfaceMetrics.controlCornerRadius,
+            cornerRadius: SpeakerRadius.inner,
             style: .continuous
         )
     }
@@ -484,10 +484,10 @@ private struct RefinementModeButton: View {
                 )
             }
             Text(choice.title)
-                .font(SpeakerTypography.bodyEmphasis)
+                .font(SpeakerTypography.emphasis)
                 .foregroundStyle(.primary)
             Text(choice.subtitle)
-                .font(SpeakerTypography.footnote)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
                 // Every card keeps two lines, so a row never mixes heights.

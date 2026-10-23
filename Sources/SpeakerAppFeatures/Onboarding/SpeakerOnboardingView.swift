@@ -64,7 +64,7 @@ package struct SpeakerOnboardingView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
         }
-        .buttonStyle(SettingsButtonStyle())
+        .buttonStyle(SpeakerButtonStyle())
         .frame(minWidth: 360, minHeight: 360)
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
@@ -107,9 +107,9 @@ package struct SpeakerOnboardingView: View {
             SpeakerIdentityTile(size: 48, accessibility: .named)
             VStack(alignment: .leading, spacing: 5) {
                 Text(step.title)
-                    .font(SpeakerTypography.pageTitle)
+                    .font(SpeakerTypography.title)
                 Text(stepDescription)
-                    .font(SpeakerTypography.caption)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -129,7 +129,7 @@ package struct SpeakerOnboardingView: View {
             ForEach(OnboardingStep.allCases, id: \.rawValue) { item in
                 HStack(spacing: 6) {
                     Text("\(item.rawValue + 1)")
-                        .font(SpeakerTypography.footnote.weight(.semibold).monospacedDigit())
+                        .font(SpeakerTypography.label.monospacedDigit())
                         .frame(width: 24, height: 24)
                         .background(
                             item == step
@@ -138,10 +138,7 @@ package struct SpeakerOnboardingView: View {
                         )
                         .foregroundStyle(item == step ? Color.white : Color.secondary)
                     Text(item.shortTitle)
-                        .font(
-                            SpeakerTypography.footnote.weight(
-                                item == step ? .semibold : .regular)
-                        )
+                        .font(item == step ? SpeakerTypography.label : SpeakerTypography.detail)
                         .foregroundStyle(item == step ? .primary : .secondary)
                         .fixedSize(horizontal: true, vertical: false)
                 }
@@ -189,7 +186,8 @@ package struct SpeakerOnboardingView: View {
                 Button("重新检查权限", action: refreshPermissions)
             }
         case .apiKey:
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: SpeakerSurfaceMetrics.sectionHeaderSpacing) {
+                SpeakerSectionHeader("语音识别")
                 SpeechRecognitionSettingsCard(model: recognition)
                     .environment(\.collapsesStoredProviderKeys, false)
             }
@@ -198,9 +196,9 @@ package struct SpeakerOnboardingView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack {
                         Text("当前键盘快捷键")
-                            .font(SpeakerTypography.bodyEmphasis)
+                            .font(SpeakerTypography.emphasis)
                         Spacer()
-                        ShortcutKeycap(name: shortcutName())
+                        SpeakerKeycap(name: shortcutName())
                     }
                     if shortcutName() == VoiceShortcutPreference.functionKey.displayName {
                         FunctionKeyConflictHint()
@@ -234,28 +232,28 @@ package struct SpeakerOnboardingView: View {
         let status = PermissionStatusPresentation(state: state)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                SpeakerIconTile(symbol: icon, tint: status.tileTint)
+                SpeakerIconTile(symbol: icon, tone: status.tileTone)
                 Text(title)
-                    .font(SpeakerTypography.cardTitle)
+                    .font(SpeakerTypography.emphasis)
                 Spacer()
                 StatusBadge(
                     text: status.text,
                     icon: status.symbolName,
-                    color: status.tint
+                    tone: status.tone
                 )
             }
             Text(purpose)
-                .font(SpeakerTypography.caption)
+                .font(SpeakerTypography.detail)
                 .fixedSize(horizontal: false, vertical: true)
             Text(presentation.permissionInstructions(for: permission))
-                .font(SpeakerTypography.caption)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let action = presentation.permissionAction(for: permission) {
                 Button(action == .request ? "允许麦克风" : "打开\(title)设置") {
                     Task { await requestPermission(permission) }
                 }
-                .buttonStyle(SettingsButtonStyle())
+                .buttonStyle(SpeakerButtonStyle())
             }
         }
         .speakerCard()
@@ -266,17 +264,17 @@ package struct SpeakerOnboardingView: View {
     private var practiceField: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("试一试")
-                .font(SpeakerTypography.bodyEmphasis)
+                .font(SpeakerTypography.emphasis)
             TextField(
                 "点这里，再用 \(shortcutName()) 说一句话",
                 text: $practiceText,
                 axis: .vertical
             )
             .lineLimit(1...3)
-            .textFieldStyle(SettingsMultilineTextFieldStyle())
+            .textFieldStyle(SpeakerMultilineTextFieldStyle())
             .accessibilityLabel("练习输入框")
             Text("文字会输入到结束录音时所在的输入框。看到文字出现在这里，就可以在任何 App 里这样用了。")
-                .font(SpeakerTypography.caption)
+                .font(SpeakerTypography.detail)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -284,12 +282,11 @@ package struct SpeakerOnboardingView: View {
 
     private func tutorialRow(icon: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            SpeakerIconTile(symbol: icon, tint: SpeakerVisualIdentity.controlTint)
-                .accessibilityHidden(true)
+            SpeakerIconTile(symbol: icon)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(SpeakerTypography.bodyEmphasis)
+                Text(title).font(SpeakerTypography.emphasis)
                 Text(detail)
-                    .font(SpeakerTypography.caption)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -301,7 +298,7 @@ package struct SpeakerOnboardingView: View {
             Divider()
             if !presentation.canContinue(from: step) {
                 Text(blockingMessage)
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -326,7 +323,7 @@ package struct SpeakerOnboardingView: View {
                     step == .shortcut ? (mode == .review ? "完成" : "开始使用 Speaker") : "下一步",
                     action: nextStep
                 )
-                .buttonStyle(SettingsButtonStyle(prominent: true))
+                .buttonStyle(SpeakerButtonStyle(prominent: true))
                 .disabled(!presentation.canContinue(from: step))
                 .keyboardShortcut(.defaultAction)
                 .accessibilityHidden(true)
@@ -395,12 +392,10 @@ private struct OnboardingAutomaticUpdateChoice: View {
             SpeakerRow(
                 "自动检查更新",
                 detail: "每天检查一次新版本，有更新时提醒你安装。之后可在「设置 → 通用」中更改。",
-                icon: "arrow.triangle.2.circlepath",
-                iconTint: SpeakerVisualIdentity.controlTint
+                icon: "arrow.triangle.2.circlepath"
             ) {
                 Toggle("自动检查更新", isOn: $model.setupAutomaticChecksChoice)
-                    .toggleStyle(.switch)
-                    .tint(SpeakerVisualIdentity.controlTint)
+                    .speakerSwitch()
                     .labelsHidden()
             }
             .speakerCard()

@@ -60,10 +60,10 @@ struct FunctionKeyConflictHint: View {
             if let message = action.conflictMessage {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: "globe")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(SpeakerTone.warning.color)
                         .accessibilityHidden(true)
                     Text(message)
-                        .font(SpeakerTypography.caption)
+                        .font(SpeakerTypography.detail)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)

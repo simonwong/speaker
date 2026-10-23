@@ -9,7 +9,7 @@ struct DoubaoRecognitionSettings: View {
     var body: some View {
         resourceRow
 
-        SettingsRowDivider()
+        SpeakerRowDivider()
 
         ProviderKeyEditor(
             draft: $model.apiKeyDraft,
@@ -19,7 +19,7 @@ struct DoubaoRecognitionSettings: View {
             status: ProviderKeyStatus(
                 text: status.text,
                 icon: status.symbolName,
-                color: status.tint,
+                tone: status.tone,
                 help: model.doubaoStatus.summary
             ),
             connectionCheck: model.hasStoredKey
@@ -36,7 +36,7 @@ struct DoubaoRecognitionSettings: View {
         )
 
         if let problem = model.doubaoProblem {
-            SettingsNotice(text: problem, color: .red)
+            SpeakerNotice(tone: .error, text: problem)
         }
     }
 
@@ -54,11 +54,11 @@ struct DoubaoRecognitionSettings: View {
                     Text(DoubaoResourcePresentation.title(for: resource)).tag(resource)
                 }
             }
-            .settingsTrailingMenu()
+            .speakerTrailingMenu()
             .disabled(model.isUpdatingKey)
         }
         Text(DoubaoResourcePresentation.costNote(for: model.doubaoResource))
-            .font(SpeakerTypography.footnote)
+            .font(SpeakerTypography.detail)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -79,7 +79,7 @@ package struct RefinementProviderSettingsCard: View {
 
     package var body: some View {
         // Sits under the mode card in the 整理 section, which already names it.
-        SettingsCard {
+        SpeakerCard {
             VStack(alignment: .leading, spacing: 12) {
                 SpeakerRow("服务商") {
                     Picker(
@@ -93,11 +93,11 @@ package struct RefinementProviderSettingsCard: View {
                             Text(provider.displayName).tag(provider)
                         }
                     }
-                    .settingsTrailingMenu()
+                    .speakerTrailingMenu()
                     .accessibilityLabel("文字整理服务商")
                 }
 
-                SettingsRowDivider()
+                SpeakerRowDivider()
 
                 if model.selectedProvider != .custom {
                     SpeakerRow("模型") {
@@ -122,7 +122,7 @@ package struct RefinementProviderSettingsCard: View {
                             }
                             Text("其他模型…").tag("__manual__")
                         }
-                        .settingsTrailingMenu()
+                        .speakerTrailingMenu()
                         .accessibilityLabel("文字整理模型")
                     }
                 }
@@ -134,7 +134,7 @@ package struct RefinementProviderSettingsCard: View {
                     Text(
                         "兼容 OpenAI 的 HTTPS 地址，无需填写 /chat/completions。"
                     )
-                    .font(SpeakerTypography.footnote)
+                    .font(SpeakerTypography.detail)
                     .foregroundStyle(.secondary)
                 }
                 if model.isEditingModelID {
@@ -153,10 +153,10 @@ package struct RefinementProviderSettingsCard: View {
             .disabled(model.isMutating)
 
             if let providerNotice = model.providerNotice {
-                SettingsNotice(text: providerNotice, color: .red)
+                SpeakerNotice(tone: .error, text: providerNotice)
             }
 
-            SettingsRowDivider()
+            SpeakerRowDivider()
 
             ProviderKeyEditor(
                 draft: $model.apiKeyDraft,
@@ -164,7 +164,7 @@ package struct RefinementProviderSettingsCard: View {
                 hasStoredKey: model.hasStoredKey,
                 isUpdating: model.isMutating,
                 allowsSave: model.hasValidProfile && !model.hasProfileChanges,
-                status: ProviderKeyStatus(text: statusText, icon: statusIcon, color: statusColor),
+                status: ProviderKeyStatus(text: statusText, icon: statusIcon, tone: statusTone),
                 connectionCheck: model.hasStoredKey
                     ? ProviderConnectionCheck(
                         isChecking: model.isCheckingConnection,
@@ -180,13 +180,13 @@ package struct RefinementProviderSettingsCard: View {
 
             if !model.hasValidProfile || model.hasProfileChanges {
                 Text("先保存模型配置，再填写或更换 Key。")
-                    .font(SpeakerTypography.footnote).foregroundStyle(.secondary)
+                    .font(SpeakerTypography.detail).foregroundStyle(.secondary)
             }
             if let credentialNotice = model.credentialNotice {
-                SettingsNotice(text: credentialNotice, color: .red)
+                SpeakerNotice(tone: .error, text: credentialNotice)
             }
             if let connectionFailure = model.connectionFailure {
-                SettingsNotice(text: connectionFailure, color: .red)
+                SpeakerNotice(tone: .error, text: connectionFailure)
             }
         }
     }
@@ -215,9 +215,9 @@ package struct RefinementProviderSettingsCard: View {
         return "key.circle.fill"
     }
 
-    private var statusColor: Color {
-        if model.connectionFailure != nil { return .red }
-        return model.hasStoredKey ? SpeakerVisualIdentity.settledGreen : .secondary
+    private var statusTone: SpeakerTone {
+        if model.connectionFailure != nil { return .error }
+        return model.hasStoredKey ? .ok : .neutral
     }
 }
 
@@ -225,7 +225,7 @@ package struct RefinementProviderSettingsCard: View {
 struct ProviderKeyStatus {
     let text: String
     let icon: String
-    let color: Color
+    let tone: SpeakerTone
     var help: String?
 }
 
@@ -297,8 +297,8 @@ struct ProviderKeyEditor: View {
     private var titleLine: some View {
         HStack(spacing: 10) {
             Text("API Key")
-                .font(SpeakerTypography.bodyEmphasis)
-            StatusBadge(text: status.text, icon: status.icon, color: status.color)
+                .font(SpeakerTypography.emphasis)
+            StatusBadge(text: status.text, icon: status.icon, tone: status.tone)
                 .help(status.help ?? "")
 
             Spacer(minLength: 8)
@@ -337,17 +337,7 @@ struct ProviderKeyEditor: View {
     @ViewBuilder
     private var editingActions: some View {
         ForEach(links, id: \.url) { link in
-            Link(destination: link.url) {
-                Label(link.title, systemImage: "arrow.up.right")
-                    .labelStyle(TrailingIconLabelStyle())
-            }
-            // The card's capsule style would otherwise dress the link as
-            // a button. Link buttons ignore `tint` and draw the system link
-            // blue, so the colour is set here to stay neutral.
-            .buttonStyle(.link)
-            .foregroundStyle(.secondary)
-            .font(SpeakerTypography.caption)
-            .speakerPointingHandCursor()
+            SpeakerLink(link.title, destination: link.url)
         }
         // With the field never folding away, collapsedActions never
         // shows, so the stored key's check has to live here.
@@ -371,7 +361,7 @@ struct ProviderKeyEditor: View {
             .buttonStyle(.link)
             // Neutral text, not the system link blue.
             .foregroundStyle(isEnabled ? .primary : .tertiary)
-            .font(SpeakerTypography.caption)
+            .font(SpeakerTypography.detail)
             .disabled(!isEnabled)
             .speakerPointingHandCursor()
             // Link-style buttons drop out of AppKit's accessibility tree
@@ -407,7 +397,7 @@ struct ProviderKeyEditor: View {
             }
             if hasDraft || isUpdating {
                 Button(saveTitle, action: saveDraft)
-                    .buttonStyle(SettingsButtonStyle(prominent: true))
+                    .buttonStyle(SpeakerButtonStyle(prominent: true))
                     .disabled(!canSave)
                     .fixedSize()
                     .accessibilityHidden(true)
@@ -429,8 +419,8 @@ struct ProviderKeyEditor: View {
                         .font(SpeakerTypography.body)
                         .foregroundStyle(.secondary)
                         .frame(
-                            width: SpeakerSurfaceMetrics.fieldHeight,
-                            height: SpeakerSurfaceMetrics.fieldHeight
+                            width: SpeakerControlMetrics.height,
+                            height: SpeakerControlMetrics.height
                         )
                         .contentShape(Rectangle())
                 }
@@ -472,16 +462,6 @@ struct ProviderKeyEditor: View {
     }
 }
 
-/// A link title followed by its glyph, like "豆包控制台 ↗".
-private struct TrailingIconLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 2) {
-            configuration.title
-            configuration.icon.imageScale(.small)
-        }
-    }
-}
-
 private struct RefinementConfigurationField: View {
     let label: String
     let placeholder: String
@@ -490,13 +470,13 @@ private struct RefinementConfigurationField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(SpeakerTypography.caption)
+            Text(label).font(SpeakerTypography.detail)
             RefinementConfigurationTextField(
                 label: label, placeholder: placeholder, text: $text, isFocused: $isFocused
             )
             .frame(height: 20)
             .padding(.horizontal, 12)
-            .frame(height: SpeakerSurfaceMetrics.fieldHeight)
+            .frame(height: SpeakerControlMetrics.height)
             .speakerField(focused: isFocused)
         }
     }

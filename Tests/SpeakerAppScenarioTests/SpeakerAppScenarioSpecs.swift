@@ -1202,16 +1202,13 @@ struct SpeakerAppScenarioSpecs {
             // Healthy states are green, working states grey, and only a state
             // that needs action colours its icon tile.
             for status in [DoubaoConnectionStatus.configured, .success("id")] {
-                try expect(
-                    DoubaoStatusPresentation(status: status).tint
-                        == SpeakerVisualIdentity.settledGreen)
+                try expect(DoubaoStatusPresentation(status: status).tone == .ok)
             }
-            try expect(DoubaoStatusPresentation(status: .checking).tint == .secondary)
-            try expect(failure.tint == .red)
+            try expect(DoubaoStatusPresentation(status: .checking).tone == .neutral)
+            try expect(failure.tone == .error)
             let granted = PermissionStatusPresentation(state: .granted)
-            try expect(
-                granted.tint == SpeakerVisualIdentity.settledGreen && granted.tileTint == nil)
-            try expect(PermissionStatusPresentation(state: .denied).tileTint == .orange)
+            try expect(granted.tone == .ok && granted.tileTone == nil)
+            try expect(PermissionStatusPresentation(state: .denied).tileTone == .warning)
         }
 
         run(

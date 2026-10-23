@@ -7,11 +7,11 @@ struct GeneralSettingsPage: View {
     let softwareUpdate: SoftwareUpdateFeature
 
     var body: some View {
-        SettingsCard {
+        SpeakerCard {
             LaunchAtLoginSettingsRow(model: loginItemSettings)
-            SettingsRowDivider()
+            SpeakerRowDivider()
             HistoryRetentionSettingsRow(model: historyRetention)
-            SettingsRowDivider()
+            SpeakerRowDivider()
             AutomaticUpdateSettingsRow(model: softwareUpdate)
         }
     }
@@ -31,14 +31,13 @@ private struct LaunchAtLoginSettingsRow: View {
                     }
                 )
             )
-            .toggleStyle(.switch)
-            .tint(SpeakerVisualIdentity.controlTint)
+            .speakerSwitch()
             .labelsHidden()
             .disabled(model.isUpdating)
         }
 
         if let notice = model.notice {
-            SettingsNotice(text: notice, color: .orange)
+            SpeakerNotice(tone: .warning, text: notice)
         }
         if model.showsSystemSettingsButton {
             HStack {
@@ -70,12 +69,12 @@ private struct HistoryRetentionSettingsRow: View {
                     Text(policy.displayName).tag(policy)
                 }
             }
-            .settingsTrailingMenu()
+            .speakerTrailingMenu()
             .disabled(model.isUpdating)
         }
 
         if let notice = model.notice {
-            SettingsNotice(text: notice, color: .orange)
+            SpeakerNotice(tone: .warning, text: notice)
         }
     }
 }
@@ -92,14 +91,13 @@ private struct AutomaticUpdateSettingsRow: View {
                     set: { model.setAutomaticallyChecksForUpdates($0) }
                 )
             )
-            .toggleStyle(.switch)
-            .tint(SpeakerVisualIdentity.controlTint)
+            .speakerSwitch()
             .labelsHidden()
             .disabled(!model.state.isAvailable)
         }
 
         if let message = model.state.unavailableMessage {
-            SettingsNotice(text: message, color: .secondary)
+            SpeakerNotice(text: message)
         }
     }
 }

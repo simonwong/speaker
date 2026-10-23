@@ -150,13 +150,4 @@ package enum AboutSection: String, CaseIterable, Identifiable, Sendable {
         case .diagnostics: Self.diagnosticsTitle
         }
     }
-
-    package var icon: String {
-        switch self {
-        case .project: "link"
-        case .author: "person.crop.circle"
-        case .privacyBoundary: "hand.raised.fill"
-        case .diagnostics: "stethoscope"
-        }
-    }
 }
