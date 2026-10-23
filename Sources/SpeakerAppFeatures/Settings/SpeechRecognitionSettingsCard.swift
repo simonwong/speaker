@@ -146,13 +146,14 @@ private struct OnDeviceRecognitionSettings: View {
     @ViewBuilder
     private var modelStatus: some View {
         if let progress = model.modelInstallProgress {
-            HStack(spacing: 8) {
+            HStack(spacing: SpeakerSpacing.s) {
                 ProgressView(value: progress)
-                    .frame(width: 120)
+                    .speakerProgress()
                 Text(progress.formatted(.percent.precision(.fractionLength(0))))
-                    .monospacedDigit()
+                    .font(SpeakerTypography.detail.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: SpeakerControlMetrics.trailingWidth)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("正在下载语言模型")
         } else {
@@ -166,8 +167,7 @@ private struct OnDeviceRecognitionSettings: View {
                     .help("由 macOS 从 Apple 下载这门语言的识别模型")
                     .disabled(model.isMutating)
             case .unsupported:
-                Text("这台 Mac 不支持当前语言")
-                    .foregroundStyle(.secondary)
+                StatusBadge(text: "不支持当前语言", tone: .neutral)
             }
         }
     }

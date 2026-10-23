@@ -65,21 +65,22 @@ package struct MicrophoneSettingsPage: View {
                     .speakerTrailingMenu()
             }
             if let notice = model.state.deviceNotice {
-                SpeakerNotice(tone: .warning, text: notice)
-                HStack {
-                    Spacer()
-                    Button("刷新麦克风列表", action: model.refresh)
-                }
+                SpeakerNotice(
+                    tone: .warning,
+                    text: notice,
+                    action: SpeakerNotice.Action("刷新", hint: "刷新麦克风列表") {
+                        model.refresh()
+                    }
+                )
             }
             if model.state.persistenceFailed {
                 SpeakerNotice(
                     tone: .warning,
-                    text: "麦克风选择尚未保存，退出后可能恢复旧选择。"
+                    text: "麦克风选择尚未保存，退出后可能恢复旧选择。",
+                    action: SpeakerNotice.Action("重试", hint: "重试保存麦克风选择") {
+                        model.retryPersistence()
+                    }
                 )
-                HStack {
-                    Spacer()
-                    Button("重试保存麦克风选择", action: model.retryPersistence)
-                }
             }
             SpeakerRowDivider()
             SpeakerRow("测试麦克风") {
@@ -90,7 +91,9 @@ package struct MicrophoneSettingsPage: View {
                 case .starting, .testing:
                     Button("停止测试", action: model.stopLevelTest)
                 case .stopping:
-                    Text("正在停止…").foregroundStyle(.secondary)
+                    Text("正在停止…")
+                        .font(SpeakerTypography.detail)
+                        .foregroundStyle(.secondary)
                 }
             }
             if model.state.testStatus == .testing {

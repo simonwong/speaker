@@ -42,7 +42,10 @@ struct DoubaoRecognitionSettings: View {
 
     @ViewBuilder
     private var resourceRow: some View {
-        SpeakerRow("流式资源") {
+        SpeakerRow(
+            "流式资源",
+            detail: DoubaoResourcePresentation.costNote(for: model.doubaoResource)
+        ) {
             Picker(
                 "流式资源",
                 selection: Binding(
@@ -57,10 +60,6 @@ struct DoubaoRecognitionSettings: View {
             .speakerTrailingMenu()
             .disabled(model.isUpdatingKey)
         }
-        Text(DoubaoResourcePresentation.costNote(for: model.doubaoResource))
-            .font(SpeakerTypography.detail)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var isChecking: Bool {
@@ -80,7 +79,7 @@ package struct RefinementProviderSettingsCard: View {
     package var body: some View {
         // Sits under the mode card in the 整理 section, which already names it.
         SpeakerCard {
-            VStack(alignment: .leading, spacing: 12) {
+            Group {
                 SpeakerRow("服务商") {
                     Picker(
                         "服务商",
@@ -129,25 +128,24 @@ package struct RefinementProviderSettingsCard: View {
 
                 if model.selectedProvider == .custom {
                     labeledField(
-                        "API Base URL", placeholder: "https://api.example.com/v1",
+                        "API Base URL", detail: "兼容 OpenAI，不含 /chat/completions",
+                        placeholder: "https://api.example.com/v1",
                         text: $model.baseURLDraft)
-                    Text(
-                        "兼容 OpenAI 的 HTTPS 地址，无需填写 /chat/completions。"
-                    )
-                    .font(SpeakerTypography.detail)
-                    .foregroundStyle(.secondary)
                 }
                 if model.isEditingModelID {
                     labeledField("模型 ID", placeholder: "填写服务商提供的模型 ID", text: $model.modelIDDraft)
-                    Button("保存模型配置", action: saveConfiguration)
-                        .disabled(!model.hasProfileChanges)
-                        .accessibilityHidden(true)
-                        .overlay {
-                            AccessibilityButtonBridge(
-                                label: "保存模型配置", hint: "保存接口和模型，不会发送测试请求",
-                                isEnabled: model.hasProfileChanges && !model.isMutating,
-                                action: saveConfiguration)
-                        }
+                    HStack {
+                        Spacer()
+                        Button("保存模型配置", action: saveConfiguration)
+                            .disabled(!model.hasProfileChanges)
+                            .accessibilityHidden(true)
+                            .overlay {
+                                AccessibilityButtonBridge(
+                                    label: "保存模型配置", hint: "保存接口和模型，不会发送测试请求",
+                                    isEnabled: model.hasProfileChanges && !model.isMutating,
+                                    action: saveConfiguration)
+                            }
+                    }
                 }
             }
             .disabled(model.isMutating)
@@ -179,8 +177,7 @@ package struct RefinementProviderSettingsCard: View {
             )
 
             if !model.hasValidProfile || model.hasProfileChanges {
-                Text("先保存模型配置，再填写或更换 Key。")
-                    .font(SpeakerTypography.detail).foregroundStyle(.secondary)
+                SpeakerNotice(text: "先保存模型配置，再保存 Key")
             }
             if let credentialNotice = model.credentialNotice {
                 SpeakerNotice(tone: .error, text: credentialNotice)
@@ -195,10 +192,11 @@ package struct RefinementProviderSettingsCard: View {
         Task { await model.saveProviderConfiguration() }
     }
 
-    private func labeledField(_ label: String, placeholder: String, text: Binding<String>)
-        -> some View
-    {
-        RefinementConfigurationField(label: label, placeholder: placeholder, text: text)
+    private func labeledField(
+        _ label: String, detail: String? = nil, placeholder: String, text: Binding<String>
+    ) -> some View {
+        RefinementConfigurationField(
+            label: label, detail: detail, placeholder: placeholder, text: text)
     }
 
     private var statusText: String {
@@ -238,8 +236,8 @@ struct ProviderConnectionCheck {
     let action: @MainActor () -> Void
 }
 
-/// The one block every provider uses for its key: a title line with the
-/// key's status and quiet text actions, then the field. A configured key
+/// The one block every provider uses for its key: a row with the key's
+/// status and neutral actions, then the field. A configured key
 /// collapses to its title line; 更换 Key opens the field, the console link,
 /// and deletion, and a successful save or 取消 closes them again. Save appears
 /// only once there is something to save.
@@ -268,11 +266,11 @@ struct ProviderKeyEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SpeakerSpacing.s) {
             titleLine
 
             if showsField {
-                HStack(spacing: 8) {
+                HStack(spacing: SpeakerSpacing.s) {
                     keyField
                     actions
                 }
@@ -295,18 +293,16 @@ struct ProviderKeyEditor: View {
     }
 
     private var titleLine: some View {
-        HStack(spacing: 10) {
-            Text("API Key")
-                .font(SpeakerTypography.emphasis)
-            StatusBadge(text: status.text, icon: status.icon, tone: status.tone)
-                .help(status.help ?? "")
+        SpeakerRow("API Key") {
+            HStack(spacing: SpeakerSpacing.s) {
+                StatusBadge(text: status.text, icon: status.icon, tone: status.tone)
+                    .help(status.help ?? "")
 
-            Spacer(minLength: 8)
-
-            if !showsField {
-                collapsedActions
-            } else {
-                editingActions
+                if !showsField {
+                    collapsedActions
+                } else {
+                    editingActions
+                }
             }
         }
     }
@@ -314,7 +310,7 @@ struct ProviderKeyEditor: View {
     @ViewBuilder
     private var collapsedActions: some View {
         connectionCheckAction()
-        textAction("更换 Key") { setReplacing(true) }
+        actionButton("更换 Key") { setReplacing(true) }
     }
 
     /// Checks the stored key. An unsaved draft disables it, because the
@@ -325,7 +321,7 @@ struct ProviderKeyEditor: View {
             if connectionCheck.isChecking {
                 ProgressView().controlSize(.small)
             }
-            textAction(
+            actionButton(
                 connectionCheck.isChecking ? "检查中…" : "检查连接",
                 isEnabled: connectionCheck.isEnabled && !blockedByDraft,
                 action: connectionCheck.action
@@ -345,26 +341,24 @@ struct ProviderKeyEditor: View {
             connectionCheckAction(blockedByDraft: hasDraft)
         }
         if hasStoredKey && collapsesStoredKey {
-            textAction("取消") {
+            actionButton("取消") {
                 draft = ""
                 setReplacing(false)
             }
         }
     }
 
-    private func textAction(
+    /// An in-app action: a neutral button, never link-styled text.
+    private func actionButton(
         _ title: String,
         isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(title, action: action)
-            .buttonStyle(.link)
-            // Neutral text, not the system link blue.
-            .foregroundStyle(isEnabled ? .primary : .tertiary)
-            .font(SpeakerTypography.detail)
+            .buttonStyle(SpeakerButtonStyle())
             .disabled(!isEnabled)
-            .speakerPointingHandCursor()
-            // Link-style buttons drop out of AppKit's accessibility tree
+            .fixedSize()
+            // Glass buttons can drop out of AppKit's accessibility tree
             // until VoiceOver runs; the bridge keeps them reachable.
             .accessibilityHidden(true)
             .overlay {
@@ -380,7 +374,7 @@ struct ProviderKeyEditor: View {
 
     private var keyField: some View {
         SecureField(
-            hasStoredKey ? "输入新 Key 替换当前凭据" : "输入 \(providerName) API Key",
+            hasStoredKey ? "输入新 Key" : "输入 \(providerName) API Key",
             text: $draft
         )
         .textContentType(.password)
@@ -391,7 +385,7 @@ struct ProviderKeyEditor: View {
     }
 
     private var actions: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: SpeakerSpacing.s) {
             if isUpdating {
                 ProgressView().controlSize(.small)
             }
@@ -412,22 +406,9 @@ struct ProviderKeyEditor: View {
             }
 
             if hasStoredKey {
-                Button {
+                SpeakerIconButton(symbol: "trash", label: "删除 Key") {
                     confirmingDelete = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(SpeakerTypography.body)
-                        .foregroundStyle(.secondary)
-                        .frame(
-                            width: SpeakerControlMetrics.height,
-                            height: SpeakerControlMetrics.height
-                        )
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(
-                    SpeakerPressableButtonStyle(pressedScale: SpeakerMotion.compactPressedScale)
-                )
-                .help("删除 Key")
                 .accessibilityHidden(true)
                 .overlay {
                     AccessibilityButtonBridge(
@@ -464,18 +445,26 @@ struct ProviderKeyEditor: View {
 
 private struct RefinementConfigurationField: View {
     let label: String
+    var detail: String?
     let placeholder: String
     @Binding var text: String
     @State private var isFocused = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(SpeakerTypography.detail)
+        VStack(alignment: .leading, spacing: SpeakerSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: SpeakerSpacing.s) {
+                Text(label)
+                if let detail {
+                    Text(detail).foregroundStyle(.secondary)
+                }
+            }
+            .font(SpeakerTypography.detail)
             RefinementConfigurationTextField(
                 label: label, placeholder: placeholder, text: $text, isFocused: $isFocused
             )
-            .frame(height: 20)
-            .padding(.horizontal, 12)
+            // The text field's own line height, centred in the capsule.
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, SpeakerSpacing.m)
             .frame(height: SpeakerControlMetrics.height)
             .speakerField(focused: isFocused)
         }

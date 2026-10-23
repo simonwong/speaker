@@ -44,7 +44,7 @@ package enum FunctionKeySystemAction: Equatable, Sendable {
         case .startDictation: effect = "连按两下还会开始 macOS 听写"
         case .systemDefault: effect = "可能还会更改输入法或显示表情"
         }
-        return "按 Fn（🌐）键时，macOS \(effect)。可在键盘设置中把「按下 🌐 键时」改为「不执行任何操作」。"
+        return "按 Fn 键时，macOS \(effect)。在键盘设置中把「按下 🌐 键时」改为「不执行任何操作」。"
     }
 }
 
@@ -58,19 +58,14 @@ struct FunctionKeyConflictHint: View {
     var body: some View {
         Group {
             if let message = action.conflictMessage {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: "globe")
-                        .foregroundStyle(SpeakerTone.warning.color)
-                        .accessibilityHidden(true)
-                    Text(message)
-                        .font(SpeakerTypography.detail)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Button("打开键盘设置") {
+                SpeakerNotice(
+                    tone: .warning,
+                    text: message,
+                    glyph: .symbol("globe"),
+                    action: SpeakerNotice.Action("打开键盘设置") {
                         openURL(FunctionKeySystemAction.keyboardSettingsURL)
                     }
-                }
+                )
             }
         }
         .onReceive(

@@ -37,15 +37,13 @@ private struct LaunchAtLoginSettingsRow: View {
         }
 
         if let notice = model.notice {
-            SpeakerNotice(tone: .warning, text: notice)
-        }
-        if model.showsSystemSettingsButton {
-            HStack {
-                Spacer()
-                Button("打开登录项设置") {
-                    model.openSystemSettings()
-                }
-            }
+            SpeakerNotice(
+                tone: .warning,
+                text: notice,
+                action: model.showsSystemSettingsButton
+                    ? SpeakerNotice.Action("打开登录项设置") { model.openSystemSettings() }
+                    : nil
+            )
         }
     }
 }
