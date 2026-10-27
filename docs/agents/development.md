@@ -16,11 +16,11 @@ A provider check is complete only when the requested provider and scenario repor
 
 ```bash
 ./scripts/swiftw run --disable-sandbox SpeakerAccuracyEvaluator -- \
-    --manifest ~/eval/manifest.json --resources 1.0,2.0 --smoothing on,off \
+    --manifest ~/eval/manifest.json --resources 1.0,2.0 --smoothing on,off --second-pass on,off \
     --dictionary-file ~/eval/entries.json --dictionary with,without
 ```
 
-The manifest is `{"samples":[{"id","wav","reference","tags"?}]}`; relative `wav` paths resolve against the manifest directory and must be 16 kHz, 16-bit, mono PCM WAV, or the sample is rejected by name before anything is sent. The optional dictionary file is a JSON array of Entry strings; it is validated like the Personal Dictionary and sent through the same `DictionaryRequestContextBuilder` capacity rule. Resource `1.0`/`2.0` follow the hour or concurrent tier of the activated resource in `settings.json`.
+The manifest is `{"samples":[{"id","wav","reference","tags"?}]}`; relative `wav` paths resolve against the manifest directory and must be 16 kHz, 16-bit, mono PCM WAV, or the sample is rejected by name before anything is sent. The optional dictionary file is a JSON array of Entry strings; it is validated like the Personal Dictionary and sent through the same `DictionaryRequestContextBuilder` capacity rule. `--second-pass` compares requests with and without Doubao's `enable_nonstream` second-pass recognition (default `on`, as in the App). Resource `1.0`/`2.0` follow the hour or concurrent tier of the activated resource in `settings.json`.
 
 Without `--confirm-paid-requests` the tool validates every input and prints the plan only; no network request is made. Adding `--confirm-paid-requests --output <fresh report.json>` streams each sample in real-time 200 ms packets, once per variant, and bills the user's Doubao account; obtain explicit approval first. The default report is owner-only and text-free: manifest SHA-256, variant definitions, per-sample and aggregate CER (with substitution, deletion, and insertion counts) and Latin-token WER, durations, and provider request IDs. `--include-text` also writes `<output>.with-text.json` with transcript, reference, and Entry text; keep that file local and never commit it or attach it to an issue. Audio samples never enter the repository.
 
