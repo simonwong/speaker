@@ -21,6 +21,7 @@
 | `enable_itn` | 默认 `true`；把口语数字等规整为书面形式。 | 改变书写形式，不是语义纠错；英文缩写/产品名错误通常不能靠 ITN 修复。 |
 | `enable_punc` | 默认 `true`。 | 改善可读性，不修复错误词义。 |
 | `enable_ddc` | 默认 `false`；会删除或修改停顿词、语气词、语义重复词等，使文本顺滑。产品表注明顺滑支持中文、英文。 | **建议**若目标是忠实听写默认关闭；若目标是可读输入再单独评估。它会改写/删除内容，不能当作可靠语义纠错器。 |
+| `enable_nonstream` | 仅双向流式优化版（`bigmodel_async`）；开启后在同一连接里先流式返回，分句结束后用 nostream 重新识别该分句音频；默认开启 VAD 分句（800 ms 判停），只有 nostream 结果带 `definite: true`。官方表未写默认值。 | Speaker 自 2026-10-28 起对所有 Refinement Mode 开启。二遍按分句做，不是整段重识别；收益与松键后的额外等待用 `SpeakerAccuracyEvaluator --second-pass on,off` 实测。 |
 | `enable_accelerate_text` / `accelerate_score` | 前者默认 `false`，开启会降低首字准确率；后者默认 `0`，范围 0–20，越大越快。 | 准确率优先时保持关闭/0。 |
 | `vad_segment_duration` | 默认 3000 ms；仅决定语义切句的最大静音阈值，不决定 `definite`。配置 `end_window_size` 后失效。 | 较长上下文可能有利于模型消歧；不要把它误当识别增强。 |
 | `end_window_size` | 默认 800 ms，最小 200 ms；配置后停用语义分句，按静音强制判停并输出 `definite`。 | 过短会切碎跨语言短语，属于准确率风险；除低延迟要求外保留默认并以真实 code-switch 样本验证。 |

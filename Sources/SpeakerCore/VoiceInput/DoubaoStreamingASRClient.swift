@@ -4,15 +4,20 @@ package struct DoubaoTranscriptionOptions: Equatable, Sendable {
     package var enablePunctuation: Bool
     package var enableITN: Bool
     package var enableSemanticSmoothing: Bool
+    /// `enable_nonstream`: Doubao re-recognizes each finished utterance in
+    /// non-streaming mode, so the final result uses the whole utterance.
+    package var enableSecondPass: Bool
 
     package init(
         enablePunctuation: Bool = true,
         enableITN: Bool = true,
-        enableSemanticSmoothing: Bool = true
+        enableSemanticSmoothing: Bool = true,
+        enableSecondPass: Bool = true
     ) {
         self.enablePunctuation = enablePunctuation
         self.enableITN = enableITN
         self.enableSemanticSmoothing = enableSemanticSmoothing
+        self.enableSecondPass = enableSecondPass
     }
 }
 
@@ -235,6 +240,7 @@ private struct DoubaoStreamingRequestBody: Encodable, Sendable {
         let enableITN: Bool
         let enablePunctuation: Bool
         let enableSemanticSmoothing: Bool
+        let enableSecondPass: Bool
         let corpus: Corpus?
 
         enum CodingKeys: String, CodingKey {
@@ -242,6 +248,7 @@ private struct DoubaoStreamingRequestBody: Encodable, Sendable {
             case enableITN = "enable_itn"
             case enablePunctuation = "enable_punc"
             case enableSemanticSmoothing = "enable_ddc"
+            case enableSecondPass = "enable_nonstream"
             case corpus
         }
     }
@@ -360,6 +367,7 @@ package actor DoubaoStreamingASRClient {
                 enableITN: configuration.options.enableITN,
                 enablePunctuation: configuration.options.enablePunctuation,
                 enableSemanticSmoothing: configuration.options.enableSemanticSmoothing,
+                enableSecondPass: configuration.options.enableSecondPass,
                 corpus: try Self.makeHotwordContext(hotwords: configuration.hotwords).map {
                     .init(context: $0)
                 }
