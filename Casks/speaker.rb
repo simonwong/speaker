@@ -1,6 +1,6 @@
 cask "speaker" do
-  version "0.9.0,207"
-  sha256 "1469ca6ffe64612cca1eb85d1eed00c2647e95f953b9af5c053f5782d275a833"
+  version "0.10.0,208"
+  sha256 "91638fdae101e8df796619f92b09a36aff25beeb19f38dd099f60d9cbd0a1c8a"
 
   url "https://github.com/simonwong/speaker/releases/download/v#{version.csv.first}/Speaker-#{version.csv.first}-#{version.csv.second}.dmg"
   name "Speaker"
