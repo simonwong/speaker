@@ -10,6 +10,11 @@ if (( $# > 1 )); then
     exit 64
 fi
 SPEAKER_TEST_MODE="${1:-quiet}"
+SPEAKER_TEST_SKIP_PACKAGING="${SPEAKER_TEST_SKIP_PACKAGING:-0}"
+if [[ "$SPEAKER_TEST_SKIP_PACKAGING" != 0 && "$SPEAKER_TEST_SKIP_PACKAGING" != 1 ]]; then
+    print -u2 "SPEAKER_TEST_SKIP_PACKAGING must be 0 or 1."
+    exit 64
+fi
 case "$SPEAKER_TEST_MODE" in
     quiet|--with-ui|--ui-only) ;;
     --help|-h)
@@ -67,12 +72,21 @@ speaker_test_run "test-provider-smoke-contract" \
     /bin/zsh "$SCRIPT_DIR/test-provider-smoke-contract"
 speaker_test_run "test-brand-assets" \
     /bin/zsh "$SCRIPT_DIR/test-brand-assets"
-speaker_test_run "test-package-dmg" \
-    /bin/zsh "$SCRIPT_DIR/test-package-dmg"
-speaker_test_run "test-install-identity" \
-    /bin/zsh "$SCRIPT_DIR/test-install-identity"
-speaker_test_run "test-release-evidence" \
-    /bin/zsh "$SCRIPT_DIR/test-release-evidence"
+# CI's `verify` job runs these packaging and install checks beside the release
+# bundle, so its `specifications` job sets SPEAKER_TEST_SKIP_PACKAGING=1 to keep
+# them off the critical path. Every other caller, the Production Release gate
+# included, runs them here.
+if [[ "$SPEAKER_TEST_SKIP_PACKAGING" == 1 ]]; then
+    print ""
+    print "Skipping test-package-dmg, test-install-identity, and test-release-evidence: SPEAKER_TEST_SKIP_PACKAGING=1."
+else
+    speaker_test_run "test-package-dmg" \
+        /bin/zsh "$SCRIPT_DIR/test-package-dmg"
+    speaker_test_run "test-install-identity" \
+        /bin/zsh "$SCRIPT_DIR/test-install-identity"
+    speaker_test_run "test-release-evidence" \
+        /bin/zsh "$SCRIPT_DIR/test-release-evidence"
+fi
 speaker_test_run "test-release-identity" \
     /bin/zsh "$SCRIPT_DIR/test-release-identity"
 speaker_test_run "SpeakerUpdateSignatureVerifier --self-test" \

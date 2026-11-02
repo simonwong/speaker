@@ -154,9 +154,11 @@ jobs:
       - name: Check Swift formatting
         run: swift format lint --strict --parallel --recursive Sources Tests
 
+      # The packaging and install checks run in `verify` instead.
       - name: Run deterministic specifications
         env:
           SPEAKER_SPEC_TRACE: "1"
+          SPEAKER_TEST_SKIP_PACKAGING: "1"
         run: ./scripts/test --with-ui
 
       - name: Verify resolved dependencies are pristine
@@ -260,8 +262,20 @@ jobs:
             ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-
             ${{ runner.os }}-swiftpm-
 
-      # The reviewed release identity guard runs inside `./scripts/test` in the
-      # `specifications` lane, against the same fixtures.
+      # `specifications` skips these three `./scripts/test` steps
+      # (SPEAKER_TEST_SKIP_PACKAGING=1) so they run here, off its critical
+      # path. test-release-evidence already ran above against the real bundle,
+      # which covers its fixture run. The reviewed release identity guard stays
+      # in `specifications`, which keeps the two lanes about even.
+      - name: Verify DMG packaging
+        run: ./scripts/test-package-dmg
+
+      - name: Verify install identity
+        env:
+          SPEAKER_SWIFT_WARNINGS_AS_ERRORS: "1"
+          SPEAKER_CACHE_ROOT: ${{ github.workspace }}/.build/speaker-swift-cache
+        run: ./scripts/test-install-identity
+
       - name: Verify install rollback
         env:
           SPEAKER_SWIFT_WARNINGS_AS_ERRORS: "1"
