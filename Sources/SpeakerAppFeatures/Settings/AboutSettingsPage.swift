@@ -79,7 +79,7 @@ private struct AboutSettingsPage: View {
 
             Spacer(minLength: SpeakerSpacing.m)
 
-            Button("检查更新…") {
+            Button("检查更新") {
                 softwareUpdate.checkForUpdates()
             }
             .buttonStyle(SpeakerButtonStyle())

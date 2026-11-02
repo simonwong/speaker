@@ -58,6 +58,7 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(recognition?["enable_itn"] as? Bool == true)
             try expect(recognition?["enable_punc"] as? Bool == true)
             try expect(recognition?["enable_ddc"] as? Bool == true)
+            try expect(recognition?["enable_nonstream"] as? Bool == true)
             try expect(recognition?["context"] == nil)
             try expect(hotwords == [["word": "Speaker"]])
             try expect(audio?["format"] as? String == "pcm")
@@ -95,6 +96,34 @@ enum DoubaoClientSpecs: CoreSpecDomain {
             try expect(recognition?["enable_ddc"] as? Bool == false)
             try expect(recognition?["enable_itn"] as? Bool == true)
             try expect(recognition?["enable_punc"] as? Bool == true)
+            try expect(recognition?["enable_nonstream"] as? Bool == true)
+        }
+
+        await runAsync(
+            "Doubao omits second-pass recognition only when the option is off",
+            failures: &failures
+        ) {
+            let connection = DoubaoWebSocketConnectionFake(
+                responses: [makeDoubaoServerResponse(text: "你好，世界。", isFinal: true)],
+                metadata: .init(httpStatusCode: 101, providerRequestID: "log-second-pass-off")
+            )
+            let client = DoubaoStreamingASRClient(
+                configuration: .init(
+                    apiKey: "test-api-key",
+                    requestUserID: "request-user",
+                    options: .init(enableSecondPass: false)
+                ),
+                connector: DoubaoWebSocketConnectorFake(connection: connection)
+            )
+
+            _ = try await client.transcribe(makeAudioStream([Data([1, 2])]))
+            let frames = await connection.sentFrames
+            let fullRequest = try DoubaoStreamingFrameCodec.decode(frames[0])
+            let body = try JSONSerialization.jsonObject(with: fullRequest.payload) as? [String: Any]
+            let recognition = body?["request"] as? [String: Any]
+
+            try expect(recognition?["enable_nonstream"] as? Bool == false)
+            try expect(recognition?["enable_ddc"] as? Bool == true)
         }
 
         await runAsync(

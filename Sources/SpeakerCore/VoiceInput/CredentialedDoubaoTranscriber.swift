@@ -8,11 +8,13 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     private let requestUserID: @Sendable () -> String
     private let runtimeDiagnostics: VoiceProviderRuntimeDiagnostics?
     private let liveness: TransportLivenessProbe
+    private let enableSecondPass: Bool
     private var resource: DoubaoStreamingResource
 
     public init(
         credentials: any ProviderCredentialStoring,
         resource: DoubaoStreamingResource = .default,
+        enableSecondPass: Bool = true,
         connector: any DoubaoWebSocketConnecting =
             URLSessionDoubaoWebSocketConnector(),
         runtimeDiagnostics: VoiceProviderRuntimeDiagnostics? = nil,
@@ -23,6 +25,7 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
     ) {
         self.credentials = credentials
         self.resource = resource
+        self.enableSecondPass = enableSecondPass
         self.connector = connector
         self.runtimeDiagnostics = runtimeDiagnostics
         self.liveness = liveness
@@ -74,7 +77,8 @@ public actor CredentialedDoubaoTranscriber: SpeechTranscribing {
                 requestUserID: requestUserID(),
                 hotwords: context.hotwords,
                 options: .init(
-                    enableSemanticSmoothing: context.purpose == .defaultSmoothing
+                    enableSemanticSmoothing: context.purpose == .defaultSmoothing,
+                    enableSecondPass: enableSecondPass
                 )
             ),
             connector: connector,

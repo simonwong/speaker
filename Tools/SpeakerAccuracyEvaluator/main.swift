@@ -36,6 +36,11 @@ private enum SmoothingSetting: String, CaseIterable {
     }
 }
 
+private enum SecondPassSetting: String, CaseIterable {
+    case on
+    case off
+}
+
 private enum DictionaryAttachment: String, CaseIterable {
     case with
     case without
@@ -45,6 +50,7 @@ private struct Options {
     var manifestURL: URL?
     var generations: [ModelGeneration] = [.model2]
     var smoothing: [SmoothingSetting] = [.on]
+    var secondPass: [SecondPassSetting] = [.on]
     var dictionaryFileURL: URL?
     var attachments: [DictionaryAttachment]?
     var outputURL: URL?
@@ -57,6 +63,7 @@ private struct Variant {
     let generation: ModelGeneration
     let resource: DoubaoStreamingResource
     let smoothing: SmoothingSetting
+    let secondPass: SecondPassSetting
     let attachment: DictionaryAttachment
     let hotwords: [String]
     let entryCount: Int
@@ -77,6 +84,7 @@ private struct VariantReport: Encodable {
     let model: String
     let resource: String
     let semanticSmoothing: Bool
+    let secondPass: Bool
     let dictionaryAttached: Bool
     let dictionaryEntryCount: Int
     let hotwordCount: Int
@@ -257,7 +265,7 @@ private struct SpeakerAccuracyEvaluator {
         print("Manifest: \(samples.count) sample(s), \(formatSeconds(totalAudioSeconds)) of audio, sha256 \(sha256Hex(manifestData)).")
         print("Variants (\(variants.count)):")
         for variant in variants {
-            print("  \(variant.id): resource=\(variant.resource.rawValue) semanticSmoothing=\(variant.smoothing == .on) dictionary=\(variant.attachment == .with) hotwords=\(variant.hotwords.count)")
+            print("  \(variant.id): resource=\(variant.resource.rawValue) semanticSmoothing=\(variant.smoothing == .on) secondPass=\(variant.secondPass == .on) dictionary=\(variant.attachment == .with) hotwords=\(variant.hotwords.count)")
         }
         print("Planned requests: \(variants.count * samples.count) streaming Doubao request(s), about \(formatSeconds(totalAudioSeconds * Double(variants.count))) of billed audio.")
 
@@ -290,7 +298,8 @@ private struct SpeakerAccuracyEvaluator {
         for variant in variants {
             let transcriber = CredentialedDoubaoTranscriber(
                 credentials: credentials,
-                resource: variant.resource
+                resource: variant.resource,
+                enableSecondPass: variant.secondPass == .on
             )
             let context = SpeechTranscriptionContext(
                 hotwords: variant.hotwords,
@@ -455,6 +464,7 @@ private struct SpeakerAccuracyEvaluator {
                 model: variant.generation.rawValue,
                 resource: variant.resource.rawValue,
                 semanticSmoothing: variant.smoothing == .on,
+                secondPass: variant.secondPass == .on,
                 dictionaryAttached: variant.attachment == .with,
                 dictionaryEntryCount: variant.entryCount,
                 hotwordCount: variant.hotwords.count,
@@ -519,17 +529,20 @@ private struct SpeakerAccuracyEvaluator {
         var variants: [Variant] = []
         for generation in options.generations {
             for smoothing in options.smoothing {
-                for attachment in attachments {
-                    let hotwords = attachment == .with ? dictionary?.hotwords ?? [] : []
-                    variants.append(Variant(
-                        id: "model\(generation.rawValue)-smoothing_\(smoothing.rawValue)-dictionary_\(attachment.rawValue)",
-                        generation: generation,
-                        resource: generation.resource(matching: configuredResource),
-                        smoothing: smoothing,
-                        attachment: attachment,
-                        hotwords: hotwords,
-                        entryCount: attachment == .with ? dictionary?.entries.count ?? 0 : 0
-                    ))
+                for secondPass in options.secondPass {
+                    for attachment in attachments {
+                        let hotwords = attachment == .with ? dictionary?.hotwords ?? [] : []
+                        variants.append(Variant(
+                            id: "model\(generation.rawValue)-smoothing_\(smoothing.rawValue)-second_pass_\(secondPass.rawValue)-dictionary_\(attachment.rawValue)",
+                            generation: generation,
+                            resource: generation.resource(matching: configuredResource),
+                            smoothing: smoothing,
+                            secondPass: secondPass,
+                            attachment: attachment,
+                            hotwords: hotwords,
+                            entryCount: attachment == .with ? dictionary?.entries.count ?? 0 : 0
+                        ))
+                    }
                 }
             }
         }
@@ -614,6 +627,8 @@ private struct SpeakerAccuracyEvaluator {
                 options.generations = try list(try value(for: argument), as: ModelGeneration.self, flag: argument)
             case "--smoothing":
                 options.smoothing = try list(try value(for: argument), as: SmoothingSetting.self, flag: argument)
+            case "--second-pass":
+                options.secondPass = try list(try value(for: argument), as: SecondPassSetting.self, flag: argument)
             case "--dictionary-file":
                 options.dictionaryFileURL = URL(fileURLWithPath: try value(for: argument)).standardizedFileURL
             case "--dictionary":
@@ -638,6 +653,7 @@ private struct SpeakerAccuracyEvaluator {
             Usage: SpeakerAccuracyEvaluator --manifest <manifest.json> [options]
               --resources 1.0,2.0          Doubao model generations to compare (default 2.0)
               --smoothing on,off           Doubao semantic smoothing variants (default on)
+              --second-pass on,off         Doubao second-pass (enable_nonstream) variants (default on)
               --dictionary-file <json>     JSON array of Personal Dictionary Entry strings sent as hotwords
               --dictionary with,without    Attach the dictionary file or not (default: with when a file is given)
               --output <report.json>       Fresh path for the text-free JSON report (required for paid runs)

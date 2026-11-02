@@ -70,7 +70,7 @@ FunASR 的服务端 SDK 也提供 `online`、`offline` 和 `2pass` 三种模式�
 
 ## 当前 Speaker 与 Doubao 的关系
 
-当前 [DoubaoStreamingASRClient](../../Sources/SpeakerCore/VoiceInput/DoubaoStreamingASRClient.swift) 默认使用 `bigmodel_async`；[DoubaoStreamingExchange](../../Sources/SpeakerCore/VoiceInput/DoubaoStreamingExchange.swift) 录音中发送，结束发送最后音频帧，收到最终结果才返回。因此当前已是边录边传、最终交付，不是逐字粘贴。当前请求没有显式 `enable_nonstream`，但这不足以推断服务端默认是否做二遍。
+当前 [DoubaoStreamingASRClient](../../Sources/SpeakerCore/VoiceInput/DoubaoStreamingASRClient.swift) 默认使用 `bigmodel_async`；[DoubaoStreamingExchange](../../Sources/SpeakerCore/VoiceInput/DoubaoStreamingExchange.swift) 录音中发送，结束发送最后音频帧，收到最终结果才返回。因此当前已是边录边传、最终交付，不是逐字粘贴。2026-10-28 起请求显式开启 `enable_nonstream`，契约见 [doubao-streaming-asr.md](doubao-streaming-asr.md)。
 
 火山官方产品介绍将流式音频输入、分句返回列为语音输入法场景；产品动态记录 `bigmodel_async` 支持非流式二遍能力。值得先查现有能力，再增加外部供应商。本轮直接 API 文档未取得正文，实施前必须重新核实资源权限、参数、默认值及结果终态；不把其他 RTC 产品的参数移植为当前 ASR 契约。[产品介绍](https://www.volcengine.com/docs/6561/1354871?lang=zh)、[产品动态](https://www.volcengine.com/docs/6561/162929?lang=en)
 
