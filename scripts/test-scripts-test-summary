@@ -95,6 +95,9 @@ if [[ "${SPEAKER_TEST_UI_FAILURE:-0}" == "1" && "$*" == *SpeakerAppUISpecs* ]]; 
 fi' > "$MODE_ROOT/$stub_name"
 done
 export SPEAKER_TEST_MODE_TRACE="$TEST_ROOT/mode-trace"
+# CI's `specifications` job sets this for the real gate; the mode checks below
+# describe the gate every other caller runs.
+unset SPEAKER_TEST_SKIP_PACKAGING
 for mode in quiet --with-ui --ui-only; do
     : > "$SPEAKER_TEST_MODE_TRACE"
     mode_args=()
@@ -132,7 +135,25 @@ if /bin/zsh "$MODE_ROOT/test" --unknown > /dev/null 2>&1; then
     exit 1
 fi
 [[ ! -s "$SPEAKER_TEST_MODE_TRACE" ]]
+: > "$SPEAKER_TEST_MODE_TRACE"
+skip_output="$(SPEAKER_TEST_SKIP_PACKAGING=1 /bin/zsh "$MODE_ROOT/test" --with-ui)"
+trace="$(cat "$SPEAKER_TEST_MODE_TRACE")"
+for packaging_step in test-package-dmg test-install-identity test-release-evidence; do
+    [[ "$trace" != *"$packaging_step"* ]]
+done
+[[ "$trace" == *SpeakerAppUISpecs* && "$trace" == *test-release-identity* ]]
+[[ "$skip_output" == *"all 22 gate steps passed"* ]]
+if SPEAKER_TEST_SKIP_PACKAGING=yes /bin/zsh "$MODE_ROOT/test" > /dev/null 2>&1; then
+    print -u2 "An invalid SPEAKER_TEST_SKIP_PACKAGING was accepted."
+    exit 1
+fi
 for workflow in ci release; do
     grep -Fq 'run: ./scripts/test --with-ui' "$SCRIPT_DIR/../.github/workflows/$workflow.yml"
 done
-print "PASS: default checks avoid UI, explicit UI modes preserve coverage and failures, and CI runs the full gate"
+# Only `specifications` may skip the packaging checks, and `verify` must run
+# the ones it skips; the Production Release gate never skips them.
+! grep -Fq SPEAKER_TEST_SKIP_PACKAGING "$SCRIPT_DIR/../.github/workflows/release.yml"
+for packaging_step in test-package-dmg test-install-identity test-release-evidence; do
+    grep -Fq "run: ./scripts/$packaging_step" "$SCRIPT_DIR/../.github/workflows/ci.yml"
+done
+print "PASS: default checks avoid UI, explicit UI modes preserve coverage and failures, and CI runs the full gate across its jobs"
