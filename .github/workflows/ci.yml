@@ -104,6 +104,12 @@ jobs:
     timeout-minutes: 20
     env:
       CI: "true"
+      # Every build in this job, the specification executables included, uses
+      # the same -warnings-as-errors flags, so each module compiles once per run
+      # and the restored .build stays incremental. The module cache lives
+      # inside .build so the one cache entry carries both.
+      SPEAKER_SWIFT_WARNINGS_AS_ERRORS: "1"
+      SPEAKER_CACHE_ROOT: ${{ github.workspace }}/.build/speaker-swift-cache
 
     steps:
       - name: Check out source
@@ -128,12 +134,12 @@ jobs:
           echo "SPEAKER_SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
           echo "Selected SDK: $SDK_CANONICAL_NAME ($SDK_PATH)"
 
-      # SwiftPM build products are reusable only for the exact resolved
-      # dependency graph, so the key carries the Package.resolved hash. The
-      # commit suffix keeps every run publishing a fresh incremental cache while
-      # the prefix restore key still matches the newest cache for that graph.
-      # The bundling lane deliberately does not restore this cache: it builds
-      # the release bundle in an isolated scratch path.
+      # The key carries the Package.resolved hash and the commit, so every run
+      # saves a fresh entry and the prefix restore key picks the newest one this
+      # ref can see: its own pull request's previous push, else main.
+      # scripts/swiftw compiles with content hashes, so after a fresh checkout
+      # only files whose bytes changed recompile. The last restore key lets a
+      # dependency update start from the previous graph.
       - name: Cache SwiftPM build products
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -141,6 +147,7 @@ jobs:
           key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-
+            ${{ runner.os }}-swiftpm-
 
       # The tree is formatted to the root .swift-format configuration, so this
       # check is blocking.
@@ -240,10 +247,33 @@ jobs:
           SPEAKER_EVIDENCE_TEST_APP: ${{ runner.temp }}/speaker-release-pending/Speaker.app
         run: ./scripts/test-release-evidence
 
+      # Install rollback bundles a debug build in .build. Restoring the cache
+      # only after the release bundle exists keeps that bundle isolated while
+      # sparing this step a cold debug compile. The flags match `specifications`
+      # so the restored modules stay valid.
+      - name: Restore SwiftPM build products
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}-
+            ${{ runner.os }}-swiftpm-
+
       # The reviewed release identity guard runs inside `./scripts/test` in the
       # `specifications` lane, against the same fixtures.
       - name: Verify install rollback
+        env:
+          SPEAKER_SWIFT_WARNINGS_AS_ERRORS: "1"
+          SPEAKER_CACHE_ROOT: ${{ github.workspace }}/.build/speaker-swift-cache
         run: ./scripts/test-install-rollback
+
+      # The repository allows actions/cache but not actions/cache/restore, so
+      # this job removes .build to keep the cache action from saving it: the
+      # entry for this commit belongs to `specifications`, whose .build holds
+      # every product.
+      - name: Keep this job from saving the cache
+        run: rm -rf .build
 
   # `Test, build, and bundle` is the required status check on main; keep this
   # name. Branch protection treats a skipped required check as passing, so this
