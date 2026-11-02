@@ -61,6 +61,33 @@ cd "$ROOT"
 # appearance: no Liquid Glass and smaller window corners. The native build
 # system records the SDK actually used, as CI's default toolchain does.
 BUILD_SYSTEM_ARGUMENTS=(--build-system native)
+# A fresh checkout gives every source file a new mtime, so a restored .build
+# would recompile the whole package. With content hashes the driver recompiles
+# only files whose bytes changed, in CI after a cache restore and locally after
+# a branch switch.
+BUILD_SYSTEM_ARGUMENTS+=(-Xswiftc -enable-incremental-file-hashing)
+# The driver rebuilds a whole module when its compiler flags change, so a job
+# that mixes plain builds with -warnings-as-errors builds compiles SpeakerCore
+# and SpeakerAppFeatures twice. SPEAKER_SWIFT_WARNINGS_AS_ERRORS=1, set by CI,
+# gives every build the same flags in the same order.
+SWIFT_WARNINGS_AS_ERRORS="${SPEAKER_SWIFT_WARNINGS_AS_ERRORS:-0}"
+if [[ "$SWIFT_WARNINGS_AS_ERRORS" != 0 && "$SWIFT_WARNINGS_AS_ERRORS" != 1 ]]; then
+    print -u2 "SPEAKER_SWIFT_WARNINGS_AS_ERRORS must be 0 or 1."
+    exit 1
+fi
+if [[ "$SWIFT_WARNINGS_AS_ERRORS" == 1 ]]; then
+    BUILD_SYSTEM_ARGUMENTS+=(-Xswiftc -warnings-as-errors)
+    CALLER_ARGUMENTS=()
+    while (( $# > 0 )); do
+        if [[ "$1" == -Xswiftc && "${2:-}" == -warnings-as-errors ]]; then
+            shift 2
+            continue
+        fi
+        CALLER_ARGUMENTS+=("$1")
+        shift
+    done
+    set -- "${CALLER_ARGUMENTS[@]}"
+fi
 if [[ "${SPEAKER_SWIFT_RELEASE_ISOLATION:-0}" == "1" \
       && -z "${SPEAKER_SWIFT_SCRATCH_PATH:-}" ]]; then
     print -u2 "Release isolation requires SPEAKER_SWIFT_SCRATCH_PATH."
